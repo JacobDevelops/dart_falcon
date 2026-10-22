@@ -1,6 +1,6 @@
 //! Flags an `is` check whose result is already guaranteed by the resolved static type.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 
 use crate::lint::semantic_type_operations::{TypeOperation, TypeOperationKind, TypeOperations};
@@ -14,10 +14,10 @@ fn same_type_or_raw_target(operand: &ResolvedType, target: &ResolvedType) -> boo
         return true;
     }
     matches!(
-        (operand, target),
+        (operand.view(), target.view()),
         (
-            ResolvedType::Interface { identity: left, .. },
-            ResolvedType::Interface { identity: right, arguments, .. }
+            ResolvedTypeView::Interface { identity: left, .. },
+            ResolvedTypeView::Interface { identity: right, arguments, .. }
         ) if left == right && arguments.is_empty()
     )
 }
@@ -35,8 +35,8 @@ impl Rule for AvoidUnnecessaryTypeAssertions {
                     || !same_type_or_raw_target(&operation.operand, &operation.target)
                     || operation.operand.nullable()
                     || matches!(
-                        operation.operand,
-                        ResolvedType::Unknown | ResolvedType::Dynamic
+                        operation.operand.view(),
+                        ResolvedTypeView::Unknown | ResolvedTypeView::Dynamic
                     )
                 {
                     return None;

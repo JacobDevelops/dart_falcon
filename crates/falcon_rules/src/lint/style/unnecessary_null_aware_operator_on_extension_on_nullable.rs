@@ -24,7 +24,7 @@
 //! lint.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, MemberResult, ResolvedType, Rule, RulePreparation,
+    AnalyzeContext, DeclarationIdentity, MemberResult, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::TokenKind;
@@ -59,24 +59,24 @@ struct Collector<'a> {
 /// Whether `ty` is written nullable, as `T?` or `Null`; `dynamic` and unknown
 /// types are not proof.
 fn explicitly_nullable(ty: &ResolvedType) -> bool {
-    match ty {
-        ResolvedType::Null => true,
-        ResolvedType::Interface { nullable, .. }
-        | ResolvedType::TypeParameter { nullable, .. }
-        | ResolvedType::Function { nullable, .. }
-        | ResolvedType::Record { nullable, .. } => *nullable,
-        ResolvedType::Unknown
-        | ResolvedType::Dynamic
-        | ResolvedType::Void
-        | ResolvedType::Never
-        | ResolvedType::NonNullTypeParameter { .. } => false,
+    match ty.view() {
+        ResolvedTypeView::Null => true,
+        ResolvedTypeView::Interface { nullable, .. }
+        | ResolvedTypeView::TypeParameter { nullable, .. }
+        | ResolvedTypeView::Function { nullable, .. }
+        | ResolvedTypeView::Record { nullable, .. } => nullable,
+        ResolvedTypeView::Unknown
+        | ResolvedTypeView::Dynamic
+        | ResolvedTypeView::Void
+        | ResolvedTypeView::Never
+        | ResolvedTypeView::NonNullTypeParameter { .. } => false,
     }
 }
 
 /// Whether an extension's `on` type is nullable to the type system:
 /// `dynamic` and `void` are, besides written-nullable types.
 fn extended_type_nullable(ty: &ResolvedType) -> bool {
-    explicitly_nullable(ty) || matches!(ty, ResolvedType::Dynamic | ResolvedType::Void)
+    explicitly_nullable(ty) || matches!(ty.view(), ResolvedTypeView::Dynamic | ResolvedTypeView::Void)
 }
 
 impl<'a> Collector<'a> {
@@ -96,13 +96,13 @@ impl<'a> Collector<'a> {
             return extended_type_nullable(on_type);
         }
         let receiver = state.infer(target);
-        if !explicitly_nullable(&receiver) || matches!(receiver, ResolvedType::Null) {
+        if !explicitly_nullable(&receiver) || matches!(receiver.view(), ResolvedTypeView::Null) {
             return false;
         }
         let non_null = receiver.with_nullable(false);
-        let lookup = match &non_null {
-            ResolvedType::TypeParameter { bound, .. } => bound.with_nullable(false),
-            ResolvedType::Interface { .. } => non_null.clone(),
+        let lookup = match non_null.view() {
+            ResolvedTypeView::TypeParameter { bound, .. } => bound.with_nullable(false),
+            ResolvedTypeView::Interface { .. } => non_null.clone(),
             _ => return false,
         };
         let getter = member.strip_suffix('=').unwrap_or(member);
@@ -133,10 +133,10 @@ impl<'a> Collector<'a> {
     /// Whether the type index records `member` on an SDK receiver: loaded SDK
     /// sources when present, otherwise the curated `dart:core` table.
     fn core_type_declares(&self, receiver: &ResolvedType, member: &str) -> bool {
-        let ResolvedType::Interface {
+        let ResolvedTypeView::Interface {
             identity: identity @ DeclarationIdentity::Sdk { .. },
             ..
-        } = receiver
+        } = receiver.view()
         else {
             return false;
         };

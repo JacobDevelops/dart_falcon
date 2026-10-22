@@ -22,7 +22,7 @@
 use std::collections::HashMap;
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -106,13 +106,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
 }
 
 fn fully_known(ty: &ResolvedType) -> bool {
-    match ty {
-        ResolvedType::Unknown | ResolvedType::Dynamic => false,
-        ResolvedType::Interface { arguments, .. } => arguments.iter().all(fully_known),
-        ResolvedType::Record {
+    match ty.view() {
+        ResolvedTypeView::Unknown | ResolvedTypeView::Dynamic => false,
+        ResolvedTypeView::Interface { arguments, .. } => arguments.iter().all(fully_known),
+        ResolvedTypeView::Record {
             positional, named, ..
         } => positional.iter().all(fully_known) && named.iter().all(|(_, ty)| fully_known(ty)),
-        ResolvedType::Function {
+        ResolvedTypeView::Function {
             return_type,
             positional,
             named,

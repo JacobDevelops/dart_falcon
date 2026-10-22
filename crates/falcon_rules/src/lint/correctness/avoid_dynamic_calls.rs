@@ -31,7 +31,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -93,7 +93,7 @@ impl<'a> Collector<'a> {
                 break dynamic;
             }
             receivers.push(expr.syntax().id());
-            if matches!(state.infer(expr), ResolvedType::Dynamic) {
+            if matches!(state.infer(expr).view(), ResolvedTypeView::Dynamic) {
                 break true;
             }
             let Some(receiver) = dynamic_receiver(expr) else {
@@ -143,7 +143,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 .resolved_field(receiver, call.name().name(), &state.model)
                 .is_some_and(|(ty, owner)| {
                     let ty = state.model.substitute(&ty, &owner);
-                    matches!(ty, ResolvedType::Dynamic) || ty.interface("dart:core", "Function")
+                    matches!(ty.view(), ResolvedTypeView::Dynamic) || ty.interface("dart:core", "Function")
                 })
         {
             // Calling a field/getter is a function-expression invocation, not
@@ -162,7 +162,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             | CascadeOp::Assign(_)
             | CascadeOp::IndexAssign(_) => true,
         };
-        if reportable && matches!(receiver, ResolvedType::Dynamic) {
+        if reportable && matches!(receiver.view(), ResolvedTypeView::Dynamic) {
             self.report(receiver_span);
         } else if let CascadeOp::Call(call) = operation
             && call.name().name() == "call"
@@ -187,23 +187,22 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         }
         let dynamic_read = if assignment.indexed {
-            matches!(receiver, ResolvedType::Dynamic)
+            matches!(receiver.view(), ResolvedTypeView::Dynamic)
                 || state
                     .signatures
                     .resolved_member(receiver, "[]", &state.model)
                     .is_some_and(|(signature, owner)| {
-                        matches!(
-                            state.model.substitute(&signature.return_type, &owner),
-                            ResolvedType::Dynamic
+                        matches!(state.model.substitute(&signature.return_type, &owner).view(),
+                            ResolvedTypeView::Dynamic
                         )
                     })
         } else if let Expr::Ident(name) = assignment.target {
-            (matches!(receiver, ResolvedType::Dynamic) && !ALLOWED_MEMBERS.contains(&name.name()))
+            (matches!(receiver.view(), ResolvedTypeView::Dynamic) && !ALLOWED_MEMBERS.contains(&name.name()))
                 || state
                     .signatures
                     .resolved_field(receiver, name.name(), &state.model)
                     .is_some_and(|(ty, owner)| {
-                        matches!(state.model.substitute(&ty, &owner), ResolvedType::Dynamic)
+                        matches!(state.model.substitute(&ty, &owner).view(), ResolvedTypeView::Dynamic)
                     })
         } else {
             false

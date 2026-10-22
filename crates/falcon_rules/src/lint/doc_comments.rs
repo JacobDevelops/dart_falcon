@@ -25,7 +25,8 @@ use std::collections::{HashMap, HashSet};
 use falcon_analyze::TypeKind;
 use falcon_analyze::{
     DeclarationIdentity, DocName, MemberFacts, MemberKind, MemberSelector, MemberSelectorKind,
-    NameIdentity, ResolvedType, SemanticModel, SignatureIndex, SourceSelector, TypeParameterScope,
+    NameIdentity, ResolvedType, ResolvedTypeView, SemanticModel, SignatureIndex, SourceSelector,
+    TypeParameterScope,
 };
 use falcon_syntax::cst::*;
 
@@ -897,8 +898,9 @@ impl<'r, 'a> DocResolver<'r, 'a> {
                 identity: Some(identity),
                 kind: NameIdentity::Type,
             }) = &lookups[0]
-            && let ResolvedType::Interface { identity, .. } = self.model.declared_type(identity)
-            && let DocLookup::Found(constructor) = self.declared_member(&identity, "new")
+            && let ResolvedTypeView::Interface { identity, .. } =
+                self.model.declared_type(identity).view()
+            && let DocLookup::Found(constructor) = self.declared_member(identity, "new")
         {
             lookups[0] = DocLookup::Found(constructor);
         }
@@ -923,11 +925,11 @@ impl<'r, 'a> DocResolver<'r, 'a> {
                 DocLookup::Found(DocElement::Declaration {
                     identity: Some(identity),
                     kind: NameIdentity::Type,
-                }) => match self.model.declared_type(identity) {
-                    ResolvedType::Interface { identity, .. } => {
-                        self.declared_member(&identity, third.text)
+                }) => match self.model.declared_type(identity).view() {
+                    ResolvedTypeView::Interface { identity, .. } => {
+                        self.declared_member(identity, third.text)
                     }
-                    ResolvedType::Unknown => DocLookup::Unknown,
+                    ResolvedTypeView::Unknown => DocLookup::Unknown,
                     _ => DocLookup::Absent,
                 },
                 DocLookup::Found(DocElement::Extension(name)) => {
@@ -1006,18 +1008,20 @@ impl<'r, 'a> DocResolver<'r, 'a> {
                 ..
             } => self.this_member(owner, name),
             Enclosing::Type { identity: None, .. } => DocLookup::Unknown,
-            Enclosing::Extension { on_type, .. } => match on_type {
-                ResolvedType::Interface { identity, .. } => self.this_member(identity, name),
-                ResolvedType::TypeParameter { bound, .. }
-                | ResolvedType::NonNullTypeParameter { bound, .. } => match bound.as_ref() {
-                    ResolvedType::Interface { identity, .. } => self.this_member(identity, name),
-                    ResolvedType::Unknown => DocLookup::Unknown,
+            Enclosing::Extension { on_type, .. } => match on_type.view() {
+                ResolvedTypeView::Interface { identity, .. } => self.this_member(identity, name),
+                ResolvedTypeView::TypeParameter { bound, .. }
+                | ResolvedTypeView::NonNullTypeParameter { bound, .. } => match bound.view() {
+                    ResolvedTypeView::Interface { identity, .. } => {
+                        self.this_member(identity, name)
+                    }
+                    ResolvedTypeView::Unknown => DocLookup::Unknown,
                     _ => DocLookup::Absent,
                 },
-                ResolvedType::Function { .. } => {
+                ResolvedTypeView::Function { .. } => {
                     self.this_member(&DeclarationIdentity::sdk("dart:core", "Function"), name)
                 }
-                ResolvedType::Unknown => DocLookup::Unknown,
+                ResolvedTypeView::Unknown => DocLookup::Unknown,
                 _ => DocLookup::Absent,
             },
             Enclosing::None => DocLookup::Absent,
@@ -1096,8 +1100,8 @@ impl<'r, 'a> DocResolver<'r, 'a> {
             if self.declares_static(&current, name) {
                 return DocLookup::Found(self.static_element(&current, name));
             }
-            match self.signatures.superclass(&current) {
-                Some(ResolvedType::Interface { identity, .. }) => current = identity.clone(),
+            match self.signatures.superclass(&current).map(ResolvedType::view) {
+                Some(ResolvedTypeView::Interface { identity, .. }) => current = identity.clone(),
                 Some(_) => return DocLookup::Unknown,
                 None => break,
             }
@@ -1147,11 +1151,11 @@ impl<'r, 'a> DocResolver<'r, 'a> {
             DocLookup::Found(DocElement::Declaration { identity, kind }) => {
                 match (identity, kind) {
                     (Some(identity), NameIdentity::Type) => {
-                        match self.model.declared_type(identity) {
-                            ResolvedType::Interface { identity, .. } => self
-                                .interface_member(&identity, name)
-                                .absent_or(|| self.declared_member(&identity, name)),
-                            ResolvedType::Unknown => DocLookup::Unknown,
+                        match self.model.declared_type(identity).view() {
+                            ResolvedTypeView::Interface { identity, .. } => self
+                                .interface_member(identity, name)
+                                .absent_or(|| self.declared_member(identity, name)),
+                            ResolvedTypeView::Unknown => DocLookup::Unknown,
                             _ => DocLookup::Absent,
                         }
                     }

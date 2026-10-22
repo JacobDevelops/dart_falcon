@@ -1,6 +1,6 @@
 //! Flags a discarded call whose resolved return type is non-void.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -41,7 +41,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         else {
             return;
         };
-        if matches!(return_type, ResolvedType::Unknown | ResolvedType::Dynamic)
+        if matches!(return_type.view(), ResolvedTypeView::Unknown | ResolvedTypeView::Dynamic)
             || state.model.void_context(&return_type)
         {
             return;

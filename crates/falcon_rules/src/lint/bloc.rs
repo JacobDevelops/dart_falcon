@@ -1,7 +1,8 @@
 use falcon_analyze::SemanticState;
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, DocName, QualifiedName, ResolvedType, RulePreparation,
-    SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth, TypeRelation,
+    AnalyzeContext, DeclarationIdentity, DocName, QualifiedName, ResolvedType, ResolvedTypeView,
+    RulePreparation, SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal,
+    Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -21,7 +22,7 @@ impl<'a> BlocTypes<'a> {
         model: &SemanticModel<'_>,
         name: &str,
     ) -> bool {
-        let ResolvedType::Interface { identity, .. } = ty else {
+        let ResolvedTypeView::Interface { identity, .. } = ty.view() else {
             return false;
         };
         is_api_identity(identity, model, name)
@@ -48,7 +49,7 @@ impl<'a> BlocTypes<'a> {
             return true;
         }
         // Only absent external declarations use the import fallback; a local declaration wins.
-        if !matches!(resolved, ResolvedType::Unknown) {
+        if !matches!(resolved.view(), ResolvedTypeView::Unknown) {
             return false;
         }
         let DartType::Named(named) = ty else {
@@ -200,7 +201,7 @@ impl<'a> BlocTypes<'a> {
         {
             return true;
         }
-        let ResolvedType::Interface { identity, .. } = ty else {
+        let ResolvedTypeView::Interface { identity, .. } = ty.view() else {
             return false;
         };
         if depth > 64 {
@@ -331,7 +332,8 @@ impl<'a> BlocTypes<'a> {
                 matches.then(|| self.local_declaration_has_member(declaration, model, name, depth))
             })
             .unwrap_or_else(|| {
-                unresolved_is_member && matches!(model.resolve_type(ty), ResolvedType::Unknown)
+                unresolved_is_member
+                    && matches!(model.resolve_type(ty).view(), ResolvedTypeView::Unknown)
             })
     }
 }
@@ -478,14 +480,14 @@ impl<'a> StructuralRuleVisitor<'a> for ModelCollector<'a> {
             let root = if self.types.is_api_type(&resolved, &self.model, "Bloc")
                 || self.types.is_api_type(&resolved, &self.model, "Cubit")
             {
-                match resolved.arguments().get(index) {
-                    Some(ResolvedType::Interface { identity, .. }) => Some(identity.clone()),
+                match resolved.arguments().get(index).map(ResolvedType::view) {
+                    Some(ResolvedTypeView::Interface { identity, .. }) => Some(identity.clone()),
                     _ => None,
                 }
             } else if let DartType::Named(named) = supertype {
                 named.type_args().nth(index).and_then(|argument| {
-                    match self.model.resolve_type(argument) {
-                        ResolvedType::Interface { identity, .. } => Some(identity),
+                    match self.model.resolve_type(argument).view() {
+                        ResolvedTypeView::Interface { identity, .. } => Some(identity.clone()),
                         _ => None,
                     }
                 })
@@ -552,11 +554,11 @@ impl ModelCollector<'_> {
     fn suffix_root(&self, mut ty: ResolvedType) -> Option<DeclarationIdentity> {
         let mut substitutions = rustc_hash::FxHashMap::default();
         for _ in 0..64 {
-            let ResolvedType::Interface {
+            let ResolvedTypeView::Interface {
                 identity,
                 arguments,
                 ..
-            } = &ty
+            } = ty.view()
             else {
                 return None;
             };
@@ -580,8 +582,8 @@ impl ModelCollector<'_> {
                 ty = self.model.substitute(superclass, &substitutions);
                 continue;
             };
-            return match arguments.get(index) {
-                Some(ResolvedType::Interface { identity, .. })
+            return match arguments.get(index).map(ResolvedType::view) {
+                Some(ResolvedTypeView::Interface { identity, .. })
                     if !matches!(identity, DeclarationIdentity::Sdk { .. }) =>
                 {
                     Some(identity.clone())
@@ -637,7 +639,7 @@ pub(crate) fn own_member<'a>(
         .model
         .resolve_name(class.name().name())
         .map(ResolvedType::interface_identity)
-        .unwrap_or(ResolvedType::Unknown);
+        .unwrap_or(ResolvedType::UNKNOWN);
     let owner = if is_super {
         state
             .signatures

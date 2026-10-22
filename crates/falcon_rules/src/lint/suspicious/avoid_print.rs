@@ -5,7 +5,7 @@
 
 use crate::lint::declarations::members_of;
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{Visitor, walk_expr};
 use falcon_syntax::cst::*;
@@ -67,7 +67,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         if identifier.name() != "kDebugMode"
             || state.environment.is_bound(identifier.name())
-            || matches!(&state.enclosing_type, Some(ResolvedType::Interface { identity, .. })
+            || matches!(state.enclosing_type.as_ref().map(ResolvedType::view), Some(ResolvedTypeView::Interface { identity, .. })
                 if !state.signatures.declared_member_facts(identity, identifier.name()).is_empty())
         {
             return;

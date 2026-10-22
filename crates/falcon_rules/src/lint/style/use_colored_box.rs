@@ -15,7 +15,7 @@
 //!
 //! Adopted from the official `use_colored_box` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -74,10 +74,11 @@ fn only_colors_child<'a>(args: ArgList<'a>, state: &SemanticState<'a>) -> bool {
 /// The analyzer's `staticType.nullabilitySuffix != question`: `dynamic` and
 /// `Null` (as for a `null` literal) carry no `?` suffix.
 fn non_nullable_color<'a>(color: Expr<'a>, state: &SemanticState<'a>) -> bool {
-    match state.infer(color) {
-        ResolvedType::Unknown => {}
-        ty => {
-            return !ty.nullable() || matches!(ty, ResolvedType::Dynamic | ResolvedType::Null);
+    let ty = state.infer(color);
+    match ty.view() {
+        ResolvedTypeView::Unknown => {}
+        _ => {
+            return !ty.nullable() || matches!(ty.view(), ResolvedTypeView::Dynamic | ResolvedTypeView::Null);
         }
     }
     if crate::lint::flutter::constructor_invocation(color, &state.model).is_some() {

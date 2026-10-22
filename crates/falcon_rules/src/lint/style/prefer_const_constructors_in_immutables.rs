@@ -29,7 +29,7 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, SemanticModel,
     SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth,
 };
 use falcon_diagnostics::Diagnostic;
@@ -281,7 +281,7 @@ impl<'a> ClassChecker<'_, 'a> {
     }
 
     fn is_const_constructor(&self, ty: &ResolvedType, name: &str) -> bool {
-        let ResolvedType::Interface { identity, .. } = ty else {
+        let ResolvedTypeView::Interface { identity, .. } = ty.view() else {
             return false;
         };
         self.is_const_identity(identity, name)

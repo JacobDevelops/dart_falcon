@@ -17,7 +17,7 @@
 //!
 //! Adopted from the official `only_throw_errors` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -88,15 +88,15 @@ fn is_literal(expr: Expr<'_>) -> bool {
 /// through its representation type.
 fn not_throwable(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
     let mut ty = ty;
-    while let ResolvedType::TypeParameter { bound, .. }
-    | ResolvedType::NonNullTypeParameter { bound, .. } = ty
+    while let ResolvedTypeView::TypeParameter { bound, .. }
+    | ResolvedTypeView::NonNullTypeParameter { bound, .. } = ty.view()
     {
         ty = bound;
     }
     let erased;
     let ty = if matches!(
-        ty,
-        ResolvedType::Interface {
+        ty.view(),
+        ResolvedTypeView::Interface {
             extension_type: true,
             ..
         }
@@ -110,16 +110,16 @@ fn not_throwable(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
         ty
     };
     if matches!(
-        ty,
-        ResolvedType::Function { .. } | ResolvedType::Record { .. }
+        ty.view(),
+        ResolvedTypeView::Function { .. } | ResolvedTypeView::Record { .. }
     ) {
         return true;
     }
     if !matches!(
-        ty,
-        ResolvedType::Interface { .. }
-            | ResolvedType::TypeParameter { .. }
-            | ResolvedType::NonNullTypeParameter { .. }
+        ty.view(),
+        ResolvedTypeView::Interface { .. }
+            | ResolvedTypeView::TypeParameter { .. }
+            | ResolvedTypeView::NonNullTypeParameter { .. }
     ) {
         return false;
     }

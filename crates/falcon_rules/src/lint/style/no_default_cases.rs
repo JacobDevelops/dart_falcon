@@ -18,7 +18,7 @@
 //! Adopted from the official `no_default_cases` lint.
 
 use falcon_analyze::TypeKind;
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::TokenKind;
 use falcon_syntax::cst::*;
@@ -125,15 +125,16 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         // Enum-like extension types can hold values other than their declared
         // constants, so a `default` may be necessary there.
-        let ResolvedType::Interface {
+        let subject = state.infer(switch.subject());
+        let ResolvedTypeView::Interface {
             identity,
             extension_type: false,
             ..
-        } = state.infer(switch.subject())
+        } = subject.view()
         else {
             return;
         };
-        if self.is_enum_or_enum_like(&identity, state) {
+        if self.is_enum_or_enum_like(identity, state) {
             let span = self.default_member_span(case, index);
             self.diags.push(self.ctx.diagnostic("Avoid using a `default` member in this switch.", span));
         }

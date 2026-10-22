@@ -23,7 +23,7 @@
 
 use falcon_analyze::SemanticState;
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation,
+    AnalyzeContext, DeclarationIdentity, ResolvedTypeView, Rule, RulePreparation,
     StructuralRuleVisitor, StructuralTraversal, TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
@@ -109,8 +109,8 @@ impl<'a> Collector<'a> {
                 return false;
             }
             matches!(
-                self.state.model.resolve_type_in(DartType::Named(ty), &self.type_parameters),
-                ResolvedType::Interface { identity, .. }
+                self.state.model.resolve_type_in(DartType::Named(ty), &self.type_parameters).view(),
+                ResolvedTypeView::Interface { identity, .. }
                     if identity.is_sdk("dart:core", "bool")
             )
         });

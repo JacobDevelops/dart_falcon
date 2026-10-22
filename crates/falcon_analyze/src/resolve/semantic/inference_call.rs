@@ -1,4 +1,5 @@
 use super::*;
+use crate::resolve::semantic::ResolvedTypeKind;
 
 /// Whether a selector/call chain starts with an implicit dot-shorthand receiver.
 /// Argument expressions do not establish the receiver's inference context.
@@ -222,7 +223,7 @@ impl TypeEnvironment {
                     type_args
                         .clone()
                         .nth(index)
-                        .map_or(ResolvedType::Unknown, |ty| {
+                        .map_or(ResolvedType::UNKNOWN, |ty| {
                             context.model.resolve_type_in(ty, context.type_parameters)
                         }),
                 )
@@ -236,7 +237,14 @@ impl TypeEnvironment {
         let mut partial = FxHashMap::default();
         // A dynamic result context supplies no downward type schema. Freezing
         // it here would discard upward constraints from ordinary arguments.
-        if let Some(expected) = expected.filter(|ty| !matches!(ty, ResolvedType::Dynamic)) {
+        if let Some(expected) = expected.filter(|ty| {
+            !matches!(
+                ty,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Dynamic
+                }
+            )
+        }) {
             let mut constraints = TypeConstraintContext {
                 parameters: call_parameters,
                 inferred: &mut inferred,
@@ -380,12 +388,16 @@ impl TypeEnvironment {
                     context.model,
                     context.signatures,
                     context.type_parameters,
-                    (matches!(expected_argument, ResolvedType::Function { .. })
-                        || !has_inference_holes(expected_argument))
+                    (matches!(
+                        expected_argument,
+                        ResolvedType {
+                            kind: ResolvedTypeKind::Function { .. }
+                        }
+                    ) || !has_inference_holes(expected_argument))
                     .then_some(expected_argument),
                     context.lookup,
                 );
-                if actual == ResolvedType::Unknown
+                if actual == ResolvedType::UNKNOWN
                     && let Some(fallback) = context.argument_fallback
                     && let Some(ty) = fallback.lookup(argument)
                 {
@@ -415,8 +427,11 @@ impl TypeEnvironment {
                 let Expr::FuncExpr(function) = argument else {
                     return false;
                 };
-                let ResolvedType::Function {
-                    positional, named, ..
+                let ResolvedType {
+                    kind:
+                        ResolvedTypeKind::Function {
+                            positional, named, ..
+                        },
                 } = parameter
                 else {
                     return false;
@@ -454,7 +469,7 @@ impl TypeEnvironment {
         for id in call_parameters {
             argument_context
                 .entry(id.clone())
-                .or_insert(ResolvedType::Unknown);
+                .or_insert(ResolvedType::UNKNOWN);
         }
         let mut deferred = Vec::new();
         // Each stage uses a frozen context. Independent closure results must
@@ -514,7 +529,10 @@ impl TypeEnvironment {
                     return true;
                 }
                 if unresolved {
-                    let ResolvedType::Function { return_type, .. } = &expected_argument else {
+                    let ResolvedType {
+                        kind: ResolvedTypeKind::Function { return_type, .. },
+                    } = &expected_argument
+                    else {
                         unreachable!()
                     };
                     let return_type = Arc::clone(return_type);
@@ -527,16 +545,19 @@ impl TypeEnvironment {
                         }
                     }
                     expected_argument = context.model.substitute(parameter, &argument_context);
-                    if let ResolvedType::Function {
-                        return_type: result,
-                        ..
+                    if let ResolvedType {
+                        kind:
+                            ResolvedTypeKind::Function {
+                                return_type: result,
+                                ..
+                            },
                     } = &mut expected_argument
                     {
                         *result = return_type;
                     }
                     for id in call_parameters {
                         if !substitutions.contains_key(id) {
-                            argument_context.insert(id.clone(), ResolvedType::Unknown);
+                            argument_context.insert(id.clone(), ResolvedType::UNKNOWN);
                         }
                     }
                     if let Some(contexts) = argument_contexts.as_deref_mut() {
@@ -575,13 +596,13 @@ impl TypeEnvironment {
                 continue;
             }
             let default = if inferred.contains_key(id) || upper.contains_key(id) {
-                ResolvedType::Unknown
+                ResolvedType::UNKNOWN
             } else if let Some(schema) = partial.remove(id) {
                 schema
             } else if let Some(default) = context.signatures.owner_defaults.get(id) {
                 context.model.substitute(default, &substitutions)
             } else if context.signatures.bound_declared.get(id) == Some(&false) {
-                ResolvedType::Dynamic
+                ResolvedType::DYNAMIC
             } else {
                 parameter_bound(return_type, id)
                     .or_else(|| {
@@ -597,7 +618,7 @@ impl TypeEnvironment {
                             .find_map(|ty| parameter_bound(ty, id))
                     })
                     .map(|bound| context.model.substitute(bound, &substitutions))
-                    .unwrap_or(ResolvedType::Unknown)
+                    .unwrap_or(ResolvedType::UNKNOWN)
             };
             substitutions.entry(id.clone()).or_insert(default);
         }
@@ -628,16 +649,19 @@ impl TypeEnvironment {
             // inference variables: constructor parameters are rewritten from
             // the class's parameters into the alias's instantiation of them.
             let Some(template) = context.model.alias_template(alias) else {
-                return ResolvedType::Unknown;
+                return ResolvedType::UNKNOWN;
             };
             let (alias_parameters, aliased) = template.as_ref();
-            let ResolvedType::Interface {
-                identity: class,
-                arguments: class_arguments,
-                ..
+            let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity: class,
+                        arguments: class_arguments,
+                        ..
+                    },
             } = &aliased
             else {
-                return ResolvedType::Unknown;
+                return ResolvedType::UNKNOWN;
             };
             let Some((class_parameters, _)) = context
                 .signatures
@@ -662,7 +686,7 @@ impl TypeEnvironment {
                         .substitute(aliased, &defaults)
                         .with_nullable(false)
                 } else {
-                    ResolvedType::Unknown
+                    ResolvedType::UNKNOWN
                 };
             };
             let mut signature = constructor.clone();
@@ -699,18 +723,20 @@ impl TypeEnvironment {
             .get(&identity)
             .and_then(|facts| facts.supertypes.as_ref())
         else {
-            return ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity,
-                arguments: type_args
-                    .clone()
-                    .map(|ty| context.model.resolve_type_in(ty, context.type_parameters))
-                    .collect(),
-                nullable: false,
-                extension_type,
+            return ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity,
+                    arguments: type_args
+                        .clone()
+                        .map(|ty| context.model.resolve_type_in(ty, context.type_parameters))
+                        .collect(),
+                    nullable: false,
+                    extension_type,
+                },
             };
         };
-        let empty = ResolvedSignature::returning(ResolvedType::Unknown);
+        let empty = ResolvedSignature::returning(ResolvedType::UNKNOWN);
         let signature = context
             .signatures
             .constructor(&identity, name)
@@ -766,7 +792,7 @@ impl TypeEnvironment {
             context
                 .signatures
                 .super_receiver(&self.receiver(), name, context.model)
-                .unwrap_or(ResolvedType::Unknown)
+                .unwrap_or(ResolvedType::UNKNOWN)
         } else {
             let inference = queries::context_copy(context);
             if null_shorted(object) {
@@ -791,12 +817,19 @@ impl TypeEnvironment {
     )> {
         let this = self.receiver();
         let mut bound = &this;
-        while let ResolvedType::TypeParameter { bound: next, .. }
-        | ResolvedType::NonNullTypeParameter { bound: next, .. } = bound
+        while let ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter { bound: next, .. },
+        }
+        | ResolvedType {
+            kind: ResolvedTypeKind::NonNullTypeParameter { bound: next, .. },
+        } = bound
         {
             bound = next;
         }
-        let ResolvedType::Interface { identity, .. } = bound else {
+        let ResolvedType {
+            kind: ResolvedTypeKind::Interface { identity, .. },
+        } = bound
+        else {
             return None;
         };
         let declared = signatures.declared_member_facts(identity, name);
@@ -861,7 +894,7 @@ impl TypeEnvironment {
             .then(|| signatures.field(&identity, name))
             .flatten()
             .map(|(_, ty)| ty.clone())
-            .filter(|ty| *ty != ResolvedType::Unknown)
+            .filter(|ty| *ty != ResolvedType::UNKNOWN)
     }
 
     pub(super) fn tearoff_type<F: Fn(&str) -> Option<ResolvedType>>(
@@ -891,7 +924,12 @@ impl TypeEnvironment {
                         )
                     }),
             );
-        } else if let Some(expected @ ResolvedType::Function { .. }) = expected {
+        } else if let Some(
+            expected @ ResolvedType {
+                kind: ResolvedTypeKind::Function { .. },
+            },
+        ) = expected
+        {
             let mut lower = FxHashMap::with_capacity_and_hasher(
                 signature.call_parameters.len(),
                 Default::default(),
@@ -941,9 +979,9 @@ impl TypeEnvironment {
                         // Truly unconstrained parameters use their declared
                         // bound, or dynamic when no bound was written.
                         if context.signatures.bound_declared.get(id) == Some(&false) {
-                            ResolvedType::Dynamic
+                            ResolvedType::DYNAMIC
                         } else {
-                            bound().unwrap_or(ResolvedType::Unknown)
+                            bound().unwrap_or(ResolvedType::UNKNOWN)
                         }
                     }),
                 };
@@ -968,10 +1006,13 @@ impl TypeEnvironment {
         {
             let template = context.model.alias_template(alias)?;
             let (parameters, result) = template.as_ref();
-            let ResolvedType::Interface {
-                identity: class,
-                arguments,
-                ..
+            let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity: class,
+                        arguments,
+                        ..
+                    },
             } = &result
             else {
                 return None;
@@ -1077,10 +1118,20 @@ pub(super) fn infer_type_constraints(
     covariant: bool,
     context: &mut TypeConstraintContext<'_, '_>,
 ) {
-    if matches!(actual, ResolvedType::Never) {
+    if matches!(
+        actual,
+        ResolvedType {
+            kind: ResolvedTypeKind::Never
+        }
+    ) {
         return;
     }
-    if matches!(actual, ResolvedType::Unknown) {
+    if matches!(
+        actual,
+        ResolvedType {
+            kind: ResolvedTypeKind::Unknown
+        }
+    ) {
         if !context.poison_unknown {
             return;
         }
@@ -1088,19 +1139,27 @@ pub(super) fn infer_type_constraints(
         collect_parameter_ids(formal, &mut parameters);
         for id in parameters {
             if context.parameters.contains(&id) {
-                context.inferred.insert(id.clone(), ResolvedType::Unknown);
-                context.upper.insert(id, ResolvedType::Unknown);
+                context.inferred.insert(id.clone(), ResolvedType::UNKNOWN);
+                context.upper.insert(id, ResolvedType::UNKNOWN);
             }
         }
         return;
     }
     match formal {
-        ResolvedType::TypeParameter { id, nullable, .. } if context.parameters.contains(id) => {
-            if matches!(actual, ResolvedType::TypeParameter { id: other, .. } if context.parameters.contains(other))
+        ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter { id, nullable, .. },
+        } if context.parameters.contains(id) => {
+            if matches!(actual, ResolvedType { kind: ResolvedTypeKind::TypeParameter { id: other, .. } } if context.parameters.contains(other))
             {
                 return;
             }
-            let actual = if *nullable && !matches!(actual, ResolvedType::Null) {
+            let actual = if *nullable
+                && !matches!(
+                    actual,
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Null
+                    }
+                ) {
                 actual.with_nullable(false)
             } else {
                 actual.clone()
@@ -1113,7 +1172,7 @@ pub(super) fn infer_type_constraints(
                         .entry(id.clone())
                         .and_modify(|previous| {
                             if *previous != actual {
-                                *previous = ResolvedType::Unknown;
+                                *previous = ResolvedType::UNKNOWN;
                             }
                         })
                         .or_insert(actual);
@@ -1128,8 +1187,13 @@ pub(super) fn infer_type_constraints(
             let ty = candidates.get(id).map_or_else(
                 || actual.clone(),
                 |previous| {
-                    if matches!(previous, ResolvedType::Unknown) {
-                        return ResolvedType::Unknown;
+                    if matches!(
+                        previous,
+                        ResolvedType {
+                            kind: ResolvedTypeKind::Unknown
+                        }
+                    ) {
+                        return ResolvedType::UNKNOWN;
                     }
                     let joined =
                         inference_join(previous, &actual, context.signatures, context.model);
@@ -1140,13 +1204,15 @@ pub(super) fn infer_type_constraints(
                     } else if joined == actual {
                         previous.clone()
                     } else {
-                        ResolvedType::Unknown
+                        ResolvedType::UNKNOWN
                     }
                 },
             );
             candidates.insert(id.clone(), ty);
         }
-        ResolvedType::Interface { identity, .. } => {
+        ResolvedType {
+            kind: ResolvedTypeKind::Interface { identity, .. },
+        } => {
             // A raw result context still constrains each type argument to its
             // instantiate-to-bound default. Projecting only the formal type
             // would otherwise zip its arguments against an empty raw schema.
@@ -1182,7 +1248,10 @@ pub(super) fn infer_type_constraints(
                 context
                     .signatures
                     .instantiated_identity(actual, identity, context.model)
-            } else if let ResolvedType::Interface { identity, .. } = actual {
+            } else if let ResolvedType {
+                kind: ResolvedTypeKind::Interface { identity, .. },
+            } = actual
+            {
                 context
                     .signatures
                     .instantiated_identity(formal, identity, context.model)
@@ -1214,19 +1283,25 @@ pub(super) fn infer_type_constraints(
                 infer_type_constraints(&formal_argument, &actual_argument, covariant, context);
             }
         }
-        ResolvedType::Function {
-            alias: formal_alias,
-            return_type,
-            positional,
-            named,
-            ..
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    alias: formal_alias,
+                    return_type,
+                    positional,
+                    named,
+                    ..
+                },
         } => {
-            if let ResolvedType::Function {
-                alias: actual_alias,
-                return_type: actual_return,
-                positional: actual_positional,
-                named: actual_named,
-                ..
+            if let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        alias: actual_alias,
+                        return_type: actual_return,
+                        positional: actual_positional,
+                        named: actual_named,
+                        ..
+                    },
             } = actual
             {
                 infer_type_constraints(
@@ -1258,17 +1333,23 @@ pub(super) fn infer_type_constraints(
                 }
             }
         }
-        ResolvedType::Record {
-            occurrence: formal_occurrence,
-            positional,
-            named,
-            ..
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Record {
+                    occurrence: formal_occurrence,
+                    positional,
+                    named,
+                    ..
+                },
         } => {
-            if let ResolvedType::Record {
-                occurrence: actual_occurrence,
-                positional: actual_positional,
-                named: actual_named,
-                ..
+            if let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Record {
+                        occurrence: actual_occurrence,
+                        positional: actual_positional,
+                        named: actual_named,
+                        ..
+                    },
             } = actual
             {
                 for (formal, actual) in positional.iter().zip(actual_positional.iter()) {
@@ -1306,10 +1387,14 @@ pub(super) fn inference_candidate(
 ) -> Option<ResolvedType> {
     match (lower, upper) {
         (Some(lower), Some(upper))
-            if matches!(upper, ResolvedType::Unknown)
-                || inference_join(lower, upper, signatures, model) != *upper =>
+            if matches!(
+                upper,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Unknown
+                }
+            ) || inference_join(lower, upper, signatures, model) != *upper =>
         {
-            Some(ResolvedType::Unknown)
+            Some(ResolvedType::UNKNOWN)
         }
         (Some(lower), _) => Some(lower.clone()),
         (_, Some(upper)) => Some(upper.clone()),

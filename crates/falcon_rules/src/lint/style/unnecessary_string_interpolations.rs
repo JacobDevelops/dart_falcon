@@ -139,7 +139,7 @@ mod tests {
                 assert_eq!(probe.0.len(), 15);
                 assert!(probe.0[5].nullable());
                 assert!(!probe.0[6].nullable());
-                assert_eq!(probe.0[14], falcon_analyze::ResolvedType::Unknown);
+                assert_eq!(probe.0[14], falcon_analyze::ResolvedType::UNKNOWN);
             },
         );
     }

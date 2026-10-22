@@ -1,7 +1,9 @@
 //! Shared unused-Future detection and annotation exemptions.
 
 use falcon_analyze::FunctionBodies;
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Truth};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, ResolvedTypeView, Truth,
+};
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -53,7 +55,7 @@ impl<'a> Collector<'a> {
         if ty.interface("dart:async", "FutureOr") {
             return self.rule.future_or_message;
         }
-        (matches!(ty, ResolvedType::Interface { .. })
+        (matches!(ty.view(), ResolvedTypeView::Interface { .. })
             && state.signatures.implements_sdk(ty, "dart:async", "Future") == Truth::Yes)
             .then_some(self.rule.future_message)
     }
@@ -125,7 +127,7 @@ impl<'a> Collector<'a> {
             let mut reported = None;
             let mut callee_end = section.span().start;
             for op in section.ops() {
-                let previous = std::mem::replace(&mut receiver, ResolvedType::Unknown);
+                let previous = std::mem::replace(&mut receiver, ResolvedType::UNKNOWN);
                 (receiver, reported) = match op {
                     CascadeOp::NullAssert(_) => (previous.non_null(), reported),
                     CascadeOp::Call(call) => {
@@ -172,7 +174,7 @@ impl<'a> Collector<'a> {
                     ),
                     CascadeOp::Index(_) => (member_return_type(&previous, "[]", state), None),
                     CascadeOp::Assign(_) | CascadeOp::IndexAssign(_) => {
-                        (ResolvedType::Unknown, None)
+                        (ResolvedType::UNKNOWN, None)
                     }
                 };
                 callee_end = match op {
@@ -256,7 +258,7 @@ fn member_return_type(
                 .model
                 .substitute(&signature.return_type, &substitutions)
         })
-        .unwrap_or(ResolvedType::Unknown)
+        .unwrap_or(ResolvedType::UNKNOWN)
 }
 
 fn field_type(receiver: &ResolvedType, name: &str, state: &SemanticState<'_>) -> ResolvedType {
@@ -269,7 +271,7 @@ fn field_type(receiver: &ResolvedType, name: &str, state: &SemanticState<'_>) ->
                 .resolved_extension_getter(receiver, name, &state.model)
         })
         .map(|(ty, substitutions)| state.model.substitute(&ty, &substitutions))
-        .unwrap_or(ResolvedType::Unknown)
+        .unwrap_or(ResolvedType::UNKNOWN)
 }
 
 fn callable_member(receiver: &ResolvedType, name: &str, state: &SemanticState<'_>) -> bool {
@@ -297,11 +299,12 @@ fn member_await_not_required(
 }
 
 fn type_alias_await_not_required(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
-    matches!(ty, ResolvedType::Function { alias, .. }
-    if alias.identity().is_some_and(|identity| {
-        state.signatures.declaration(identity)
+    ty.function_alias_identity().is_some_and(|identity| {
+        state
+            .signatures
+            .declaration(identity)
             .is_some_and(|facts| facts.annotations.iter().any(is_await_not_required))
-    }))
+    })
 }
 
 /// The analyzer's `isAwaitNotRequired`: the invoked top-level function,
@@ -312,7 +315,7 @@ fn invokes_await_not_required<'a>(expr: Expr<'a>, state: &SemanticState<'a>) -> 
         let callee = call.callee();
         let explicit_call = matches!(callee.unparenthesized(), Expr::Field(field)
             if field.field().name() == "call"
-                && matches!(state.infer_receiver(field.object()), ResolvedType::Function { .. }));
+                && matches!(state.infer_receiver(field.object()).view(), ResolvedTypeView::Function { .. }));
         if !explicit_call && type_alias_await_not_required(&state.infer_receiver(callee), state) {
             return true;
         }
@@ -368,7 +371,7 @@ fn invokes_await_not_required<'a>(expr: Expr<'a>, state: &SemanticState<'a>) -> 
             Expr::Ident(identifier) if !state.environment.is_bound(identifier.name()) => {
                 state.enclosing_type.as_ref().is_some_and(|receiver| {
                     member_await_not_required(receiver, identifier.name(), state)
-                        || matches!(receiver, ResolvedType::Interface { identity, .. }
+                        || matches!(receiver.view(), ResolvedTypeView::Interface { identity, .. }
                             if static_member(identity, identifier.name()))
                 }) || function(QualifiedName::from(identifier.name()))
             }

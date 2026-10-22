@@ -136,11 +136,11 @@ fn known_non_matcher(
     state: &SemanticState<'_>,
     ctx: &AnalyzeContext<'_>,
 ) -> bool {
-    use falcon_analyze::ResolvedType;
-    match ty {
-        ResolvedType::Null | ResolvedType::Record { .. } => true,
-        ResolvedType::Interface { identity, .. } if identity.is_sdk("dart:core", "Object") => false,
-        ResolvedType::Interface { identity, .. } => {
+    use falcon_analyze::ResolvedTypeView;
+    match ty.view() {
+        ResolvedTypeView::Null | ResolvedTypeView::Record { .. } => true,
+        ResolvedTypeView::Interface { identity, .. } if identity.is_sdk("dart:core", "Object") => false,
+        ResolvedTypeView::Interface { identity, .. } => {
             state.signatures.supertype_matches(identity, &|identity| {
                 crate::lint::support::test_assertions::MATCHER_PACKAGES
                     .iter()

@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use crate::lint::lexical_usage::NameScopes;
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, RulePreparation,
-    SemanticModel, SignatureIndex, StructuralNode, StructuralRuleVisitor, StructuralTraversal,
-    Truth, TypeRelation,
+    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, ResolvedTypeView,
+    RulePreparation, SemanticModel, SignatureIndex, StructuralNode, StructuralRuleVisitor,
+    StructuralTraversal, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{Visitor, walk_expr, walk_stmt};
@@ -513,7 +513,7 @@ pub(crate) fn has_dispose(
     signatures: &SignatureIndex,
     model: &SemanticModel<'_>,
 ) -> bool {
-    matches!(ty, ResolvedType::Interface { identity: DeclarationIdentity::Package { package, name, .. }, .. }
+    matches!(ty.view(), ResolvedTypeView::Interface { identity: DeclarationIdentity::Package { package, name, .. }, .. }
         if package.as_str() == "flutter" && matches!(name.as_str(), "FocusNode" | "ChangeNotifier" | "ValueNotifier" | "TextEditingController" | "ScrollController" | "PageController" | "TabController" | "AnimationController"))
         || signatures
             .resolved_member_facts(ty, "dispose", model)
@@ -530,8 +530,8 @@ fn constructs_controller(expression: Expr<'_>, model: &SemanticModel<'_>) -> boo
         expression = cascade.object().unparenthesized();
     }
     let identity = match expression.unparenthesized() {
-        Expr::New(construction) => match model.resolve_type(construction.dart_type()) {
-            ResolvedType::Interface { identity, .. } => Some(identity),
+        Expr::New(construction) => match model.resolve_type(construction.dart_type()).view() {
+            ResolvedTypeView::Interface { identity, .. } => Some(identity.clone()),
             _ => None,
         },
         Expr::Call(call) => constructor_identity(call.callee(), model),

@@ -37,7 +37,7 @@ use std::collections::HashSet;
 
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationIdentity, MemberSelector,
-    MemberSelectorKind as SelectorKind, QualifiedName, ResolvedType, Rule, RulePreparation,
+    MemberSelectorKind as SelectorKind, QualifiedName, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
     ConstantContext, SemanticModel, SignatureIndex, SourceSelector, TypeParameterScope, evaluate_constant,
     resolve_new_constructor,
 };
@@ -361,8 +361,8 @@ impl<'a> Visitor<'a> for Frontier<'a> {
         };
         let superclass =
             superclass.and_then(
-                |ty| match self.model.resolve_type_in(ty, &self.parameters) {
-                    ResolvedType::Interface { identity, .. } => Some(identity),
+                |ty| match self.model.resolve_type_in(ty, &self.parameters).view() {
+                    ResolvedTypeView::Interface { identity, .. } => Some(identity.clone()),
                     _ => None,
                 },
             );
@@ -441,12 +441,12 @@ impl<'a> Visitor<'a> for Frontier<'a> {
                 .push(constructor_target(superclass.clone(), "new", span));
         }
         if let Some(redirect) = &node.redirect
-            && let ResolvedType::Interface { identity, .. } = self
+            && let ResolvedTypeView::Interface { identity, .. } = self
                 .model
-                .resolve_type_in(redirect.type_(), &self.parameters)
+                .resolve_type_in(redirect.type_(), &self.parameters).view()
         {
             self.types.push(constructor_target(
-                identity,
+                identity.clone(),
                 redirect
                     .constructor_name()
                     .as_ref()
@@ -1144,7 +1144,7 @@ impl<'a> SemanticRuleVisitor<'a> for Uses<'a> {
             }
             CascadeOp::Invoke(invoke) => {
                 let args = invoke.args();
-                if !matches!(receiver, ResolvedType::Function { .. })
+                if !matches!(receiver.view(), ResolvedTypeView::Function { .. })
                     && let Some(target) = self.member(
                         receiver,
                         "call",
@@ -1319,8 +1319,8 @@ impl<'a> SemanticRuleVisitor<'a> for Uses<'a> {
                 let left = binary.left();
                 let right = binary.right();
                 if matches!(op, BinaryOp::EqEq | BinaryOp::NotEq)
-                    && (matches!(state.infer(left), ResolvedType::Null)
-                        || matches!(state.infer(right), ResolvedType::Null))
+                    && (matches!(state.infer(left).view(), ResolvedTypeView::Null)
+                        || matches!(state.infer(right).view(), ResolvedTypeView::Null))
                 {
                     None
                 } else {
@@ -1470,7 +1470,7 @@ impl<'a> SemanticRuleVisitor<'a> for Uses<'a> {
                     self.arguments(&target, args);
                 }
                 let receiver = state.infer(callee);
-                if !matches!(receiver, ResolvedType::Function { .. })
+                if !matches!(receiver.view(), ResolvedTypeView::Function { .. })
                     && let Some(mut target) =
                         self.member(&receiver, "call", node.span(), state, false)
                 {

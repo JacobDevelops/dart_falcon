@@ -1,4 +1,5 @@
 use super::*;
+use crate::resolve::semantic::ResolvedTypeKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum InferenceInput {
@@ -314,7 +315,7 @@ struct InitializerDependencies<F> {
 
 impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> InitializerDependencies<F> {
     fn bind(&mut self, name: &str) {
-        self.environment.declare(name, ResolvedType::Unknown);
+        self.environment.declare(name, ResolvedType::UNKNOWN);
     }
 
     fn bind_statements(&mut self, statements: AstChildren<'a, falcon_syntax::cst::Stmt<'a>>) {
@@ -339,12 +340,12 @@ impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> InitializerDependencies<F> {
             fn visit_pattern(&mut self, pattern: falcon_syntax::cst::Pattern<'a>) {
                 if let falcon_syntax::cst::Pattern::Variable(variable) = pattern {
                     self.0
-                        .declare(variable.name().name(), ResolvedType::Unknown);
+                        .declare(variable.name().name(), ResolvedType::UNKNOWN);
                 }
                 if let falcon_syntax::cst::Pattern::Object(object) = pattern {
                     for field in object.fields() {
                         if field.pattern().is_none() {
-                            self.0.declare(field.name().name(), ResolvedType::Unknown);
+                            self.0.declare(field.name().name(), ResolvedType::UNKNOWN);
                         }
                     }
                 }
@@ -629,8 +630,8 @@ impl SignatureIndex {
             self,
             &TypeParameterScope::default(),
         );
-        let ty = if ty == ResolvedType::Null {
-            ResolvedType::Dynamic
+        let ty = if ty == ResolvedType::NULL {
+            ResolvedType::DYNAMIC
         } else {
             ty
         };
@@ -650,12 +651,12 @@ impl SignatureIndex {
         if has_inference_holes(&ty) {
             // Delay partial evidence until concrete progress stops. Published
             // partials may become concrete, but must never recursively expand.
-            if ty != ResolvedType::Unknown
+            if ty != ResolvedType::UNKNOWN
                 && (retry_partial
                     || self
                         .value_types
                         .get(identity)
-                        .is_none_or(|ty| *ty == ResolvedType::Unknown))
+                        .is_none_or(|ty| *ty == ResolvedType::UNKNOWN))
             {
                 pending.insert(identity.clone(), ty);
             } else {
@@ -676,7 +677,7 @@ impl SignatureIndex {
         let slot = self
             .value_types
             .entry(identity.clone())
-            .or_insert(ResolvedType::Unknown);
+            .or_insert(ResolvedType::UNKNOWN);
         if refine_inferred_type(slot, ty) {
             record_inference_write(|| InferenceInput::Value(identity.clone()));
         }
@@ -812,7 +813,7 @@ impl SignatureIndex {
                         let mut scope = TypeParameterScope::default();
                         let parameters = declaration.type_params();
                         scope.push(parameters.clone(), model);
-                        let receiver = ResolvedType::Interface {
+                        let receiver = ResolvedType::from_kind(ResolvedTypeKind::Interface {
                             occurrence: Default::default(),
                             identity: identity.clone(),
                             arguments: parameters
@@ -820,7 +821,7 @@ impl SignatureIndex {
                                 .collect(),
                             nullable: false,
                             extension_type: matches!(declaration, TopLevelDecl::ExtensionType(_)),
-                        };
+                        });
                         let mut environment = TypeEnvironment::new();
                         environment.declare_receiver(receiver);
                         Arc::new((environment, scope))
@@ -1092,9 +1093,9 @@ impl SignatureIndex {
             self.override_inference_signature(identity, name, setter, model, lookup)
         };
         let fallback = if unresolved {
-            ResolvedType::Unknown
+            ResolvedType::UNKNOWN
         } else {
-            ResolvedType::Dynamic
+            ResolvedType::DYNAMIC
         };
         if inference_deferred() {
             return;
@@ -1202,7 +1203,7 @@ impl SignatureIndex {
                     return;
                 }
                 if inherited.as_ref().is_some_and(|previous| *previous != ty) {
-                    inherited = Some(ResolvedType::Unknown);
+                    inherited = Some(ResolvedType::UNKNOWN);
                     break;
                 }
                 inherited = Some(ty);
@@ -1233,7 +1234,7 @@ impl SignatureIndex {
         } else if entry.implicit_getter {
             // Getter bodies do not participate in declaration inference. An
             // omitted getter with no inherited evidence retains its default.
-            ResolvedType::Dynamic
+            ResolvedType::DYNAMIC
         } else {
             return;
         };
@@ -1357,14 +1358,14 @@ impl SignatureIndex {
                     } else {
                         receiver
                     };
-                    if let Some(ResolvedType::Interface { identity, .. }) = self
-                        .resolved_instance_owner(
-                            &receiver,
-                            field.name(),
-                            InstanceAccess::Read,
-                            model,
-                        )
-                    {
+                    if let Some(ResolvedType {
+                        kind: ResolvedTypeKind::Interface { identity, .. },
+                    }) = self.resolved_instance_owner(
+                        &receiver,
+                        field.name(),
+                        InstanceAccess::Read,
+                        model,
+                    ) {
                         unresolved |= self.member_type_pending(&identity, field.name());
                     }
                     let ty = static_owner
@@ -1378,7 +1379,7 @@ impl SignatureIndex {
                                 })
                                 .map(|(ty, substitutions)| model.substitute(&ty, &substitutions))
                         })
-                        .unwrap_or(ResolvedType::Unknown);
+                        .unwrap_or(ResolvedType::UNKNOWN);
                     receivers.insert(expression.syntax().id(), ty);
                     member_receivers.insert(expression.syntax().id(), receiver);
                 } else if let Expr::Call(call) = expression {
@@ -1444,20 +1445,23 @@ impl SignatureIndex {
             if declaration.is_abstract {
                 continue;
             }
-            let receiver = ResolvedType::Interface {
+            let receiver = ResolvedType::from_kind(ResolvedTypeKind::Interface {
                 occurrence: Default::default(),
                 identity: identity.clone(),
                 arguments: empty_type_arguments(),
                 nullable: false,
                 extension_type: false,
-            };
+            });
             let declaring = SemanticModel::in_library(
                 identities,
                 types,
                 identities.declaration_library(identity),
             );
-            let Some(ResolvedType::Interface {
-                identity: owner, ..
+            let Some(ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity: owner, ..
+                    },
             }) = self.resolved_owner_through(
                 &receiver,
                 "noSuchMethod",
@@ -1493,7 +1497,7 @@ impl SignatureIndex {
                 let private_scope = SemanticModel::in_library(identities, types, Some(library));
                 let implemented = self.resolved_owner_through(&receiver, name, InstanceAccess::Read, false, &private_scope)
                     .and_then(|owner| match owner {
-                        ResolvedType::Interface { identity: owner, .. } => {
+                        ResolvedType { kind: ResolvedTypeKind::Interface { identity: owner, .. } } => {
                             let same_library = matches!(&owner, DeclarationIdentity::Library { library: owner_library, .. } if *owner_library == library);
                             Some(same_library && self.member_entry(&owner, name).is_some_and(|entry|
                                 entry.facts.iter().any(|fact| !fact.is_static && !fact.is_abstract)))
@@ -1545,7 +1549,10 @@ impl SignatureIndex {
             .and_then(|facts| facts.supertypes.as_ref())
         {
             for supertype in supertypes {
-                if let ResolvedType::Interface { identity, .. } = supertype {
+                if let ResolvedType {
+                    kind: ResolvedTypeKind::Interface { identity, .. },
+                } = supertype
+                {
                     self.abstract_private_getters(identity, visited, getters);
                 }
             }

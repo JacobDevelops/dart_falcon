@@ -6,7 +6,7 @@
 //! Map keys are covered separately by `avoid-duplicate-map-keys`.
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -62,7 +62,7 @@ impl<'a> Collector<'a> {
                 if state.is_variable_read(identifier.name())
                     && state.environment.binding_declaration(identifier.name()).is_some()
                     && !state.is_own_field(identifier.name()))
-                && matches!(state.infer(expression), ResolvedType::Interface { identity: DeclarationIdentity::Sdk { library, name }, .. }
+                && matches!(state.infer(expression).view(), ResolvedTypeView::Interface { identity: DeclarationIdentity::Sdk { library, name }, .. }
                     if library.as_str() == "dart:core" && matches!(name.as_str(), "bool" | "int" | "double" | "num" | "String"));
             if !scalar_literal(expression) && !stable_local {
                 seen.clear();

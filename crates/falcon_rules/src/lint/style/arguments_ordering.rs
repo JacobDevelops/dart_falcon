@@ -6,7 +6,7 @@ use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
-use falcon_analyze::{QualifiedName, ResolvedSignature, ResolvedType, resolve_new_constructor};
+use falcon_analyze::{QualifiedName, ResolvedSignature, ResolvedType, ResolvedTypeView, resolve_new_constructor};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{self, Visitor};
 use falcon_syntax::cst::*;
@@ -157,7 +157,7 @@ impl DeclarationCollector<'_> {
         args: ArgList<'_>,
         state: &SemanticState<'_>,
     ) {
-        if let Some(ResolvedType::Interface { identity, .. }) = receiver
+        if let Some(ResolvedTypeView::Interface { identity, .. }) = receiver.map(ResolvedType::view)
             && let Some(signature) = state.signatures.constructor(identity, name)
         {
             self.check(args, signature);

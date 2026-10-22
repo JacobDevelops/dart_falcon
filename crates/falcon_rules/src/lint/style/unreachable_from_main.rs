@@ -835,10 +835,10 @@ impl<'a> Tables<'a> {
             }
             let Some(parent) = self.library_container(supertype) else {
                 if let Some((model, signatures)) = semantic
-                    && let falcon_analyze::ResolvedType::Interface { identity, .. } =
-                        model.resolve_type(supertype)
+                    && let falcon_analyze::ResolvedTypeView::Interface { identity, .. } =
+                        model.resolve_type(supertype).view()
                 {
-                    match signatures.supertype_matches(&identity, &|identity| {
+                    match signatures.supertype_matches(identity, &|identity| {
                         !signatures.declared_member_facts(identity, name).is_empty()
                             || (matches!(identity, falcon_analyze::DeclarationIdentity::Sdk { .. })
                                 && *identity != falcon_analyze::DeclarationIdentity::OBJECT
@@ -1462,12 +1462,12 @@ impl<'t, 'a> RefWalker<'t, 'a> {
             return false;
         };
         if matches!(
-            ty,
-            falcon_analyze::ResolvedType::Unknown | falcon_analyze::ResolvedType::Dynamic
+            ty.view(),
+            falcon_analyze::ResolvedTypeView::Unknown | falcon_analyze::ResolvedTypeView::Dynamic
         ) {
             return false;
         }
-        if let falcon_analyze::ResolvedType::Interface { identity, .. } = ty
+        if let falcon_analyze::ResolvedTypeView::Interface { identity, .. } = ty.view()
             && let Some(container) = self.resolved_container(identity)
             && self.mark_in_hierarchy(container, name)
         {

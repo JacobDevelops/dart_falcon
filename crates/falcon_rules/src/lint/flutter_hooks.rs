@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use falcon_analyze::SemanticState;
 use falcon_analyze::TypeKind;
-use falcon_analyze::{DeclarationIdentity, QualifiedName, ResolvedType};
+use falcon_analyze::{DeclarationIdentity, QualifiedName, ResolvedType, ResolvedTypeView};
 use falcon_syntax::cst::*;
 
 use falcon_analyze::{AnalyzeContext, FunctionBodies};
@@ -49,7 +49,7 @@ fn widget_kind(ty: &ResolvedType, state: &SemanticState<'_>) -> WidgetContext {
     let mut current = ty;
     let mut visited = HashSet::new();
     loop {
-        let ResolvedType::Interface { identity, .. } = current else {
+        let ResolvedTypeView::Interface { identity, .. } = current.view() else {
             return WidgetContext::Unknown;
         };
         if !visited.insert(identity) {
@@ -86,10 +86,11 @@ fn widget_context(state: &SemanticState<'_>) -> WidgetContext {
     let Some(ty) = &state.enclosing_type else {
         return WidgetContext::Unknown;
     };
-    if let Some(ResolvedType::Interface { arguments, .. }) =
+    if let Some(instance) =
         state
             .signatures
             .as_instance_of(ty, &DeclarationIdentity::flutter("State"), &state.model)
+        && let ResolvedTypeView::Interface { arguments, .. } = instance.view()
     {
         return match arguments.first().map(|widget| widget_kind(widget, state)) {
             Some(WidgetContext::Hook) => WidgetContext::Hook,
@@ -145,7 +146,7 @@ pub(crate) fn call_identity(
     if state.environment.is_bound(head)
         || state.type_parameters.contains(head)
         || state.enclosing_type.as_ref().is_some_and(|ty| {
-            matches!(ty, ResolvedType::Interface { identity, .. }
+            matches!(ty.view(), ResolvedTypeView::Interface { identity, .. }
             if !state.signatures.declared_member_facts(identity, head).is_empty()
                 || state.signatures.member(identity, head).is_some()
                 || state.signatures.field(identity, head).is_some())
@@ -290,7 +291,8 @@ impl<'a> HookCalls<'a> {
                 if !hook_name(name.name()) || state.environment.is_bound(name.name()) {
                     return None;
                 }
-                let ResolvedType::Interface { identity, .. } = state.enclosing_type.as_ref()?
+                let ResolvedTypeView::Interface { identity, .. } =
+                    state.enclosing_type.as_ref()?.view()
                 else {
                     return None;
                 };

@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    AnalyzeContext, DeclarationIdentity, ResolvedTypeView, Rule, RulePreparation, SemanticModel,
     SignatureIndex, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
@@ -249,10 +249,11 @@ fn implicit_super_const(
     let Some(supertype) = class.extends() else {
         return true;
     };
-    let ResolvedType::Interface { identity, .. } = model.resolve_type(supertype) else {
+    let supertype = model.resolve_type(supertype);
+    let ResolvedTypeView::Interface { identity, .. } = supertype.view() else {
         return false;
     };
-    constructor_const(&identity, "new", signatures)
+    constructor_const(identity, "new", signatures)
 }
 
 fn super_constructor_const(
@@ -264,11 +265,12 @@ fn super_constructor_const(
     let Some(supertype) = class.extends() else {
         return name.is_none();
     };
-    let ResolvedType::Interface { identity, .. } = model.resolve_type(supertype) else {
+    let supertype = model.resolve_type(supertype);
+    let ResolvedTypeView::Interface { identity, .. } = supertype.view() else {
         return false;
     };
     constructor_const(
-        &identity,
+        identity,
         name.map_or("new", |identifier| identifier.name()),
         signatures,
     )

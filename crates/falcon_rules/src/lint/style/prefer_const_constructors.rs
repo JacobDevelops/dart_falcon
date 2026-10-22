@@ -26,7 +26,7 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -173,7 +173,7 @@ impl Collector<'_> {
                 instance
                     .arguments()
                     .iter()
-                    .any(|argument| matches!(argument, ResolvedType::TypeParameter { .. }))
+                    .any(|argument| matches!(argument.view(), ResolvedTypeView::TypeParameter { .. }))
             })
     }
 
@@ -204,7 +204,7 @@ impl Collector<'_> {
             }
             Expr::Call(call) => match call.callee().unparenthesized() {
                 Expr::DotShorthand(shorthand) if !shorthand.is_const() => {
-                    let Some(ResolvedType::Interface { identity, .. }) = state.expected() else {
+                    let Some(ResolvedTypeView::Interface { identity, .. }) = state.expected().map(ResolvedType::view) else {
                         return None;
                     };
                     Some(Invocation {

@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, DocName, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, DocName, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -74,7 +74,7 @@ impl Rule for AvoidUnnecessarySuper {
                     _ => None,
                 };
                 if let Some(superclass) = superclass
-                    && let ResolvedType::Interface { identity, .. } = model.resolve_type(superclass)
+                    && let ResolvedTypeView::Interface { identity, .. } = model.resolve_type(superclass).view()
                 {
                     closed.remove(identity.name());
                 }
@@ -102,8 +102,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if !matches!(field.object(), Expr::Super(_)) {
             return;
         }
-        let Some(receiver @ ResolvedType::Interface { identity, .. }) = &state.enclosing_type
-        else {
+        let Some(receiver) = state.enclosing_type.as_ref() else {
+            return;
+        };
+        let ResolvedTypeView::Interface { identity, .. } = receiver.view() else {
             return;
         };
         if !self.closed.contains(identity.name())

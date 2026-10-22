@@ -79,7 +79,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        if let Some(falcon_analyze::ResolvedType::Interface { identity, .. }) = state.expected()
+        if let Some(falcon_analyze::ResolvedTypeView::Interface { identity, .. }) = state.expected().map(falcon_analyze::ResolvedType::view)
             && [
                 "Transform",
                 "Padding",

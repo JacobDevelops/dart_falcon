@@ -13,7 +13,7 @@
 //! Adopted from the official `noop_primitive_operations` lint.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, RulePreparation,
+    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -93,9 +93,9 @@ impl Collector<'_> {
     /// Reports `name` invoked on a receiver of type `receiver` when it
     /// returns the receiver unchanged.
     fn check_invocation(&mut self, receiver: &ResolvedType, name: Identifier<'_>) {
-        let ResolvedType::Interface {
+        let ResolvedTypeView::Interface {
             identity, nullable, ..
-        } = receiver
+        } = receiver.view()
         else {
             return;
         };

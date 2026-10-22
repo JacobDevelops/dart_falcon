@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
     AnalyzeContext, ConstantCache, ConstantContext, ConstantValue, DeclarationIdentity,
-    ResolvedType, Truth, TypeRelation, evaluate_constant, expression_segments,
+    ResolvedType, ResolvedTypeView, Truth, TypeRelation, evaluate_constant, expression_segments,
     resolve_call_constructor,
 };
 use falcon_syntax::cst::visit::{Visitor, walk_expr};
@@ -285,7 +285,7 @@ fn context_member_kind(
 }
 
 fn is_context(ty: &ResolvedType, skip_nullable: bool) -> bool {
-    matches!(ty, ResolvedType::Interface { identity, nullable, .. }
+    matches!(ty.view(), ResolvedTypeView::Interface { identity, nullable, .. }
         if identity.is_package("flutter", "BuildContext")
             && (!skip_nullable || !nullable))
 }
@@ -378,7 +378,7 @@ fn receiver_type<'a>(
         return ty.clone();
     }
     let inferred = state.infer_receiver(expression);
-    if inferred == ResolvedType::Unknown && context_kind(expression, state, globals).is_some() {
+    if inferred == ResolvedType::UNKNOWN && context_kind(expression, state, globals).is_some() {
         // A State.context declaration can be known even when external field
         // signatures are absent. Reading its mounted member still resolves
         // BuildContext.mounted, not the State getter associated with its use.
@@ -488,7 +488,7 @@ impl<'a> Collector<'a> {
     }
 
     fn instance_callbacks(&mut self, receiver: &ResolvedType, method: &str, args: ArgList<'a>) {
-        let ResolvedType::Interface { identity, .. } = receiver else {
+        let ResolvedTypeView::Interface { identity, .. } = receiver.view() else {
             return;
         };
         if self.setstate && !identity.is_sdk("dart:async", "Future") {
@@ -533,7 +533,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         }
         if matches!(expression, Expr::Ident(_) | Expr::Field(_) | Expr::Call(_))
-            && state.infer(expression) == ResolvedType::Never
+            && state.infer(expression) == ResolvedType::NEVER
         {
             self.semantics.never.insert(key(expression));
         }
@@ -625,7 +625,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                                                     &substitutions,
                                                 )
                                             })
-                                            .unwrap_or(ResolvedType::Unknown),
+                                            .unwrap_or(ResolvedType::UNKNOWN),
                                     );
                                 }
                             }
@@ -659,7 +659,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                                             .map(|(ty, substitutions)| {
                                                 state.model.substitute(&ty, &substitutions)
                                             })
-                                            .unwrap_or(ResolvedType::Unknown),
+                                            .unwrap_or(ResolvedType::UNKNOWN),
                                     );
                                 }
                             }
@@ -673,7 +673,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                                                 .model
                                                 .substitute(&signature.return_type, &substitutions)
                                         })
-                                        .unwrap_or(ResolvedType::Unknown),
+                                        .unwrap_or(ResolvedType::UNKNOWN),
                                 );
                             }
                             CascadeOp::Assign(..) | CascadeOp::IndexAssign(..) => {}
@@ -684,12 +684,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             Expr::New(new) => {
                 let args = new.args();
                 self.arguments(args, state);
-                if let ResolvedType::Interface { identity, .. } = state
+                if let ResolvedTypeView::Interface { identity, .. } = state
                     .model
                     .resolve_type_in(new.dart_type(), &state.type_parameters)
+                    .view()
                 {
                     self.constructor_callbacks(
-                        &identity,
+                        identity,
                         new.constructor_name().map_or("new", |name| name.name()),
                         args,
                     );

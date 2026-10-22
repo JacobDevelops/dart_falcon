@@ -11,7 +11,7 @@ use std::collections::HashSet;
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, RulePreparation,
+    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
     resolve_new_constructor,
 };
 use falcon_diagnostics::Diagnostic;
@@ -161,7 +161,7 @@ impl WeakCrypto<'_> {
                 .signatures
                 .declared_member_facts(owner, name)
                 .is_empty()
-        }) || matches!(&state.enclosing_type, Some(ResolvedType::Interface { identity, .. })
+        }) || matches!(state.enclosing_type.as_ref().map(ResolvedType::view), Some(ResolvedTypeView::Interface { identity, .. })
             if !state.signatures.declared_member_facts(identity, name).is_empty())
     }
 }

@@ -2,7 +2,8 @@
 
 use crate::lint::bloc::BlocTypes;
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, Truth, TypeRelation,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, RulePreparation, Truth,
+    TypeRelation,
 };
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
@@ -203,8 +204,8 @@ impl<'a> Collector<'a> {
                     |identity| crate::lint::bloc::is_api_identity(identity, &state.model, "Bloc"),
                     &state.model,
                 )?;
-                match bloc.arguments().first()? {
-                    ResolvedType::Interface { identity, .. }
+                match bloc.arguments().first()?.view() {
+                    ResolvedTypeView::Interface { identity, .. }
                         if state.model.identities().is_project(identity) =>
                     {
                         Some(identity.clone())

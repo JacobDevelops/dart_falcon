@@ -277,7 +277,7 @@ fn future_expression<'a>(expression: Expr<'a>, state: &SemanticState<'a>) -> boo
     if state.signatures.implements_sdk(&ty, "dart:async", "Future") == Truth::Yes {
         return true;
     }
-    if !matches!(ty, falcon_analyze::ResolvedType::Unknown) {
+    if !matches!(ty.view(), falcon_analyze::ResolvedTypeView::Unknown) {
         return false;
     }
     let mut current = expression.unparenthesized();
@@ -296,7 +296,7 @@ fn future_expression<'a>(expression: Expr<'a>, state: &SemanticState<'a>) -> boo
         if receiver.interface("dart:async", "Future") {
             return true;
         }
-        if !matches!(receiver, falcon_analyze::ResolvedType::Unknown) {
+        if !matches!(receiver.view(), falcon_analyze::ResolvedTypeView::Unknown) {
             return false;
         }
     }

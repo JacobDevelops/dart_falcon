@@ -9,7 +9,7 @@
 //! excludes matching named arguments from callback checks.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, SemanticModel,
     SignatureIndex, StructuralNode, StructuralRuleVisitor, StructuralTraversal, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
@@ -169,7 +169,7 @@ impl CallbackCollector<'_> {
         }
         let builder_parameter = function.params().params().first().is_none_or(|first| {
             first.param_type().is_none_or(|ty| {
-                matches!(self.model.resolve_type(ty), ResolvedType::Interface { identity, nullable: false, .. }
+                matches!(self.model.resolve_type(ty).view(), ResolvedTypeView::Interface { identity, nullable: false, .. }
                     if identity.is_package("flutter", "BuildContext"))
             })
         });

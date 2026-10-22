@@ -1,7 +1,7 @@
 //! Enforces class-level encapsulation even inside one Dart library.
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -42,7 +42,7 @@ impl Collector<'_> {
                     .resolved_writable_member_owner(receiver, name.name(), &state.model)
             })
             .or_else(|| {
-                let ResolvedType::Interface { identity, .. } = receiver else {
+                let ResolvedTypeView::Interface { identity, .. } = receiver.view() else {
                     return None;
                 };
                 state
@@ -55,12 +55,12 @@ impl Collector<'_> {
         else {
             return;
         };
-        let enclosing_type = match &state.enclosing_type {
-            Some(ResolvedType::Interface { identity, .. }) => Some(identity),
+        let enclosing_type = match state.enclosing_type.as_ref().map(ResolvedType::view) {
+            Some(ResolvedTypeView::Interface { identity, .. }) => Some(identity),
             _ => None,
         };
-        let receiver_type = match receiver {
-            ResolvedType::Interface { identity, .. } => Some(identity),
+        let receiver_type = match receiver.view() {
+            ResolvedTypeView::Interface { identity, .. } => Some(identity),
             _ => None,
         };
         if enclosing_type.is_some() && receiver_type == enclosing_type {
@@ -92,13 +92,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 && !state.environment.is_bound(name.name())
                 && let Some(identity) = state.model.resolve_name(name.name())
             {
-                receiver = ResolvedType::Interface {
-                    occurrence: Default::default(),
-                    identity,
-                    arguments: Vec::new().into(),
-                    nullable: false,
-                    extension_type: false,
-                };
+                receiver = ResolvedType::new_interface(identity, Vec::new().into(), false, false);
             }
             self.check(field.field(), &receiver, state);
         } else if let Expr::DotShorthand(shorthand) = node

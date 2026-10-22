@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -56,7 +56,7 @@ impl<'a> Collector<'a> {
                 Expr::Paren(_) | Expr::IntLit(_) | Expr::DoubleLit(_) => true,
                 Expr::Ident(name) => {
                     self.references.get(&name.span().start).is_some_and(|id| {
-                        matches!(state.infer(node), ResolvedType::Interface { identity, nullable: false, .. }
+                        matches!(state.infer(node).view(), ResolvedTypeView::Interface { identity, nullable: false, .. }
                             if ((identity.is_sdk("dart:core", "int") || identity.is_sdk("dart:core", "double"))
                                 && self.stable.contains(id))
                                 || (identity.is_sdk("dart:core", "String") && !self.mutated.contains(id)))
@@ -64,19 +64,19 @@ impl<'a> Collector<'a> {
                 }
                 Expr::Binary(binary) => {
                     matches!(binary.op(), BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul)
-                        && matches!(state.infer(node), ResolvedType::Interface { identity, nullable: false, .. }
+                        && matches!(state.infer(node).view(), ResolvedTypeView::Interface { identity, nullable: false, .. }
                             if identity.is_sdk("dart:core", "int") || identity.is_sdk("dart:core", "double"))
                 }
                 Expr::Field(field) if !field.is_null_safe() => {
                     // Prove built-in results even when the lightweight SDK index
                     // does not carry their getter result signatures.
                     match field.field().name() {
-                        "length" => matches!(state.infer(field.object()),
-                            ResolvedType::Interface { identity, nullable: false, .. }
+                        "length" => matches!(state.infer(field.object()).view(),
+                            ResolvedTypeView::Interface { identity, nullable: false, .. }
                                 if identity.is_sdk("dart:core", "String"))
                             && matches!(field.object().unparenthesized(), Expr::Ident(_)),
-                        "isOdd" | "isEven" => matches!(state.infer(field.object()),
-                            ResolvedType::Interface { identity, nullable: false, .. }
+                        "isOdd" | "isEven" => matches!(state.infer(field.object()).view(),
+                            ResolvedTypeView::Interface { identity, nullable: false, .. }
                                 if identity.is_sdk("dart:core", "int"))
                             || matches!(field.object().unparenthesized(), Expr::Field(inner)
                                 if inner.field().name() == "length"),

@@ -36,15 +36,15 @@ pub(crate) fn same_element<'a>(
                     (Some(left), Some(right)) => left == right,
                     (None, None) => {
                         matches!(
-                            state.infer_access_receiver(left_object, left_field.name(), left_safe),
-                            falcon_analyze::ResolvedType::Dynamic
+                            state
+                                .infer_access_receiver(left_object, left_field.name(), left_safe)
+                                .view(),
+                            falcon_analyze::ResolvedTypeView::Dynamic
                         ) && matches!(
-                            state.infer_access_receiver(
-                                right_object,
-                                right_field.name(),
-                                right_safe
-                            ),
-                            falcon_analyze::ResolvedType::Dynamic
+                            state
+                                .infer_access_receiver(right_object, right_field.name(), right_safe)
+                                .view(),
+                            falcon_analyze::ResolvedTypeView::Dynamic
                         )
                     }
                     _ => false,

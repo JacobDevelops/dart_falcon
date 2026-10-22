@@ -11,6 +11,7 @@
 //! from. Everything else (type parameters against non-type-parameters, ...)
 //! might be related.
 
+use crate::resolve::semantic::ResolvedTypeKind;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 
@@ -31,13 +32,23 @@ fn memoized_relation(
     compute: impl FnOnce(&mut RelationMemo) -> Truth,
 ) -> Truth {
     let has_children = |ty: &ResolvedType| match ty {
-        ResolvedType::Interface { arguments, .. } => !arguments.is_empty(),
-        ResolvedType::Record {
-            positional, named, ..
+        ResolvedType {
+            kind: ResolvedTypeKind::Interface { arguments, .. },
+        } => !arguments.is_empty(),
+        ResolvedType {
+            kind: ResolvedTypeKind::Record {
+                positional, named, ..
+            },
         } => !positional.is_empty() || !named.is_empty(),
-        ResolvedType::TypeParameter { .. }
-        | ResolvedType::NonNullTypeParameter { .. }
-        | ResolvedType::Function { .. } => true,
+        ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter { .. },
+        }
+        | ResolvedType {
+            kind: ResolvedTypeKind::NonNullTypeParameter { .. },
+        }
+        | ResolvedType {
+            kind: ResolvedTypeKind::Function { .. },
+        } => true,
         _ => false,
     };
     if !has_children(left) && !has_children(right) {
@@ -68,13 +79,19 @@ impl SignatureIndex {
     /// Whether a type excludes null, including extension types implementing Object.
     pub fn is_non_nullable(&self, ty: &ResolvedType) -> bool {
         match ty {
-            ResolvedType::TypeParameter {
-                bound, nullable, ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::TypeParameter {
+                        bound, nullable, ..
+                    },
             } => !nullable && self.is_non_nullable(bound),
-            ResolvedType::Interface {
-                extension_type: true,
-                nullable: false,
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        extension_type: true,
+                        nullable: false,
+                        ..
+                    },
             } => self.implements_sdk(ty, "dart:core", "Object") == Truth::Yes,
             ty if !ty.nullable() => future_or_argument(ty).map_or_else(
                 || ty.is_non_nullable(),
@@ -127,15 +144,32 @@ impl SignatureIndex {
         model: &SemanticModel<'_>,
         memo: &mut RelationMemo,
     ) -> Truth {
-        use ResolvedType as T;
-        if matches!(left, T::Unknown) || matches!(right, T::Unknown) {
+        if matches!(
+            left,
+            ResolvedType {
+                kind: ResolvedTypeKind::Unknown
+            }
+        ) || matches!(
+            right,
+            ResolvedType {
+                kind: ResolvedTypeKind::Unknown
+            }
+        ) {
             return Truth::Unknown;
         }
-        if is_bottom(left) || is_bottom(right) || *left == T::Dynamic || *right == T::Dynamic {
+        if is_bottom(left)
+            || is_bottom(right)
+            || *left == ResolvedType::DYNAMIC
+            || *right == ResolvedType::DYNAMIC
+        {
             return Truth::No;
         }
-        if *left == T::Null || *right == T::Null {
-            let other = if *left == T::Null { right } else { left };
+        if *left == ResolvedType::NULL || *right == ResolvedType::NULL {
+            let other = if *left == ResolvedType::NULL {
+                right
+            } else {
+                left
+            };
             if non_nullable(other) == Truth::Yes {
                 return Truth::Yes;
             }
@@ -156,13 +190,27 @@ impl SignatureIndex {
             Truth::Unknown
         };
         let unrelated = match (&left, &right) {
-            (T::Interface { .. }, T::Interface { .. }) => {
-                self.interfaces_unrelated(&left, &right, model, memo)
-            }
             (
-                T::TypeParameter { bound: left, .. } | T::NonNullTypeParameter { bound: left, .. },
-                T::TypeParameter { bound: right, .. }
-                | T::NonNullTypeParameter { bound: right, .. },
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface { .. },
+                },
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface { .. },
+                },
+            ) => self.interfaces_unrelated(&left, &right, model, memo),
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { bound: left, .. },
+                }
+                | ResolvedType {
+                    kind: ResolvedTypeKind::NonNullTypeParameter { bound: left, .. },
+                },
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { bound: right, .. },
+                }
+                | ResolvedType {
+                    kind: ResolvedTypeKind::NonNullTypeParameter { bound: right, .. },
+                },
             ) => {
                 if unbounded(left) || unbounded(right) {
                     Truth::No
@@ -170,10 +218,30 @@ impl SignatureIndex {
                     self.erased_unrelated_memoized(left, right, model, memo)
                 }
             }
-            (T::Function { .. }, other) | (other, T::Function { .. }) => {
-                self.unrelated_to_function(other)
-            }
-            (T::Record { .. }, _) | (_, T::Record { .. }) => Truth::Yes,
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function { .. },
+                },
+                other,
+            )
+            | (
+                other,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function { .. },
+                },
+            ) => self.unrelated_to_function(other),
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::Record { .. },
+                },
+                _,
+            )
+            | (
+                _,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Record { .. },
+                },
+            ) => Truth::Yes,
             _ => Truth::No,
         };
         match (neither_subtype, unrelated) {
@@ -191,15 +259,21 @@ impl SignatureIndex {
         memo: &mut RelationMemo,
     ) -> Truth {
         let (
-            ResolvedType::Interface {
-                identity: left_identity,
-                arguments: left_arguments,
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity: left_identity,
+                        arguments: left_arguments,
+                        ..
+                    },
             },
-            ResolvedType::Interface {
-                identity: right_identity,
-                arguments: right_arguments,
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity: right_identity,
+                        arguments: right_arguments,
+                        ..
+                    },
             },
         ) = (left, right)
         else {
@@ -244,11 +318,12 @@ impl SignatureIndex {
                 .get(identity)
                 .and_then(|facts| facts.member_supertypes.as_ref())
                 .map(|types| match types.as_slice() {
-                    [types @ .., ResolvedType::Interface { identity, .. }]
-                        if *identity == DeclarationIdentity::OBJECT =>
-                    {
-                        types
-                    }
+                    [
+                        types @ ..,
+                        ResolvedType {
+                            kind: ResolvedTypeKind::Interface { identity, .. },
+                        },
+                    ] if *identity == DeclarationIdentity::OBJECT => types,
                     types => types,
                 })
         };
@@ -279,7 +354,10 @@ impl SignatureIndex {
             // Two implicit Object superclasses do not establish relatedness.
             return Truth::Yes;
         };
-        let ResolvedType::Interface { identity, .. } = superclass else {
+        let ResolvedType {
+            kind: ResolvedTypeKind::Interface { identity, .. },
+        } = superclass
+        else {
             return Truth::Unknown;
         };
         let protobuf_enum = identity.name() == "ProtobufEnum"
@@ -290,8 +368,17 @@ impl SignatureIndex {
 
     /// The linter's `_isTypeUnrelatedToFunctionType`.
     fn unrelated_to_function(&self, ty: &ResolvedType) -> Truth {
-        let ResolvedType::Interface { identity, .. } = ty else {
-            return (!matches!(ty, ResolvedType::Function { .. })).into();
+        let ResolvedType {
+            kind: ResolvedTypeKind::Interface { identity, .. },
+        } = ty
+        else {
+            return (!matches!(
+                ty,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function { .. }
+                }
+            ))
+            .into();
         };
         match self.type_kind(identity) {
             None if matches!(identity, DeclarationIdentity::Sdk { .. })
@@ -370,22 +457,67 @@ impl SignatureIndex {
         prove_unknown_top: bool,
         memo: &mut RelationMemo,
     ) -> Truth {
-        use ResolvedType as T;
         match (sub, sup) {
-            (T::Unknown, T::Dynamic | T::Void) if prove_unknown_top => return Truth::Yes,
-            (T::Unknown, _) | (_, T::Unknown) => return Truth::Unknown,
-            (_, T::Dynamic | T::Void) | (T::Never, _) => return Truth::Yes,
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::Unknown,
+                },
+                ResolvedType {
+                    kind: ResolvedTypeKind::Dynamic,
+                }
+                | ResolvedType {
+                    kind: ResolvedTypeKind::Void,
+                },
+            ) if prove_unknown_top => return Truth::Yes,
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::Unknown,
+                },
+                _,
+            )
+            | (
+                _,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Unknown,
+                },
+            ) => return Truth::Unknown,
             (
                 _,
-                T::Interface {
-                    identity,
-                    nullable: true,
-                    ..
+                ResolvedType {
+                    kind: ResolvedTypeKind::Dynamic,
+                }
+                | ResolvedType {
+                    kind: ResolvedTypeKind::Void,
+                },
+            )
+            | (
+                ResolvedType {
+                    kind: ResolvedTypeKind::Never,
+                },
+                _,
+            ) => return Truth::Yes,
+            (
+                _,
+                ResolvedType {
+                    kind:
+                        ResolvedTypeKind::Interface {
+                            identity,
+                            nullable: true,
+                            ..
+                        },
                 },
             ) if *identity == DeclarationIdentity::OBJECT => {
                 return Truth::Yes;
             }
-            (T::Dynamic | T::Void, _) => {
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::Dynamic,
+                }
+                | ResolvedType {
+                    kind: ResolvedTypeKind::Void,
+                },
+                _,
+            ) => {
                 return self.subtype_memoized(
                     &model.core_type("Object", true),
                     sup,
@@ -394,7 +526,12 @@ impl SignatureIndex {
                     memo,
                 );
             }
-            (T::Null, _) => return accepts_null(sup),
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::Null,
+                },
+                _,
+            ) => return accepts_null(sup),
             _ => {}
         }
         if sub.nullable() {
@@ -418,42 +555,92 @@ impl SignatureIndex {
             ]);
         }
         match (&sub, &sup) {
-            (T::TypeParameter { id, .. }, T::TypeParameter { id: target, .. }) if id == target => {
-                Truth::Yes
-            }
             (
-                T::NonNullTypeParameter { id, .. },
-                T::TypeParameter { id: target, .. } | T::NonNullTypeParameter { id: target, .. },
-            ) if id == target => Truth::Yes,
-            (T::NonNullTypeParameter { bound, .. }, _) => {
-                self.subtype_memoized(&bound.non_null(), &sup, model, prove_unknown_top, memo)
-            }
-            (T::TypeParameter { bound, .. }, _) => {
-                self.subtype_memoized(bound, &sup, model, prove_unknown_top, memo)
-            }
-            (_, T::Interface { identity, .. }) if *identity == DeclarationIdentity::OBJECT => {
-                Truth::Yes
-            }
-            (_, T::TypeParameter { .. } | T::NonNullTypeParameter { .. }) => Truth::No,
-            (T::Function { .. }, T::Function { .. }) => {
-                self.function_subtype(&sub, &sup, model, prove_unknown_top, memo)
-            }
-            (T::Function { .. }, T::Interface { identity, .. }) => {
-                identity.is_sdk("dart:core", "Function").into()
-            }
-            (T::Record { .. }, T::Interface { identity, .. }) => {
-                identity.is_sdk("dart:core", "Record").into()
-            }
-            (
-                T::Record {
-                    positional: sub_positional,
-                    named: sub_named,
-                    ..
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { id, .. },
                 },
-                T::Record {
-                    positional: sup_positional,
-                    named: sup_named,
-                    ..
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { id: target, .. },
+                },
+            ) if id == target => Truth::Yes,
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::NonNullTypeParameter { id, .. },
+                },
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { id: target, .. },
+                }
+                | ResolvedType {
+                    kind: ResolvedTypeKind::NonNullTypeParameter { id: target, .. },
+                },
+            ) if id == target => Truth::Yes,
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+                },
+                _,
+            ) => self.subtype_memoized(&bound.non_null(), &sup, model, prove_unknown_top, memo),
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { bound, .. },
+                },
+                _,
+            ) => self.subtype_memoized(bound, &sup, model, prove_unknown_top, memo),
+            (
+                _,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface { identity, .. },
+                },
+            ) if *identity == DeclarationIdentity::OBJECT => Truth::Yes,
+            (
+                _,
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { .. },
+                }
+                | ResolvedType {
+                    kind: ResolvedTypeKind::NonNullTypeParameter { .. },
+                },
+            ) => Truth::No,
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function { .. },
+                },
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function { .. },
+                },
+            ) => self.function_subtype(&sub, &sup, model, prove_unknown_top, memo),
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function { .. },
+                },
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface { identity, .. },
+                },
+            ) => identity.is_sdk("dart:core", "Function").into(),
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::Record { .. },
+                },
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface { identity, .. },
+                },
+            ) => identity.is_sdk("dart:core", "Record").into(),
+            (
+                ResolvedType {
+                    kind:
+                        ResolvedTypeKind::Record {
+                            positional: sub_positional,
+                            named: sub_named,
+                            ..
+                        },
+                },
+                ResolvedType {
+                    kind:
+                        ResolvedTypeKind::Record {
+                            positional: sup_positional,
+                            named: sup_named,
+                            ..
+                        },
                 },
             ) => {
                 if sub_positional.len() != sup_positional.len()
@@ -477,17 +664,41 @@ impl SignatureIndex {
                         self.subtype_memoized(sub, sup, model, prove_unknown_top, memo)
                     }))
             }
-            (T::Interface { .. }, T::Function { .. } | T::Record { .. })
-            | (T::Function { .. } | T::Record { .. }, _) => Truth::No,
             (
-                T::Interface {
-                    identity: sub_identity,
-                    ..
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface { .. },
                 },
-                T::Interface {
-                    identity: sup_identity,
-                    arguments: sup_arguments,
-                    ..
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function { .. },
+                }
+                | ResolvedType {
+                    kind: ResolvedTypeKind::Record { .. },
+                },
+            )
+            | (
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function { .. },
+                }
+                | ResolvedType {
+                    kind: ResolvedTypeKind::Record { .. },
+                },
+                _,
+            ) => Truth::No,
+            (
+                ResolvedType {
+                    kind:
+                        ResolvedTypeKind::Interface {
+                            identity: sub_identity,
+                            ..
+                        },
+                },
+                ResolvedType {
+                    kind:
+                        ResolvedTypeKind::Interface {
+                            identity: sup_identity,
+                            arguments: sup_arguments,
+                            ..
+                        },
                 },
             ) => match self.instantiated_identity(&sub, sup_identity, model) {
                 Some(instantiated) => {
@@ -524,21 +735,27 @@ impl SignatureIndex {
         memo: &mut RelationMemo,
     ) -> Truth {
         let (
-            ResolvedType::Function {
-                return_type: sub_return,
-                positional: sub_positional,
-                named: sub_named,
-                optional_positional: sub_optional,
-                shape: Some(sub_shape),
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        return_type: sub_return,
+                        positional: sub_positional,
+                        named: sub_named,
+                        optional_positional: sub_optional,
+                        shape: Some(sub_shape),
+                        ..
+                    },
             },
-            ResolvedType::Function {
-                return_type: sup_return,
-                positional: sup_positional,
-                named: sup_named,
-                optional_positional: sup_optional,
-                shape: Some(sup_shape),
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        return_type: sup_return,
+                        positional: sup_positional,
+                        named: sup_named,
+                        optional_positional: sup_optional,
+                        shape: Some(sup_shape),
+                        ..
+                    },
             },
         ) = (sub, sup)
         else {
@@ -568,8 +785,12 @@ impl SignatureIndex {
             .zip(sup_shape.type_parameters.iter())
         {
             let (
-                ResolvedType::TypeParameter { id: sub_id, .. },
-                ResolvedType::TypeParameter { id: sup_id, .. },
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { id: sub_id, .. },
+                },
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { id: sup_id, .. },
+                },
             ) = (sub, sup)
             else {
                 return Truth::Unknown;
@@ -592,11 +813,17 @@ impl SignatureIndex {
             .zip(sup_shape.type_parameters.iter())
         {
             let (
-                ResolvedType::TypeParameter {
-                    bound: sub_bound, ..
+                ResolvedType {
+                    kind:
+                        ResolvedTypeKind::TypeParameter {
+                            bound: sub_bound, ..
+                        },
                 },
-                ResolvedType::TypeParameter {
-                    bound: sup_bound, ..
+                ResolvedType {
+                    kind:
+                        ResolvedTypeKind::TypeParameter {
+                            bound: sup_bound, ..
+                        },
                 },
             ) = (sub, sup)
             else {
@@ -652,9 +879,11 @@ impl SignatureIndex {
             &mut |ty| {
                 matches!(
                     ty,
-                    ResolvedType::Interface {
-                        extension_type: true,
-                        ..
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Interface {
+                            extension_type: true,
+                            ..
+                        }
                     }
                 )
             },
@@ -685,12 +914,15 @@ impl SignatureIndex {
             return result.clone();
         }
         let result = match ty {
-            ResolvedType::Interface {
-                identity,
-                arguments,
-                nullable,
-                extension_type: true,
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity,
+                        arguments,
+                        nullable,
+                        extension_type: true,
+                        ..
+                    },
             } => {
                 // A repeated declaration in a finite argument (E<E<int>>)
                 // is not a representation cycle. Erase supplied arguments
@@ -728,13 +960,16 @@ impl SignatureIndex {
                 active.remove(identity);
                 result
             }
-            ResolvedType::Interface {
-                occurrence,
-                identity,
-                arguments,
-                nullable,
-                extension_type: false,
-            } => Some(ResolvedType::Interface {
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        occurrence,
+                        identity,
+                        arguments,
+                        nullable,
+                        extension_type: false,
+                    },
+            } => Some(ResolvedType::from_kind(ResolvedTypeKind::Interface {
                 occurrence: occurrence.clone(),
                 identity: identity.clone(),
                 arguments: arguments
@@ -744,31 +979,39 @@ impl SignatureIndex {
                     .into(),
                 nullable: *nullable,
                 extension_type: false,
-            }),
-            ResolvedType::TypeParameter {
-                id,
-                bound,
-                nullable,
-            } => Some(ResolvedType::TypeParameter {
+            })),
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::TypeParameter {
+                        id,
+                        bound,
+                        nullable,
+                    },
+            } => Some(ResolvedType::from_kind(ResolvedTypeKind::TypeParameter {
                 id: id.clone(),
                 bound: std::sync::Arc::new(self.erase_memoized(bound, model, memo, active)?),
                 nullable: *nullable,
-            }),
-            ResolvedType::NonNullTypeParameter { id, bound } => {
-                Some(ResolvedType::NonNullTypeParameter {
+            })),
+            ResolvedType {
+                kind: ResolvedTypeKind::NonNullTypeParameter { id, bound },
+            } => Some(ResolvedType::from_kind(
+                ResolvedTypeKind::NonNullTypeParameter {
                     id: id.clone(),
                     bound: std::sync::Arc::new(self.erase_memoized(bound, model, memo, active)?),
-                })
-            }
-            ResolvedType::Function {
-                return_type,
-                positional,
-                named,
-                nullable,
-                alias,
-                optional_positional,
-                shape,
-            } => Some(ResolvedType::Function {
+                },
+            )),
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        return_type,
+                        positional,
+                        named,
+                        nullable,
+                        alias,
+                        optional_positional,
+                        shape,
+                    },
+            } => Some(ResolvedType::from_kind(ResolvedTypeKind::Function {
                 optional_positional: *optional_positional,
                 shape: match shape {
                     Some(shape) => {
@@ -812,13 +1055,16 @@ impl SignatureIndex {
                     .collect::<Option<Vec<_>>>()?
                     .into(),
                 nullable: *nullable,
-            }),
-            ResolvedType::Record {
-                occurrence,
-                positional,
-                named,
-                nullable,
-            } => Some(ResolvedType::Record {
+            })),
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Record {
+                        occurrence,
+                        positional,
+                        named,
+                        nullable,
+                    },
+            } => Some(ResolvedType::from_kind(ResolvedTypeKind::Record {
                 occurrence: occurrence.clone(),
                 positional: positional
                     .iter()
@@ -833,7 +1079,7 @@ impl SignatureIndex {
                     .collect::<Option<Vec<_>>>()?
                     .into(),
                 nullable: *nullable,
-            }),
+            })),
             other => return Some(other.clone()),
         };
         memo.insert(key, result.clone());
@@ -844,13 +1090,20 @@ impl SignatureIndex {
 /// `Never`, or a type parameter bounded by it.
 fn is_bottom(ty: &ResolvedType) -> bool {
     match ty {
-        ResolvedType::Never => true,
-        ResolvedType::TypeParameter {
-            bound,
-            nullable: false,
-            ..
+        ResolvedType {
+            kind: ResolvedTypeKind::Never,
+        } => true,
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::TypeParameter {
+                    bound,
+                    nullable: false,
+                    ..
+                },
         }
-        | ResolvedType::NonNullTypeParameter { bound, .. } => is_bottom(bound),
+        | ResolvedType {
+            kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+        } => is_bottom(bound),
         _ => false,
     }
 }
@@ -858,11 +1111,16 @@ fn is_bottom(ty: &ResolvedType) -> bool {
 /// A type parameter without an explicit bound.
 fn unbounded(bound: &ResolvedType) -> bool {
     match bound {
-        ResolvedType::Dynamic => true,
-        ResolvedType::Interface {
-            identity,
-            nullable: true,
-            ..
+        ResolvedType {
+            kind: ResolvedTypeKind::Dynamic,
+        } => true,
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    identity,
+                    nullable: true,
+                    ..
+                },
         } => *identity == DeclarationIdentity::OBJECT,
         _ => false,
     }
@@ -876,14 +1134,31 @@ fn promote_non_null(ty: &ResolvedType) -> ResolvedType {
 /// The analyzer's `isNonNullable`.
 pub(super) fn non_nullable(ty: &ResolvedType) -> Truth {
     match ty {
-        ResolvedType::Unknown => Truth::Unknown,
-        ResolvedType::Never => Truth::Yes,
-        ResolvedType::Dynamic | ResolvedType::Void | ResolvedType::Null => Truth::No,
+        ResolvedType {
+            kind: ResolvedTypeKind::Unknown,
+        } => Truth::Unknown,
+        ResolvedType {
+            kind: ResolvedTypeKind::Never,
+        } => Truth::Yes,
+        ResolvedType {
+            kind: ResolvedTypeKind::Dynamic,
+        }
+        | ResolvedType {
+            kind: ResolvedTypeKind::Void,
+        }
+        | ResolvedType {
+            kind: ResolvedTypeKind::Null,
+        } => Truth::No,
         ty if ty.nullable() => Truth::No,
-        ResolvedType::TypeParameter { bound, .. } => non_nullable(bound),
-        ResolvedType::Interface {
-            extension_type: true,
-            ..
+        ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter { bound, .. },
+        } => non_nullable(bound),
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    extension_type: true,
+                    ..
+                },
         } => Truth::Unknown,
         ty => match future_or_argument(ty) {
             Some(argument) => non_nullable(argument),
@@ -895,8 +1170,18 @@ pub(super) fn non_nullable(ty: &ResolvedType) -> Truth {
 /// Whether `Null` is a subtype of `ty`.
 fn accepts_null(ty: &ResolvedType) -> Truth {
     match ty {
-        ResolvedType::Unknown => Truth::Unknown,
-        ResolvedType::Dynamic | ResolvedType::Void | ResolvedType::Null => Truth::Yes,
+        ResolvedType {
+            kind: ResolvedTypeKind::Unknown,
+        } => Truth::Unknown,
+        ResolvedType {
+            kind: ResolvedTypeKind::Dynamic,
+        }
+        | ResolvedType {
+            kind: ResolvedTypeKind::Void,
+        }
+        | ResolvedType {
+            kind: ResolvedTypeKind::Null,
+        } => Truth::Yes,
         ty if ty.nullable() => Truth::Yes,
         ty => match future_or_argument(ty) {
             Some(argument) => accepts_null(argument),
@@ -907,23 +1192,26 @@ fn accepts_null(ty: &ResolvedType) -> Truth {
 
 fn future_or_argument(ty: &ResolvedType) -> Option<&ResolvedType> {
     match ty {
-        ResolvedType::Interface {
-            identity,
-            arguments,
-            ..
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    identity,
+                    arguments,
+                    ..
+                },
         } if identity.is_sdk("dart:async", "FutureOr") => arguments.first(),
         _ => None,
     }
 }
 
 fn future_of(argument: &ResolvedType) -> ResolvedType {
-    ResolvedType::Interface {
+    ResolvedType::from_kind(ResolvedTypeKind::Interface {
         occurrence: Default::default(),
         identity: DeclarationIdentity::sdk("dart:async", "Future"),
         arguments: vec![argument.clone()].into(),
         nullable: false,
         extension_type: false,
-    }
+    })
 }
 
 fn any(results: impl IntoIterator<Item = Truth>) -> Truth {
@@ -988,23 +1276,23 @@ mod tests {
         let future_or_void = signatures
             .instantiated_override_return(&base, "onLoad", false, &model)
             .unwrap();
-        let future_void = future_of(&ResolvedType::Void);
+        let future_void = future_of(&ResolvedType::VOID);
         let int = model.core_type("int", false);
         let string = model.core_type("String", false);
         let future_int = future_of(&int);
-        let future_or_int = ResolvedType::Interface {
+        let future_or_int = ResolvedType::from_kind(ResolvedTypeKind::Interface {
             occurrence: Default::default(),
             identity: DeclarationIdentity::sdk("dart:async", "FutureOr"),
             arguments: vec![int.clone()].into(),
             nullable: false,
             extension_type: false,
-        };
+        });
         let object = model.core_type("Object", false);
         let nullable_object = model.core_type("Object", true);
         for (sub, sup, expected) in [
             (&future_or_void, &future_or_void, Truth::Yes),
-            (&ResolvedType::Void, &future_or_void, Truth::Yes),
-            (&ResolvedType::Dynamic, &future_or_void, Truth::Yes),
+            (&ResolvedType::VOID, &future_or_void, Truth::Yes),
+            (&ResolvedType::DYNAMIC, &future_or_void, Truth::Yes),
             (&nullable_object, &future_or_void, Truth::Yes),
             (&future_or_void, &nullable_object, Truth::Yes),
             (&future_void, &future_or_void, Truth::Yes),
@@ -1016,8 +1304,8 @@ mod tests {
             (&future_or_int, &future_or_int, Truth::Yes),
             (&future_int, &future_or_int, Truth::Yes),
             (&int, &future_or_int, Truth::Yes),
-            (&ResolvedType::Void, &future_or_int, Truth::No),
-            (&ResolvedType::Dynamic, &future_or_int, Truth::No),
+            (&ResolvedType::VOID, &future_or_int, Truth::No),
+            (&ResolvedType::DYNAMIC, &future_or_int, Truth::No),
             (&future_void, &future_or_int, Truth::No),
             (&future_or_int, &string, Truth::No),
             (&string, &future_or_int, Truth::No),

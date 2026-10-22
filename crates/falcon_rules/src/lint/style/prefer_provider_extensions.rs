@@ -1,6 +1,6 @@
 //! Prefer context.read/watch when provider extensions are in scope.
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -61,7 +61,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         };
         let receiver = state.infer(context);
-        if !matches!(&receiver, ResolvedType::Interface { identity, .. } if identity.is_package("flutter", "BuildContext"))
+        if !matches!(receiver.view(), ResolvedTypeView::Interface { identity, .. } if identity.is_package("flutter", "BuildContext"))
         {
             return;
         }

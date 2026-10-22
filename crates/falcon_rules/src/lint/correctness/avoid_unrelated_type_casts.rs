@@ -6,7 +6,7 @@
 //! of the incompatible type is read.
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth, TypeRelation};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth, TypeRelation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -39,13 +39,11 @@ impl Collector<'_> {
         // instantiated with one even when its bound is not structural.
         if source.interface("dart:core", "Object")
             || target.interface("dart:core", "Object")
-            || matches!(
-                source,
-                ResolvedType::TypeParameter { .. } | ResolvedType::NonNullTypeParameter { .. }
+            || matches!(source.view(),
+                ResolvedTypeView::TypeParameter { .. } | ResolvedTypeView::NonNullTypeParameter { .. }
             )
-            || matches!(
-                target,
-                ResolvedType::TypeParameter { .. } | ResolvedType::NonNullTypeParameter { .. }
+            || matches!(target.view(),
+                ResolvedTypeView::TypeParameter { .. } | ResolvedTypeView::NonNullTypeParameter { .. }
             )
         {
             return false;

@@ -25,7 +25,7 @@
 //! Adopted from the official `type_annotate_public_apis` lint.
 
 use falcon_analyze::{
-    AnalyzeContext, ResolvedType, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    AnalyzeContext, ResolvedTypeView, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -224,8 +224,8 @@ impl<'a> Checker<'a> {
     /// declaration without a useful inferred type; unknown types stay silent.
     fn lacks_inferred_type(&self, initializer: Expr<'a>) -> bool {
         matches!(
-            self.state.infer(initializer),
-            ResolvedType::Dynamic | ResolvedType::Null
+            self.state.infer(initializer).view(),
+            ResolvedTypeView::Dynamic | ResolvedTypeView::Null
         )
     }
 

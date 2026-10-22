@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, evaluate_constant,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, evaluate_constant,
     ConstantContext, evaluate_construction,
 };
 use falcon_diagnostics::Diagnostic;
@@ -107,7 +107,7 @@ impl<'a> Collector<'a> {
             if state.expected_unknown() {
                 return None;
             }
-            let Some(ResolvedType::Interface { identity, .. }) = state.expected() else {
+            let Some(ResolvedTypeView::Interface { identity, .. }) = state.expected().map(ResolvedType::view) else {
                 return None;
             };
             state.signatures.constructor(identity, dot.name().name())?;
@@ -129,10 +129,10 @@ impl<'a> Collector<'a> {
         }
         let value = if let Expr::Call(call) = node.unparenthesized()
             && let Expr::DotShorthand(dot) = call.callee().unparenthesized()
-            && let Some(ResolvedType::Interface {
+            && let Some(ResolvedTypeView::Interface {
                 arguments: type_args,
                 ..
-            }) = state.expected()
+            }) = state.expected().map(ResolvedType::view)
         {
             evaluate_construction(identity, dot.name().name(), type_args, call.args(), ConstantContext::new(&state.model, &state.signatures))
             .value

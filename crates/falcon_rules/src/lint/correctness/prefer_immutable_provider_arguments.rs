@@ -9,7 +9,7 @@ use crate::lint::flutter::scoped_constructor_invocation;
 use crate::lint::riverpod::is_identity;
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
+    AnalyzeContext, DeclarationIdentity, ResolvedTypeView, Rule, RulePreparation, Truth,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{Visitor, walk_expr};
@@ -69,7 +69,7 @@ impl Collector<'_> {
                     return false;
                 };
                 if !state.signatures.has_constructor(&identity, constructor)
-                    || matches!(state.infer(argument), ResolvedType::Interface { extension_type: true, .. })
+                    || matches!(state.infer(argument).view(), ResolvedTypeView::Interface { extension_type: true, .. })
                     // Factories may return a cached value or a subtype with its own equality.
                     || state.signatures.declaration(&identity).is_some_and(|declaration| {
                         declaration.constructors.iter().any(|fact| {
@@ -103,15 +103,16 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         let Expr::Call(call) = expression else {
             return;
         };
-        let ResolvedType::Interface { identity, .. } = state.infer(call.callee()) else {
+        let callee_type = state.infer(call.callee());
+        let ResolvedTypeView::Interface { identity, .. } = callee_type.view() else {
             return;
         };
         let family = |identity: &falcon_analyze::DeclarationIdentity| {
             identity.name().ends_with("Family")
                 && is_identity(self.ctx, identity, &[identity.name()])
         };
-        if !family(&identity)
-            && state.signatures.supertype_matches(&identity, &family) != Truth::Yes
+        if !family(identity)
+            && state.signatures.supertype_matches(identity, &family) != Truth::Yes
         {
             return;
         }

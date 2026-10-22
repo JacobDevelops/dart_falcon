@@ -12,7 +12,7 @@
 //! [`TypeRelation::RuntimeUnrelatedTo`]: falcon_analyze::TypeRelation::RuntimeUnrelatedTo
 
 use falcon_analyze::TypeKind;
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth, TypeRelation};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth, TypeRelation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -149,8 +149,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 // The linter finds an implicit receiver only in classes,
                 // mixins, enums, and extensions, not extension types.
                 Expr::Ident(identifier) => {
-                    if let Some(enclosing @ ResolvedType::Interface { identity, .. }) =
-                        &state.enclosing_type
+                    if let Some(enclosing) = state.enclosing_type.as_ref()
+                        && let ResolvedTypeView::Interface { identity, .. } = enclosing.view()
                         && state.signatures.type_kind(identity) != Some(TypeKind::ExtensionType)
                     {
                         self.check_call(enclosing, identifier.name(), call.args(), state);
@@ -190,7 +190,7 @@ fn receiver_type<'a>(object: Expr<'a>, state: &SemanticState<'a>) -> ResolvedTyp
         Expr::Super(_) => state
             .enclosing_type
             .clone()
-            .unwrap_or(ResolvedType::Unknown),
+            .unwrap_or(ResolvedType::UNKNOWN),
         other => state.infer(other),
     }
 }

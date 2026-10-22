@@ -1,7 +1,8 @@
 //! Resolved Provider access and widget build contexts.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, Truth, TypeRelation,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, RulePreparation, Truth,
+    TypeRelation,
 };
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
@@ -49,7 +50,7 @@ impl Collector<'_> {
         let method = field.field().name();
         if self.extensions && matches!(method, "read" | "watch" | "select") {
             let receiver = state.infer(field.object());
-            if matches!(&receiver, ResolvedType::Interface { identity, .. }
+            if matches!(receiver.view(), ResolvedTypeView::Interface { identity, .. }
                 if identity.is_package("flutter", "BuildContext"))
                 && state
                     .signatures
@@ -82,7 +83,7 @@ impl Collector<'_> {
             return None;
         }
         let receiver = state.infer(call.args().positional().next()?);
-        if !matches!(receiver, ResolvedType::Interface { identity, .. }
+        if !matches!(receiver.view(), ResolvedTypeView::Interface { identity, .. }
             if identity.is_package("flutter", "BuildContext"))
         {
             return None;
@@ -229,7 +230,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 ) else {
                     return;
                 };
-                if signature.return_type != ResolvedType::Void {
+                if signature.return_type != ResolvedType::VOID {
                     return;
                 }
                 "Use read instead of watch when invoking a provided method."

@@ -13,11 +13,13 @@ fn parsed() -> &'static Arc<crate::ParsedFile> {
 fn fanout(depth: usize, leaf: ResolvedType) -> ResolvedType {
     let mut ty = leaf;
     for _ in 0..depth {
-        ty = ResolvedType::Record {
-            occurrence: Default::default(),
-            positional: vec![ty.clone(), ty.clone(), ty].into(),
-            named: Arc::from([]),
-            nullable: false,
+        ty = ResolvedType {
+            kind: ResolvedTypeKind::Record {
+                occurrence: Default::default(),
+                positional: vec![ty.clone(), ty.clone(), ty].into(),
+                named: Arc::from([]),
+                nullable: false,
+            },
         };
     }
     ty
@@ -25,13 +27,15 @@ fn fanout(depth: usize, leaf: ResolvedType) -> ResolvedType {
 
 fn unshared(depth: usize) -> ResolvedType {
     if depth == 0 {
-        return ResolvedType::Dynamic;
+        return ResolvedType::DYNAMIC;
     }
-    ResolvedType::Record {
-        occurrence: Default::default(),
-        positional: (0..3).map(|_| unshared(depth - 1)).collect(),
-        named: Arc::from([]),
-        nullable: false,
+    ResolvedType {
+        kind: ResolvedTypeKind::Record {
+            occurrence: Default::default(),
+            positional: (0..3).map(|_| unshared(depth - 1)).collect(),
+            named: Arc::from([]),
+            nullable: false,
+        },
     }
 }
 
@@ -54,7 +58,7 @@ fn flat_interfaces_and_shared_children_do_not_allocate_memos() {
     let mut hashes = FxHashMap::default();
     left.structural_hash(&mut hashes);
     assert_eq!(hashes.capacity(), 0);
-    let shared = fanout(17, ResolvedType::Dynamic);
+    let shared = fanout(17, ResolvedType::DYNAMIC);
     let shared_clone = shared.clone();
     assert!(shared.eq_memoized(&shared_clone, &mut pairs));
     assert_eq!(pairs.capacity(), 0);
@@ -62,8 +66,8 @@ fn flat_interfaces_and_shared_children_do_not_allocate_memos() {
 
 #[test]
 fn independent_deep_graphs_compare_and_hash_once_per_node() {
-    let left = fanout(17, ResolvedType::Dynamic);
-    let right = fanout(17, ResolvedType::Dynamic);
+    let left = fanout(17, ResolvedType::DYNAMIC);
+    let right = fanout(17, ResolvedType::DYNAMIC);
     let mut pairs = FxHashSet::default();
     assert!(left.eq_memoized(&right, &mut pairs));
     assert!(pairs.len() <= 3 * 17);
@@ -76,7 +80,7 @@ fn independent_deep_graphs_compare_and_hash_once_per_node() {
 
 #[test]
 fn structural_equality_and_hash_ignore_sharing_topology() {
-    let shared = fanout(4, ResolvedType::Dynamic);
+    let shared = fanout(4, ResolvedType::DYNAMIC);
     let expanded = unshared(4);
     assert!(shared == expanded);
     assert_eq!(hash(&shared), hash(&expanded));
@@ -91,8 +95,8 @@ fn sdk_free_unrelatedness_preserves_deep_shared_types() {
     let model = SemanticModel::new(Path::new("graph.dart"), parsed(), &identities, None);
     let signatures = SignatureIndex::default();
     for depth in [17, 80] {
-        let left = fanout(depth, ResolvedType::Dynamic);
-        let right = fanout(depth, ResolvedType::Dynamic);
+        let left = fanout(depth, ResolvedType::DYNAMIC);
+        let right = fanout(depth, ResolvedType::DYNAMIC);
         assert!(signatures.extension_type_erasure(&left, &model).is_some());
         assert_eq!(
             signatures.relation(
@@ -102,7 +106,7 @@ fn sdk_free_unrelatedness_preserves_deep_shared_types() {
             ),
             Truth::No
         );
-        let related = fanout(depth, ResolvedType::Void);
+        let related = fanout(depth, ResolvedType::VOID);
         assert_eq!(
             signatures.relation(
                 &left,
@@ -119,11 +123,15 @@ fn sdk_free_unrelatedness_preserves_deep_shared_types() {
     let first = model.core_type("int", false);
     let second = model.core_type("int", false);
     let (
-        ResolvedType::Interface {
-            arguments: first, ..
+        ResolvedType {
+            kind: ResolvedTypeKind::Interface {
+                arguments: first, ..
+            },
         },
-        ResolvedType::Interface {
-            arguments: second, ..
+        ResolvedType {
+            kind: ResolvedTypeKind::Interface {
+                arguments: second, ..
+            },
         },
     ) = (&first, &second)
     else {
@@ -146,18 +154,22 @@ fn owner_parameter_mentions_search_shared_nodes_and_bounds() {
         ordinal: 1,
         ..id.clone()
     };
-    let parameter = ResolvedType::TypeParameter {
-        id: id.clone(),
-        bound: Arc::new(ResolvedType::Dynamic),
-        nullable: false,
+    let parameter = ResolvedType {
+        kind: ResolvedTypeKind::TypeParameter {
+            id: id.clone(),
+            bound: Arc::new(ResolvedType::DYNAMIC),
+            nullable: false,
+        },
     };
     let graph = fanout(17, parameter);
     assert!(mentions_any(&graph, std::slice::from_ref(&id)));
     assert!(!mentions_any(&graph, std::slice::from_ref(&absent)));
-    let bounded = ResolvedType::TypeParameter {
-        id: absent,
-        bound: Arc::new(graph),
-        nullable: false,
+    let bounded = ResolvedType {
+        kind: ResolvedTypeKind::TypeParameter {
+            id: absent,
+            bound: Arc::new(graph),
+            nullable: false,
+        },
     };
     assert!(mentions_any(&bounded, &[id]));
 }
@@ -171,26 +183,36 @@ fn substitution_interns_independently_allocated_equal_siblings() {
         ordinal: 0,
         name: "T".into(),
     };
-    let parameter = ResolvedType::TypeParameter {
-        id: id.clone(),
-        bound: Arc::new(ResolvedType::Dynamic),
-        nullable: false,
+    let parameter = ResolvedType {
+        kind: ResolvedTypeKind::TypeParameter {
+            id: id.clone(),
+            bound: Arc::new(ResolvedType::DYNAMIC),
+            nullable: false,
+        },
     };
-    let source = ResolvedType::Record {
-        occurrence: Default::default(),
-        positional: (0..3).map(|_| fanout(17, parameter.clone())).collect(),
-        named: empty_named_types(),
-        nullable: false,
+    let source = ResolvedType {
+        kind: ResolvedTypeKind::Record {
+            occurrence: Default::default(),
+            positional: (0..3).map(|_| fanout(17, parameter.clone())).collect(),
+            named: empty_named_types(),
+            nullable: false,
+        },
     };
-    let substitutions = FxHashMap::from_iter([(id, ResolvedType::Void)]);
+    let substitutions = FxHashMap::from_iter([(id, ResolvedType::VOID)]);
     let result = model.substitute(&source, &substitutions);
-    let ResolvedType::Record { positional, .. } = result else {
+    let ResolvedType {
+        kind: ResolvedTypeKind::Record { positional, .. },
+    } = result
+    else {
         unreachable!()
     };
     let children: Vec<_> = positional
         .iter()
         .map(|child| {
-            let ResolvedType::Record { positional, .. } = child else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::Record { positional, .. },
+            } = child
+            else {
                 unreachable!()
             };
             positional
@@ -198,7 +220,7 @@ fn substitution_interns_independently_allocated_equal_siblings() {
         .collect();
     assert!(Arc::ptr_eq(children[0], children[1]));
     assert!(Arc::ptr_eq(children[1], children[2]));
-    assert!(positional[0] == fanout(17, ResolvedType::Void));
+    assert!(positional[0] == fanout(17, ResolvedType::VOID));
 }
 
 #[test]
@@ -210,11 +232,13 @@ fn substitution_memos_shared_sources_and_skips_irrelevant_subgraphs() {
         ordinal: 0,
         name: "T".into(),
     };
-    let substitutions = FxHashMap::from_iter([(id.clone(), ResolvedType::Void)]);
-    let parameter = ResolvedType::TypeParameter {
-        id,
-        bound: Arc::new(ResolvedType::Dynamic),
-        nullable: false,
+    let substitutions = FxHashMap::from_iter([(id.clone(), ResolvedType::VOID)]);
+    let parameter = ResolvedType {
+        kind: ResolvedTypeKind::TypeParameter {
+            id,
+            bound: Arc::new(ResolvedType::DYNAMIC),
+            nullable: false,
+        },
     };
     let source = fanout(24, parameter);
     let mut memo = SubstitutionMemo::default();
@@ -222,9 +246,9 @@ fn substitution_memos_shared_sources_and_skips_irrelevant_subgraphs() {
     assert_eq!(memo.sources.len(), 24);
     assert_eq!(memo.relevant.len(), 23);
     assert!(memo.hashes.len() <= 3 * 24 + 1);
-    assert!(result == fanout(24, ResolvedType::Void));
+    assert!(result == fanout(24, ResolvedType::VOID));
 
-    let source = fanout(24, ResolvedType::Dynamic);
+    let source = fanout(24, ResolvedType::DYNAMIC);
     let mut memo = SubstitutionMemo::default();
     let result = model.substitute_memoized(&source, &substitutions, &mut memo);
     assert_eq!(memo.relevant.len(), 23);
@@ -232,13 +256,19 @@ fn substitution_memos_shared_sources_and_skips_irrelevant_subgraphs() {
     assert!(memo.hashes.is_empty());
     assert!(memo.structural.is_empty());
     let (
-        ResolvedType::Record {
-            positional: original,
-            ..
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Record {
+                    positional: original,
+                    ..
+                },
         },
-        ResolvedType::Record {
-            positional: unchanged,
-            ..
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Record {
+                    positional: unchanged,
+                    ..
+                },
         },
     ) = (&source, &result)
     else {
@@ -257,25 +287,29 @@ fn flat_irrelevant_substitution_roots_do_not_allocate_memos() {
             ordinal: 0,
             name: "T".into(),
         },
-        ResolvedType::Void,
+        ResolvedType::VOID,
     )]);
     let integer = model.core_type("int", false);
     let sources = [
-        ResolvedType::Function {
-            shape: Some(FunctionTypeShape::empty()),
-            alias: FunctionTypeAlias::default(),
-            return_type: Arc::new(integer.clone()),
-            positional: vec![integer.clone()].into(),
-            named: empty_named_types(),
-            optional_positional: 0,
-            nullable: false,
+        ResolvedType {
+            kind: ResolvedTypeKind::Function {
+                shape: Some(FunctionTypeShape::empty()),
+                alias: FunctionTypeAlias::default(),
+                return_type: Arc::new(integer.clone()),
+                positional: vec![integer.clone()].into(),
+                named: empty_named_types(),
+                optional_positional: 0,
+                nullable: false,
+            },
         },
-        ResolvedType::Interface {
-            occurrence: Default::default(),
-            identity: DeclarationIdentity::sdk("dart:core", "List"),
-            arguments: vec![integer].into(),
-            nullable: false,
-            extension_type: false,
+        ResolvedType {
+            kind: ResolvedTypeKind::Interface {
+                occurrence: Default::default(),
+                identity: DeclarationIdentity::sdk("dart:core", "List"),
+                arguments: vec![integer].into(),
+                nullable: false,
+                extension_type: false,
+            },
         },
     ];
     for source in &sources {
@@ -298,18 +332,22 @@ fn substitution_memoizes_shared_irrelevant_children_after_relevant_siblings() {
         ordinal: 0,
         name: "T".into(),
     };
-    let substitutions = FxHashMap::from_iter([(id.clone(), ResolvedType::Void)]);
-    let record = |positional: Vec<ResolvedType>| ResolvedType::Record {
-        occurrence: Default::default(),
-        positional: positional.into(),
-        named: empty_named_types(),
-        nullable: false,
+    let substitutions = FxHashMap::from_iter([(id.clone(), ResolvedType::VOID)]);
+    let record = |positional: Vec<ResolvedType>| ResolvedType {
+        kind: ResolvedTypeKind::Record {
+            occurrence: Default::default(),
+            positional: positional.into(),
+            named: empty_named_types(),
+            nullable: false,
+        },
     };
     let irrelevant = record(vec![model.core_type("int", false); 256]);
-    let mut source = ResolvedType::TypeParameter {
-        id,
-        bound: Arc::new(ResolvedType::Dynamic),
-        nullable: false,
+    let mut source = ResolvedType {
+        kind: ResolvedTypeKind::TypeParameter {
+            id,
+            bound: Arc::new(ResolvedType::DYNAMIC),
+            nullable: false,
+        },
     };
     for _ in 0..24 {
         source = record(vec![source, irrelevant.clone()]);
@@ -322,28 +360,33 @@ fn substitution_memoizes_shared_irrelevant_children_after_relevant_siblings() {
     assert_eq!(memo.sources.len(), 24);
     let mut result = &result;
     for _ in 0..24 {
-        let ResolvedType::Record { positional, .. } = result else {
+        let ResolvedType {
+            kind: ResolvedTypeKind::Record { positional, .. },
+        } = result
+        else {
             panic!("lost mixed fanout record")
         };
         assert!(SubstitutionSourceKey::of(&positional[1]) == Some(irrelevant_key));
         result = &positional[0];
     }
-    assert_eq!(result, &ResolvedType::Void);
+    assert_eq!(result, &ResolvedType::VOID);
 }
 
 #[test]
 fn substitution_keys_preserve_distinct_function_origins() {
-    let function = |offset| ResolvedType::Function {
-        shape: Some(FunctionTypeShape::empty()),
-        optional_positional: 0,
-        alias: FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
-            identity: DeclarationIdentity::OBJECT,
-            origin: Some((None, offset)),
-        }))),
-        return_type: Arc::new(ResolvedType::Dynamic),
-        positional: empty_type_arguments(),
-        named: empty_named_types(),
-        nullable: false,
+    let function = |offset| ResolvedType {
+        kind: ResolvedTypeKind::Function {
+            shape: Some(FunctionTypeShape::empty()),
+            optional_positional: 0,
+            alias: FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
+                identity: DeclarationIdentity::OBJECT,
+                origin: Some((None, offset)),
+            }))),
+            return_type: Arc::new(ResolvedType::DYNAMIC),
+            positional: empty_type_arguments(),
+            named: empty_named_types(),
+            nullable: false,
+        },
     };
     let left = fanout(17, function(1));
     let right = fanout(17, function(2));
@@ -361,35 +404,47 @@ fn substitution_source_keys_preserve_scalar_context_and_alias_origins() {
         ordinal: 0,
         name: "T".into(),
     };
-    let parameter = ResolvedType::TypeParameter {
-        id: id.clone(),
-        bound: Arc::new(fanout(24, ResolvedType::Dynamic)),
-        nullable: false,
+    let parameter = ResolvedType {
+        kind: ResolvedTypeKind::TypeParameter {
+            id: id.clone(),
+            bound: Arc::new(fanout(24, ResolvedType::DYNAMIC)),
+            nullable: false,
+        },
     };
     let positional: Arc<[ResolvedType]> = vec![parameter.clone()].into();
     let named = empty_named_types();
-    let interface = ResolvedType::Interface {
-        occurrence: Default::default(),
-        identity: DeclarationIdentity::sdk("dart:core", "List"),
-        arguments: Arc::clone(&positional),
-        nullable: false,
-        extension_type: false,
+    let interface = ResolvedType {
+        kind: ResolvedTypeKind::Interface {
+            occurrence: Default::default(),
+            identity: DeclarationIdentity::sdk("dart:core", "List"),
+            arguments: Arc::clone(&positional),
+            nullable: false,
+            extension_type: false,
+        },
     };
     let mut other_identity = interface.clone();
-    let ResolvedType::Interface { identity, .. } = &mut other_identity else {
+    let ResolvedType {
+        kind: ResolvedTypeKind::Interface { identity, .. },
+    } = &mut other_identity
+    else {
         unreachable!()
     };
     *identity = DeclarationIdentity::sdk("dart:core", "Set");
     let mut extension = interface.clone();
-    let ResolvedType::Interface { extension_type, .. } = &mut extension else {
+    let ResolvedType {
+        kind: ResolvedTypeKind::Interface { extension_type, .. },
+    } = &mut extension
+    else {
         unreachable!()
     };
     *extension_type = true;
-    let record = ResolvedType::Record {
-        occurrence: Default::default(),
-        positional: Arc::clone(&positional),
-        named: Arc::clone(&named),
-        nullable: false,
+    let record = ResolvedType {
+        kind: ResolvedTypeKind::Record {
+            occurrence: Default::default(),
+            positional: Arc::clone(&positional),
+            named: Arc::clone(&named),
+            nullable: false,
+        },
     };
     let provenance = |offset| {
         FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
@@ -397,46 +452,65 @@ fn substitution_source_keys_preserve_scalar_context_and_alias_origins() {
             origin: Some((None, offset)),
         })))
     };
-    let function = ResolvedType::Function {
-        shape: Some(FunctionTypeShape::empty()),
-        alias: provenance(1),
-        optional_positional: 0,
-        return_type: Arc::new(parameter.clone()),
-        positional,
-        named,
-        nullable: false,
+    let function = ResolvedType {
+        kind: ResolvedTypeKind::Function {
+            shape: Some(FunctionTypeShape::empty()),
+            alias: provenance(1),
+            optional_positional: 0,
+            return_type: Arc::new(parameter.clone()),
+            positional,
+            named,
+            nullable: false,
+        },
     };
     let mut optional = function.clone();
-    let ResolvedType::Function {
-        optional_positional,
-        ..
+    let ResolvedType {
+        kind: ResolvedTypeKind::Function {
+            optional_positional,
+            ..
+        },
     } = &mut optional
     else {
         unreachable!()
     };
     *optional_positional = 1;
     let mut unaliased = function.clone();
-    let ResolvedType::Function { alias, .. } = &mut unaliased else {
+    let ResolvedType {
+        kind: ResolvedTypeKind::Function { alias, .. },
+    } = &mut unaliased
+    else {
         unreachable!()
     };
     *alias = FunctionTypeAlias::default();
     let mut other_origin = function.clone();
-    let ResolvedType::Function { alias, .. } = &mut other_origin else {
+    let ResolvedType {
+        kind: ResolvedTypeKind::Function { alias, .. },
+    } = &mut other_origin
+    else {
         unreachable!()
     };
     *alias = provenance(2);
     let mut contextual_interface = interface.clone();
-    let ResolvedType::Interface { occurrence, .. } = &mut contextual_interface else {
+    let ResolvedType {
+        kind: ResolvedTypeKind::Interface { occurrence, .. },
+    } = &mut contextual_interface
+    else {
         unreachable!()
     };
     *occurrence = provenance(3);
     let mut contextual_record = record.clone();
-    let ResolvedType::Record { occurrence, .. } = &mut contextual_record else {
+    let ResolvedType {
+        kind: ResolvedTypeKind::Record { occurrence, .. },
+    } = &mut contextual_record
+    else {
         unreachable!()
     };
     *occurrence = provenance(3);
     let mut contextual_function = unaliased.clone();
-    let ResolvedType::Function { alias, .. } = &mut contextual_function else {
+    let ResolvedType {
+        kind: ResolvedTypeKind::Function { alias, .. },
+    } = &mut contextual_function
+    else {
         unreachable!()
     };
     *alias = alias.projected_from(&provenance(3));
@@ -458,18 +532,23 @@ fn substitution_source_keys_preserve_scalar_context_and_alias_origins() {
     ];
     let keys: FxHashSet<_> = cases.iter().filter_map(SubstitutionSourceKey::of).collect();
     assert_eq!(keys.len(), cases.len());
-    let substitutions = FxHashMap::from_iter([(id, ResolvedType::Void)]);
+    let substitutions = FxHashMap::from_iter([(id, ResolvedType::VOID)]);
     let expected: Vec<_> = cases
         .iter()
         .map(|ty| model.substitute(ty, &substitutions))
         .collect();
-    let source = ResolvedType::Record {
-        occurrence: Default::default(),
-        positional: cases.into(),
-        named: empty_named_types(),
-        nullable: false,
+    let source = ResolvedType {
+        kind: ResolvedTypeKind::Record {
+            occurrence: Default::default(),
+            positional: cases.into(),
+            named: empty_named_types(),
+            nullable: false,
+        },
     };
-    let ResolvedType::Record { positional, .. } = model.substitute(&source, &substitutions) else {
+    let ResolvedType {
+        kind: ResolvedTypeKind::Record { positional, .. },
+    } = model.substitute(&source, &substitutions)
+    else {
         unreachable!()
     };
     for (actual, expected) in positional.iter().zip(&expected) {
@@ -477,8 +556,10 @@ fn substitution_source_keys_preserve_scalar_context_and_alias_origins() {
     }
     let mut memo = SubstitutionMemo::default();
     assert!(matches!(
-        model.substitute_memoized(&parameter, &substitutions, &mut memo),
-        ResolvedType::Void
+        model
+            .substitute_memoized(&parameter, &substitutions, &mut memo)
+            .kind,
+        ResolvedTypeKind::Void
     ));
     assert!(memo.hashes.is_empty());
     assert!(memo.structural.is_empty());
@@ -545,21 +626,25 @@ fn inference_join_memoizes_contextual_record_fanout() {
             origin: Some((None, offset)),
         })))
     };
-    let mut graph = ResolvedType::Function {
-        shape: Some(FunctionTypeShape::empty()),
-        alias: provenance(1),
-        return_type: Arc::new(ResolvedType::Void),
-        positional: empty_type_arguments(),
-        named: empty_named_types(),
-        optional_positional: 0,
-        nullable: false,
+    let mut graph = ResolvedType {
+        kind: ResolvedTypeKind::Function {
+            shape: Some(FunctionTypeShape::empty()),
+            alias: provenance(1),
+            return_type: Arc::new(ResolvedType::VOID),
+            positional: empty_type_arguments(),
+            named: empty_named_types(),
+            optional_positional: 0,
+            nullable: false,
+        },
     };
     for _ in 0..24 {
-        graph = ResolvedType::Record {
-            occurrence: Default::default(),
-            positional: vec![graph.clone(), graph.clone(), graph].into(),
-            named: empty_named_types(),
-            nullable: false,
+        graph = ResolvedType {
+            kind: ResolvedTypeKind::Record {
+                occurrence: Default::default(),
+                positional: vec![graph.clone(), graph.clone(), graph].into(),
+                named: empty_named_types(),
+                nullable: false,
+            },
         };
     }
     let left = graph.clone().projected_from(&provenance(2));
@@ -572,7 +657,10 @@ fn inference_join_memoizes_contextual_record_fanout() {
     assert_eq!(memo.provenance.len(), 23);
     assert!(memo.hashes.len() <= 24 * 3 + 1);
     for _ in 0..24 {
-        let ResolvedType::Record { positional, .. } = &joined else {
+        let ResolvedType {
+            kind: ResolvedTypeKind::Record { positional, .. },
+        } = &joined
+        else {
             panic!("lost record shape")
         };
         let keys: Vec<_> = positional.iter().map(SubstitutionSourceKey::of).collect();
@@ -580,7 +668,10 @@ fn inference_join_memoizes_contextual_record_fanout() {
         assert!(keys[0] == keys[2]);
         joined = joined.record_positional(0).unwrap();
     }
-    let ResolvedType::Function { alias, .. } = joined else {
+    let ResolvedType {
+        kind: ResolvedTypeKind::Function { alias, .. },
+    } = joined
+    else {
         panic!("lost function descendant")
     };
     assert_eq!(alias.identity(), None);
@@ -593,24 +684,29 @@ fn inference_join_memoizes_interface_fanout() {
     let signatures = SignatureIndex::default();
     let fanout = |mut ty: ResolvedType| {
         for _ in 0..24 {
-            ty = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: DeclarationIdentity::OBJECT,
-                arguments: vec![ty.clone(), ty.clone(), ty].into(),
-                nullable: false,
-                extension_type: false,
+            ty = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: DeclarationIdentity::OBJECT,
+                    arguments: vec![ty.clone(), ty.clone(), ty].into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
         }
         ty
     };
-    let left = fanout(ResolvedType::Void);
-    let right = fanout(ResolvedType::Dynamic);
+    let left = fanout(ResolvedType::VOID);
+    let right = fanout(ResolvedType::DYNAMIC);
     let mut memo = InferenceJoinMemo::default();
     let mut joined = inference_join_memoized(&left, &right, &signatures, &model, &mut memo);
     assert_eq!(memo.shapes.values().map(Vec::len).sum::<usize>(), 24);
     assert!(memo.provenance.is_empty());
     for _ in 0..24 {
-        let ResolvedType::Interface { arguments, .. } = &joined else {
+        let ResolvedType {
+            kind: ResolvedTypeKind::Interface { arguments, .. },
+        } = &joined
+        else {
             panic!("lost interface shape")
         };
         let keys: Vec<_> = arguments.iter().map(SubstitutionSourceKey::of).collect();
@@ -618,7 +714,7 @@ fn inference_join_memoizes_interface_fanout() {
         assert!(keys[0] == keys[2]);
         joined = joined.type_argument(0).unwrap();
     }
-    assert_eq!(joined, ResolvedType::Void);
+    assert_eq!(joined, ResolvedType::VOID);
 }
 
 #[test]
@@ -627,29 +723,35 @@ fn ordinary_composite_projections_do_not_add_occurrence_context() {
         identity: DeclarationIdentity::OBJECT,
         origin: Some((None, 1)),
     })));
-    let function = ResolvedType::Function {
-        shape: Some(FunctionTypeShape::empty()),
-        alias: Default::default(),
-        return_type: Arc::new(ResolvedType::Void),
-        positional: empty_type_arguments(),
-        named: empty_named_types(),
-        optional_positional: 0,
-        nullable: false,
+    let function = ResolvedType {
+        kind: ResolvedTypeKind::Function {
+            shape: Some(FunctionTypeShape::empty()),
+            alias: Default::default(),
+            return_type: Arc::new(ResolvedType::VOID),
+            positional: empty_type_arguments(),
+            named: empty_named_types(),
+            optional_positional: 0,
+            nullable: false,
+        },
     };
     for ty in [
         function.clone(),
-        ResolvedType::Interface {
-            occurrence: Default::default(),
-            identity: DeclarationIdentity::OBJECT,
-            arguments: vec![function.clone()].into(),
-            nullable: false,
-            extension_type: false,
+        ResolvedType {
+            kind: ResolvedTypeKind::Interface {
+                occurrence: Default::default(),
+                identity: DeclarationIdentity::OBJECT,
+                arguments: vec![function.clone()].into(),
+                nullable: false,
+                extension_type: false,
+            },
         },
-        ResolvedType::Record {
-            occurrence: Default::default(),
-            positional: vec![function].into(),
-            named: empty_named_types(),
-            nullable: false,
+        ResolvedType {
+            kind: ResolvedTypeKind::Record {
+                occurrence: Default::default(),
+                positional: vec![function].into(),
+                named: empty_named_types(),
+                nullable: false,
+            },
         },
     ] {
         let projected = ty.clone().projected_from(&owner);
@@ -667,23 +769,27 @@ fn separate_member_substitution_joins_drop_function_alias_annotations() {
         ordinal: 0,
         name: "T".into(),
     };
-    let source = ResolvedType::Function {
-        shape: Some(FunctionTypeShape::empty()),
-        alias: FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
-            identity: DeclarationIdentity::OBJECT,
-            origin: Some((None, 1)),
-        }))),
-        optional_positional: 0,
-        return_type: Arc::new(ResolvedType::TypeParameter {
-            id: id.clone(),
-            bound: Arc::new(ResolvedType::Dynamic),
+    let source = ResolvedType {
+        kind: ResolvedTypeKind::Function {
+            shape: Some(FunctionTypeShape::empty()),
+            alias: FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
+                identity: DeclarationIdentity::OBJECT,
+                origin: Some((None, 1)),
+            }))),
+            optional_positional: 0,
+            return_type: Arc::new(ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter {
+                    id: id.clone(),
+                    bound: Arc::new(ResolvedType::DYNAMIC),
+                    nullable: false,
+                },
+            }),
+            positional: empty_type_arguments(),
+            named: empty_named_types(),
             nullable: false,
-        }),
-        positional: empty_type_arguments(),
-        named: empty_named_types(),
-        nullable: false,
+        },
     };
-    let substitutions = FxHashMap::from_iter([(id, ResolvedType::Void)]);
+    let substitutions = FxHashMap::from_iter([(id, ResolvedType::VOID)]);
     // Independent member reads substitute the same cached signature, but
     // their instantiated alias annotations are not one shared type use.
     let first = model.substitute(&source, &substitutions);
@@ -691,10 +797,13 @@ fn separate_member_substitution_joins_drop_function_alias_annotations() {
     assert!(SubstitutionKey(&first) == SubstitutionKey(&second));
     for nullable in [false, true] {
         let joined = inference_join(&first, &second.with_nullable(nullable), &signatures, &model);
-        let ResolvedType::Function {
-            alias,
-            nullable: actual_nullable,
-            ..
+        let ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    alias,
+                    nullable: actual_nullable,
+                    ..
+                },
         } = joined
         else {
             panic!("lost joined function shape")
@@ -703,7 +812,10 @@ fn separate_member_substitution_joins_drop_function_alias_annotations() {
         assert_eq!(actual_nullable, nullable);
     }
     let shared = inference_join(&first, &first.clone(), &signatures, &model);
-    let ResolvedType::Function { alias, .. } = shared else {
+    let ResolvedType {
+        kind: ResolvedTypeKind::Function { alias, .. },
+    } = shared
+    else {
         panic!("lost shared function alias")
     };
     assert!(alias.identity().is_some());
@@ -711,22 +823,24 @@ fn separate_member_substitution_joins_drop_function_alias_annotations() {
 
 #[test]
 fn graph_equality_preserves_leaf_nullability_and_named_fields() {
-    let ty = fanout(17, ResolvedType::Dynamic);
-    assert!(ty != fanout(17, ResolvedType::Void));
+    let ty = fanout(17, ResolvedType::DYNAMIC);
+    assert!(ty != fanout(17, ResolvedType::VOID));
     assert!(ty != ty.with_nullable(true));
-    let named = |name: &str| ResolvedType::Record {
-        occurrence: Default::default(),
-        positional: Arc::from([]),
-        named: vec![(name.to_owned(), ty.clone())].into(),
-        nullable: false,
+    let named = |name: &str| ResolvedType {
+        kind: ResolvedTypeKind::Record {
+            occurrence: Default::default(),
+            positional: Arc::from([]),
+            named: vec![(name.to_owned(), ty.clone())].into(),
+            nullable: false,
+        },
     };
     assert!(named("left") != named("right"));
 }
 
 #[test]
 fn address_identity_keys_distinguish_equal_allocations_and_retain_only_shared_storage() {
-    let first: Arc<[ResolvedType]> = vec![ResolvedType::Void].into();
-    let second: Arc<[ResolvedType]> = vec![ResolvedType::Void].into();
+    let first: Arc<[ResolvedType]> = vec![ResolvedType::VOID].into();
+    let second: Arc<[ResolvedType]> = vec![ResolvedType::VOID].into();
     let borrowed = BorrowedIdentity::new(first.as_ref());
     let copied = borrowed;
     let mut borrowed_keys = FxHashSet::default();
@@ -754,8 +868,11 @@ fn address_identity_keys_distinguish_equal_allocations_and_retain_only_shared_st
 #[test]
 fn persistent_hashes_keep_child_addresses_live_without_retaining_stack_roots() {
     let mut hashes = FxHashMap::default();
-    let source = fanout(24, ResolvedType::Void);
-    let ResolvedType::Record { positional, .. } = &source else {
+    let source = fanout(24, ResolvedType::VOID);
+    let ResolvedType {
+        kind: ResolvedTypeKind::Record { positional, .. },
+    } = &source
+    else {
         unreachable!()
     };
     let weak = Arc::downgrade(positional);
@@ -767,7 +884,7 @@ fn persistent_hashes_keep_child_addresses_live_without_retaining_stack_roots() {
 
     // A new, structurally different source must miss the persistent memo.
     // Its children cannot reuse old addresses while the memo owns them.
-    let source = fanout(24, ResolvedType::Dynamic);
+    let source = fanout(24, ResolvedType::DYNAMIC);
     let actual = source.structural_hash_shared(&mut hashes);
     assert_ne!(actual, expected);
     assert_eq!(actual, source.structural_hash(&mut FxHashMap::default()));
@@ -778,12 +895,14 @@ fn persistent_hashes_keep_child_addresses_live_without_retaining_stack_roots() {
 
 #[test]
 fn persistent_hashes_preserve_sharing_independent_container_hashes() {
-    let shared = fanout(4, ResolvedType::Dynamic);
-    let expanded = |ty: &ResolvedType| ResolvedType::Record {
-        occurrence: Default::default(),
-        positional: vec![ty.clone()].into(),
-        named: vec![("value".to_owned(), ty.clone())].into(),
-        nullable: false,
+    let shared = fanout(4, ResolvedType::DYNAMIC);
+    let expanded = |ty: &ResolvedType| ResolvedType {
+        kind: ResolvedTypeKind::Record {
+            occurrence: Default::default(),
+            positional: vec![ty.clone()].into(),
+            named: vec![("value".to_owned(), ty.clone())].into(),
+            nullable: false,
+        },
     };
     let left = expanded(&shared);
     let right = expanded(&unshared(4));
@@ -807,37 +926,50 @@ fn persistent_provenance_memo_misses_after_source_roots_drop() {
         identity: DeclarationIdentity::OBJECT,
         origin: Some((None, 1)),
     })));
-    let record = |child| ResolvedType::Record {
-        occurrence: Default::default(),
-        positional: vec![child].into(),
-        named: empty_named_types(),
-        nullable: false,
+    let record = |child| ResolvedType {
+        kind: ResolvedTypeKind::Record {
+            occurrence: Default::default(),
+            positional: vec![child].into(),
+            named: empty_named_types(),
+            nullable: false,
+        },
     };
     let mut memo = FxHashMap::default();
-    let source = record(ResolvedType::Void);
-    let ResolvedType::Record { positional, .. } = &source else {
+    let source = record(ResolvedType::VOID);
+    let ResolvedType {
+        kind: ResolvedTypeKind::Record { positional, .. },
+    } = &source
+    else {
         unreachable!()
     };
     let weak = Arc::downgrade(positional);
     let projected = source.projected_from_memoized(&owner, &mut memo, None);
-    let ResolvedType::Record { occurrence, .. } = &projected else {
+    let ResolvedType {
+        kind: ResolvedTypeKind::Record { occurrence, .. },
+    } = &projected
+    else {
         unreachable!()
     };
     assert!(occurrence.0.is_none());
     drop(projected);
     assert!(weak.upgrade().is_some());
 
-    let source = record(ResolvedType::Function {
-        shape: Some(FunctionTypeShape::empty()),
-        alias: owner.clone(),
-        optional_positional: 0,
-        return_type: Arc::new(ResolvedType::Void),
-        positional: empty_type_arguments(),
-        named: empty_named_types(),
-        nullable: false,
+    let source = record(ResolvedType {
+        kind: ResolvedTypeKind::Function {
+            shape: Some(FunctionTypeShape::empty()),
+            alias: owner.clone(),
+            optional_positional: 0,
+            return_type: Arc::new(ResolvedType::VOID),
+            positional: empty_type_arguments(),
+            named: empty_named_types(),
+            nullable: false,
+        },
     });
     let projected = source.projected_from_memoized(&owner, &mut memo, None);
-    let ResolvedType::Record { occurrence, .. } = projected else {
+    let ResolvedType {
+        kind: ResolvedTypeKind::Record { occurrence, .. },
+    } = projected
+    else {
         unreachable!()
     };
     assert!(occurrence.same_origin(&owner));
@@ -852,19 +984,25 @@ fn inference_join_cache_hits_release_independently_allocated_equal_sources() {
     let model = SemanticModel::new(Path::new("graph.dart"), parsed(), &identities, None);
     let signatures = SignatureIndex::default();
     let mut memo = InferenceJoinMemo::default();
-    let left = fanout(17, ResolvedType::Void);
-    let right = fanout(17, ResolvedType::Dynamic);
+    let left = fanout(17, ResolvedType::VOID);
+    let right = fanout(17, ResolvedType::DYNAMIC);
     let expected = inference_join_memoized(&left, &right, &signatures, &model, &mut memo);
     let hashes = memo.hashes.len();
     let shapes = memo.shapes.values().map(Vec::len).sum::<usize>();
 
-    let left = fanout(17, ResolvedType::Void);
-    let right = fanout(17, ResolvedType::Dynamic);
-    let ResolvedType::Record { positional, .. } = &left else {
+    let left = fanout(17, ResolvedType::VOID);
+    let right = fanout(17, ResolvedType::DYNAMIC);
+    let ResolvedType {
+        kind: ResolvedTypeKind::Record { positional, .. },
+    } = &left
+    else {
         unreachable!()
     };
     let left_storage = Arc::downgrade(positional);
-    let ResolvedType::Record { positional, .. } = &right else {
+    let ResolvedType {
+        kind: ResolvedTypeKind::Record { positional, .. },
+    } = &right
+    else {
         unreachable!()
     };
     let right_storage = Arc::downgrade(positional);
@@ -881,27 +1019,31 @@ fn inference_join_cache_hits_release_independently_allocated_equal_sources() {
 
 #[test]
 fn persistent_hashes_cache_function_shapes_and_shared_bounds() {
-    let bound = Arc::new(fanout(17, ResolvedType::Dynamic));
-    let parameter = ResolvedType::TypeParameter {
-        id: TypeParameterId {
-            owner: ParameterOwner::Sdk("hash-identity"),
-            ordinal: 0,
-            name: "T".into(),
+    let bound = Arc::new(fanout(17, ResolvedType::DYNAMIC));
+    let parameter = ResolvedType {
+        kind: ResolvedTypeKind::TypeParameter {
+            id: TypeParameterId {
+                owner: ParameterOwner::Sdk("hash-identity"),
+                ordinal: 0,
+                name: "T".into(),
+            },
+            bound: Arc::clone(&bound),
+            nullable: false,
         },
-        bound: Arc::clone(&bound),
-        nullable: false,
     };
-    let ty = ResolvedType::Function {
-        alias: Default::default(),
-        return_type: Arc::clone(&bound),
-        positional: vec![parameter.clone()].into(),
-        named: vec![("value".to_owned(), parameter.clone())].into(),
-        shape: Some(FunctionTypeShape::new(
-            vec!["value".to_owned()],
-            vec![parameter],
-        )),
-        optional_positional: 0,
-        nullable: false,
+    let ty = ResolvedType {
+        kind: ResolvedTypeKind::Function {
+            alias: Default::default(),
+            return_type: Arc::clone(&bound),
+            positional: vec![parameter.clone()].into(),
+            named: vec![("value".to_owned(), parameter.clone())].into(),
+            shape: Some(FunctionTypeShape::new(
+                vec!["value".to_owned()],
+                vec![parameter],
+            )),
+            optional_positional: 0,
+            nullable: false,
+        },
     };
     let mut hashes = FxHashMap::default();
     assert_eq!(
@@ -953,22 +1095,26 @@ fn nested_raw_joins_share_provenance_queries_but_standalone_roots_release_storag
         identity: DeclarationIdentity::OBJECT,
         origin: Some((None, 1)),
     })));
-    let instantiated = |big| ResolvedType::Interface {
-        occurrence: owner.clone(),
-        identity: list.clone(),
-        arguments: vec![big].into(),
-        nullable: false,
-        extension_type: false,
+    let instantiated = |big| ResolvedType {
+        kind: ResolvedTypeKind::Interface {
+            occurrence: owner.clone(),
+            identity: list.clone(),
+            arguments: vec![big].into(),
+            nullable: false,
+            extension_type: false,
+        },
     };
-    let outer = |name: &'static str, child| ResolvedType::Interface {
-        occurrence: Default::default(),
-        identity: DeclarationIdentity::sdk("test:raw-join", name),
-        arguments: vec![child].into(),
-        nullable: false,
-        extension_type: false,
+    let outer = |name: &'static str, child| ResolvedType {
+        kind: ResolvedTypeKind::Interface {
+            occurrence: Default::default(),
+            identity: DeclarationIdentity::sdk("test:raw-join", name),
+            arguments: vec![child].into(),
+            nullable: false,
+            extension_type: false,
+        },
     };
 
-    let big = fanout(17, ResolvedType::Void);
+    let big = fanout(17, ResolvedType::VOID);
     let right = instantiated(big);
     let mut memo = InferenceJoinMemo::default();
     for name in ["A", "B", "C", "D", "E", "F", "G", "H"] {
@@ -979,21 +1125,24 @@ fn nested_raw_joins_share_provenance_queries_but_standalone_roots_release_storag
             &model,
             &mut memo,
         );
-        assert!(!matches!(result, ResolvedType::Unknown));
+        assert!(!matches!(result.kind, ResolvedTypeKind::Unknown));
         // Each raw List frame is non-cacheable, but its enclosing Outer
         // operand anchors Big and keeps the same presence-query keys reusable.
         assert_eq!(memo.provenance.len(), 17);
     }
 
-    let big = fanout(17, ResolvedType::Void);
-    let ResolvedType::Record { positional, .. } = &big else {
+    let big = fanout(17, ResolvedType::VOID);
+    let ResolvedType {
+        kind: ResolvedTypeKind::Record { positional, .. },
+    } = &big
+    else {
         unreachable!()
     };
     let storage = Arc::downgrade(positional);
     let right = instantiated(big);
     let mut standalone = InferenceJoinMemo::default();
     let result = inference_join_memoized(&raw, &right, &signatures, &model, &mut standalone);
-    assert!(!matches!(result, ResolvedType::Unknown));
+    assert!(!matches!(result.kind, ResolvedTypeKind::Unknown));
     assert!(standalone.provenance.is_empty());
     drop(right);
     drop(result);

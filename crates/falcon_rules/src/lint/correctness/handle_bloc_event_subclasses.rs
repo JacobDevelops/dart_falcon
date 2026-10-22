@@ -11,7 +11,7 @@
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth, TypeRelation,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -74,7 +74,7 @@ impl<'a> Collector<'a> {
             return;
         };
         let handled = state.model.resolve_type_in(event, &state.type_parameters);
-        if !matches!(handled, ResolvedType::Interface { .. }) {
+        if !matches!(handled.view(), ResolvedTypeView::Interface { .. }) {
             return;
         }
         events
@@ -110,11 +110,12 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         let Some(event) = named.type_args().next() else {
             return;
         };
-        let ResolvedType::Interface {
+        let event_type = state.model.resolve_type_in(event, &state.type_parameters);
+        let ResolvedTypeView::Interface {
             identity: root,
             arguments,
             ..
-        } = state.model.resolve_type_in(event, &state.type_parameters)
+        } = event_type.view()
         else {
             return;
         };
@@ -140,13 +141,14 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             let mut ty = ResolvedType::interface_identity(identity.clone());
             if let Some(count) = state.signatures.type_parameter_count(&identity)
                 && count > 0
-                && let ResolvedType::Interface { arguments, .. } = &mut ty
             {
                 // A generic declaration represents unknown instantiations, not dynamic.
-                *arguments = vec![ResolvedType::Unknown; count].into();
+                ty = ResolvedType::new_interface(
+                    identity.clone(), vec![ResolvedType::UNKNOWN; count].into(), false, false,
+                );
             }
-            if identity != root
-                && state.signatures.relation(&ty, TypeRelation::SubtypeOfDeclaration(&root), &state.model) == Truth::Yes
+            if &identity != root
+                && state.signatures.relation(&ty, TypeRelation::SubtypeOfDeclaration(root), &state.model) == Truth::Yes
             {
                 missing.push((identity, ty));
             }

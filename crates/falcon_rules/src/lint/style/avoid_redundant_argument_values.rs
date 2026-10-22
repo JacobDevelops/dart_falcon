@@ -30,7 +30,7 @@ use std::ops::ControlFlow;
 use falcon_analyze::contextual_number;
 use falcon_analyze::{
     AnalyzeContext, ConstantValue, DeclarationIdentity, LibraryId, ParameterDefault, QualifiedName,
-    ConstantContext, ResolvedSignature, ResolvedType, Rule, RulePreparation, evaluate_constant,
+    ConstantContext, ResolvedSignature, ResolvedType, ResolvedTypeView, Rule, RulePreparation, evaluate_constant,
     expression_segments, resolve_call_constructor,
 };
 use falcon_diagnostics::Diagnostic;
@@ -138,7 +138,7 @@ impl Targets<'_> {
                 if !visited.insert((owner, name)) {
                     return None;
                 }
-                let ResolvedType::Interface { identity, .. } = target else {
+                let ResolvedTypeView::Interface { identity, .. } = target.view() else {
                     return None;
                 };
                 owner = identity;
@@ -277,8 +277,8 @@ impl Targets<'_> {
                         .or_else(|| self.instance_target(&state.infer(callee), "call", state)),
                 );
             }
-            if let Some(receiver @ ResolvedType::Interface { identity, .. }) =
-                state.enclosing_type.as_ref()
+            if let Some(receiver) = state.enclosing_type.as_ref()
+                && let ResolvedTypeView::Interface { identity, .. } = receiver.view()
             {
                 if !state
                     .signatures
@@ -300,7 +300,7 @@ impl Targets<'_> {
             segments.first().is_some_and(|name| {
                 !state.environment.is_bound(name)
                     && !state.enclosing_type.as_ref().is_some_and(|receiver| {
-                        matches!(receiver, ResolvedType::Interface { identity, .. }
+                        matches!(receiver.view(), ResolvedTypeView::Interface { identity, .. }
                             if !state.signatures.declared_member_facts(identity, name).is_empty())
                             || state
                                 .signatures
@@ -435,18 +435,12 @@ impl Targets<'_> {
             .collect();
         arguments.sort_by_key(|(argument, ..)| argument.span().start);
         let caller_type = caller.map(|identity| match state.enclosing_type.as_ref() {
-            Some(
-                receiver @ ResolvedType::Interface {
-                    identity: current, ..
-                },
-            ) if current == identity => Cow::Borrowed(receiver),
-            _ => Cow::Owned(ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: identity.clone(),
-                arguments: Vec::new().into(),
-                nullable: false,
-                extension_type: false,
-            }),
+            Some(receiver) if matches!(receiver.view(),
+                ResolvedTypeView::Interface { identity: current, .. } if current == identity
+            ) => Cow::Borrowed(receiver),
+            _ => Cow::Owned(ResolvedType::new_interface(
+                identity.clone(), Vec::new().into(), false, false,
+            )),
         });
         for (argument, name, ty, positional) in arguments.into_iter().rev() {
             let Some(name) = name else {
@@ -511,8 +505,8 @@ impl Targets<'_> {
             }
             None => ConstantValue::Null,
         };
-        let caller_owner = match caller {
-            Some(ResolvedType::Interface { identity, .. }) => Some(identity),
+        let caller_owner = match caller.map(ResolvedType::view) {
+            Some(ResolvedTypeView::Interface { identity, .. }) => Some(identity),
             _ => None,
         };
         let Some(value) = evaluate_constant(argument, ConstantContext { owner: caller_owner, locals: Some(&state.visible_local_constants()), expected: context, ..ConstantContext::new(&state.model, &state.signatures) }) else {
@@ -602,15 +596,15 @@ impl<'a> cst_visit::Visitor<'a> for NonConstantFinder<'_, '_> {
     fn visit_expr(&mut self, node: cst::Expr<'a>) {
         if let cst::Expr::Ident(identifier) = node {
             let name = identifier.name();
-            let constant = matches!(self.caller,
-                Some(ResolvedType::Interface { identity, .. })
+            let constant = matches!(self.caller.map(ResolvedType::view),
+                Some(ResolvedTypeView::Interface { identity, .. })
                     if self.state.signatures.declaration(identity).is_some_and(|facts|
                         facts.static_consts.iter().any(|field| field.name == name)));
             let bound = self.state.environment.is_bound(name)
                 && self.state.local_constant(name).is_none()
                 && !(constant && self.state.environment.is_bound_in_root_scope(name));
             let member = self.caller.is_some_and(|receiver| {
-                matches!(receiver, ResolvedType::Interface { identity, .. }
+                matches!(receiver.view(), ResolvedTypeView::Interface { identity, .. }
                     if !self.state.signatures.declared_member_facts(identity, name).is_empty())
                     || self
                         .state
@@ -711,11 +705,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 .targets
                 .call_target(call.callee(), state)
                 .map(|target| (target, call.args())),
-            cst::Expr::New(new) => match state.model.resolve_type(new.dart_type()) {
-                ResolvedType::Interface { identity, .. } => self
+            cst::Expr::New(new) => match state.model.resolve_type(new.dart_type()).view() {
+                ResolvedTypeView::Interface { identity, .. } => self
                     .targets
                     .constructor_target(
-                        identity,
+                        identity.clone(),
                         new.constructor_name().map_or("new", |name| name.name()),
                         state,
                     )

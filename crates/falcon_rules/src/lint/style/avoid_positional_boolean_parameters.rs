@@ -24,7 +24,7 @@
 //! Adopted from the official `avoid_positional_boolean_parameters` lint.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
     StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
@@ -75,8 +75,8 @@ struct Collector<'a> {
 
 fn is_core_bool(ty: &ResolvedType) -> bool {
     matches!(
-        ty,
-        ResolvedType::Interface {
+        ty.view(),
+        ResolvedTypeView::Interface {
             identity,
             ..
         } if identity.is_sdk("dart:core", "bool")

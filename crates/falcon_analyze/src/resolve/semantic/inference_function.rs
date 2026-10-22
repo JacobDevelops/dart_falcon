@@ -1,4 +1,5 @@
 use super::flow::FlowContext;
+use crate::resolve::semantic::ResolvedTypeKind;
 
 use super::*;
 
@@ -21,17 +22,20 @@ impl TypeEnvironment {
                 AsyncMarker::SyncStar | AsyncMarker::AsyncStar
             )
         {
-            return ResolvedType::Unknown;
+            return ResolvedType::UNKNOWN;
         }
         let mut function_parameters = type_parameters.clone();
         function_parameters.push(function.type_params.clone(), model);
         let contextual = match expected {
-            Some(ResolvedType::Function {
-                alias,
-                return_type,
-                positional,
-                named,
-                ..
+            Some(ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        alias,
+                        return_type,
+                        positional,
+                        named,
+                        ..
+                    },
             }) => Some((alias, return_type.as_ref(), positional, named)),
             _ => None,
         };
@@ -86,12 +90,14 @@ impl TypeEnvironment {
                     if function.async_marker == AsyncMarker::Async
                         && return_type.interface("dart:async", "Future")
                     {
-                        ResolvedType::Interface {
-                            occurrence: Default::default(),
-                            identity: DeclarationIdentity::sdk("dart:async", "FutureOr"),
-                            arguments: return_type.type_arguments().collect(),
-                            nullable: false,
-                            extension_type: false,
+                        ResolvedType {
+                            kind: ResolvedTypeKind::Interface {
+                                occurrence: Default::default(),
+                                identity: DeclarationIdentity::sdk("dart:async", "FutureOr"),
+                                arguments: return_type.type_arguments().collect(),
+                                nullable: false,
+                                extension_type: false,
+                            },
                         }
                     } else {
                         return_type.clone()
@@ -132,7 +138,7 @@ impl TypeEnvironment {
                             &|expression| returns.never_expressions.contains(&expression.span()),
                             &|statement| returns.exhaustive_switches.contains(&statement.span()),
                         ) {
-                            returns.types.push(ResolvedType::Null);
+                            returns.types.push(ResolvedType::NULL);
                         }
                         let inferred = returns
                             .types
@@ -145,61 +151,71 @@ impl TypeEnvironment {
                                 }
                             })
                             .reduce(|left, right| inference_join(&left, &right, signatures, model))
-                            .unwrap_or(ResolvedType::Null);
+                            .unwrap_or(ResolvedType::NULL);
                         // Inference imputes `void` when the return context is
                         // `void`, or `FutureOr<void>` for an `async` literal.
                         let imputes_void = body_context.as_ref().is_some_and(|context| {
-                            matches!(context, ResolvedType::Void)
-                                || (function.async_marker == AsyncMarker::Async
-                                    && context.interface("dart:async", "FutureOr")
-                                    && matches!(
-                                        context.arguments().first(),
-                                        Some(ResolvedType::Void)
-                                    ))
+                            matches!(
+                                context,
+                                ResolvedType {
+                                    kind: ResolvedTypeKind::Void
+                                }
+                            ) || (function.async_marker == AsyncMarker::Async
+                                && context.interface("dart:async", "FutureOr")
+                                && matches!(
+                                    context.arguments().first(),
+                                    Some(ResolvedType {
+                                        kind: ResolvedTypeKind::Void
+                                    })
+                                ))
                         });
                         if imputes_void {
-                            ResolvedType::Void
+                            ResolvedType::VOID
                         } else {
                             inferred
                         }
                     }
-                    FunctionBody::Native(_) => ResolvedType::Unknown,
+                    FunctionBody::Native(_) => ResolvedType::UNKNOWN,
                 };
                 if function.async_marker == AsyncMarker::Async {
                     let argument = flatten_async_return(return_type, signatures, model);
-                    ResolvedType::Interface {
-                        occurrence: Default::default(),
-                        identity: DeclarationIdentity::sdk("dart:async", "Future"),
-                        arguments: vec![argument].into(),
-                        nullable: false,
-                        extension_type: false,
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Interface {
+                            occurrence: Default::default(),
+                            identity: DeclarationIdentity::sdk("dart:async", "Future"),
+                            arguments: vec![argument].into(),
+                            nullable: false,
+                            extension_type: false,
+                        },
                     }
                 } else {
                     return_type
                 }
             }
         };
-        ResolvedType::Function {
-            shape: FunctionTypeShape::from_scope(
-                function
+        ResolvedType {
+            kind: ResolvedTypeKind::Function {
+                shape: FunctionTypeShape::from_scope(
+                    function
+                        .params
+                        .named()
+                        .filter(|param| matches!(param.kind(), ParamKind::Named { required: true }))
+                        .map(|param| param.name().name().to_owned())
+                        .collect(),
+                    function.type_params,
+                    &function_parameters,
+                ),
+                optional_positional: function
                     .params
-                    .named()
-                    .filter(|param| matches!(param.kind(), ParamKind::Named { required: true }))
-                    .map(|param| param.name().name().to_owned())
-                    .collect(),
-                function.type_params,
-                &function_parameters,
-            ),
-            optional_positional: function
-                .params
-                .positional()
-                .filter(|param| param.kind() == ParamKind::OptionalPositional)
-                .count(),
-            alias: FunctionTypeAlias::default(),
-            return_type: Arc::new(return_type),
-            positional: positional.into(),
-            named: named.into(),
-            nullable: false,
+                    .positional()
+                    .filter(|param| param.kind() == ParamKind::OptionalPositional)
+                    .count(),
+                alias: FunctionTypeAlias::default(),
+                return_type: Arc::new(return_type),
+                positional: positional.into(),
+                named: named.into(),
+                nullable: false,
+            },
         }
     }
 }
@@ -212,7 +228,7 @@ fn flatten_async_return(
 ) -> ResolvedType {
     let flattened =
         if ty.interface("dart:async", "Future") || ty.interface("dart:async", "FutureOr") {
-            Some(ty.type_argument(0).unwrap_or(ResolvedType::Dynamic))
+            Some(ty.type_argument(0).unwrap_or(ResolvedType::DYNAMIC))
         } else {
             signatures
                 .instantiated_supertype(&ty, "dart:async", "Future", model)
@@ -287,7 +303,7 @@ impl<L: Fn(&str) -> Option<ResolvedType>> ClosureReturns<'_, '_, L> {
                         .initializer()
                         .map(|expression| self.infer(expression, None))
                 })
-                .unwrap_or(ResolvedType::Dynamic);
+                .unwrap_or(ResolvedType::DYNAMIC);
             if let Some(initializer) = declarator.initializer() {
                 self.visit_expr(initializer);
             }
@@ -341,7 +357,7 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                 let never = self
                     .expression_never
                     .take()
-                    .unwrap_or_else(|| self.infer(expression, None) == ResolvedType::Never);
+                    .unwrap_or_else(|| self.infer(expression, None) == ResolvedType::NEVER);
                 if never {
                     self.never_expressions.insert(expression.span());
                 }
@@ -352,7 +368,7 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                 }
                 let ty = statement
                     .value()
-                    .map_or(ResolvedType::Void, |value| self.infer(value, self.context));
+                    .map_or(ResolvedType::VOID, |value| self.infer(value, self.context));
                 self.types.push(ty);
             }
             Stmt::LocalVar(declaration) => self.declare_local(declaration),
@@ -633,7 +649,7 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                     };
                     let assigned = self.infer(value, expected.as_ref());
                     if op.binary().is_none() {
-                        self.expression_never = Some(assigned == ResolvedType::Never);
+                        self.expression_never = Some(assigned == ResolvedType::NEVER);
                     }
                     Some(assigned)
                 }

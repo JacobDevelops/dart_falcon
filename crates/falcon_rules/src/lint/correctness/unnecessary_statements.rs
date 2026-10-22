@@ -35,7 +35,7 @@
 use std::collections::HashMap;
 
 use falcon_analyze::{
-    AnalyzeContext, MemberKind, MemberResult, ResolvedType, Rule, RulePreparation,
+    AnalyzeContext, MemberKind, MemberResult, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -283,7 +283,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 &state.model,
             );
             let is_method = (name.name() == "call"
-                && matches!(target, ResolvedType::Function { .. }))
+                && matches!(target.view(), ResolvedTypeView::Function { .. }))
                 || facts.is_some_and(|facts| {
                     facts
                         .iter()
@@ -299,7 +299,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         .signatures
                         .resolved_extension_getter(&target, name.name(), &state.model)
                 })
-                .is_some_and(|(ty, _)| matches!(ty, ResolvedType::Function { .. }));
+                .is_some_and(|(ty, _)| matches!(ty.view(), ResolvedTypeView::Function { .. }));
             if is_method || is_function_value {
                 self.report(section.span());
             }
@@ -465,7 +465,7 @@ impl Collector<'_> {
     ) -> Option<Effect> {
         // Function types have a synthetic `call` method, not a getter or an
         // interface declaration that member lookup can discover.
-        if name == "call" && matches!(receiver, ResolvedType::Function { .. }) {
+        if name == "call" && matches!(receiver.view(), ResolvedTypeView::Function { .. }) {
             return Some(Effect::None);
         }
         if let Some(facts) =
@@ -484,7 +484,7 @@ impl Collector<'_> {
             }
             return effect;
         }
-        if matches!(receiver, ResolvedType::Dynamic) {
+        if matches!(receiver.view(), ResolvedTypeView::Dynamic) {
             return Some(Effect::None);
         }
         let effect = self.index_member(receiver, name).and_then(Effect::of_kind);
@@ -498,8 +498,8 @@ impl Collector<'_> {
         {
             return Some(Effect::Getter);
         }
-        match receiver {
-            ResolvedType::Interface { identity, .. }
+        match receiver.view() {
+            ResolvedTypeView::Interface { identity, .. }
                 if state.signatures.declaration(identity).is_some() =>
             {
                 Some(Effect::None)
@@ -510,7 +510,7 @@ impl Collector<'_> {
 
     /// The member kind recorded by the type index for an interface receiver.
     fn index_member(&self, receiver: &ResolvedType, name: &str) -> Option<MemberKind> {
-        let ResolvedType::Interface { identity, .. } = receiver else {
+        let ResolvedTypeView::Interface { identity, .. } = receiver.view() else {
             return None;
         };
         match self.ctx.types()?.member_lookup_identity(identity, name) {
@@ -521,7 +521,7 @@ impl Collector<'_> {
 
     /// Members declared in this file by the enclosing type.
     fn own_members(&self, enclosing: &ResolvedType) -> Option<&HashMap<&str, Member>> {
-        let ResolvedType::Interface { identity, .. } = enclosing else {
+        let ResolvedTypeView::Interface { identity, .. } = enclosing.view() else {
             return None;
         };
         self.declarations.types.get(identity.name())

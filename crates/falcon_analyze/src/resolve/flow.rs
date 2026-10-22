@@ -1,4 +1,5 @@
 //! Flow transfers used by the shared syntax visitor; no independent syntax-tree walk.
+use crate::resolve::semantic::ResolvedTypeKind;
 use std::borrow::Cow;
 
 use falcon_syntax::cst::visit::{Visitor, walk_expr, walk_stmt};
@@ -60,7 +61,12 @@ impl FlowContext<'_, '_> {
                     }
                     _ => return false,
                 };
-                if matches!(target, ResolvedType::Unknown) {
+                if matches!(
+                    target,
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Unknown
+                    }
+                ) {
                     return false;
                 }
                 matched == &target
@@ -77,7 +83,7 @@ impl FlowContext<'_, '_> {
         let covers_null = patterns().any(|pattern| {
             matches!(pattern, Pattern::Literal(literal) if matches!(literal.value(), LiteralPatternValue::Null))
         });
-        if *matched == ResolvedType::Null {
+        if *matched == ResolvedType::NULL {
             return covers_null;
         }
         if matched.nullable() && !covers_null {
@@ -86,7 +92,10 @@ impl FlowContext<'_, '_> {
         if matched.nullable() && covers_type(&matched.with_nullable(false)) {
             return true;
         }
-        let ResolvedType::Interface { identity, .. } = matched else {
+        let ResolvedType {
+            kind: ResolvedTypeKind::Interface { identity, .. },
+        } = matched
+        else {
             return false;
         };
         if identity.is_sdk("dart:core", "bool") {
@@ -203,10 +212,13 @@ impl FlowContext<'_, '_> {
     fn compatible(&self, value: &ResolvedType, target: &ResolvedType) -> bool {
         // `FutureOr<T>` is the union of `T` and `Future<T>`. Check it
         // before ordinary nullability: its value branch may itself be nullable.
-        if let ResolvedType::Interface {
-            identity,
-            arguments,
-            ..
+        if let ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    identity,
+                    arguments,
+                    ..
+                },
         } = target
             && identity.is_sdk("dart:async", "FutureOr")
             && let Some(argument) = arguments.first()
@@ -214,11 +226,23 @@ impl FlowContext<'_, '_> {
             // A written nullable union retains its null arm independently of
             // the argument: T? <: FutureOr<T>? follows from T <: FutureOr<T>.
             if target.nullable() {
-                if matches!(value, ResolvedType::Null) {
+                if matches!(
+                    value,
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Null
+                    }
+                ) {
                     return true;
                 }
                 if value.nullable()
-                    && !matches!(value, ResolvedType::Dynamic | ResolvedType::Unknown)
+                    && !matches!(
+                        value,
+                        ResolvedType {
+                            kind: ResolvedTypeKind::Dynamic
+                        } | ResolvedType {
+                            kind: ResolvedTypeKind::Unknown
+                        }
+                    )
                 {
                     return self.subtype(&value.with_nullable(false), &target.with_nullable(false));
                 }
@@ -230,17 +254,22 @@ impl FlowContext<'_, '_> {
                 return false;
             }
             return match value {
-                ResolvedType::Interface {
-                    identity,
-                    arguments,
-                    ..
+                ResolvedType {
+                    kind:
+                        ResolvedTypeKind::Interface {
+                            identity,
+                            arguments,
+                            ..
+                        },
                 } if identity.is_sdk("dart:async", "FutureOr") => arguments
                     .first()
                     .is_some_and(|value| self.subtype(value, argument)),
-                ResolvedType::TypeParameter { bound, .. } => self.subtype(bound, target),
-                ResolvedType::NonNullTypeParameter { bound, .. } => {
-                    self.subtype(&bound.non_null(), target)
-                }
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { bound, .. },
+                } => self.subtype(bound, target),
+                ResolvedType {
+                    kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+                } => self.subtype(&bound.non_null(), target),
                 _ => self
                     .signatures
                     .instantiated_supertype(value, "dart:async", "Future", self.model)
@@ -258,22 +287,33 @@ impl FlowContext<'_, '_> {
         if same_shape(value, target) {
             return true;
         }
-        if matches!(value, ResolvedType::Function { .. })
-            && target.interface("dart:core", "Function")
+        if matches!(
+            value,
+            ResolvedType {
+                kind: ResolvedTypeKind::Function { .. }
+            }
+        ) && target.interface("dart:core", "Function")
         {
             return true;
         }
         if let (
-            ResolvedType::NonNullTypeParameter { id: value, .. },
-            ResolvedType::TypeParameter { id: target, .. },
+            ResolvedType {
+                kind: ResolvedTypeKind::NonNullTypeParameter { id: value, .. },
+            },
+            ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter { id: target, .. },
+            },
         ) = (value, target)
         {
             return value == target;
         }
-        let ResolvedType::Interface {
-            identity,
-            arguments,
-            ..
+        let ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    identity,
+                    arguments,
+                    ..
+                },
         } = target
         else {
             return false;
@@ -282,7 +322,13 @@ impl FlowContext<'_, '_> {
         if *identity == DeclarationIdentity::OBJECT {
             return !matches!(
                 value,
-                ResolvedType::Dynamic | ResolvedType::Unknown | ResolvedType::Void
+                ResolvedType {
+                    kind: ResolvedTypeKind::Dynamic
+                } | ResolvedType {
+                    kind: ResolvedTypeKind::Unknown
+                } | ResolvedType {
+                    kind: ResolvedTypeKind::Void
+                }
             );
         }
         // Interface type arguments are covariant.
@@ -301,18 +347,35 @@ impl FlowContext<'_, '_> {
     /// Whether `value` is provably a subtype of `target`.
     fn subtype(&self, value: &ResolvedType, target: &ResolvedType) -> bool {
         match (value, target) {
-            (ResolvedType::Unknown, _) => false,
-            (_, ResolvedType::Dynamic | ResolvedType::Void) => true,
-            (_, ResolvedType::Interface { identity, .. })
-                if identity.is_sdk("dart:async", "FutureOr") =>
-            {
-                self.compatible(value, target)
-            }
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::Unknown,
+                },
+                _,
+            ) => false,
+            (
+                _,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Dynamic,
+                }
+                | ResolvedType {
+                    kind: ResolvedTypeKind::Void,
+                },
+            ) => true,
+            (
+                _,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface { identity, .. },
+                },
+            ) if identity.is_sdk("dart:async", "FutureOr") => self.compatible(value, target),
             // A potentially nullable bound proves subtyping only when the
             // bound itself fits the target; stripping its `?` would lose null.
-            (ResolvedType::TypeParameter { bound, .. }, _)
-                if !target.nullable() && !self.signatures.is_non_nullable(bound) =>
-            {
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { bound, .. },
+                },
+                _,
+            ) if !target.nullable() && !self.signatures.is_non_nullable(bound) => {
                 !value.nullable() && (same_shape(value, target) || self.subtype(bound, target))
             }
             _ => {
@@ -336,32 +399,42 @@ impl FlowContext<'_, '_> {
             return value.clone();
         }
         if self.subtype(value, excluded) {
-            return ResolvedType::Never;
+            return ResolvedType::NEVER;
         }
         match value {
-            ResolvedType::Interface { nullable: true, .. }
-            | ResolvedType::TypeParameter { nullable: true, .. }
-            | ResolvedType::Function { nullable: true, .. }
-            | ResolvedType::Record { nullable: true, .. } => {
+            ResolvedType {
+                kind: ResolvedTypeKind::Interface { nullable: true, .. },
+            }
+            | ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter { nullable: true, .. },
+            }
+            | ResolvedType {
+                kind: ResolvedTypeKind::Function { nullable: true, .. },
+            }
+            | ResolvedType {
+                kind: ResolvedTypeKind::Record { nullable: true, .. },
+            } => {
                 let remainder = self.factor(&value.with_nullable(false), excluded);
-                if self.subtype(&ResolvedType::Null, excluded) {
+                if self.subtype(&ResolvedType::NULL, excluded) {
                     remainder
                 } else {
                     remainder.with_nullable(true)
                 }
             }
-            ResolvedType::Interface { identity, .. }
-                if identity.is_sdk("dart:async", "FutureOr") =>
-            {
+            ResolvedType {
+                kind: ResolvedTypeKind::Interface { identity, .. },
+            } if identity.is_sdk("dart:async", "FutureOr") => {
                 let Some(argument) = value.type_argument(0) else {
                     return value.clone();
                 };
-                let future = ResolvedType::Interface {
-                    occurrence: Default::default(),
-                    identity: DeclarationIdentity::sdk("dart:async", "Future"),
-                    arguments: vec![argument.clone()].into(),
-                    nullable: false,
-                    extension_type: false,
+                let future = ResolvedType {
+                    kind: ResolvedTypeKind::Interface {
+                        occurrence: Default::default(),
+                        identity: DeclarationIdentity::sdk("dart:async", "Future"),
+                        arguments: vec![argument.clone()].into(),
+                        nullable: false,
+                        extension_type: false,
+                    },
                 };
                 if self.subtype(&future, excluded) {
                     self.factor(&argument, excluded)
@@ -458,7 +531,14 @@ impl FlowContext<'_, '_> {
         mut ty: ResolvedType,
     ) {
         let current = self.infer(environment, expression);
-        if matches!(ty, ResolvedType::Dynamic | ResolvedType::Unknown) {
+        if matches!(
+            ty,
+            ResolvedType {
+                kind: ResolvedTypeKind::Dynamic
+            } | ResolvedType {
+                kind: ResolvedTypeKind::Unknown
+            }
+        ) {
             return;
         }
         if self.subtype(&current, &ty) {
@@ -466,7 +546,14 @@ impl FlowContext<'_, '_> {
         }
         if current.nullable()
             && !ty.nullable()
-            && !matches!(current, ResolvedType::Dynamic | ResolvedType::Unknown)
+            && !matches!(
+                current,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Dynamic
+                } | ResolvedType {
+                    kind: ResolvedTypeKind::Unknown
+                }
+            )
         {
             let non_null = current.non_null();
             if self.subtype(&non_null, &ty) {
@@ -474,8 +561,12 @@ impl FlowContext<'_, '_> {
             }
         }
         let compatible = match &current {
-            ResolvedType::Dynamic => true,
-            ResolvedType::TypeParameter { bound, .. } => self.subtype(&ty, bound),
+            ResolvedType {
+                kind: ResolvedTypeKind::Dynamic,
+            } => true,
+            ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter { bound, .. },
+            } => self.subtype(&ty, bound),
             _ => self.subtype(&ty, &current),
         };
         if !compatible {
@@ -551,7 +642,7 @@ impl FlowContext<'_, '_> {
                         };
                         // An impossible type-test branch does not change the
                         // variable's static type to Never.
-                        if ty != ResolvedType::Never {
+                        if ty != ResolvedType::NEVER {
                             self.promote_without_test(environment, expr, ty);
                         }
                     }
@@ -675,7 +766,7 @@ impl FlowContext<'_, '_> {
     pub fn statement_exits(&self, environment: &TypeEnvironment, statement: Stmt<'_>) -> bool {
         exits(
             statement,
-            &|expression| self.infer(environment, expression) == ResolvedType::Never,
+            &|expression| self.infer(environment, expression) == ResolvedType::NEVER,
             &|_| false,
             true,
         )
@@ -691,7 +782,7 @@ impl FlowContext<'_, '_> {
         self.signatures
             .instantiated_supertype(iterable, library, name, self.model)
             .and_then(|ty| ty.type_argument(0))
-            .unwrap_or(ResolvedType::Unknown)
+            .unwrap_or(ResolvedType::UNKNOWN)
     }
 
     /// Declares every variable a declaration or matched pattern binds, typed from `matched`.
@@ -717,7 +808,7 @@ impl FlowContext<'_, '_> {
                             .instantiated_supertype(&matched, "dart:core", "List", self.model)
                             .and_then(|ty| ty.type_argument(0))
                     })
-                    .unwrap_or(ResolvedType::Unknown);
+                    .unwrap_or(ResolvedType::UNKNOWN);
                 for child in list.elements() {
                     match child {
                         ListPatternElement::Pattern(child) => {
@@ -745,7 +836,7 @@ impl FlowContext<'_, '_> {
                     self.declare_pattern(
                         environment,
                         field.pattern(),
-                        ty.unwrap_or(ResolvedType::Unknown),
+                        ty.unwrap_or(ResolvedType::UNKNOWN),
                     );
                 }
             }
@@ -759,7 +850,7 @@ impl FlowContext<'_, '_> {
                             .instantiated_supertype(&matched, "dart:core", "Map", self.model)
                             .and_then(|ty| ty.type_argument(1))
                     })
-                    .unwrap_or(ResolvedType::Unknown);
+                    .unwrap_or(ResolvedType::UNKNOWN);
                 for entry in map.entries() {
                     self.declare_pattern(environment, entry.pattern(), value.clone());
                 }
@@ -777,7 +868,7 @@ impl FlowContext<'_, '_> {
                                 self.model,
                             )
                         })
-                        .map_or(ResolvedType::Unknown, |(ty, substitutions)| {
+                        .map_or(ResolvedType::UNKNOWN, |(ty, substitutions)| {
                             self.model.substitute(&ty, &substitutions)
                         });
                     match field.pattern() {
@@ -830,10 +921,13 @@ impl FlowContext<'_, '_> {
     ) -> ResolvedType {
         let resolved = self.model.resolve_type_in(written, self.type_parameters);
         match &resolved {
-            ResolvedType::Interface {
-                identity,
-                arguments,
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity,
+                        arguments,
+                        ..
+                    },
             } if arguments.is_empty() => self
                 .signatures
                 .as_instance_of(matched, identity, self.model)
@@ -856,7 +950,7 @@ impl FlowContext<'_, '_> {
                 let ty = self
                     .model
                     .resolve_type_in(cast.dart_type(), self.type_parameters);
-                if ty != ResolvedType::Dynamic {
+                if ty != ResolvedType::DYNAMIC {
                     self.promote(environment, cast.expr(), ty);
                 }
             }
@@ -925,9 +1019,18 @@ impl FlowContext<'_, '_> {
 /// `NonNull(ty)` for values with a resolved non-null refinement.
 fn non_null(ty: &ResolvedType) -> Option<ResolvedType> {
     match ty {
-        ResolvedType::Dynamic | ResolvedType::Unknown | ResolvedType::Void | ResolvedType::Null => {
-            None
+        ResolvedType {
+            kind: ResolvedTypeKind::Dynamic,
         }
+        | ResolvedType {
+            kind: ResolvedTypeKind::Unknown,
+        }
+        | ResolvedType {
+            kind: ResolvedTypeKind::Void,
+        }
+        | ResolvedType {
+            kind: ResolvedTypeKind::Null,
+        } => None,
         ty => Some(ty.non_null()),
     }
 }
@@ -935,59 +1038,87 @@ fn non_null(ty: &ResolvedType) -> Option<ResolvedType> {
 fn same_shape(left: &ResolvedType, right: &ResolvedType) -> bool {
     match (left, right) {
         (
-            ResolvedType::Interface {
-                identity: a,
-                arguments: aa,
-                extension_type: ae,
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity: a,
+                        arguments: aa,
+                        extension_type: ae,
+                        ..
+                    },
             },
-            ResolvedType::Interface {
-                identity: b,
-                arguments: ba,
-                extension_type: be,
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity: b,
+                        arguments: ba,
+                        extension_type: be,
+                        ..
+                    },
             },
         ) => a == b && aa == ba && ae == be,
         (
-            ResolvedType::TypeParameter {
-                id: a, bound: ab, ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::TypeParameter {
+                        id: a, bound: ab, ..
+                    },
             },
-            ResolvedType::TypeParameter {
-                id: b, bound: bb, ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::TypeParameter {
+                        id: b, bound: bb, ..
+                    },
             },
         ) => a == b && ab == bb,
         (
-            ResolvedType::NonNullTypeParameter { id: a, bound: ab },
-            ResolvedType::NonNullTypeParameter { id: b, bound: bb },
+            ResolvedType {
+                kind: ResolvedTypeKind::NonNullTypeParameter { id: a, bound: ab },
+            },
+            ResolvedType {
+                kind: ResolvedTypeKind::NonNullTypeParameter { id: b, bound: bb },
+            },
         ) => a == b && ab == bb,
         (
-            ResolvedType::Function {
-                return_type: a,
-                positional: ap,
-                named: an,
-                optional_positional: ao,
-                shape: a_shape,
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        return_type: a,
+                        positional: ap,
+                        named: an,
+                        optional_positional: ao,
+                        shape: a_shape,
+                        ..
+                    },
             },
-            ResolvedType::Function {
-                return_type: b,
-                positional: bp,
-                named: bn,
-                optional_positional: bo,
-                shape: b_shape,
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        return_type: b,
+                        positional: bp,
+                        named: bn,
+                        optional_positional: bo,
+                        shape: b_shape,
+                        ..
+                    },
             },
         ) => a == b && ap == bp && an == bn && ao == bo && a_shape == b_shape,
         (
-            ResolvedType::Record {
-                positional: a,
-                named: an,
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Record {
+                        positional: a,
+                        named: an,
+                        ..
+                    },
             },
-            ResolvedType::Record {
-                positional: b,
-                named: bn,
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Record {
+                        positional: b,
+                        named: bn,
+                        ..
+                    },
             },
         ) => a == b && an == bn,
         _ => left == right,
@@ -1220,7 +1351,7 @@ mod tests {
     use falcon_dart_parser::parse;
     use falcon_syntax::cst::{FunctionBody, TopLevelDecl};
 
-    use super::completes_normally;
+    use super::{ResolvedTypeKind, completes_normally};
 
     fn with_flow_context(test: impl FnOnce(&super::FlowContext<'_, '_>)) {
         use std::path::PathBuf;
@@ -1257,12 +1388,14 @@ mod tests {
     }
 
     fn async_type(name: &'static str, argument: super::ResolvedType) -> super::ResolvedType {
-        super::ResolvedType::Interface {
-            occurrence: Default::default(),
-            identity: super::DeclarationIdentity::sdk("dart:async", name),
-            arguments: vec![argument].into(),
-            nullable: false,
-            extension_type: false,
+        super::ResolvedType {
+            kind: ResolvedTypeKind::Interface {
+                occurrence: Default::default(),
+                identity: super::DeclarationIdentity::sdk("dart:async", name),
+                arguments: vec![argument].into(),
+                nullable: false,
+                extension_type: false,
+            },
         }
     }
 
@@ -1289,8 +1422,8 @@ mod tests {
         use crate::resolve::{ParameterOwner, ResolvedType, TypeParameterId};
 
         with_flow_context(|context| {
-            let parameter =
-                |name: &str, ordinal, bound: ResolvedType| ResolvedType::TypeParameter {
+            let parameter = |name: &str, ordinal, bound: ResolvedType| ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter {
                     id: TypeParameterId {
                         owner: ParameterOwner::Sdk("test"),
                         ordinal,
@@ -1298,7 +1431,8 @@ mod tests {
                     },
                     bound: bound.into(),
                     nullable: false,
-                };
+                },
+            };
             let t = parameter("T", 0, context.model.core_type("Object", true));
             assert!(context.subtype(&t, &async_type("FutureOr", t.clone())));
             let int = context.model.core_type("int", false);
@@ -1322,25 +1456,29 @@ mod tests {
         use crate::resolve::{ParameterOwner, ResolvedType, TypeParameterId};
 
         with_flow_context(|context| {
-            let bound = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: super::DeclarationIdentity::sdk("test", "IntBox"),
-                arguments: Default::default(),
-                nullable: false,
-                extension_type: true,
-            };
-            let parameter = |bound: ResolvedType| ResolvedType::TypeParameter {
-                id: TypeParameterId {
-                    owner: ParameterOwner::Sdk("test"),
-                    ordinal: 0,
-                    name: "T".into(),
+            let bound = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: super::DeclarationIdentity::sdk("test", "IntBox"),
+                    arguments: Default::default(),
+                    nullable: false,
+                    extension_type: true,
                 },
-                bound: bound.into(),
-                nullable: false,
+            };
+            let parameter = |bound: ResolvedType| ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter {
+                    id: TypeParameterId {
+                        owner: ParameterOwner::Sdk("test"),
+                        ordinal: 0,
+                        name: "T".into(),
+                    },
+                    bound: bound.into(),
+                    nullable: false,
+                },
             };
             let exact = parameter(bound.clone());
             assert!(context.subtype(&exact, &bound));
-            assert_eq!(context.factor(&exact, &bound), ResolvedType::Never);
+            assert_eq!(context.factor(&exact, &bound), ResolvedType::NEVER);
             let nullable = parameter(bound.with_nullable(true));
             assert!(!context.subtype(&nullable, &bound));
             assert_eq!(context.factor(&nullable, &bound), nullable);
@@ -1511,22 +1649,28 @@ mod tests {
                 "{}",
                 function.name().name()
             );
-            assert_eq!(context.factor(&expected, &expected), ResolvedType::Never);
+            assert_eq!(context.factor(&expected, &expected), ResolvedType::NEVER);
             assert_eq!(
-                context.factor(&ResolvedType::Unknown, &expected),
-                ResolvedType::Unknown,
+                context.factor(&ResolvedType::UNKNOWN, &expected),
+                ResolvedType::UNKNOWN,
             );
-            assert_eq!(context.factor(&expected, &ResolvedType::Unknown), expected);
+            assert_eq!(context.factor(&expected, &ResolvedType::UNKNOWN), expected);
             let mut unresolved = environment.declared_type("value");
             match &mut unresolved {
-                ResolvedType::Interface { arguments, .. } if !arguments.is_empty() => {
-                    std::sync::Arc::make_mut(arguments)[0] = ResolvedType::Unknown;
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface { arguments, .. },
+                } if !arguments.is_empty() => {
+                    std::sync::Arc::make_mut(arguments)[0] = ResolvedType::UNKNOWN;
                 }
-                ResolvedType::Function { return_type, .. } => {
-                    *std::sync::Arc::make_mut(return_type) = ResolvedType::Unknown;
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function { return_type, .. },
+                } => {
+                    *std::sync::Arc::make_mut(return_type) = ResolvedType::UNKNOWN;
                 }
-                ResolvedType::Record { positional, .. } if !positional.is_empty() => {
-                    std::sync::Arc::make_mut(positional)[0] = ResolvedType::Unknown;
+                ResolvedType {
+                    kind: ResolvedTypeKind::Record { positional, .. },
+                } if !positional.is_empty() => {
+                    std::sync::Arc::make_mut(positional)[0] = ResolvedType::UNKNOWN;
                 }
                 _ => continue,
             }
@@ -1539,21 +1683,25 @@ mod tests {
     fn non_null_parameter_promotions_preserve_the_intersection() {
         use crate::resolve::{DeclarationIdentity, ParameterOwner, ResolvedType, TypeParameterId};
 
-        let parameter = ResolvedType::TypeParameter {
-            id: TypeParameterId {
-                owner: ParameterOwner::Sdk("test"),
-                ordinal: 0,
-                name: "T".into(),
+        let parameter = ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter {
+                id: TypeParameterId {
+                    owner: ParameterOwner::Sdk("test"),
+                    ordinal: 0,
+                    name: "T".into(),
+                },
+                bound: ResolvedType::interface_identity(DeclarationIdentity::OBJECT)
+                    .with_nullable(true)
+                    .into(),
+                nullable: true,
             },
-            bound: ResolvedType::interface_identity(DeclarationIdentity::OBJECT)
-                .with_nullable(true)
-                .into(),
-            nullable: true,
         };
         let promoted = super::non_null(&parameter).unwrap();
         assert!(matches!(
             promoted,
-            ResolvedType::NonNullTypeParameter { .. }
+            ResolvedType {
+                kind: ResolvedTypeKind::NonNullTypeParameter { .. }
+            }
         ));
         assert!(!super::same_shape(
             &promoted,

@@ -56,14 +56,17 @@ fn assert_nested_assignment_closures_inferred_once(conditional: bool) {
             &|name| {
                 (name == "probe").then(|| {
                     probes.set(probes.get() + 1);
-                    ResolvedType::Dynamic
+                    ResolvedType::DYNAMIC
                 })
             },
         );
-        let ResolvedType::Function { return_type, .. } = inferred else {
+        let ResolvedType {
+            kind: ResolvedTypeKind::Function { return_type, .. },
+        } = inferred
+        else {
             panic!("expected closure type");
         };
-        assert_eq!(*return_type, ResolvedType::Null);
+        assert_eq!(*return_type, ResolvedType::NULL);
         assert_eq!(
             probes.get(),
             1,
@@ -103,7 +106,10 @@ fn closure_inference_does_not_cache_flow_or_expected_types() {
                     panic!("expected function");
                 };
                 let expected = model.resolve_type(function.return_type().unwrap());
-                let ResolvedType::Function { positional, .. } = &expected else {
+                let ResolvedType {
+                    kind: ResolvedTypeKind::Function { positional, .. },
+                } = &expected
+                else {
                     panic!("expected function type");
                 };
                 environment.declare("captured".to_owned(), positional[0].clone());

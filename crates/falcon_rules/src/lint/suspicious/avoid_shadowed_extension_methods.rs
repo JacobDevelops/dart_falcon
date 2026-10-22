@@ -42,7 +42,7 @@ impl Rule for AvoidShadowedExtensionMethods {
             ctx,
             model,
             signatures,
-            receiver: ResolvedType::Unknown,
+            receiver: ResolvedType::UNKNOWN,
             diagnostics: Vec::new(),
         }))
     }

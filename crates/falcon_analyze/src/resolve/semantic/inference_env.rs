@@ -1,5 +1,6 @@
 use super::*;
 use crate::resolve::lexical_scope::{LexicalScopes, ScopeStorage};
+use crate::resolve::semantic::ResolvedTypeKind;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct FlowBinding {
@@ -120,17 +121,24 @@ impl TypeEnvironment {
 
     pub fn declare(&mut self, name: impl Into<String>, ty: ResolvedType) {
         let name = name.into();
-        if let ResolvedType::NonNullTypeParameter { id, bound } = ty {
+        if let ResolvedType {
+            kind: ResolvedTypeKind::NonNullTypeParameter { id, bound },
+        } = ty
+        {
             // Inferred locals declare `T`, then promote to `T & Object`.
             // A later write of `T` must be able to discard the intersection.
-            let declared = ResolvedType::TypeParameter {
-                id: id.clone(),
-                bound: bound.clone(),
-                nullable: false,
+            let declared = ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter {
+                    id: id.clone(),
+                    bound: bound.clone(),
+                    nullable: false,
+                },
             };
             self.declare_binding(name, declared, true)
                 .promoted
-                .push(ResolvedType::NonNullTypeParameter { id, bound });
+                .push(ResolvedType {
+                    kind: ResolvedTypeKind::NonNullTypeParameter { id, bound },
+                });
         } else {
             self.declare_binding(name, ty, true);
         }
@@ -155,7 +163,7 @@ impl TypeEnvironment {
     pub fn receiver(&self) -> ResolvedType {
         self.receiver_depth()
             .and_then(|index| self.scopes[index].receiver.as_ref())
-            .map_or(ResolvedType::Unknown, |receiver| receiver.ty.clone())
+            .map_or(ResolvedType::UNKNOWN, |receiver| receiver.ty.clone())
     }
 
     fn receiver_depth(&self) -> Option<usize> {
@@ -280,7 +288,7 @@ impl TypeEnvironment {
     pub fn declared_type(&self, name: &str) -> ResolvedType {
         self.binding(name)
             .map(|binding| binding.declared.clone())
-            .unwrap_or(ResolvedType::Unknown)
+            .unwrap_or(ResolvedType::UNKNOWN)
     }
 
     /// The promotion chain of `name`, most general first.
@@ -297,7 +305,7 @@ impl TypeEnvironment {
 
     /// Records the actual tested type, independently of the branch's promotion.
     pub(crate) fn record_tested_type(&mut self, name: &str, ty: ResolvedType) {
-        if ty != ResolvedType::Unknown
+        if ty != ResolvedType::UNKNOWN
             && self
                 .binding(name)
                 .is_some_and(|binding| !binding.tested.contains(&ty))
@@ -309,7 +317,7 @@ impl TypeEnvironment {
 
     /// Applies a flow refinement without making it a tested type of interest.
     pub(crate) fn promote_without_test(&mut self, name: &str, ty: ResolvedType) {
-        if ty != ResolvedType::Unknown
+        if ty != ResolvedType::UNKNOWN
             && self.binding(name).is_some_and(|binding| {
                 binding.promotable && !binding.captured && binding.promoted.last() != Some(&ty)
             })
@@ -335,7 +343,7 @@ impl TypeEnvironment {
     }
 
     pub fn promote(&mut self, name: &str, ty: ResolvedType) {
-        if ty != ResolvedType::Unknown
+        if ty != ResolvedType::UNKNOWN
             && self.binding(name).is_some_and(|binding| {
                 binding.promotable
                     && !binding.captured
@@ -561,7 +569,7 @@ impl TypeEnvironment {
     pub fn lookup(&self, name: &str) -> ResolvedType {
         self.binding(name)
             .map(|binding| binding.promoted.last().unwrap_or(&binding.declared).clone())
-            .unwrap_or(ResolvedType::Unknown)
+            .unwrap_or(ResolvedType::UNKNOWN)
     }
 }
 

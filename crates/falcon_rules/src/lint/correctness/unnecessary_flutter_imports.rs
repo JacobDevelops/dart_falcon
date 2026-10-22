@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, RulePreparation,
+    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedTypeView, Rule, RulePreparation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{Visitor, walk_annotation, walk_dart_type};
@@ -125,8 +125,8 @@ impl<'tree> Visitor<'tree> for TypeUsage<'_, '_, 'tree> {
     fn visit_dart_type(&mut self, node: DartType<'tree>) {
         if let DartType::Named(named) = node {
             let mut segments = named.segments().map(|segment| segment.name());
-            match self.model.resolve_type(node) {
-                ResolvedType::Interface { identity, .. } if framework_identity(&identity) => {
+            match self.model.resolve_type(node).view() {
+                ResolvedTypeView::Interface { identity, .. } if framework_identity(identity) => {
                     match (segments.next(), segments.next(), segments.next()) {
                         (Some(name), None, None) => {
                             self.unprefixed.insert(name);
@@ -137,7 +137,7 @@ impl<'tree> Visitor<'tree> for TypeUsage<'_, '_, 'tree> {
                         _ => {}
                     }
                 }
-                ResolvedType::Unknown => {
+                ResolvedTypeView::Unknown => {
                     if let Some(first) = segments.next() {
                         self.unknown.insert(first);
                     }

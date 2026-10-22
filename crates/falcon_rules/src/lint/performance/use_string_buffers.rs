@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -80,7 +80,7 @@ impl<'a> Collector<'a> {
                 Stmt::Block(block) => pending.extend(block.stmts().rev()),
                 Stmt::LocalVar(declaration) => {
                     let declared_string = declaration.var_type().map(|ty| {
-                        matches!(state.model.resolve_type(ty), ResolvedType::Interface { identity, nullable: false, .. }
+                        matches!(state.model.resolve_type(ty).view(), ResolvedTypeView::Interface { identity, nullable: false, .. }
                             if identity.is_sdk("dart:core", "String"))
                     });
                     locals.extend(declaration.declarators().map(|declarator| {

@@ -24,7 +24,7 @@
 //!
 //! Adopted from the official `prefer_const_literals_to_create_immutables` lint.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -104,8 +104,8 @@ fn is_immutable(identity: &DeclarationIdentity, state: &SemanticState<'_>) -> bo
         if annotated(current) {
             return true;
         }
-        match signatures.superclass(current) {
-            Some(ResolvedType::Interface { identity, .. }) => current = identity,
+        match signatures.superclass(current).map(ResolvedType::view) {
+            Some(ResolvedTypeView::Interface { identity, .. }) => current = identity,
             Some(_) | None => break,
         }
     }

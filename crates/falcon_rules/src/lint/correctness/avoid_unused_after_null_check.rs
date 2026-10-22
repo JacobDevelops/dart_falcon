@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::ResolvedType;
+use falcon_analyze::{ResolvedType, ResolvedTypeView};
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
@@ -68,7 +68,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         };
         let ty = state.infer(Expr::Ident(checked));
-        if !matches!(ty, ResolvedType::Interface { .. }) || !ty.nullable() {
+        if !matches!(ty.view(), ResolvedTypeView::Interface { .. }) || !ty.nullable() {
             return;
         }
         self.guards.push(Guard {

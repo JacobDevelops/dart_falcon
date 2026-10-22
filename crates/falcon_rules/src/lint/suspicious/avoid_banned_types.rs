@@ -3,7 +3,7 @@
 //! Unknown types are not reported. Match against the declaration's simple name.
 
 use falcon_analyze::{
-    AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
+    AnalyzeContext, ResolvedTypeView, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
     StructuralTraversal, TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
@@ -76,10 +76,10 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             }
         }
         let resolved = self.model.resolve_type_in(node, &parameters);
-        let name = match &resolved {
-            ResolvedType::Interface { identity, .. } => identity.name(),
-            ResolvedType::Dynamic => "dynamic",
-            ResolvedType::Void => "void",
+        let name = match resolved.view() {
+            ResolvedTypeView::Interface { identity, .. } => identity.name(),
+            ResolvedTypeView::Dynamic => "dynamic",
+            ResolvedTypeView::Void => "void",
             _ => return StructuralTraversal::Continue,
         };
         report(self.ctx, self.entries, name, node.span(), &mut self.diagnostics);

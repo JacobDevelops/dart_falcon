@@ -10,7 +10,7 @@
 //! reported; no class-name suffix is assumed.
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -56,7 +56,7 @@ impl<'a> Collector<'a> {
         {
             return;
         }
-        if let ResolvedType::Interface { identity, .. } = receiver
+        if let ResolvedTypeView::Interface { identity, .. } = receiver.view()
             && state.constant_owner.as_ref() == Some(identity)
         {
             return;

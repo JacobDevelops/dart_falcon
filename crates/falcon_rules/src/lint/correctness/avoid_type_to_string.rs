@@ -20,7 +20,7 @@
 
 use falcon_analyze::TypeKind;
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -54,7 +54,7 @@ impl Rule for AvoidTypeToString {
                     TopLevelDecl::Mixin(mixin) => this_type(mixin.name(), &model),
                     TopLevelDecl::Extension(extension) => {
                         Some(model.resolve_type(extension.on_type()))
-                            .filter(|ty| matches!(ty, ResolvedType::Interface { .. }))
+                            .filter(|ty| matches!(ty.view(), ResolvedTypeView::Interface { .. }))
                     }
                     _ => return None,
                 };
@@ -76,13 +76,7 @@ fn this_type(
 ) -> Option<ResolvedType> {
     model
         .resolve_name(name.name())
-        .map(|identity| ResolvedType::Interface {
-            occurrence: Default::default(),
-            identity,
-            arguments: Vec::new().into(),
-            nullable: false,
-            extension_type: false,
-        })
+        .map(ResolvedType::interface_identity)
 }
 
 /// What the `toString` reference resolves against.
@@ -142,13 +136,13 @@ impl<'a> Collector<'a> {
             Expr::This(_) | Expr::Super(_) => state
                 .enclosing_type
                 .clone()
-                .unwrap_or(ResolvedType::Unknown),
+                .unwrap_or(ResolvedType::UNKNOWN),
             other => state.infer(other),
         };
-        if matches!(receiver_type, ResolvedType::Unknown) {
+        if matches!(receiver_type.view(), ResolvedTypeView::Unknown) {
             return;
         }
-        let target = if matches!(receiver_type, ResolvedType::Interface { .. }) {
+        let target = if matches!(receiver_type.view(), ResolvedTypeView::Interface { .. }) {
             Some(&receiver_type)
         } else if prefixed_only {
             return;
@@ -242,8 +236,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
 /// The analyzer's `isSubtypeOf(target, Type)`: nullable types never are.
 fn is_type_subtype(target: &ResolvedType, state: &SemanticState<'_>) -> bool {
     matches!(
-        target,
-        ResolvedType::Interface {
+        target.view(),
+        ResolvedTypeView::Interface {
             nullable: false,
             ..
         }
@@ -261,8 +255,8 @@ fn resolves_to_object_to_string(lookup: Lookup<'_>, state: &SemanticState<'_>) -
     };
     let ty = match lookup {
         Lookup::Super => {
-            return match &state.enclosing_type {
-                Some(ResolvedType::Interface { identity, .. }) => {
+            return match state.enclosing_type.as_ref().map(ResolvedType::view) {
+                Some(ResolvedTypeView::Interface { identity, .. }) => {
                     is_object(signatures.inherited_concrete_member(identity, "toString"))
                 }
                 _ => false,
@@ -270,12 +264,12 @@ fn resolves_to_object_to_string(lookup: Lookup<'_>, state: &SemanticState<'_>) -
         }
         Lookup::Member(ty) => ty,
     };
-    match ty {
-        ResolvedType::Dynamic => true,
-        ResolvedType::TypeParameter { bound, .. } => {
+    match ty.view() {
+        ResolvedTypeView::Dynamic => true,
+        ResolvedTypeView::TypeParameter { bound, .. } => {
             resolves_to_object_to_string(Lookup::Member(bound), state)
         }
-        ResolvedType::Interface { identity, .. } => {
+        ResolvedTypeView::Interface { identity, .. } => {
             // `dart:core` `Type` redeclares `toString`.
             if identity.is_sdk("dart:core", "Type") {
                 return false;

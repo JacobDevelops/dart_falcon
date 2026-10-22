@@ -1,7 +1,7 @@
 //! Sort Widget-valued child properties last, except before closure arguments.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth, TypeRelation,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -66,11 +66,11 @@ impl<'a> SemanticRuleVisitor<'a> for ChildOrdering<'_, 'a> {
 }
 
 fn widget_property(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
-    let ResolvedType::Interface {
+    let ResolvedTypeView::Interface {
         identity,
         arguments,
         ..
-    } = ty
+    } = ty.view()
     else {
         return false;
     };

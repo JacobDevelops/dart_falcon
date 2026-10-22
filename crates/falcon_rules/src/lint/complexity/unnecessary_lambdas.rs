@@ -49,7 +49,7 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, Feature, MemberFacts, MemberKind, QualifiedName,
-    ResolvedType, Rule, RulePreparation, SignatureIndex, expression_segments,
+    ResolvedType, ResolvedTypeView, Rule, RulePreparation, SignatureIndex, expression_segments,
     resolve_call_constructor, resolve_new_constructor,
 };
 use falcon_diagnostics::Diagnostic;
@@ -376,7 +376,7 @@ impl<'a> Collector<'a> {
                 .member_callee(facts, name, false, signatures)
                 .or_else(|| self.member_callee(facts, name, true, signatures));
         }
-        if let Some(ResolvedType::Interface { identity, .. }) = &state.enclosing_type {
+        if let Some(ResolvedTypeView::Interface { identity, .. }) = state.enclosing_type.as_ref().map(ResolvedType::view) {
             let facts = signatures.declared_member_facts(identity, name);
             if !facts.is_empty() {
                 return self.member_callee(facts, name, true, signatures);
@@ -519,8 +519,8 @@ impl<'a> Collector<'a> {
         mut params: AstChildren<'a, FormalParam<'a>>,
         state: &SemanticState<'_>,
     ) -> bool {
-        let (contextual, named) = match state.expected() {
-            Some(ResolvedType::Function {
+        let (contextual, named) = match state.expected().map(ResolvedType::view) {
+            Some(ResolvedTypeView::Function {
                 positional, named, ..
             }) => (positional.as_ref(), Some(named)),
             _ => (&[][..], None),
@@ -543,7 +543,7 @@ impl<'a> Collector<'a> {
                 .param_type()
                 .is_some_and(|ty| !matches!(ty, DartType::Dynamic(_)))
                 || contextual_type
-                    .is_some_and(|ty| !matches!(ty, ResolvedType::Unknown | ResolvedType::Dynamic))
+                    .is_some_and(|ty| !matches!(ty.view(), ResolvedTypeView::Unknown | ResolvedTypeView::Dynamic))
         })
     }
 
@@ -576,8 +576,8 @@ impl<'a> Collector<'a> {
             _ => false,
         };
         !discards
-            || matches!(state.expected(), Some(ResolvedType::Function { return_type, .. })
-                if **return_type == ResolvedType::Void)
+            || matches!(state.expected().map(ResolvedType::view), Some(ResolvedTypeView::Function { return_type, .. })
+                if **return_type == ResolvedType::VOID)
     }
 
     /// Whether `callee(...)` invokes a constructor.

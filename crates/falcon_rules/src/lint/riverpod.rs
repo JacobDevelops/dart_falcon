@@ -1,7 +1,9 @@
 //! Shared package identity and build-body queries for Riverpod rules.
 
 use crate::lint::flutter::scoped_constructor_invocation;
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, Truth};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, RulePreparation, Truth,
+};
 use falcon_analyze::{BodyOwner, FunctionBodies};
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
@@ -31,7 +33,7 @@ pub(crate) fn is_type(
     ty: &ResolvedType,
     names: &[&str],
 ) -> bool {
-    let ResolvedType::Interface { identity, .. } = ty else {
+    let ResolvedTypeView::Interface { identity, .. } = ty.view() else {
         return false;
     };
     is_identity(ctx, identity, names)
@@ -42,7 +44,7 @@ pub(crate) fn is_type(
 }
 
 pub(crate) fn is_exact_type(ctx: &AnalyzeContext<'_>, ty: &ResolvedType, names: &[&str]) -> bool {
-    matches!(ty, ResolvedType::Interface { identity, .. } if is_identity(ctx, identity, names))
+    matches!(ty.view(), ResolvedTypeView::Interface { identity, .. } if is_identity(ctx, identity, names))
 }
 
 pub(crate) fn is_identity(
@@ -199,7 +201,10 @@ impl<'a> BuildCollector<'a> {
                 &["Ref", "WidgetRef"],
             )
             && is_type(self.ctx, state, &state.infer(member.object()), NOTIFIERS)
-            && matches!(state.infer(expression), ResolvedType::Function { .. })
+            && matches!(
+                state.infer(expression).view(),
+                ResolvedTypeView::Function { .. }
+            )
         {
             self.diagnostics.push(self.ctx.diagnostic(
                 "Use `ref.read` rather than `ref.watch` when invoking notifier methods.",

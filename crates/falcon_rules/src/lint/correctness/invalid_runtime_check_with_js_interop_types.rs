@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, SemanticModel,
     SignatureIndex, Truth, TypeParameterId, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
@@ -54,20 +54,18 @@ impl Collector<'_, '_> {
         ty: &ResolvedType,
         visiting: &mut HashSet<DeclarationIdentity>,
     ) -> Normalized {
-        match ty {
-            ResolvedType::Unknown => Normalized {
-                ty: ResolvedType::Unknown,
+        match ty.view() {
+            ResolvedTypeView::Unknown => Normalized {
+                ty: ResolvedType::UNKNOWN,
                 interop: Interop::Unknown,
             },
-            ResolvedType::TypeParameter { bound, .. } => self.normalize_inner(bound, visiting),
-            ResolvedType::NonNullTypeParameter { bound, .. } => {
+            ResolvedTypeView::TypeParameter { bound, .. } => self.normalize_inner(bound, visiting),
+            ResolvedTypeView::NonNullTypeParameter { bound, .. } => {
                 self.normalize_inner(&bound.non_null(), visiting)
             }
-            ResolvedType::Interface {
+            ResolvedTypeView::Interface {
                 identity,
-                arguments,
                 extension_type,
-                occurrence,
                 ..
             } => {
                 if let DeclarationIdentity::Sdk { library, .. } = identity
@@ -80,7 +78,7 @@ impl Collector<'_, '_> {
                 }
                 if !visiting.insert(identity.clone()) {
                     return Normalized {
-                        ty: ResolvedType::Unknown,
+                        ty: ResolvedType::UNKNOWN,
                         interop: Interop::Unknown,
                     };
                 }
@@ -96,10 +94,10 @@ impl Collector<'_, '_> {
                         ty: js_type(DeclarationIdentity::sdk("dart:js_interop", "JSObject")),
                         interop: Interop::User(identity.clone()),
                     }
-                } else if *extension_type || representation.is_some() {
+                } else if extension_type || representation.is_some() {
                     representation.map_or(
                         Normalized {
-                            ty: ResolvedType::Unknown,
+                            ty: ResolvedType::UNKNOWN,
                             interop: Interop::Unknown,
                         },
                         |representation| {
@@ -127,79 +125,28 @@ impl Collector<'_, '_> {
                     )
                 } else {
                     Normalized {
-                        ty: ResolvedType::Interface {
-                            occurrence: occurrence.clone(),
-                            identity: identity.clone(),
-                            arguments: arguments
-                                .iter()
-                                .map(|argument| self.normalize_inner(argument, visiting).ty)
-                                .collect(),
-                            nullable: false,
-                            extension_type: false,
-                        },
+                        ty: ty
+                            .map_children(|child| self.normalize_inner(child, visiting).ty)
+                            .with_nullable(false),
                         interop: Interop::None,
                     }
                 };
                 visiting.remove(identity);
                 result
             }
-            ResolvedType::Function {
-                return_type,
-                positional,
-                named,
-                alias,
-                optional_positional,
-                shape,
-                ..
-            } => Normalized {
-                ty: ResolvedType::Function {
-                    shape: shape.as_ref().map(|shape| {
-                        shape.map_bounds(|bound| self.normalize_inner(bound, visiting).ty)
-                    }),
-                    optional_positional: *optional_positional,
-                    alias: alias.clone(),
-                    return_type: std::sync::Arc::new(
-                        self.normalize_inner(return_type, visiting).ty,
-                    ),
-                    positional: positional
-                        .iter()
-                        .map(|ty| self.normalize_inner(ty, visiting).ty)
-                        .collect(),
-                    named: named
-                        .iter()
-                        .map(|(name, ty)| (name.clone(), self.normalize_inner(ty, visiting).ty))
-                        .collect(),
-                    nullable: false,
-                },
-                interop: Interop::None,
-            },
-            ResolvedType::Record {
-                positional,
-                named,
-                occurrence,
-                ..
-            } => Normalized {
-                ty: ResolvedType::Record {
-                    occurrence: occurrence.clone(),
-                    positional: positional
-                        .iter()
-                        .map(|ty| self.normalize_inner(ty, visiting).ty)
-                        .collect(),
-                    named: named
-                        .iter()
-                        .map(|(name, ty)| (name.clone(), self.normalize_inner(ty, visiting).ty))
-                        .collect(),
-                    nullable: false,
-                },
+            ResolvedTypeView::Function { .. } | ResolvedTypeView::Record { .. } => Normalized {
+                ty: ty
+                    .map_children(|child| self.normalize_inner(child, visiting).ty)
+                    .with_nullable(false),
                 interop: Interop::None,
             },
             // `promoteToNonNull(Null)` is `Never`.
-            ResolvedType::Null => Normalized {
-                ty: ResolvedType::Never,
+            ResolvedTypeView::Null => Normalized {
+                ty: ResolvedType::NEVER,
                 interop: Interop::None,
             },
-            other => Normalized {
-                ty: other.with_nullable(false),
+            _ => Normalized {
+                ty: ty.with_nullable(false),
                 interop: Interop::None,
             },
         }
@@ -213,16 +160,16 @@ impl Collector<'_, '_> {
         ty: &ResolvedType,
         visiting: &mut HashSet<TypeParameterId>,
     ) -> Option<bool> {
-        match ty {
-            ResolvedType::Unknown => None,
-            ResolvedType::TypeParameter { id, bound, .. }
-            | ResolvedType::NonNullTypeParameter { id, bound } => {
+        match ty.view() {
+            ResolvedTypeView::Unknown => None,
+            ResolvedTypeView::TypeParameter { id, bound, .. }
+            | ResolvedTypeView::NonNullTypeParameter { id, bound } => {
                 if !visiting.insert(id.clone()) {
                     return Some(false);
                 }
                 self.has_interop(bound, visiting)
             }
-            ResolvedType::Interface { arguments, .. } => {
+            ResolvedTypeView::Interface { arguments, .. } => {
                 match self.normalize(ty).interop {
                     Interop::Sdk | Interop::User(_) => return Some(true),
                     Interop::Unknown => return None,
@@ -230,7 +177,7 @@ impl Collector<'_, '_> {
                 }
                 self.any_has_interop(arguments.iter(), visiting)
             }
-            ResolvedType::Function {
+            ResolvedTypeView::Function {
                 return_type,
                 positional,
                 named,
@@ -240,7 +187,7 @@ impl Collector<'_, '_> {
                     || self.any_has_interop(positional.iter(), visiting)?
                     || self.any_has_interop(named.iter().map(|(_, ty)| ty), visiting)?,
             ),
-            ResolvedType::Record {
+            ResolvedTypeView::Record {
                 positional, named, ..
             } => Some(
                 self.any_has_interop(positional.iter(), visiting)?
@@ -277,7 +224,7 @@ impl Collector<'_, '_> {
             let left_subtype = self.is_subtype(&left_normalized.ty, &right_normalized.ty);
             let right_subtype = self.is_subtype(&right_normalized.ty, &left_normalized.ty);
             if is_check {
-                if !left_subtype && !matches!(right_normalized.ty, ResolvedType::Dynamic) {
+                if !left_subtype && !matches!(right_normalized.ty.view(), ResolvedTypeView::Dynamic) {
                     return true;
                 }
                 if left_subtype
@@ -289,8 +236,8 @@ impl Collector<'_, '_> {
                 }
             } else if !left_subtype
                 && !right_subtype
-                && !matches!(left_normalized.ty, ResolvedType::Dynamic)
-                && !matches!(right_normalized.ty, ResolvedType::Dynamic)
+                && !matches!(left_normalized.ty.view(), ResolvedTypeView::Dynamic)
+                && !matches!(right_normalized.ty.view(), ResolvedTypeView::Dynamic)
             {
                 return true;
             }
@@ -302,12 +249,12 @@ impl Collector<'_, '_> {
     /// analyzer's `canBeSubtypeOf` does; it never descends into function
     /// types, so their parameters and return types are not checked.
     fn invalid_nested(&self, left: &ResolvedType, right: &ResolvedType, is_check: bool) -> bool {
-        match (left, right) {
+        match (left.view(), right.view()) {
             (
-                ResolvedType::Interface {
+                ResolvedTypeView::Interface {
                     arguments: left, ..
                 },
-                ResolvedType::Interface {
+                ResolvedTypeView::Interface {
                     arguments: right, ..
                 },
             ) if left.len() == right.len() => left
@@ -315,12 +262,12 @@ impl Collector<'_, '_> {
                 .zip(right.iter())
                 .any(|(left, right)| self.invalid_test(left, right, is_check)),
             (
-                ResolvedType::Record {
+                ResolvedTypeView::Record {
                     positional: left_positional,
                     named: left_named,
                     ..
                 },
-                ResolvedType::Record {
+                ResolvedTypeView::Record {
                     positional: right_positional,
                     named: right_named,
                     ..
@@ -330,40 +277,40 @@ impl Collector<'_, '_> {
                     || named_invalid(self, left_named, right_named, is_check)
             }
             (
-                ResolvedType::TypeParameter { bound, .. }
-                | ResolvedType::NonNullTypeParameter { bound, .. },
-                right,
+                ResolvedTypeView::TypeParameter { bound, .. }
+                | ResolvedTypeView::NonNullTypeParameter { bound, .. },
+                _,
             ) => self.invalid_test(bound, right, is_check),
             (
-                left,
-                ResolvedType::TypeParameter { bound, .. }
-                | ResolvedType::NonNullTypeParameter { bound, .. },
+                _,
+                ResolvedTypeView::TypeParameter { bound, .. }
+                | ResolvedTypeView::NonNullTypeParameter { bound, .. },
             ) => self.invalid_test(left, bound, is_check),
             _ => false,
         }
     }
 
     fn is_subtype(&self, left: &ResolvedType, right: &ResolvedType) -> bool {
-        if matches!(left, ResolvedType::Never) || matches!(right, ResolvedType::Dynamic) {
+        if matches!(left.view(), ResolvedTypeView::Never) || matches!(right.view(), ResolvedTypeView::Dynamic) {
             return true;
         }
         // `dynamic` is a subtype of top types only; operands are non-nullable.
-        if matches!(left, ResolvedType::Dynamic) {
+        if matches!(left.view(), ResolvedTypeView::Dynamic) {
             return false;
         }
-        if let ResolvedType::Interface { identity, .. } = right
+        if let ResolvedTypeView::Interface { identity, .. } = right.view()
             && *identity == DeclarationIdentity::OBJECT
         {
             return true;
         }
-        match (left, right) {
+        match (left.view(), right.view()) {
             (
-                ResolvedType::Interface {
+                ResolvedTypeView::Interface {
                     identity: left_identity,
                     arguments: left_arguments,
                     ..
                 },
-                ResolvedType::Interface {
+                ResolvedTypeView::Interface {
                     identity: right_identity,
                     arguments: right_arguments,
                     ..
@@ -385,22 +332,22 @@ impl Collector<'_, '_> {
                     self.model,
                 ) == Truth::Yes
             }
-            (ResolvedType::Null, ResolvedType::Null) => true,
-            (ResolvedType::Void, ResolvedType::Void) => true,
-            (ResolvedType::Function { .. }, ResolvedType::Function { .. })
-            | (ResolvedType::Record { .. }, ResolvedType::Record { .. }) => left == right,
+            (ResolvedTypeView::Null, ResolvedTypeView::Null) => true,
+            (ResolvedTypeView::Void, ResolvedTypeView::Void) => true,
+            (ResolvedTypeView::Function { .. }, ResolvedTypeView::Function { .. })
+            | (ResolvedTypeView::Record { .. }, ResolvedTypeView::Record { .. }) => left == right,
             _ => false,
         }
     }
 
     fn original_subtype(&self, left: &ResolvedType, right: &ResolvedType) -> bool {
-        match (left, right) {
+        match (left.view(), right.view()) {
             (
-                ResolvedType::Interface {
+                ResolvedTypeView::Interface {
                     identity: left_identity,
                     ..
                 },
-                ResolvedType::Interface {
+                ResolvedTypeView::Interface {
                     identity: right_identity,
                     ..
                 },
@@ -413,9 +360,9 @@ impl Collector<'_, '_> {
                     ) == Truth::Yes
             }
             (
-                ResolvedType::TypeParameter { bound, .. }
-                | ResolvedType::NonNullTypeParameter { bound, .. },
-                right,
+                ResolvedTypeView::TypeParameter { bound, .. }
+                | ResolvedTypeView::NonNullTypeParameter { bound, .. },
+                _,
             ) => self.original_subtype(bound, right),
             _ => false,
         }
@@ -520,13 +467,7 @@ fn has_annotation(annotations: &[DeclarationIdentity], name: &str) -> bool {
 }
 
 fn js_type(identity: DeclarationIdentity) -> ResolvedType {
-    ResolvedType::Interface {
-        occurrence: Default::default(),
-        identity,
-        arguments: Vec::new().into(),
-        nullable: false,
-        extension_type: true,
-    }
+    ResolvedType::new_interface(identity, Vec::new().into(), false, true)
 }
 
 fn is_js_sdk(identity: &DeclarationIdentity) -> bool {

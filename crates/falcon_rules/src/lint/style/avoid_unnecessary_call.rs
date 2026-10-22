@@ -4,7 +4,7 @@
 //! static and extension-only call members are deliberately not diagnosed.
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, MemberKind, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, MemberKind, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -36,7 +36,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         }
         let receiver = state.infer(field.object());
-        let callable_instance = matches!(&receiver, ResolvedType::Interface { .. })
+        let callable_instance = matches!(receiver.view(), ResolvedTypeView::Interface { .. })
             && !receiver.nullable()
             && state
                 .signatures
@@ -47,8 +47,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         .any(|fact| fact.kind == MemberKind::Method && !fact.is_static)
                 });
         if matches!(
-            receiver,
-            ResolvedType::Function {
+            receiver.view(),
+            ResolvedTypeView::Function {
                 nullable: false,
                 ..
             }

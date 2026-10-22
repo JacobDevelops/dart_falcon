@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 use falcon_analyze::MemberKind;
 use falcon_analyze::{
-    AnalyzeContext, Feature, ResolvedType, Rule, RulePreparation, Truth, TypeRelation,
+    AnalyzeContext, Feature, ResolvedTypeView, Rule, RulePreparation, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -86,8 +86,10 @@ impl<'a> Collector<'a> {
         } else if field.name() != parameter.name().name() {
             return;
         }
-        let Some(receiver @ ResolvedType::Interface { identity, .. }) = &state.enclosing_type
-        else {
+        let Some(receiver) = &state.enclosing_type else {
+            return;
+        };
+        let ResolvedTypeView::Interface { identity, .. } = receiver.view() else {
             return;
         };
         if !state

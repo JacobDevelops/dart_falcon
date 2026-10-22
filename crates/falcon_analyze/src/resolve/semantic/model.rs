@@ -1,4 +1,5 @@
 use super::*;
+use crate::resolve::semantic::ResolvedTypeKind;
 
 /// Templates are shared across threads, with separate typed and untyped slots.
 /// Clones of an identity index do not retain its derived templates.
@@ -106,7 +107,7 @@ impl TypeParameterScope {
                 .expect("type-parameter scope")
                 .insert(
                     name.clone(),
-                    ResolvedType::TypeParameter {
+                    ResolvedType::from_kind(ResolvedTypeKind::TypeParameter {
                         id: TypeParameterId {
                             owner,
                             ordinal,
@@ -114,11 +115,13 @@ impl TypeParameterScope {
                         },
                         bound: Arc::new(model.core_type("Object", true)),
                         nullable: false,
-                    },
+                    }),
                 );
         }
         for param in params {
-            let Some(ResolvedType::TypeParameter { id, .. }) = self.lookup(param.name().name())
+            let Some(ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter { id, .. },
+            }) = self.lookup(param.name().name())
             else {
                 unreachable!("registered type parameter");
             };
@@ -131,11 +134,11 @@ impl TypeParameterScope {
                 .expect("type-parameter scope")
                 .insert(
                     id.name.clone(),
-                    ResolvedType::TypeParameter {
+                    ResolvedType::from_kind(ResolvedTypeKind::TypeParameter {
                         id,
                         bound: Arc::new(bound),
                         nullable: false,
-                    },
+                    }),
                 );
         }
     }
@@ -322,7 +325,7 @@ impl<'a> SemanticModel<'a> {
         let return_type = param
             .param_type()
             .map(|ty| self.resolve_type_in(ty, parameters))
-            .unwrap_or(ResolvedType::Dynamic);
+            .unwrap_or(ResolvedType::DYNAMIC);
         let Some(function_params) = param.function_params() else {
             return return_type;
         };
@@ -336,7 +339,7 @@ impl<'a> SemanticModel<'a> {
             })
             .collect();
         named.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-        ResolvedType::Function {
+        ResolvedType::from_kind(ResolvedTypeKind::Function {
             shape: FunctionTypeShape::from_scope(
                 function_params
                     .named()
@@ -359,7 +362,7 @@ impl<'a> SemanticModel<'a> {
                 .into(),
             named: named.into(),
             nullable: false,
-        }
+        })
     }
 
     pub(super) fn extension_visible(
@@ -442,7 +445,9 @@ impl<'a> SemanticModel<'a> {
             return identity;
         }
         match self.declared_type(&identity) {
-            ResolvedType::Interface { identity, .. } => identity,
+            ResolvedType {
+                kind: ResolvedTypeKind::Interface { identity, .. },
+            } => identity,
             _ => identity,
         }
     }
@@ -622,13 +627,13 @@ impl<'a> SemanticModel<'a> {
         let extension_type = self.types.is_some_and(|types| {
             types.type_kind_identity(identity) == Some(super::TypeKind::ExtensionType)
         });
-        ResolvedType::Interface {
+        ResolvedType::from_kind(ResolvedTypeKind::Interface {
             occurrence: Default::default(),
             identity: identity.clone(),
             arguments: empty_type_arguments(),
             nullable: false,
             extension_type,
-        }
+        })
     }
 
     pub fn resolve_type_in(
@@ -637,8 +642,8 @@ impl<'a> SemanticModel<'a> {
         parameters: &TypeParameterScope,
     ) -> ResolvedType {
         match ty {
-            DartType::Void(_) => ResolvedType::Void,
-            DartType::Dynamic(_) => ResolvedType::Dynamic,
+            DartType::Void(_) => ResolvedType::VOID,
+            DartType::Dynamic(_) => ResolvedType::DYNAMIC,
             DartType::Named(named) => {
                 let mut segments = named.segments();
                 if let Some(segment) = segments.next()
@@ -650,16 +655,16 @@ impl<'a> SemanticModel<'a> {
                 let Some(identity) = QualifiedName::from_identifiers(named.segments())
                     .and_then(|name| self.resolve_name(name))
                 else {
-                    return ResolvedType::Unknown;
+                    return ResolvedType::UNKNOWN;
                 };
                 if identity.is_sdk("dart:core", "Null") {
-                    return ResolvedType::Null;
+                    return ResolvedType::NULL;
                 }
                 if identity.is_sdk("dart:core", "Never") {
                     return if named.is_nullable() {
-                        ResolvedType::Null
+                        ResolvedType::NULL
                     } else {
-                        ResolvedType::Never
+                        ResolvedType::NEVER
                     };
                 }
                 if let Some(alias) = self.identities.type_alias(&identity) {
@@ -678,7 +683,7 @@ impl<'a> SemanticModel<'a> {
                 let extension_type = self.types.is_some_and(|types| {
                     types.type_kind_identity(&identity) == Some(super::TypeKind::ExtensionType)
                 });
-                ResolvedType::Interface {
+                ResolvedType::from_kind(ResolvedTypeKind::Interface {
                     occurrence: Default::default(),
                     identity,
                     arguments: if named.type_args().is_empty() {
@@ -691,7 +696,7 @@ impl<'a> SemanticModel<'a> {
                     },
                     nullable: named.is_nullable(),
                     extension_type,
-                }
+                })
             }
             DartType::Function(function) => {
                 let mut function_parameters = parameters.clone();
@@ -709,7 +714,7 @@ impl<'a> SemanticModel<'a> {
                     })
                     .collect();
                 named.sort_by(|left, right| left.0.cmp(&right.0));
-                ResolvedType::Function {
+                ResolvedType::from_kind(ResolvedTypeKind::Function {
                     shape: FunctionTypeShape::from_scope(
                         function
                             .params()
@@ -728,7 +733,7 @@ impl<'a> SemanticModel<'a> {
                         function
                             .return_type()
                             .map(|ty| self.resolve_type_in(ty, &function_parameters))
-                            .unwrap_or(ResolvedType::Dynamic),
+                            .unwrap_or(ResolvedType::DYNAMIC),
                     ),
                     positional: if function.params().all(|param| param.is_named()) {
                         empty_type_arguments()
@@ -747,7 +752,7 @@ impl<'a> SemanticModel<'a> {
                         named.into()
                     },
                     nullable: function.is_nullable(),
-                }
+                })
             }
             DartType::Record(record) => {
                 let mut named: Vec<_> = record
@@ -760,7 +765,7 @@ impl<'a> SemanticModel<'a> {
                     })
                     .collect();
                 named.sort_by(|left, right| left.0.cmp(&right.0));
-                ResolvedType::Record {
+                ResolvedType::from_kind(ResolvedTypeKind::Record {
                     occurrence: Default::default(),
                     positional: if record.positional().is_empty() {
                         empty_type_arguments()
@@ -776,7 +781,7 @@ impl<'a> SemanticModel<'a> {
                         named.into()
                     },
                     nullable: record.is_nullable(),
-                }
+                })
             }
         }
     }
@@ -795,7 +800,7 @@ impl<'a> SemanticModel<'a> {
         origin: Option<(Option<FileId>, usize)>,
     ) -> ResolvedType {
         let Some(template) = self.alias_template(alias) else {
-            return ResolvedType::Unknown;
+            return ResolvedType::UNKNOWN;
         };
         let (parameters, aliased) = template.as_ref();
         let mut expanded = if parameters.is_empty() {
@@ -817,7 +822,9 @@ impl<'a> SemanticModel<'a> {
         };
         let has_descendant_provenance = expanded.has_alias_provenance();
         match &mut expanded {
-            ResolvedType::Function { alias, .. } => {
+            ResolvedType {
+                kind: ResolvedTypeKind::Function { alias, .. },
+            } => {
                 *alias = FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
                     identity: identity.clone(),
                     origin,
@@ -858,15 +865,16 @@ impl<'a> SemanticModel<'a> {
                 .type_params()
                 .enumerate()
                 .filter_map(|(ordinal, parameter)| {
-                    let ResolvedType::TypeParameter { id, bound, .. } =
-                        scope.lookup(parameter.name().name())?
+                    let ResolvedType {
+                        kind: ResolvedTypeKind::TypeParameter { id, bound, .. },
+                    } = scope.lookup(parameter.name().name())?
                     else {
                         return None;
                     };
                     let default = if parameter.bound().is_some() {
                         bound.as_ref().clone()
                     } else {
-                        ResolvedType::Dynamic
+                        ResolvedType::DYNAMIC
                     };
                     Some((ordinal, id, default))
                 })
@@ -883,42 +891,62 @@ impl<'a> SemanticModel<'a> {
     }
 
     pub fn core_type(&self, name: &'static str, nullable: bool) -> ResolvedType {
-        ResolvedType::Interface {
+        ResolvedType::from_kind(ResolvedTypeKind::Interface {
             occurrence: Default::default(),
             identity: DeclarationIdentity::sdk("dart:core", name),
             arguments: empty_type_arguments(),
             nullable,
             extension_type: false,
-        }
+        })
     }
 
     pub fn is_future_like(&self, ty: &ResolvedType) -> Truth {
         match ty {
-            ResolvedType::Dynamic | ResolvedType::Null | ResolvedType::Never => Truth::Yes,
-            ResolvedType::Unknown => Truth::Unknown,
-            ResolvedType::Interface {
-                extension_type: true,
-                ..
+            ResolvedType {
+                kind: ResolvedTypeKind::Dynamic,
+            }
+            | ResolvedType {
+                kind: ResolvedTypeKind::Null,
+            }
+            | ResolvedType {
+                kind: ResolvedTypeKind::Never,
             } => Truth::Yes,
-            ResolvedType::Interface {
-                identity: DeclarationIdentity::Sdk { library, name },
-                ..
+            ResolvedType {
+                kind: ResolvedTypeKind::Unknown,
+            } => Truth::Unknown,
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        extension_type: true,
+                        ..
+                    },
+            } => Truth::Yes,
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity: DeclarationIdentity::Sdk { library, name },
+                        ..
+                    },
             } if library.as_str() == "dart:async"
                 && matches!(name.as_str(), "Future" | "FutureOr") =>
             {
                 Truth::Yes
             }
-            ResolvedType::TypeParameter { bound, .. }
-            | ResolvedType::NonNullTypeParameter { bound, .. } => self.is_future_like(bound),
-            ResolvedType::Interface { identity, .. } => {
-                self.types.map_or(Truth::Unknown, |types| {
-                    types.supertype_matches(
-                        identity,
-                        |ancestor| ancestor.is_sdk("dart:async", "Future"),
-                        |name| name == "Future",
-                    )
-                })
+            ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter { bound, .. },
             }
+            | ResolvedType {
+                kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+            } => self.is_future_like(bound),
+            ResolvedType {
+                kind: ResolvedTypeKind::Interface { identity, .. },
+            } => self.types.map_or(Truth::Unknown, |types| {
+                types.supertype_matches(
+                    identity,
+                    |ancestor| ancestor.is_sdk("dart:async", "Future"),
+                    |name| name == "Future",
+                )
+            }),
             _ => Truth::No,
         }
     }
@@ -953,13 +981,17 @@ impl<'a> SemanticModel<'a> {
         // Parameter replacements are leaves in this pass. In particular, do
         // not hash their bounds: neither bounds nor replacements are traversed.
         match ty {
-            ResolvedType::TypeParameter { id, nullable, .. } => {
+            ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter { id, nullable, .. },
+            } => {
                 return substitutions
                     .get(id)
                     .map(|ty| ty.with_nullable(*nullable || ty.nullable()))
                     .unwrap_or_else(|| ty.clone());
             }
-            ResolvedType::NonNullTypeParameter { id, .. } => {
+            ResolvedType {
+                kind: ResolvedTypeKind::NonNullTypeParameter { id, .. },
+            } => {
                 return substitutions
                     .get(id)
                     .map(ResolvedType::non_null)
@@ -994,13 +1026,16 @@ impl<'a> SemanticModel<'a> {
         }
         let mut function_changed = None;
         let result = match ty {
-            ResolvedType::Interface {
-                occurrence,
-                identity,
-                arguments,
-                nullable,
-                extension_type,
-            } => ResolvedType::Interface {
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        occurrence,
+                        identity,
+                        arguments,
+                        nullable,
+                        extension_type,
+                    },
+            } => ResolvedType::from_kind(ResolvedTypeKind::Interface {
                 occurrence: occurrence.clone(),
                 identity: identity.clone(),
                 arguments: arguments
@@ -1011,17 +1046,20 @@ impl<'a> SemanticModel<'a> {
                     .collect(),
                 nullable: *nullable,
                 extension_type: *extension_type,
-            },
-            ResolvedType::Function {
-                return_type,
-                positional,
-                named,
-                nullable,
-                alias,
-                optional_positional,
-                shape,
+            }),
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        return_type,
+                        positional,
+                        named,
+                        nullable,
+                        alias,
+                        optional_positional,
+                        shape,
+                    },
             } => {
-                let mut substituted = ResolvedType::Function {
+                let mut substituted = ResolvedType::from_kind(ResolvedTypeKind::Function {
                     shape: shape.as_ref().map(|shape| {
                         shape.substitute(substitutions, |bound| {
                             self.substitute_memoized_inner(bound, substitutions, records, true)
@@ -1056,12 +1094,15 @@ impl<'a> SemanticModel<'a> {
                         })
                         .collect(),
                     nullable: *nullable,
-                };
+                });
                 let changed = substituted != *ty;
                 function_changed = Some(changed);
-                if let ResolvedType::Function {
-                    alias: result_alias,
-                    ..
+                if let ResolvedType {
+                    kind:
+                        ResolvedTypeKind::Function {
+                            alias: result_alias,
+                            ..
+                        },
                 } = &mut substituted
                 {
                     *result_alias = if changed {
@@ -1072,12 +1113,15 @@ impl<'a> SemanticModel<'a> {
                 }
                 substituted
             }
-            ResolvedType::Record {
-                occurrence,
-                positional,
-                named,
-                nullable,
-            } => ResolvedType::Record {
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Record {
+                        occurrence,
+                        positional,
+                        named,
+                        nullable,
+                    },
+            } => ResolvedType::from_kind(ResolvedTypeKind::Record {
                 occurrence: occurrence.clone(),
                 positional: positional
                     .iter()
@@ -1095,7 +1139,7 @@ impl<'a> SemanticModel<'a> {
                     })
                     .collect(),
                 nullable: *nullable,
-            },
+            }),
             other => other.clone(),
         };
         let result = if function_changed.unwrap_or_else(|| result != *ty) {
@@ -1115,8 +1159,12 @@ impl<'a> SemanticModel<'a> {
     }
 
     pub fn void_context(&self, ty: &ResolvedType) -> bool {
-        matches!(ty, ResolvedType::Void)
-            || matches!(ty, ResolvedType::Interface { identity: DeclarationIdentity::Sdk { library, name }, arguments, .. }
+        matches!(
+            ty,
+            ResolvedType {
+                kind: ResolvedTypeKind::Void
+            }
+        ) || matches!(ty, ResolvedType { kind: ResolvedTypeKind::Interface { identity: DeclarationIdentity::Sdk { library, name }, arguments, .. } }
                 if library.as_str() == "dart:async" && matches!(name.as_str(), "Future" | "FutureOr") && arguments.first().is_some_and(|argument| self.void_context(argument)))
     }
 
@@ -1125,23 +1173,42 @@ impl<'a> SemanticModel<'a> {
         expected: &ResolvedType,
         actual: &ResolvedType,
     ) -> Truth {
-        if matches!(actual, ResolvedType::Unknown) {
+        if matches!(
+            actual,
+            ResolvedType {
+                kind: ResolvedTypeKind::Unknown
+            }
+        ) {
             return Truth::Unknown;
         }
-        if matches!(expected, ResolvedType::Void) {
+        if matches!(
+            expected,
+            ResolvedType {
+                kind: ResolvedTypeKind::Void
+            }
+        ) {
             return if matches!(
                 actual,
-                ResolvedType::Void | ResolvedType::Null | ResolvedType::Never
+                ResolvedType {
+                    kind: ResolvedTypeKind::Void
+                } | ResolvedType {
+                    kind: ResolvedTypeKind::Null
+                } | ResolvedType {
+                    kind: ResolvedTypeKind::Never
+                }
             ) {
                 Truth::Yes
             } else {
                 Truth::No
             };
         }
-        let ResolvedType::Interface {
-            identity: DeclarationIdentity::Sdk { library, name },
-            arguments,
-            ..
+        let ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    identity: DeclarationIdentity::Sdk { library, name },
+                    arguments,
+                    ..
+                },
         } = expected
         else {
             return Truth::Unknown;
@@ -1149,12 +1216,25 @@ impl<'a> SemanticModel<'a> {
         if *library != "dart:async" || !matches!(name.as_str(), "Future" | "FutureOr") {
             return Truth::Unknown;
         }
-        if *name == "FutureOr" && matches!(actual, ResolvedType::Dynamic) {
+        if *name == "FutureOr"
+            && matches!(
+                actual,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Dynamic
+                }
+            )
+        {
             return Truth::Yes;
         }
         if matches!(
             actual,
-            ResolvedType::Null | ResolvedType::Never | ResolvedType::Void
+            ResolvedType {
+                kind: ResolvedTypeKind::Null
+            } | ResolvedType {
+                kind: ResolvedTypeKind::Never
+            } | ResolvedType {
+                kind: ResolvedTypeKind::Void
+            }
         ) && *name == "FutureOr"
         {
             return Truth::Yes;
@@ -1162,14 +1242,17 @@ impl<'a> SemanticModel<'a> {
         let Some(expected_argument) = arguments.first() else {
             return Truth::Unknown;
         };
-        let ResolvedType::Interface {
-            identity:
-                DeclarationIdentity::Sdk {
-                    library: actual_library,
-                    name: actual_name,
+        let ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    identity:
+                        DeclarationIdentity::Sdk {
+                            library: actual_library,
+                            name: actual_name,
+                        },
+                    arguments: actual_arguments,
+                    ..
                 },
-            arguments: actual_arguments,
-            ..
         } = actual
         else {
             return Truth::No;
@@ -1195,16 +1278,26 @@ impl<'a> SemanticModel<'a> {
     pub(super) fn structural_unrelated(&self, left: &ResolvedType, right: &ResolvedType) -> Truth {
         if matches!(
             left,
-            ResolvedType::Unknown
-                | ResolvedType::Dynamic
-                | ResolvedType::Never
-                | ResolvedType::Null
+            ResolvedType {
+                kind: ResolvedTypeKind::Unknown
+            } | ResolvedType {
+                kind: ResolvedTypeKind::Dynamic
+            } | ResolvedType {
+                kind: ResolvedTypeKind::Never
+            } | ResolvedType {
+                kind: ResolvedTypeKind::Null
+            }
         ) || matches!(
             right,
-            ResolvedType::Unknown
-                | ResolvedType::Dynamic
-                | ResolvedType::Never
-                | ResolvedType::Null
+            ResolvedType {
+                kind: ResolvedTypeKind::Unknown
+            } | ResolvedType {
+                kind: ResolvedTypeKind::Dynamic
+            } | ResolvedType {
+                kind: ResolvedTypeKind::Never
+            } | ResolvedType {
+                kind: ResolvedTypeKind::Null
+            }
         ) {
             return Truth::Unknown;
         }
@@ -1219,15 +1312,21 @@ impl<'a> SemanticModel<'a> {
         }
         match (left, right) {
             (
-                ResolvedType::Interface {
-                    identity: left_id,
-                    arguments: left_arguments,
-                    ..
+                ResolvedType {
+                    kind:
+                        ResolvedTypeKind::Interface {
+                            identity: left_id,
+                            arguments: left_arguments,
+                            ..
+                        },
                 },
-                ResolvedType::Interface {
-                    identity: right_id,
-                    arguments: right_arguments,
-                    ..
+                ResolvedType {
+                    kind:
+                        ResolvedTypeKind::Interface {
+                            identity: right_id,
+                            arguments: right_arguments,
+                            ..
+                        },
                 },
             ) => {
                 if left_id == right_id {
@@ -1264,23 +1363,59 @@ impl<'a> SemanticModel<'a> {
                     _ => Truth::Unknown,
                 }
             }
-            (ResolvedType::NonNullTypeParameter { bound, .. }, other)
-            | (other, ResolvedType::NonNullTypeParameter { bound, .. }) => {
-                self.structural_unrelated(&bound.non_null(), other)
-            }
-            (ResolvedType::TypeParameter { bound, .. }, other)
-            | (other, ResolvedType::TypeParameter { bound, .. }) => {
-                self.structural_unrelated(bound, other)
-            }
-            (ResolvedType::Function { .. }, ResolvedType::Function { .. })
-            | (ResolvedType::Record { .. }, ResolvedType::Record { .. }) => {
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+                },
+                other,
+            )
+            | (
+                other,
+                ResolvedType {
+                    kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+                },
+            ) => self.structural_unrelated(&bound.non_null(), other),
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { bound, .. },
+                },
+                other,
+            )
+            | (
+                other,
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { bound, .. },
+                },
+            ) => self.structural_unrelated(bound, other),
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function { .. },
+                },
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function { .. },
+                },
+            )
+            | (
+                ResolvedType {
+                    kind: ResolvedTypeKind::Record { .. },
+                },
+                ResolvedType {
+                    kind: ResolvedTypeKind::Record { .. },
+                },
+            ) => {
                 fn fields(ty: &ResolvedType) -> (&[ResolvedType], &[(String, ResolvedType)]) {
                     match ty {
-                        ResolvedType::Function {
-                            positional, named, ..
+                        ResolvedType {
+                            kind:
+                                ResolvedTypeKind::Function {
+                                    positional, named, ..
+                                },
                         } => (positional.as_ref(), named.as_ref()),
-                        ResolvedType::Record {
-                            positional, named, ..
+                        ResolvedType {
+                            kind:
+                                ResolvedTypeKind::Record {
+                                    positional, named, ..
+                                },
                         } => (positional.as_ref(), named.as_ref()),
                         _ => unreachable!(),
                     }
@@ -1296,13 +1431,19 @@ impl<'a> SemanticModel<'a> {
                     return Truth::Yes;
                 }
                 if let (
-                    ResolvedType::Function {
-                        return_type: left_return,
-                        ..
+                    ResolvedType {
+                        kind:
+                            ResolvedTypeKind::Function {
+                                return_type: left_return,
+                                ..
+                            },
                     },
-                    ResolvedType::Function {
-                        return_type: right_return,
-                        ..
+                    ResolvedType {
+                        kind:
+                            ResolvedTypeKind::Function {
+                                return_type: right_return,
+                                ..
+                            },
                     },
                 ) = (left, right)
                     && self.structural_unrelated(left_return, right_return) == Truth::Yes

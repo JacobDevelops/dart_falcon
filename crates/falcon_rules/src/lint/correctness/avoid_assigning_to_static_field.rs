@@ -2,7 +2,7 @@
 //! assignments and increments. Static methods, top-level functions, declarations,
 //! instance fields, setters, and shadowed names are excluded.
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, MemberKind, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, MemberKind, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -50,7 +50,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 if !state.environment.is_bound(id.name())
                     || state.environment.is_bound_in_root_scope(id.name()) =>
             {
-                let Some(ResolvedType::Interface { identity, .. }) = state.enclosing_type.as_ref()
+                let Some(ResolvedTypeView::Interface { identity, .. }) = state.enclosing_type.as_ref().map(ResolvedType::view)
                 else {
                     return;
                 };
@@ -64,12 +64,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 if state.environment.is_bound(segments[0]) {
                     return;
                 }
-                let Some(ResolvedType::Interface { identity, .. }) =
-                    state.model.resolve_type_name(&segments)
+                let resolved = state.model.resolve_type_name(&segments);
+                let Some(ResolvedTypeView::Interface { identity, .. }) =
+                    resolved.as_ref().map(ResolvedType::view)
                 else {
                     return;
                 };
-                (identity, field.field().name())
+                (identity.clone(), field.field().name())
             }
             _ => return,
         };

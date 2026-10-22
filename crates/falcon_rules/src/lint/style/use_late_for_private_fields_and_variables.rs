@@ -31,7 +31,7 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth,
     TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
@@ -397,17 +397,17 @@ fn potentially_nullable<'a>(
         (Some(ty), _) => state.model.resolve_type_in(ty, scope),
         // Without a type or initializer the variable is `dynamic`; a `null`
         // initializer also infers `dynamic`.
-        (None, None | Some(Expr::NullLit(_))) => ResolvedType::Dynamic,
+        (None, None | Some(Expr::NullLit(_))) => ResolvedType::DYNAMIC,
         (None, Some(initializer)) => state.infer(initializer),
     };
-    match &ty {
-        ResolvedType::Dynamic => true,
-        ResolvedType::TypeParameter {
+    match ty.view() {
+        ResolvedTypeView::Dynamic => true,
+        ResolvedTypeView::TypeParameter {
             bound,
             nullable: false,
             ..
         } => {
-            matches!(bound.as_ref(), ResolvedType::Dynamic)
+            matches!(bound.view(), ResolvedTypeView::Dynamic)
                 || nullability(bound, &state.signatures, ctx.types()) == Truth::Yes
         }
         _ => nullability(&ty, &state.signatures, ctx.types()) == Truth::Yes,

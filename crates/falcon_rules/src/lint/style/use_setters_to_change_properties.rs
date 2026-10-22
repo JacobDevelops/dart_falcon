@@ -25,7 +25,7 @@
 //! Adopted from the official `use_setters_to_change_properties` lint.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, Rule, RulePreparation,
+    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
     SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal, TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
@@ -94,7 +94,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
                     };
                     let unresolved_super = match decl {
                         TopLevelDecl::Class(class) => class.extends().is_some_and(|ty| {
-                            matches!(model.resolve_type(ty), ResolvedType::Unknown)
+                            matches!(model.resolve_type(ty).view(), ResolvedTypeView::Unknown)
                         }),
                         _ => false,
                     };
@@ -146,14 +146,14 @@ fn changes_property<'a>(
         return false;
     };
     let mut owner_type = owner_type;
-    while let ResolvedType::TypeParameter { bound, .. }
-    | ResolvedType::NonNullTypeParameter { bound, .. } = owner_type
+    while let ResolvedTypeView::TypeParameter { bound, .. }
+    | ResolvedTypeView::NonNullTypeParameter { bound, .. } = owner_type.view()
     {
         owner_type = bound;
     }
-    let ResolvedType::Interface {
+    let ResolvedTypeView::Interface {
         identity: owner, ..
-    } = owner_type
+    } = owner_type.view()
     else {
         return false;
     };

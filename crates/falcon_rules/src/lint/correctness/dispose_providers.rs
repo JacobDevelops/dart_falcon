@@ -11,7 +11,7 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, MemberKind, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, MemberKind, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -178,7 +178,7 @@ fn created_type<'a>(
     let returned = match create.unparenthesized() {
         Expr::FuncExpr(function) => {
             let Some(returned) = returned_expression(function.body()) else {
-                return ResolvedType::Unknown;
+                return ResolvedType::UNKNOWN;
             };
             let head = match returned.unparenthesized() {
                 Expr::Call(call) => falcon_analyze::expression_segments(call.callee(), true)
@@ -187,7 +187,7 @@ fn created_type<'a>(
             };
             if head.is_some_and(|head| function.params().params().any(|p| p.name().name() == head))
             {
-                return ResolvedType::Unknown;
+                return ResolvedType::UNKNOWN;
             }
             returned
         }
@@ -203,10 +203,10 @@ fn created_type<'a>(
                     _ => None,
                 })
             else {
-                return ResolvedType::Unknown;
+                return ResolvedType::UNKNOWN;
             };
             let Some(returned) = function.body().and_then(returned_expression) else {
-                return ResolvedType::Unknown;
+                return ResolvedType::UNKNOWN;
             };
             let head = match returned.unparenthesized() {
                 Expr::Call(call) => falcon_analyze::expression_segments(call.callee(), true)
@@ -218,16 +218,16 @@ fn created_type<'a>(
                     .params()
                     .is_some_and(|params| params.params().any(|p| p.name().name() == head))
             }) {
-                return ResolvedType::Unknown;
+                return ResolvedType::UNKNOWN;
             }
             returned
         }
-        _ => return ResolvedType::Unknown,
+        _ => return ResolvedType::UNKNOWN,
     };
     let Some((identity, constructor, _)) =
         scoped_constructor_invocation(returned.unparenthesized(), state)
     else {
-        return ResolvedType::Unknown;
+        return ResolvedType::UNKNOWN;
     };
     if !state.signatures.has_constructor(&identity, constructor)
         || state
@@ -240,11 +240,11 @@ fn created_type<'a>(
                     .any(|fact| fact.name == constructor && fact.is_factory)
             })
     {
-        return ResolvedType::Unknown;
+        return ResolvedType::UNKNOWN;
     }
-    match state.infer(create) {
-        ResolvedType::Function { return_type, .. } => (*return_type).clone(),
-        _ => ResolvedType::Unknown,
+    match state.infer(create).view() {
+        ResolvedTypeView::Function { return_type, .. } => (**return_type).clone(),
+        _ => ResolvedType::UNKNOWN,
     }
 }
 

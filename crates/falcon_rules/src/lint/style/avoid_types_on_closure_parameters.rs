@@ -26,7 +26,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, SemanticModel};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{self as visitor, Visitor};
 use falcon_syntax::cst::*;
@@ -202,7 +202,7 @@ impl Collector<'_> {
             return *function;
         }
         let Some(frame) = self.returned.get(&id) else {
-            return matches!(expected, Some(ResolvedType::Function { .. }));
+            return matches!(expected.map(ResolvedType::view), Some(ResolvedTypeView::Function { .. }));
         };
         // A returned value's context is the declared or contextual return type
         // only when an `async` body returns `Future<F>`; the walker gives it
@@ -212,9 +212,9 @@ impl Collector<'_> {
             ReturnFrame::AsyncClosure(closure) => self.future_closures.contains(closure),
         };
         future
-            && matches!(expected, Some(ResolvedType::Interface { identity, arguments, .. })
+            && matches!(expected.map(ResolvedType::view), Some(ResolvedTypeView::Interface { identity, arguments, .. })
                 if identity.is_sdk("dart:async", "FutureOr")
-                    && matches!(arguments.first(), Some(ResolvedType::Function { .. })))
+                    && matches!(arguments.first().map(ResolvedType::view), Some(ResolvedTypeView::Function { .. })))
     }
 
     fn uncontextual_element(&mut self, element: CollectionElement<'_>) {
@@ -319,16 +319,16 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             }
             Expr::Assign(assign) => {
                 let function = matches!(
-                    state.infer_with_context(node, state.expected()),
-                    ResolvedType::Function { .. }
+                    state.infer_with_context(node, state.expected()).view(),
+                    ResolvedTypeView::Function { .. }
                 );
                 self.expression_contexts
                     .insert(assign.value().syntax().id(), function);
             }
             Expr::Conditional(conditional) => {
                 let function = matches!(
-                    state.infer_with_context(node, state.expected()),
-                    ResolvedType::Function { .. }
+                    state.infer_with_context(node, state.expected()).view(),
+                    ResolvedTypeView::Function { .. }
                 );
                 self.expression_contexts
                     .insert(conditional.then_expr().syntax().id(), function);
@@ -341,8 +341,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         };
         if closure.async_marker() == AsyncMarker::Async
-            && matches!(state.expected(), Some(ResolvedType::Function { return_type, .. })
-                if matches!(&**return_type, ResolvedType::Interface { identity, .. }
+            && matches!(state.expected().map(ResolvedType::view), Some(ResolvedTypeView::Function { return_type, .. })
+                if matches!(return_type.view(), ResolvedTypeView::Interface { identity, .. }
                     if identity.is_sdk("dart:async", "Future")))
         {
             self.future_closures.insert(node.syntax().id());
@@ -361,8 +361,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 match param.param_type() {
                     Some(ty @ DartType::Named(named))
                         if !matches!(
-                            state.model.resolve_type_in(ty, &state.type_parameters),
-                            ResolvedType::Dynamic
+                            state.model.resolve_type_in(ty, &state.type_parameters).view(),
+                            ResolvedTypeView::Dynamic
                         ) =>
                     {
                         named.span()

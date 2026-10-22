@@ -9,7 +9,7 @@
 //! suggestion retains eager evaluation and element order; no automatic fix is made.
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -101,11 +101,12 @@ impl<'a> Collector<'a> {
         {
             return;
         }
-        let ResolvedType::Interface {
+        let receiver = state.infer(map_field.object());
+        let ResolvedTypeView::Interface {
             identity,
             nullable: false,
             ..
-        } = state.infer(map_field.object())
+        } = receiver.view()
         else {
             return;
         };

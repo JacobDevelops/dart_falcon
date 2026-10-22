@@ -43,8 +43,9 @@ use super::{DocName, flow, flow_writes, identity};
 mod types;
 pub(super) use types::has_inference_holes;
 use types::*;
+pub(crate) use types::{FunctionTypeAlias, ResolvedTypeKind};
 pub use types::{
-    FunctionTypeAlias, FunctionTypeShape, ParameterOwner, ResolvedType, TypeParameterId,
+    FunctionTypeShape, ParameterOwner, ResolvedType, ResolvedTypeView, TypeParameterId,
 };
 mod model;
 pub(crate) use model::AliasTemplates;

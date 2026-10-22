@@ -26,7 +26,7 @@
 //! Adopted from the official `matching_super_parameters` lint.
 
 use falcon_analyze::{
-    AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel, SignatureIndex,
+    AnalyzeContext, ResolvedTypeView, Rule, RulePreparation, SemanticModel, SignatureIndex,
     StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
@@ -69,10 +69,11 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             let Some(superclass) = class.extends() else {
                 return StructuralTraversal::SkipChildren;
             };
-            let ResolvedType::Interface { identity, .. } = self.model.resolve_type(superclass) else {
+            let resolved = self.model.resolve_type(superclass);
+            let ResolvedTypeView::Interface { identity, .. } = resolved.view() else {
                 return StructuralTraversal::SkipChildren;
             };
-            let Some(facts) = self.signatures.declaration(&identity) else {
+            let Some(facts) = self.signatures.declaration(identity) else {
                 return StructuralTraversal::SkipChildren;
             };
             for constructor in class.element_members().constructors() {

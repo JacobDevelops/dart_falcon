@@ -11,7 +11,7 @@
 //! frame.
 
 use falcon_analyze::{
-    AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
+    AnalyzeContext, ResolvedTypeView, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
     StructuralTraversal, TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
@@ -70,10 +70,10 @@ impl Collector<'_> {
         };
         let ty = self.model.resolve_type_in(rt, &self.parameters);
         match marker {
-            AsyncMarker::Sync => matches!(ty, ResolvedType::Void),
+            AsyncMarker::Sync => matches!(ty.view(), ResolvedTypeView::Void),
             AsyncMarker::Async => {
                 ty.interface("dart:async", "Future")
-                    && matches!(ty.arguments(), [ResolvedType::Void])
+                    && matches!(ty.arguments(), [argument] if matches!(argument.view(), ResolvedTypeView::Void))
             }
             _ => false,
         }

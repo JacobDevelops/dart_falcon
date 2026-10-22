@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
     ConstantContext, ConstantValue, DeclarationIdentity, MemberKind, NameIdentity, QualifiedName,
-    ResolvedType, SemanticModel, SignatureIndex, evaluate_constant, evaluate_construction,
-    expression_segments, invocation_type_args, resolve_call_constructor,
+    ResolvedType, ResolvedTypeView, SemanticModel, SignatureIndex, evaluate_constant,
+    evaluate_construction, expression_segments, invocation_type_args, resolve_call_constructor,
 };
 use falcon_analyze::{class_has_primitive_equality, constant_operands_all};
 use falcon_syntax::cst::visit::{Visitor, walk_arg_list, walk_expr};
@@ -592,7 +592,7 @@ impl ConstantExpressions<'_, '_> {
         args: ArgList<'a>,
     ) -> bool {
         if let Expr::DotShorthand(shorthand) = callee.unparenthesized() {
-            return matches!(self.state.expected(), Some(ResolvedType::Interface { identity, .. })
+            return matches!(self.state.expected().map(ResolvedType::view), Some(ResolvedTypeView::Interface { identity, .. })
                 if self.invocation(identity, shorthand.name().name(), type_args, args));
         }
         let Some(segments) = expression_segments(callee, true) else {
@@ -779,8 +779,8 @@ impl ConstantExpressions<'_, '_> {
                 Some(ConstantValue::Null | ConstantValue::Bool(_) | ConstantValue::String(_))
             ),
             Expr::New(construction) => matches!(
-                model.resolve_type(construction.dart_type()),
-                ResolvedType::Interface { identity, .. } if class_has_primitive_equality(&identity, signatures)
+                model.resolve_type(construction.dart_type()).view(),
+                ResolvedTypeView::Interface { identity, .. } if class_has_primitive_equality(identity, signatures)
             ),
             Expr::Call(call) => resolve_call_constructor(call.callee(), model, true)
                 .is_some_and(|(identity, _)| class_has_primitive_equality(&identity, signatures)),
@@ -856,10 +856,14 @@ fn has_unescaped_dollar(raw: &str) -> bool {
 
 /// Whether `ty` mentions a type parameter anywhere.
 pub(crate) fn mentions_type_parameter(ty: &ResolvedType) -> bool {
-    match ty {
-        ResolvedType::TypeParameter { .. } | ResolvedType::NonNullTypeParameter { .. } => true,
-        ResolvedType::Interface { arguments, .. } => arguments.iter().any(mentions_type_parameter),
-        ResolvedType::Function {
+    match ty.view() {
+        ResolvedTypeView::TypeParameter { .. } | ResolvedTypeView::NonNullTypeParameter { .. } => {
+            true
+        }
+        ResolvedTypeView::Interface { arguments, .. } => {
+            arguments.iter().any(mentions_type_parameter)
+        }
+        ResolvedTypeView::Function {
             return_type,
             positional,
             named,
@@ -869,16 +873,16 @@ pub(crate) fn mentions_type_parameter(ty: &ResolvedType) -> bool {
                 || positional.iter().any(mentions_type_parameter)
                 || named.iter().any(|(_, ty)| mentions_type_parameter(ty))
         }
-        ResolvedType::Record {
+        ResolvedTypeView::Record {
             positional, named, ..
         } => {
             positional.iter().any(mentions_type_parameter)
                 || named.iter().any(|(_, ty)| mentions_type_parameter(ty))
         }
-        ResolvedType::Unknown
-        | ResolvedType::Dynamic
-        | ResolvedType::Void
-        | ResolvedType::Never
-        | ResolvedType::Null => false,
+        ResolvedTypeView::Unknown
+        | ResolvedTypeView::Dynamic
+        | ResolvedTypeView::Void
+        | ResolvedTypeView::Never
+        | ResolvedTypeView::Null => false,
     }
 }

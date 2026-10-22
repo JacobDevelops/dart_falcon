@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use falcon_analyze::{
-    AnalyzeContext, ResolvedType, RuleAnalysis, RulePreparation, SemanticRuleVisitor,
-    SemanticState, SignatureIndex, returned_expressions, visit_program,
+    AnalyzeContext, ResolvedType, ResolvedTypeView, RuleAnalysis, RulePreparation,
+    SemanticRuleVisitor, SemanticState, SignatureIndex, returned_expressions, visit_program,
 };
 use falcon_dart_parser::parse;
 use falcon_syntax::cst::*;
@@ -61,9 +61,9 @@ fn generic_predicate_closure_keeps_completed_input_context() {
             _: &HashMap<String, ResolvedType>,
             state: &SemanticState<'a>,
         ) {
-            let ResolvedType::Function {
+            let ResolvedTypeView::Function {
                 positional: inputs, ..
-            } = &positional[0]
+            } = positional[0].view()
             else {
                 panic!("callback context: {positional:?}")
             };
@@ -230,9 +230,9 @@ class GenericLookup {
     assert_eq!(
         observed.elements,
         [
-            ResolvedType::Dynamic,
-            ResolvedType::Dynamic,
-            ResolvedType::Unknown,
+            ResolvedType::DYNAMIC,
+            ResolvedType::DYNAMIC,
+            ResolvedType::UNKNOWN,
         ]
     );
     assert_eq!(
@@ -258,7 +258,7 @@ class GenericLookup {
     );
     assert!(element_contexts[2].interface("dart:core", "String"));
     assert!(element_contexts[3].interface("dart:core", "int"));
-    assert_eq!(observed.element_contexts[4].1, Some(ResolvedType::Unknown));
+    assert_eq!(observed.element_contexts[4].1, Some(ResolvedType::UNKNOWN));
     let implicit = observed.implicit_call.unwrap();
     assert!(implicit.is_empty());
     let explicit = observed.explicit_call.unwrap();
@@ -454,7 +454,7 @@ void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
 
     fn assert_value(state: &SemanticState<'_>, ty: &ResolvedType, nullable: bool) {
         assert!(
-            matches!(ty, ResolvedType::Interface { identity, .. }
+            matches!(ty.view(), ResolvedTypeView::Interface { identity, .. }
                 if Some(identity.clone()) == state.model.resolve_name("Value")),
             "{ty:?}"
         );
@@ -784,10 +784,10 @@ void assertedCascade(C value) {
                 let ty = if list.type_arg().is_some() {
                     state.infer_with_context(node, state.expected())
                 } else {
-                    state.expected().cloned().unwrap_or(ResolvedType::Unknown)
+                    state.expected().cloned().unwrap_or(ResolvedType::UNKNOWN)
                 };
                 self.elements
-                    .push(ty.type_argument(0).unwrap_or(ResolvedType::Unknown));
+                    .push(ty.type_argument(0).unwrap_or(ResolvedType::UNKNOWN));
             }
         }
         fn visit_cascade_operation(
@@ -809,7 +809,7 @@ void assertedCascade(C value) {
     assert!(observed.promoted);
     assert_eq!(
         observed.elements,
-        [ResolvedType::Void, ResolvedType::Dynamic]
+        [ResolvedType::VOID, ResolvedType::DYNAMIC]
     );
     assert_eq!(observed.cascade_nullable, [false, true, false, true, false]);
 }

@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::ResolvedType;
+use falcon_analyze::ResolvedTypeView;
 use falcon_analyze::LocalWrite;
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
@@ -194,7 +194,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if within_loop
             && (matches!(expression, Expr::Await(_) | Expr::Throw(_))
                 || matches!(expression, Expr::Call(_))
-                    && matches!(state.infer(expression), ResolvedType::Never))
+                    && matches!(state.infer(expression).view(), ResolvedTypeView::Never))
         {
             for candidate in &mut self.loops {
                 if candidate.span.contains(expression.span()) {

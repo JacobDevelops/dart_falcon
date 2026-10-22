@@ -170,7 +170,7 @@ pub struct TypeParameterId {
 
 /// Typedef provenance is metadata, not part of structural function-type equality.
 #[derive(Debug, Clone, Default, Eq)]
-pub struct FunctionTypeAlias(pub(super) Option<Arc<AliasProvenance>>);
+pub(crate) struct FunctionTypeAlias(pub(super) Option<Arc<AliasProvenance>>);
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum AliasProvenance {
@@ -245,7 +245,7 @@ impl AliasProvenance {
 }
 
 impl FunctionTypeAlias {
-    pub fn identity(&self) -> Option<&DeclarationIdentity> {
+    pub(crate) fn identity(&self) -> Option<&DeclarationIdentity> {
         self.0.as_ref().and_then(|alias| alias.identity())
     }
 
@@ -354,22 +354,22 @@ impl FunctionTypeShape {
     ) -> Arc<Self> {
         let mut mapped = None;
         for (index, parameter) in self.type_parameters.iter().enumerate() {
-            let ResolvedType::TypeParameter {
+            let ResolvedTypeKind::TypeParameter {
                 id,
                 bound,
                 nullable,
-            } = parameter
+            } = &parameter.kind
             else {
                 continue;
             };
             let result = map(bound);
             if result != **bound {
                 let parameters = mapped.get_or_insert_with(|| self.type_parameters.to_vec());
-                parameters[index] = ResolvedType::TypeParameter {
+                parameters[index] = ResolvedType::from_kind(ResolvedTypeKind::TypeParameter {
                     id: id.clone(),
                     bound: Arc::new(result),
                     nullable: *nullable,
-                };
+                });
             }
         }
         mapped.map_or_else(
@@ -392,14 +392,14 @@ impl FunctionTypeShape {
     ) -> Arc<Self> {
         let mapped = self.map_bounds(map);
         if !self.type_parameters.iter().any(|parameter| {
-            matches!(parameter, ResolvedType::TypeParameter { id, .. } if substitutions.contains_key(id))
+            matches!(&parameter.kind, ResolvedTypeKind::TypeParameter { id, .. } if substitutions.contains_key(id))
         }) {
             return mapped;
         }
         Self::new(
             mapped.required_named.to_vec(),
             mapped.type_parameters.iter().filter(|parameter| {
-                !matches!(parameter, ResolvedType::TypeParameter { id, .. } if substitutions.contains_key(id))
+                !matches!(&parameter.kind, ResolvedTypeKind::TypeParameter { id, .. } if substitutions.contains_key(id))
             }).cloned().collect(),
         )
     }
@@ -416,8 +416,74 @@ impl FunctionTypeShape {
     }
 }
 
+/// A resolved semantic type. Inspect semantic fields with [`Self::view`].
+/// Occurrence and alias provenance remain private to the analyzer.
+///
+/// ```compile_fail
+/// use falcon_analyze::ResolvedType;
+/// let _ = ResolvedType { kind: ResolvedType::UNKNOWN.kind };
+/// ```
+///
+/// ```
+/// use falcon_analyze::{ResolvedType, ResolvedTypeView};
+/// assert!(matches!(ResolvedType::UNKNOWN.view(), ResolvedTypeView::Unknown));
+/// ```
+///
+/// ```compile_fail
+/// use falcon_analyze::ResolvedType;
+/// let _ = ResolvedType::Unknown;
+/// ```
+#[derive(Clone)]
+pub struct ResolvedType {
+    pub(crate) kind: ResolvedTypeKind,
+}
+
+impl std::fmt::Debug for ResolvedType {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.kind, formatter)
+    }
+}
+
+/// Borrowed semantic fields, without analyzer occurrence or alias metadata.
+#[derive(Debug, Clone, Copy)]
+pub enum ResolvedTypeView<'a> {
+    Unknown,
+    Dynamic,
+    Void,
+    Never,
+    Null,
+    Interface {
+        identity: &'a DeclarationIdentity,
+        arguments: &'a Arc<[ResolvedType]>,
+        nullable: bool,
+        extension_type: bool,
+    },
+    TypeParameter {
+        id: &'a TypeParameterId,
+        bound: &'a Arc<ResolvedType>,
+        nullable: bool,
+    },
+    NonNullTypeParameter {
+        id: &'a TypeParameterId,
+        bound: &'a Arc<ResolvedType>,
+    },
+    Function {
+        shape: &'a Option<Arc<FunctionTypeShape>>,
+        optional_positional: usize,
+        return_type: &'a Arc<ResolvedType>,
+        positional: &'a Arc<[ResolvedType]>,
+        named: &'a Arc<[(String, ResolvedType)]>,
+        nullable: bool,
+    },
+    Record {
+        positional: &'a Arc<[ResolvedType]>,
+        named: &'a Arc<[(String, ResolvedType)]>,
+        nullable: bool,
+    },
+}
+
 #[derive(Debug, Clone)]
-pub enum ResolvedType {
+pub(crate) enum ResolvedTypeKind {
     Unknown,
     Dynamic,
     Void,
@@ -458,6 +524,38 @@ pub enum ResolvedType {
     },
 }
 
+fn map_type_children(
+    children: &mut Arc<[ResolvedType]>,
+    map: &mut impl FnMut(&ResolvedType) -> ResolvedType,
+) {
+    let mut mapped = None;
+    for (index, child) in children.iter().enumerate() {
+        let result = map(child);
+        if result != *child {
+            mapped.get_or_insert_with(|| children.to_vec())[index] = result;
+        }
+    }
+    if let Some(mapped) = mapped {
+        *children = mapped.into();
+    }
+}
+
+fn map_named_children(
+    children: &mut Arc<[(String, ResolvedType)]>,
+    map: &mut impl FnMut(&ResolvedType) -> ResolvedType,
+) {
+    let mut mapped = None;
+    for (index, (_, child)) in children.iter().enumerate() {
+        let result = map(child);
+        if result != *child {
+            mapped.get_or_insert_with(|| children.to_vec())[index].1 = result;
+        }
+    }
+    if let Some(mapped) = mapped {
+        *children = mapped.into();
+    }
+}
+
 impl PartialEq for ResolvedType {
     fn eq(&self, other: &Self) -> bool {
         if std::ptr::eq(self, other) {
@@ -477,6 +575,191 @@ pub(super) enum AliasComparison {
 }
 
 impl ResolvedType {
+    pub const UNKNOWN: Self = Self::from_kind(ResolvedTypeKind::Unknown);
+    pub const DYNAMIC: Self = Self::from_kind(ResolvedTypeKind::Dynamic);
+    pub const VOID: Self = Self::from_kind(ResolvedTypeKind::Void);
+    pub const NEVER: Self = Self::from_kind(ResolvedTypeKind::Never);
+    pub const NULL: Self = Self::from_kind(ResolvedTypeKind::Null);
+
+    pub(crate) const fn from_kind(kind: ResolvedTypeKind) -> Self {
+        Self { kind }
+    }
+
+    pub fn new_interface(
+        identity: DeclarationIdentity,
+        arguments: Arc<[ResolvedType]>,
+        nullable: bool,
+        extension_type: bool,
+    ) -> Self {
+        Self::from_kind(ResolvedTypeKind::Interface {
+            occurrence: Default::default(),
+            identity,
+            arguments,
+            nullable,
+            extension_type,
+        })
+    }
+
+    pub fn new_type_parameter(
+        id: TypeParameterId,
+        bound: Arc<ResolvedType>,
+        nullable: bool,
+    ) -> Self {
+        Self::from_kind(ResolvedTypeKind::TypeParameter {
+            id,
+            bound,
+            nullable,
+        })
+    }
+
+    pub fn new_non_null_type_parameter(id: TypeParameterId, bound: Arc<ResolvedType>) -> Self {
+        Self::from_kind(ResolvedTypeKind::NonNullTypeParameter { id, bound })
+    }
+
+    pub fn new_function(
+        shape: Option<Arc<FunctionTypeShape>>,
+        optional_positional: usize,
+        return_type: Arc<ResolvedType>,
+        positional: Arc<[ResolvedType]>,
+        named: Arc<[(String, ResolvedType)]>,
+        nullable: bool,
+    ) -> Self {
+        Self::from_kind(ResolvedTypeKind::Function {
+            shape,
+            alias: Default::default(),
+            optional_positional,
+            return_type,
+            positional,
+            named,
+            nullable,
+        })
+    }
+
+    pub fn new_record(
+        positional: Arc<[ResolvedType]>,
+        named: Arc<[(String, ResolvedType)]>,
+        nullable: bool,
+    ) -> Self {
+        Self::from_kind(ResolvedTypeKind::Record {
+            occurrence: Default::default(),
+            positional,
+            named,
+            nullable,
+        })
+    }
+
+    /// The typedef declaration behind a function type, when available.
+    pub fn function_alias_identity(&self) -> Option<&DeclarationIdentity> {
+        match &self.kind {
+            ResolvedTypeKind::Function { alias, .. } => alias.identity(),
+            _ => None,
+        }
+    }
+
+    pub fn view(&self) -> ResolvedTypeView<'_> {
+        match &self.kind {
+            ResolvedTypeKind::Unknown => ResolvedTypeView::Unknown,
+            ResolvedTypeKind::Dynamic => ResolvedTypeView::Dynamic,
+            ResolvedTypeKind::Void => ResolvedTypeView::Void,
+            ResolvedTypeKind::Never => ResolvedTypeView::Never,
+            ResolvedTypeKind::Null => ResolvedTypeView::Null,
+            ResolvedTypeKind::Interface {
+                identity,
+                arguments,
+                nullable,
+                extension_type,
+                ..
+            } => ResolvedTypeView::Interface {
+                identity,
+                arguments,
+                nullable: *nullable,
+                extension_type: *extension_type,
+            },
+            ResolvedTypeKind::TypeParameter {
+                id,
+                bound,
+                nullable,
+            } => ResolvedTypeView::TypeParameter {
+                id,
+                bound,
+                nullable: *nullable,
+            },
+            ResolvedTypeKind::NonNullTypeParameter { id, bound } => {
+                ResolvedTypeView::NonNullTypeParameter { id, bound }
+            }
+            ResolvedTypeKind::Function {
+                shape,
+                optional_positional,
+                return_type,
+                positional,
+                named,
+                nullable,
+                ..
+            } => ResolvedTypeView::Function {
+                shape,
+                optional_positional: *optional_positional,
+                return_type,
+                positional,
+                named,
+                nullable: *nullable,
+            },
+            ResolvedTypeKind::Record {
+                positional,
+                named,
+                nullable,
+                ..
+            } => ResolvedTypeView::Record {
+                positional,
+                named,
+                nullable: *nullable,
+            },
+        }
+    }
+
+    /// Maps immediate semantic children, including parameter bounds and function
+    /// binder bounds, retaining this occurrence's provenance and unchanged storage.
+    /// The callback controls recursion into each child.
+    pub fn map_children(&self, mut map: impl FnMut(&ResolvedType) -> ResolvedType) -> Self {
+        let mut result = self.clone();
+        match &mut result.kind {
+            ResolvedTypeKind::Interface { arguments, .. } => {
+                map_type_children(arguments, &mut map);
+            }
+            ResolvedTypeKind::TypeParameter { bound, .. }
+            | ResolvedTypeKind::NonNullTypeParameter { bound, .. } => {
+                let mapped = map(bound);
+                if mapped != **bound {
+                    *bound = Arc::new(mapped);
+                }
+            }
+            ResolvedTypeKind::Function {
+                shape,
+                return_type,
+                positional,
+                named,
+                ..
+            } => {
+                if let Some(shape) = shape {
+                    *shape = shape.map_bounds(&mut map);
+                }
+                let mapped = map(return_type);
+                if mapped != **return_type {
+                    *return_type = Arc::new(mapped);
+                }
+                map_type_children(positional, &mut map);
+                map_named_children(named, &mut map);
+            }
+            ResolvedTypeKind::Record {
+                positional, named, ..
+            } => {
+                map_type_children(positional, &mut map);
+                map_named_children(named, &mut map);
+            }
+            _ => {}
+        }
+        result
+    }
+
     pub(super) fn eq_memoized<'a>(
         &'a self,
         other: &'a Self,
@@ -496,16 +779,16 @@ impl ResolvedType {
         }
         // Reject scalar differences, and accept already-shared children, before
         // allocating a memo table. Flat SDK interface comparisons stay allocation-free.
-        match (self, other) {
+        match (&self.kind, &other.kind) {
             (
-                Self::Interface {
+                ResolvedTypeKind::Interface {
                     occurrence: a_occurrence,
                     identity: a,
                     arguments: aa,
                     nullable: an,
                     extension_type: ae,
                 },
-                Self::Interface {
+                ResolvedTypeKind::Interface {
                     occurrence: b_occurrence,
                     identity: b,
                     arguments: ba,
@@ -526,12 +809,12 @@ impl ResolvedType {
                 }
             }
             (
-                Self::TypeParameter {
+                ResolvedTypeKind::TypeParameter {
                     id: a,
                     bound: ab,
                     nullable: an,
                 },
-                Self::TypeParameter {
+                ResolvedTypeKind::TypeParameter {
                     id: b,
                     bound: bb,
                     nullable: bn,
@@ -545,8 +828,8 @@ impl ResolvedType {
                 }
             }
             (
-                Self::NonNullTypeParameter { id: a, bound: ab },
-                Self::NonNullTypeParameter { id: b, bound: bb },
+                ResolvedTypeKind::NonNullTypeParameter { id: a, bound: ab },
+                ResolvedTypeKind::NonNullTypeParameter { id: b, bound: bb },
             ) => {
                 if a != b {
                     return false;
@@ -556,7 +839,7 @@ impl ResolvedType {
                 }
             }
             (
-                Self::Function {
+                ResolvedTypeKind::Function {
                     optional_positional: ao,
                     return_type: ar,
                     positional: ap,
@@ -566,7 +849,7 @@ impl ResolvedType {
                     shape: a_shape,
                     ..
                 },
-                Self::Function {
+                ResolvedTypeKind::Function {
                     optional_positional: bo,
                     return_type: br,
                     positional: bp,
@@ -598,13 +881,13 @@ impl ResolvedType {
                 }
             }
             (
-                Self::Record {
+                ResolvedTypeKind::Record {
                     occurrence: a_occurrence,
                     positional: ap,
                     named: a,
                     nullable: an,
                 },
-                Self::Record {
+                ResolvedTypeKind::Record {
                     occurrence: b_occurrence,
                     positional: bp,
                     named: b,
@@ -623,11 +906,11 @@ impl ResolvedType {
                     return true;
                 }
             }
-            (Self::Unknown, Self::Unknown)
-            | (Self::Dynamic, Self::Dynamic)
-            | (Self::Void, Self::Void)
-            | (Self::Never, Self::Never)
-            | (Self::Null, Self::Null) => {
+            (ResolvedTypeKind::Unknown, ResolvedTypeKind::Unknown)
+            | (ResolvedTypeKind::Dynamic, ResolvedTypeKind::Dynamic)
+            | (ResolvedTypeKind::Void, ResolvedTypeKind::Void)
+            | (ResolvedTypeKind::Never, ResolvedTypeKind::Never)
+            | (ResolvedTypeKind::Null, ResolvedTypeKind::Null) => {
                 return true;
             }
             _ => return false,
@@ -635,23 +918,27 @@ impl ResolvedType {
         if !seen.insert((BorrowedIdentity::new(self), BorrowedIdentity::new(other))) {
             return true;
         }
-        match (self, other) {
-            (Self::Interface { arguments: a, .. }, Self::Interface { arguments: b, .. }) => {
-                Self::eq_types(a, b, seen, compare_aliases)
-            }
-            (Self::TypeParameter { bound: a, .. }, Self::TypeParameter { bound: b, .. })
+        match (&self.kind, &other.kind) {
+            (
+                ResolvedTypeKind::Interface { arguments: a, .. },
+                ResolvedTypeKind::Interface { arguments: b, .. },
+            ) => Self::eq_types(a, b, seen, compare_aliases),
+            (
+                ResolvedTypeKind::TypeParameter { bound: a, .. },
+                ResolvedTypeKind::TypeParameter { bound: b, .. },
+            )
             | (
-                Self::NonNullTypeParameter { bound: a, .. },
-                Self::NonNullTypeParameter { bound: b, .. },
+                ResolvedTypeKind::NonNullTypeParameter { bound: a, .. },
+                ResolvedTypeKind::NonNullTypeParameter { bound: b, .. },
             ) => a.eq_memoized_with_aliases(b, seen, compare_aliases),
             (
-                Self::Function {
+                ResolvedTypeKind::Function {
                     return_type: ar,
                     positional: ap,
                     named: a,
                     ..
                 },
-                Self::Function {
+                ResolvedTypeKind::Function {
                     return_type: br,
                     positional: bp,
                     named: b,
@@ -663,12 +950,12 @@ impl ResolvedType {
                     && Self::eq_named(a, b, seen, compare_aliases)
             }
             (
-                Self::Record {
+                ResolvedTypeKind::Record {
                     positional: ap,
                     named: a,
                     ..
                 },
-                Self::Record {
+                ResolvedTypeKind::Record {
                     positional: bp,
                     named: b,
                     ..
@@ -742,9 +1029,9 @@ impl ResolvedType {
         memo: &mut StructuralHashMemo<'_, K>,
     ) -> u64 {
         let mut state = rustc_hash::FxHasher::default();
-        std::mem::discriminant(self).hash(&mut state);
-        match self {
-            Self::Interface {
+        std::mem::discriminant(&self.kind).hash(&mut state);
+        match &self.kind {
+            ResolvedTypeKind::Interface {
                 identity,
                 arguments,
                 nullable,
@@ -756,7 +1043,7 @@ impl ResolvedType {
                 extension_type.hash(&mut state);
                 Self::hash_types(arguments, memo, &mut state);
             }
-            Self::TypeParameter {
+            ResolvedTypeKind::TypeParameter {
                 id,
                 bound,
                 nullable,
@@ -765,11 +1052,11 @@ impl ResolvedType {
                 nullable.hash(&mut state);
                 Self::hash_shared_type(bound, memo).hash(&mut state);
             }
-            Self::NonNullTypeParameter { id, bound } => {
+            ResolvedTypeKind::NonNullTypeParameter { id, bound } => {
                 id.hash(&mut state);
                 Self::hash_shared_type(bound, memo).hash(&mut state);
             }
-            Self::Function {
+            ResolvedTypeKind::Function {
                 optional_positional,
                 return_type,
                 positional,
@@ -793,7 +1080,7 @@ impl ResolvedType {
                 Self::hash_types(positional, memo, &mut state);
                 Self::hash_named(named, memo, &mut state);
             }
-            Self::Record {
+            ResolvedTypeKind::Record {
                 positional,
                 named,
                 nullable,
@@ -822,15 +1109,15 @@ impl ResolvedType {
         ty: &'a Arc<Self>,
         memo: &mut StructuralHashMemo<'_, K>,
     ) -> u64 {
-        match ty.as_ref() {
-            Self::Interface { arguments, .. } if arguments.is_empty() => {
+        match &ty.kind {
+            ResolvedTypeKind::Interface { arguments, .. } if arguments.is_empty() => {
                 ty.structural_hash_inner(memo)
             }
-            Self::Interface { .. }
-            | Self::TypeParameter { .. }
-            | Self::NonNullTypeParameter { .. }
-            | Self::Function { .. }
-            | Self::Record { .. } => {
+            ResolvedTypeKind::Interface { .. }
+            | ResolvedTypeKind::TypeParameter { .. }
+            | ResolvedTypeKind::NonNullTypeParameter { .. }
+            | ResolvedTypeKind::Function { .. }
+            | ResolvedTypeKind::Record { .. } => {
                 memoized_hash(K::ty(ty), memo, |memo| ty.structural_hash_inner(memo))
             }
             _ => ty.structural_hash_inner(memo),
@@ -906,25 +1193,25 @@ pub(super) fn find_type_including_bounds<'a>(
     if predicate(ty) {
         return Some(ty);
     }
-    match ty {
-        ResolvedType::Interface { arguments, .. } if arguments.is_empty() => return None,
-        ResolvedType::Record {
+    match &ty.kind {
+        ResolvedTypeKind::Interface { arguments, .. } if arguments.is_empty() => return None,
+        ResolvedTypeKind::Record {
             positional, named, ..
         } if positional.is_empty() && named.is_empty() => return None,
-        ResolvedType::Interface { .. }
-        | ResolvedType::Function { .. }
-        | ResolvedType::Record { .. } => {
+        ResolvedTypeKind::Interface { .. }
+        | ResolvedTypeKind::Function { .. }
+        | ResolvedTypeKind::Record { .. } => {
             if !seen.insert(BorrowedIdentity::new(ty)) {
                 return None;
             }
         }
-        ResolvedType::TypeParameter { .. } | ResolvedType::NonNullTypeParameter { .. }
+        ResolvedTypeKind::TypeParameter { .. } | ResolvedTypeKind::NonNullTypeParameter { .. }
             if include_bounds => {}
         _ => return None,
     }
-    match ty {
-        ResolvedType::TypeParameter { bound, .. }
-        | ResolvedType::NonNullTypeParameter { bound, .. }
+    match &ty.kind {
+        ResolvedTypeKind::TypeParameter { bound, .. }
+        | ResolvedTypeKind::NonNullTypeParameter { bound, .. }
             if include_bounds =>
         {
             if !seen.insert(BorrowedIdentity::new(ty)) {
@@ -932,10 +1219,10 @@ pub(super) fn find_type_including_bounds<'a>(
             }
             find_type_including_bounds(bound, predicate, seen, true)
         }
-        ResolvedType::Interface { arguments, .. } => arguments
+        ResolvedTypeKind::Interface { arguments, .. } => arguments
             .iter()
             .find_map(|ty| find_type_including_bounds(ty, predicate, seen, include_bounds)),
-        ResolvedType::Function {
+        ResolvedTypeKind::Function {
             return_type,
             positional,
             named,
@@ -955,14 +1242,14 @@ pub(super) fn find_type_including_bounds<'a>(
             .or_else(|| {
                 shape.as_ref().and_then(|shape| {
                     shape.type_parameters.iter().find_map(|parameter| {
-                        let ResolvedType::TypeParameter { bound, .. } = parameter else {
+                        let ResolvedTypeKind::TypeParameter { bound, .. } = &parameter.kind else {
                             return None;
                         };
                         find_type_including_bounds(bound, predicate, seen, include_bounds)
                     })
                 })
             }),
-        ResolvedType::Record {
+        ResolvedTypeKind::Record {
             positional, named, ..
         } => positional
             .iter()
@@ -979,7 +1266,7 @@ pub(super) fn find_type_including_bounds<'a>(
 pub(crate) fn has_inference_holes(ty: &ResolvedType) -> bool {
     find_type(
         ty,
-        &mut |ty| matches!(ty, ResolvedType::Unknown),
+        &mut |ty| matches!(&ty.kind, ResolvedTypeKind::Unknown),
         &mut FxHashSet::default(),
     )
     .is_some()
@@ -992,8 +1279,8 @@ pub(super) fn refine_inferred_type(current: &mut ResolvedType, candidate: Resolv
     if index_fixpoint::inference_deferred() {
         return false;
     }
-    if matches!(current, ResolvedType::Unknown) {
-        if matches!(candidate, ResolvedType::Unknown) {
+    if matches!(&current.kind, ResolvedTypeKind::Unknown) {
+        if matches!(&candidate.kind, ResolvedTypeKind::Unknown) {
             return false;
         }
     } else if !has_inference_holes(current)
@@ -1039,17 +1326,17 @@ fn inference_refinement_compatible<'a>(
                     left_name == right_name && inference_refinement_compatible(left, right, seen)
                 })
     };
-    match (current, candidate) {
-        (ResolvedType::Unknown, _) => true,
+    match (&current.kind, &candidate.kind) {
+        (ResolvedTypeKind::Unknown, _) => true,
         (
-            ResolvedType::Interface {
+            ResolvedTypeKind::Interface {
                 identity: left,
                 arguments: left_arguments,
                 nullable: left_nullable,
                 extension_type: left_extension,
                 occurrence: left_occurrence,
             },
-            ResolvedType::Interface {
+            ResolvedTypeKind::Interface {
                 identity: right,
                 arguments: right_arguments,
                 nullable: right_nullable,
@@ -1064,7 +1351,7 @@ fn inference_refinement_compatible<'a>(
                 && positional(left_arguments, right_arguments, seen)
         }
         (
-            ResolvedType::Function {
+            ResolvedTypeKind::Function {
                 shape: left_shape,
                 alias: left_alias,
                 optional_positional: left_optional,
@@ -1073,7 +1360,7 @@ fn inference_refinement_compatible<'a>(
                 named: left_named,
                 nullable: left_nullable,
             },
-            ResolvedType::Function {
+            ResolvedTypeKind::Function {
                 shape: right_shape,
                 alias: right_alias,
                 optional_positional: right_optional,
@@ -1099,13 +1386,13 @@ fn inference_refinement_compatible<'a>(
                 && named(left_named, right_named, seen)
         }
         (
-            ResolvedType::Record {
+            ResolvedTypeKind::Record {
                 occurrence: left_occurrence,
                 positional: left_positional,
                 named: left_named,
                 nullable: left_nullable,
             },
-            ResolvedType::Record {
+            ResolvedTypeKind::Record {
                 occurrence: right_occurrence,
                 positional: right_positional,
                 named: right_named,
@@ -1118,12 +1405,12 @@ fn inference_refinement_compatible<'a>(
                 && named(left_named, right_named, seen)
         }
         (
-            ResolvedType::TypeParameter {
+            ResolvedTypeKind::TypeParameter {
                 id: left,
                 bound: left_bound,
                 nullable: left_nullable,
             },
-            ResolvedType::TypeParameter {
+            ResolvedTypeKind::TypeParameter {
                 id: right,
                 bound: right_bound,
                 nullable: right_nullable,
@@ -1134,11 +1421,11 @@ fn inference_refinement_compatible<'a>(
                 && inference_refinement_compatible(left_bound, right_bound, seen)
         }
         (
-            ResolvedType::NonNullTypeParameter {
+            ResolvedTypeKind::NonNullTypeParameter {
                 id: left,
                 bound: left_bound,
             },
-            ResolvedType::NonNullTypeParameter {
+            ResolvedTypeKind::NonNullTypeParameter {
                 id: right,
                 bound: right_bound,
             },
@@ -1155,8 +1442,8 @@ pub(super) fn collect_parameter_ids(ty: &ResolvedType, ids: &mut Vec<TypeParamet
     find_type(
         ty,
         &mut |ty| {
-            if let ResolvedType::TypeParameter { id, .. }
-            | ResolvedType::NonNullTypeParameter { id, .. } = ty
+            if let ResolvedTypeKind::TypeParameter { id, .. }
+            | ResolvedTypeKind::NonNullTypeParameter { id, .. } = &ty.kind
                 && !ids.contains(id)
             {
                 ids.push(id.clone());
@@ -1175,16 +1462,16 @@ pub(super) fn parameter_bound<'a>(
         ty,
         &mut |ty| {
             matches!(
-                ty,
-                ResolvedType::TypeParameter { id, .. }
-                    | ResolvedType::NonNullTypeParameter { id, .. } if id == parameter
+                &ty.kind,
+                ResolvedTypeKind::TypeParameter { id, .. }
+                    | ResolvedTypeKind::NonNullTypeParameter { id, .. } if id == parameter
             )
         },
         &mut FxHashSet::default(),
     )?;
-    match occurrence {
-        ResolvedType::TypeParameter { bound, .. }
-        | ResolvedType::NonNullTypeParameter { bound, .. } => Some(bound),
+    match &occurrence.kind {
+        ResolvedTypeKind::TypeParameter { bound, .. }
+        | ResolvedTypeKind::NonNullTypeParameter { bound, .. } => Some(bound),
         _ => None,
     }
 }
@@ -1205,8 +1492,8 @@ pub(super) enum AliasPresenceKey {
 
 impl ResolvedType {
     fn alias_presence_key(&self) -> Option<AliasPresenceKey> {
-        match self {
-            Self::Function {
+        match &self.kind {
+            ResolvedTypeKind::Function {
                 return_type,
                 positional,
                 named,
@@ -1216,10 +1503,10 @@ impl ResolvedType {
                 SharedIdentity::new(positional),
                 SharedIdentity::new(named),
             )),
-            Self::Interface { arguments, .. } => {
+            ResolvedTypeKind::Interface { arguments, .. } => {
                 Some(AliasPresenceKey::Interface(SharedIdentity::new(arguments)))
             }
-            Self::Record {
+            ResolvedTypeKind::Record {
                 positional, named, ..
             } => Some(AliasPresenceKey::Record(
                 SharedIdentity::new(positional),
@@ -1238,9 +1525,10 @@ impl ResolvedType {
         memo: &mut FxHashMap<AliasPresenceKey, bool>,
         inserted: &mut Option<&mut Vec<AliasPresenceKey>>,
     ) -> bool {
-        match self {
-            Self::Function { alias, .. } if alias.0.is_some() => return true,
-            Self::Interface { occurrence, .. } | Self::Record { occurrence, .. }
+        match &self.kind {
+            ResolvedTypeKind::Function { alias, .. } if alias.0.is_some() => return true,
+            ResolvedTypeKind::Interface { occurrence, .. }
+            | ResolvedTypeKind::Record { occurrence, .. }
                 if occurrence.0.is_some() =>
             {
                 return true;
@@ -1253,8 +1541,8 @@ impl ResolvedType {
         if let Some(present) = memo.get(&key) {
             return *present;
         }
-        let present = match self {
-            Self::Function {
+        let present = match &self.kind {
+            ResolvedTypeKind::Function {
                 return_type,
                 positional,
                 named,
@@ -1268,10 +1556,10 @@ impl ResolvedType {
                         .iter()
                         .any(|(_, ty)| ty.has_alias_provenance_memoized(memo, inserted))
             }
-            Self::Interface { arguments, .. } => arguments
+            ResolvedTypeKind::Interface { arguments, .. } => arguments
                 .iter()
                 .any(|ty| ty.has_alias_provenance_memoized(memo, inserted)),
-            Self::Record {
+            ResolvedTypeKind::Record {
                 positional, named, ..
             } => {
                 positional
@@ -1305,14 +1593,14 @@ impl ResolvedType {
             return self;
         }
         if matches!(
-            &self,
-            Self::Function {
+            &self.kind,
+            ResolvedTypeKind::Function {
                 alias: FunctionTypeAlias(None),
                 ..
-            } | Self::Interface {
+            } | ResolvedTypeKind::Interface {
                 occurrence: FunctionTypeAlias(None),
                 ..
-            } | Self::Record {
+            } | ResolvedTypeKind::Record {
                 occurrence: FunctionTypeAlias(None),
                 ..
             }
@@ -1320,9 +1608,9 @@ impl ResolvedType {
         {
             return self;
         }
-        match &mut self {
-            Self::Function { alias, .. } => *alias = alias.projected_from(owner),
-            Self::Interface {
+        match &mut self.kind {
+            ResolvedTypeKind::Function { alias, .. } => *alias = alias.projected_from(owner),
+            ResolvedTypeKind::Interface {
                 occurrence,
                 arguments,
                 ..
@@ -1333,7 +1621,7 @@ impl ResolvedType {
                     occurrence.projected_from(owner)
                 };
             }
-            Self::Record {
+            ResolvedTypeKind::Record {
                 occurrence,
                 positional,
                 named,
@@ -1351,9 +1639,9 @@ impl ResolvedType {
     }
 
     pub fn function_return_type(&self) -> Option<Self> {
-        let Self::Function {
+        let ResolvedTypeKind::Function {
             return_type, alias, ..
-        } = self
+        } = &self.kind
         else {
             return None;
         };
@@ -1361,11 +1649,11 @@ impl ResolvedType {
     }
 
     pub fn type_argument(&self, index: usize) -> Option<Self> {
-        let Self::Interface {
+        let ResolvedTypeKind::Interface {
             arguments,
             occurrence,
             ..
-        } = self
+        } = &self.kind
         else {
             return None;
         };
@@ -1379,11 +1667,11 @@ impl ResolvedType {
     }
 
     pub fn record_positional(&self, index: usize) -> Option<Self> {
-        let Self::Record {
+        let ResolvedTypeKind::Record {
             positional,
             occurrence,
             ..
-        } = self
+        } = &self.kind
         else {
             return None;
         };
@@ -1393,12 +1681,12 @@ impl ResolvedType {
     }
 
     pub fn record_field(&self, name: &str) -> Option<Self> {
-        let Self::Record {
+        let ResolvedTypeKind::Record {
             positional,
             named,
             occurrence,
             ..
-        } = self
+        } = &self.kind
         else {
             return None;
         };
@@ -1416,24 +1704,20 @@ impl ResolvedType {
     }
 
     pub fn interface_identity(identity: DeclarationIdentity) -> Self {
-        Self::Interface {
-            occurrence: Default::default(),
-            identity,
-            arguments: empty_type_arguments(),
-            nullable: false,
-            extension_type: false,
-        }
+        Self::new_interface(identity, empty_type_arguments(), false, false)
     }
 
     pub fn nullable(&self) -> bool {
-        match self {
-            Self::Null => true,
-            Self::Dynamic | Self::Unknown => true,
-            Self::Interface { nullable, .. }
-            | Self::TypeParameter { nullable, .. }
-            | Self::Function { nullable, .. }
-            | Self::Record { nullable, .. } => *nullable,
-            Self::Void | Self::Never | Self::NonNullTypeParameter { .. } => false,
+        match &self.kind {
+            ResolvedTypeKind::Null => true,
+            ResolvedTypeKind::Dynamic | ResolvedTypeKind::Unknown => true,
+            ResolvedTypeKind::Interface { nullable, .. }
+            | ResolvedTypeKind::TypeParameter { nullable, .. }
+            | ResolvedTypeKind::Function { nullable, .. }
+            | ResolvedTypeKind::Record { nullable, .. } => *nullable,
+            ResolvedTypeKind::Void
+            | ResolvedTypeKind::Never
+            | ResolvedTypeKind::NonNullTypeParameter { .. } => false,
         }
     }
 
@@ -1441,31 +1725,35 @@ impl ResolvedType {
         if self.nullable() == nullable {
             return self.clone();
         }
-        match self {
-            Self::Interface {
+        match &self.kind {
+            ResolvedTypeKind::Interface {
                 occurrence,
                 identity,
                 arguments,
                 extension_type,
                 ..
-            } => Self::Interface {
+            } => ResolvedType::from_kind(ResolvedTypeKind::Interface {
                 occurrence: occurrence.clone(),
                 identity: identity.clone(),
                 arguments: arguments.clone(),
                 nullable,
                 extension_type: *extension_type,
-            },
-            Self::TypeParameter { id, bound, .. } => Self::TypeParameter {
-                id: id.clone(),
-                bound: bound.clone(),
-                nullable,
-            },
-            Self::NonNullTypeParameter { id, bound } if nullable => Self::TypeParameter {
-                id: id.clone(),
-                bound: bound.clone(),
-                nullable: true,
-            },
-            Self::Function {
+            }),
+            ResolvedTypeKind::TypeParameter { id, bound, .. } => {
+                ResolvedType::from_kind(ResolvedTypeKind::TypeParameter {
+                    id: id.clone(),
+                    bound: bound.clone(),
+                    nullable,
+                })
+            }
+            ResolvedTypeKind::NonNullTypeParameter { id, bound } if nullable => {
+                ResolvedType::from_kind(ResolvedTypeKind::TypeParameter {
+                    id: id.clone(),
+                    bound: bound.clone(),
+                    nullable: true,
+                })
+            }
+            ResolvedTypeKind::Function {
                 return_type,
                 positional,
                 named,
@@ -1473,7 +1761,7 @@ impl ResolvedType {
                 optional_positional,
                 shape,
                 ..
-            } => Self::Function {
+            } => ResolvedType::from_kind(ResolvedTypeKind::Function {
                 shape: shape.clone(),
                 optional_positional: *optional_positional,
                 return_type: return_type.clone(),
@@ -1481,20 +1769,20 @@ impl ResolvedType {
                 named: named.clone(),
                 alias: alias.clone(),
                 nullable,
-            },
-            Self::Record {
+            }),
+            ResolvedTypeKind::Record {
                 positional,
                 named,
                 occurrence,
                 ..
-            } => Self::Record {
+            } => ResolvedType::from_kind(ResolvedTypeKind::Record {
                 occurrence: occurrence.clone(),
                 positional: positional.clone(),
                 named: named.clone(),
                 nullable,
-            },
-            Self::Never if nullable => Self::Null,
-            other => other.clone(),
+            }),
+            ResolvedTypeKind::Never if nullable => Self::NULL,
+            _ => self.clone(),
         }
     }
 
@@ -1506,40 +1794,40 @@ impl ResolvedType {
 
     // Extension types expose their own members even when their values may be null.
     pub(super) fn has_instance_members(&self) -> bool {
-        match self {
-            Self::TypeParameter {
+        match &self.kind {
+            ResolvedTypeKind::TypeParameter {
                 bound, nullable, ..
             } => !nullable && bound.has_instance_members(),
-            Self::Interface {
+            ResolvedTypeKind::Interface {
                 extension_type: true,
                 nullable,
                 ..
             } => !nullable,
-            ty => ty.is_non_nullable(),
+            _ => self.is_non_nullable(),
         }
     }
 
     /// Dart's `NonNull`, rather than merely removing a written `?` suffix.
     pub fn non_null(&self) -> Self {
-        match self {
-            Self::TypeParameter { id, bound, .. } if !bound.is_non_nullable() => {
-                Self::NonNullTypeParameter {
+        match &self.kind {
+            ResolvedTypeKind::TypeParameter { id, bound, .. } if !bound.is_non_nullable() => {
+                ResolvedType::from_kind(ResolvedTypeKind::NonNullTypeParameter {
                     id: id.clone(),
                     bound: bound.clone(),
-                }
+                })
             }
-            Self::Null => Self::Never,
-            other => other.with_nullable(false),
+            ResolvedTypeKind::Null => Self::NEVER,
+            _ => self.with_nullable(false),
         }
     }
 
     pub fn interface(&self, library: &str, name: &str) -> bool {
-        matches!(self, Self::Interface { identity, .. } if identity.is_sdk(library, name))
+        matches!(&self.kind, ResolvedTypeKind::Interface { identity, .. } if identity.is_sdk(library, name))
     }
 
     pub fn arguments(&self) -> &[ResolvedType] {
-        match self {
-            Self::Interface { arguments, .. } => arguments,
+        match &self.kind {
+            ResolvedTypeKind::Interface { arguments, .. } => arguments,
             _ => &[],
         }
     }
@@ -1551,80 +1839,84 @@ mod refinement_tests {
 
     #[test]
     fn unknown_fills_once_including_explicit_dynamic() {
-        let mut current = ResolvedType::Unknown;
-        assert!(!refine_inferred_type(&mut current, ResolvedType::Unknown));
-        assert!(refine_inferred_type(&mut current, ResolvedType::Dynamic));
-        assert!(!refine_inferred_type(&mut current, ResolvedType::Void));
-        assert_eq!(current, ResolvedType::Dynamic);
+        let mut current = ResolvedType::UNKNOWN;
+        assert!(!refine_inferred_type(&mut current, ResolvedType::UNKNOWN));
+        assert!(refine_inferred_type(&mut current, ResolvedType::DYNAMIC));
+        assert!(!refine_inferred_type(&mut current, ResolvedType::VOID));
+        assert_eq!(current, ResolvedType::DYNAMIC);
     }
 
     #[test]
     fn partials_only_accept_hole_free_structurally_compatible_candidates() {
-        let record = |positional: Vec<ResolvedType>| ResolvedType::Record {
-            occurrence: FunctionTypeAlias::default(),
-            positional: positional.into(),
-            named: empty_named_types(),
-            nullable: false,
+        let record = |positional: Vec<ResolvedType>| {
+            ResolvedType::from_kind(ResolvedTypeKind::Record {
+                occurrence: FunctionTypeAlias::default(),
+                positional: positional.into(),
+                named: empty_named_types(),
+                nullable: false,
+            })
         };
-        let partial = record(vec![ResolvedType::Dynamic, ResolvedType::Unknown]);
+        let partial = record(vec![ResolvedType::DYNAMIC, ResolvedType::UNKNOWN]);
         let mut current = partial.clone();
         assert!(!refine_inferred_type(
             &mut current,
-            record(vec![ResolvedType::Dynamic, partial.clone()]),
+            record(vec![ResolvedType::DYNAMIC, partial.clone()]),
         ));
         assert!(!refine_inferred_type(
             &mut current,
-            record(vec![ResolvedType::Void, ResolvedType::Never]),
+            record(vec![ResolvedType::VOID, ResolvedType::NEVER]),
         ));
         assert!(!refine_inferred_type(
             &mut current,
-            record(vec![ResolvedType::Dynamic]),
+            record(vec![ResolvedType::DYNAMIC]),
         ));
         assert_eq!(current, partial);
-        let complete = record(vec![ResolvedType::Dynamic, ResolvedType::Never]);
+        let complete = record(vec![ResolvedType::DYNAMIC, ResolvedType::NEVER]);
         assert!(refine_inferred_type(&mut current, complete.clone()));
         assert_eq!(current, complete);
-        assert!(!refine_inferred_type(&mut current, ResolvedType::Dynamic));
+        assert!(!refine_inferred_type(&mut current, ResolvedType::DYNAMIC));
     }
 
     #[test]
     fn function_refinement_freezes_known_slots_shape_and_provenance() {
-        let function = |return_type, positional: Vec<ResolvedType>| ResolvedType::Function {
-            shape: Some(FunctionTypeShape::empty()),
-            alias: FunctionTypeAlias::default(),
-            optional_positional: 0,
-            return_type: Arc::new(return_type),
-            positional: positional.into(),
-            named: empty_named_types(),
-            nullable: false,
+        let function = |return_type, positional: Vec<ResolvedType>| {
+            ResolvedType::from_kind(ResolvedTypeKind::Function {
+                shape: Some(FunctionTypeShape::empty()),
+                alias: FunctionTypeAlias::default(),
+                optional_positional: 0,
+                return_type: Arc::new(return_type),
+                positional: positional.into(),
+                named: empty_named_types(),
+                nullable: false,
+            })
         };
         let partial = function(
-            ResolvedType::Unknown,
-            vec![ResolvedType::Dynamic, ResolvedType::Void],
+            ResolvedType::UNKNOWN,
+            vec![ResolvedType::DYNAMIC, ResolvedType::VOID],
         );
         let complete = function(
-            ResolvedType::Never,
-            vec![ResolvedType::Dynamic, ResolvedType::Void],
+            ResolvedType::NEVER,
+            vec![ResolvedType::DYNAMIC, ResolvedType::VOID],
         );
         let mut current = partial.clone();
         assert!(!refine_inferred_type(
             &mut current,
             function(
-                ResolvedType::Never,
-                vec![ResolvedType::Never, ResolvedType::Void]
+                ResolvedType::NEVER,
+                vec![ResolvedType::NEVER, ResolvedType::VOID]
             ),
         ));
         let mut changed_shape = complete.clone();
-        if let ResolvedType::Function {
+        if let ResolvedTypeKind::Function {
             optional_positional,
             ..
-        } = &mut changed_shape
+        } = &mut changed_shape.kind
         {
             *optional_positional = 1;
         }
         assert!(!refine_inferred_type(&mut current, changed_shape));
         let mut changed_alias = complete.clone();
-        if let ResolvedType::Function { alias, .. } = &mut changed_alias {
+        if let ResolvedTypeKind::Function { alias, .. } = &mut changed_alias.kind {
             *alias = FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
                 identity: DeclarationIdentity::OBJECT,
                 origin: None,
@@ -1638,31 +1930,363 @@ mod refinement_tests {
 
     #[test]
     fn function_parameters_refine_nested_holes_without_changing_known_returns() {
-        let parameter = |ty| ResolvedType::Record {
-            occurrence: FunctionTypeAlias::default(),
-            positional: Arc::from([ty]),
-            named: empty_named_types(),
-            nullable: false,
+        let parameter = |ty| {
+            ResolvedType::from_kind(ResolvedTypeKind::Record {
+                occurrence: FunctionTypeAlias::default(),
+                positional: Arc::from([ty]),
+                named: empty_named_types(),
+                nullable: false,
+            })
         };
-        let mut current = ResolvedType::Function {
+        let mut current = ResolvedType::from_kind(ResolvedTypeKind::Function {
             shape: Some(FunctionTypeShape::empty()),
             alias: FunctionTypeAlias::default(),
             optional_positional: 0,
-            return_type: Arc::new(ResolvedType::Void),
-            positional: Arc::from([parameter(ResolvedType::Unknown)]),
-            named: Arc::from([("named".to_owned(), ResolvedType::Unknown)]),
+            return_type: Arc::new(ResolvedType::VOID),
+            positional: Arc::from([parameter(ResolvedType::UNKNOWN)]),
+            named: Arc::from([("named".to_owned(), ResolvedType::UNKNOWN)]),
             nullable: false,
-        };
+        });
         let mut candidate = current.clone();
-        if let ResolvedType::Function {
+        if let ResolvedTypeKind::Function {
             positional, named, ..
-        } = &mut candidate
+        } = &mut candidate.kind
         {
-            *positional = Arc::from([parameter(ResolvedType::Dynamic)]);
-            *named = Arc::from([("named".to_owned(), ResolvedType::Never)]);
+            *positional = Arc::from([parameter(ResolvedType::DYNAMIC)]);
+            *named = Arc::from([("named".to_owned(), ResolvedType::NEVER)]);
         }
         assert!(refine_inferred_type(&mut current, candidate.clone()));
         assert_eq!(current, candidate);
-        assert!(!refine_inferred_type(&mut current, ResolvedType::Dynamic));
+        assert!(!refine_inferred_type(&mut current, ResolvedType::DYNAMIC));
+    }
+}
+
+#[cfg(test)]
+mod type_view_tests {
+    use super::*;
+
+    fn parameter_id() -> TypeParameterId {
+        TypeParameterId {
+            owner: ParameterOwner::Sdk("view-test"),
+            ordinal: 2,
+            name: Arc::from("T"),
+        }
+    }
+
+    fn provenance() -> FunctionTypeAlias {
+        FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
+            identity: DeclarationIdentity::OBJECT,
+            origin: Some((None, 42)),
+        })))
+    }
+
+    #[test]
+    fn primitive_views_and_debug_retain_enum_spelling() {
+        for (ty, spelling) in [
+            (ResolvedType::UNKNOWN, "Unknown"),
+            (ResolvedType::DYNAMIC, "Dynamic"),
+            (ResolvedType::VOID, "Void"),
+            (ResolvedType::NEVER, "Never"),
+            (ResolvedType::NULL, "Null"),
+        ] {
+            assert_eq!(format!("{ty:?}"), spelling);
+            assert_eq!(format!("{:?}", ty.view()), spelling);
+            assert_eq!(ty.map_children(|_| panic!("primitive has no children")), ty);
+        }
+    }
+
+    #[test]
+    fn constructors_expose_borrowed_semantics_without_replacing_storage() {
+        let bound = Arc::new(ResolvedType::DYNAMIC);
+        let positional: Arc<[ResolvedType]> = Arc::from([ResolvedType::VOID]);
+        let named: Arc<[(String, ResolvedType)]> =
+            Arc::from([("field".to_owned(), ResolvedType::NULL)]);
+        let parameter = ResolvedType::new_type_parameter(parameter_id(), bound.clone(), true);
+        let ResolvedTypeView::TypeParameter {
+            id,
+            bound: viewed_bound,
+            nullable,
+        } = parameter.view()
+        else {
+            panic!("type parameter view")
+        };
+        assert_eq!(id, &parameter_id());
+        assert!(Arc::ptr_eq(viewed_bound, &bound));
+        assert!(nullable);
+        let non_null = ResolvedType::new_non_null_type_parameter(parameter_id(), bound.clone());
+        let ResolvedTypeView::NonNullTypeParameter {
+            id,
+            bound: viewed_bound,
+        } = non_null.view()
+        else {
+            panic!("non-null type parameter view")
+        };
+        assert_eq!(id, &parameter_id());
+        assert!(Arc::ptr_eq(viewed_bound, &bound));
+        assert!(!non_null.nullable());
+        let interface = ResolvedType::new_interface(
+            DeclarationIdentity::OBJECT,
+            positional.clone(),
+            true,
+            true,
+        );
+        let ResolvedTypeView::Interface {
+            identity,
+            arguments,
+            nullable,
+            extension_type,
+        } = interface.view()
+        else {
+            panic!("interface view")
+        };
+        assert_eq!(identity, &DeclarationIdentity::OBJECT);
+        assert!(Arc::ptr_eq(arguments, &positional));
+        assert!(nullable && extension_type);
+        let shape = FunctionTypeShape::new(vec!["field".to_owned()], vec![parameter.clone()]);
+        let function = ResolvedType::new_function(
+            Some(shape.clone()),
+            3,
+            bound.clone(),
+            positional.clone(),
+            named.clone(),
+            true,
+        );
+        let ResolvedTypeView::Function {
+            shape: viewed_shape,
+            optional_positional,
+            return_type,
+            positional: viewed_positional,
+            named: viewed_named,
+            nullable,
+        } = function.view()
+        else {
+            panic!("function view")
+        };
+        assert!(Arc::ptr_eq(viewed_shape.as_ref().unwrap(), &shape));
+        assert_eq!(optional_positional, 3);
+        assert!(Arc::ptr_eq(return_type, &bound));
+        assert!(Arc::ptr_eq(viewed_positional, &positional));
+        assert!(Arc::ptr_eq(viewed_named, &named));
+        assert!(nullable);
+        let record = ResolvedType::new_record(positional.clone(), named.clone(), true);
+        let ResolvedTypeView::Record {
+            positional: viewed_positional,
+            named: viewed_named,
+            nullable,
+        } = record.view()
+        else {
+            panic!("record view")
+        };
+        assert!(Arc::ptr_eq(viewed_positional, &positional));
+        assert!(Arc::ptr_eq(viewed_named, &named));
+        assert!(nullable);
+        assert_eq!(
+            format!("{record:?}"),
+            "Record { occurrence: FunctionTypeAlias(None), positional: [Void], named: [(\"field\", Null)], nullable: true }"
+        );
+        let unavailable = ResolvedType::new_function(
+            None,
+            0,
+            bound,
+            empty_type_arguments(),
+            empty_named_types(),
+            false,
+        );
+        assert!(matches!(
+            unavailable.view(),
+            ResolvedTypeView::Function { shape: None, .. }
+        ));
+        for ty in [
+            parameter,
+            non_null,
+            interface,
+            function,
+            record,
+            unavailable,
+        ] {
+            match ty.kind {
+                ResolvedTypeKind::Interface { occurrence, .. }
+                | ResolvedTypeKind::Record { occurrence, .. } => assert!(occurrence.0.is_none()),
+                ResolvedTypeKind::Function { alias, .. } => assert!(alias.0.is_none()),
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn mapping_children_preserves_provenance_and_maps_all_bounds_and_slots() {
+        let metadata = provenance();
+        let binder =
+            ResolvedType::new_type_parameter(parameter_id(), Arc::new(ResolvedType::UNKNOWN), true);
+        let shape = FunctionTypeShape::new(vec!["field".to_owned()], vec![binder]);
+        let mut function = ResolvedType::new_function(
+            Some(shape.clone()),
+            2,
+            Arc::new(ResolvedType::UNKNOWN),
+            Arc::from([ResolvedType::UNKNOWN]),
+            Arc::from([("field".to_owned(), ResolvedType::UNKNOWN)]),
+            true,
+        );
+        let ResolvedTypeKind::Function { alias, .. } = &mut function.kind else {
+            unreachable!()
+        };
+        *alias = metadata.clone();
+        let unchanged = function.map_children(Clone::clone);
+        let (
+            ResolvedTypeView::Function {
+                shape: a,
+                return_type: ar,
+                positional: ap,
+                named: an,
+                ..
+            },
+            ResolvedTypeView::Function {
+                shape: b,
+                return_type: br,
+                positional: bp,
+                named: bn,
+                ..
+            },
+        ) = (function.view(), unchanged.view())
+        else {
+            unreachable!()
+        };
+        assert!(Arc::ptr_eq(a.as_ref().unwrap(), b.as_ref().unwrap()));
+        assert!(Arc::ptr_eq(ar, br));
+        assert!(Arc::ptr_eq(ap, bp));
+        assert!(Arc::ptr_eq(an, bn));
+        let mapped = function.map_children(|_| ResolvedType::NEVER);
+        let ResolvedTypeKind::Function {
+            alias,
+            shape,
+            optional_positional,
+            return_type,
+            positional,
+            named,
+            nullable,
+        } = &mapped.kind
+        else {
+            unreachable!()
+        };
+        assert!(Arc::ptr_eq(
+            alias.0.as_ref().unwrap(),
+            metadata.0.as_ref().unwrap()
+        ));
+        assert_eq!(
+            mapped.function_alias_identity(),
+            Some(&DeclarationIdentity::OBJECT)
+        );
+        assert_eq!(*optional_positional, 2);
+        assert!(*nullable);
+        assert_eq!(**return_type, ResolvedType::NEVER);
+        assert_eq!(positional.as_ref(), &[ResolvedType::NEVER]);
+        assert_eq!(named[0].1, ResolvedType::NEVER);
+        let ResolvedTypeView::TypeParameter {
+            id,
+            bound,
+            nullable,
+        } = shape.as_ref().unwrap().type_parameters[0].view()
+        else {
+            unreachable!()
+        };
+        assert_eq!(id, &parameter_id());
+        assert_eq!(**bound, ResolvedType::NEVER);
+        assert!(nullable);
+        for mut ty in [
+            ResolvedType::new_interface(
+                DeclarationIdentity::OBJECT,
+                Arc::from([ResolvedType::UNKNOWN]),
+                true,
+                true,
+            ),
+            ResolvedType::new_record(
+                Arc::from([ResolvedType::UNKNOWN]),
+                Arc::from([("field".to_owned(), ResolvedType::UNKNOWN)]),
+                true,
+            ),
+        ] {
+            match &mut ty.kind {
+                ResolvedTypeKind::Interface { occurrence, .. }
+                | ResolvedTypeKind::Record { occurrence, .. } => *occurrence = metadata.clone(),
+                _ => unreachable!(),
+            }
+            let unchanged = ty.map_children(Clone::clone);
+            let mapped = ty.map_children(|_| ResolvedType::NEVER);
+            match (&ty.kind, &unchanged.kind, &mapped.kind) {
+                (
+                    ResolvedTypeKind::Interface { arguments: a, .. },
+                    ResolvedTypeKind::Interface { arguments: b, .. },
+                    ResolvedTypeKind::Interface {
+                        occurrence,
+                        arguments,
+                        nullable,
+                        extension_type,
+                        ..
+                    },
+                ) => {
+                    assert!(Arc::ptr_eq(a, b));
+                    assert_eq!(arguments.as_ref(), &[ResolvedType::NEVER]);
+                    assert!(*nullable && *extension_type);
+                    assert!(Arc::ptr_eq(
+                        occurrence.0.as_ref().unwrap(),
+                        metadata.0.as_ref().unwrap()
+                    ));
+                }
+                (
+                    ResolvedTypeKind::Record {
+                        positional: ap,
+                        named: an,
+                        ..
+                    },
+                    ResolvedTypeKind::Record {
+                        positional: bp,
+                        named: bn,
+                        ..
+                    },
+                    ResolvedTypeKind::Record {
+                        occurrence,
+                        positional,
+                        named,
+                        nullable,
+                    },
+                ) => {
+                    assert!(Arc::ptr_eq(ap, bp));
+                    assert!(Arc::ptr_eq(an, bn));
+                    assert_eq!(positional.as_ref(), &[ResolvedType::NEVER]);
+                    assert_eq!(named[0].1, ResolvedType::NEVER);
+                    assert!(*nullable);
+                    assert!(Arc::ptr_eq(
+                        occurrence.0.as_ref().unwrap(),
+                        metadata.0.as_ref().unwrap()
+                    ));
+                }
+                _ => unreachable!(),
+            }
+        }
+        for ty in [
+            ResolvedType::new_type_parameter(parameter_id(), Arc::new(ResolvedType::UNKNOWN), true),
+            ResolvedType::new_non_null_type_parameter(
+                parameter_id(),
+                Arc::new(ResolvedType::UNKNOWN),
+            ),
+        ] {
+            let mapped = ty.map_children(|_| ResolvedType::NEVER);
+            match mapped.view() {
+                ResolvedTypeView::TypeParameter {
+                    id,
+                    bound,
+                    nullable,
+                } => {
+                    assert_eq!(id, &parameter_id());
+                    assert_eq!(**bound, ResolvedType::NEVER);
+                    assert!(nullable);
+                }
+                ResolvedTypeView::NonNullTypeParameter { id, bound } => {
+                    assert_eq!(id, &parameter_id());
+                    assert_eq!(**bound, ResolvedType::NEVER);
+                }
+                _ => unreachable!(),
+            }
+        }
     }
 }

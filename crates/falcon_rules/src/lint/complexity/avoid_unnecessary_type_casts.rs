@@ -1,6 +1,6 @@
 //! Flags an `as` cast to the operand's resolved static type.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedTypeView, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 
 use crate::lint::semantic_type_operations::{TypeOperation, TypeOperationKind, TypeOperations};
@@ -22,8 +22,8 @@ impl Rule for AvoidUnnecessaryTypeCasts {
                     || operation.operand != operation.target
                     || operation.operand.nullable()
                     || matches!(
-                        operation.operand,
-                        ResolvedType::Unknown | ResolvedType::Dynamic
+                        operation.operand.view(),
+                        ResolvedTypeView::Unknown | ResolvedTypeView::Dynamic
                     )
                 {
                     return None;

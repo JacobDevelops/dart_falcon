@@ -3,7 +3,7 @@
 //! Initializer-list assignments and forwarding through intermediate classes are not tracked.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, Rule, RulePreparation,
+    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
     SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
@@ -60,7 +60,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         let Some(owner) = self.model.resolve_name(declaration.name.name()) else {
             return StructuralTraversal::SkipChildren;
         };
-        let Some(ResolvedType::Interface { identity: parent, .. }) = self.signatures.superclass(&owner) else {
+        let Some(ResolvedTypeView::Interface { identity: parent, .. }) = self.signatures.superclass(&owner).map(ResolvedType::view) else {
             return StructuralTraversal::SkipChildren;
         };
         let Some(parent_facts) = self.signatures.declaration(parent) else {

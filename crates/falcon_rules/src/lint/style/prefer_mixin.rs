@@ -19,7 +19,7 @@
 
 use falcon_analyze::TypeKind;
 use falcon_analyze::{
-    AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel, SignatureIndex,
+    AnalyzeContext, ResolvedTypeView, Rule, RulePreparation, SemanticModel, SignatureIndex,
     StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
@@ -69,9 +69,9 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             _ => return StructuralTraversal::SkipChildren,
         };
         for mixin in with_clause {
-            let is_plain_class = match model.resolve_type(mixin) {
-                ResolvedType::Interface { identity, .. } => {
-                    signatures.type_kind(&identity) == Some(TypeKind::Class)
+            let is_plain_class = match model.resolve_type(mixin).view() {
+                ResolvedTypeView::Interface { identity, .. } => {
+                    signatures.type_kind(identity) == Some(TypeKind::Class)
                 }
                 _ => false,
             };

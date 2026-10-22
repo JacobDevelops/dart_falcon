@@ -1,4 +1,5 @@
 use super::*;
+use crate::resolve::semantic::ResolvedTypeKind;
 
 pub(super) struct CollectionTypes<'a, 'model, L> {
     pub(super) lexical: ClosureReturns<'a, 'model, L>,
@@ -108,20 +109,25 @@ impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
     }
 
     fn spread(&mut self, expression: Expr<'_>, map: bool, null_aware: bool) {
-        let context = self.contexts[0].map(|first| ResolvedType::Interface {
-            occurrence: Default::default(),
-            identity: DeclarationIdentity::sdk("dart:core", if map { "Map" } else { "Iterable" }),
-            arguments: if map {
-                vec![
-                    first.clone(),
-                    self.contexts[1].cloned().unwrap_or(ResolvedType::Unknown),
-                ]
-                .into()
-            } else {
-                vec![first.clone()].into()
+        let context = self.contexts[0].map(|first| ResolvedType {
+            kind: ResolvedTypeKind::Interface {
+                occurrence: Default::default(),
+                identity: DeclarationIdentity::sdk(
+                    "dart:core",
+                    if map { "Map" } else { "Iterable" },
+                ),
+                arguments: if map {
+                    vec![
+                        first.clone(),
+                        self.contexts[1].cloned().unwrap_or(ResolvedType::UNKNOWN),
+                    ]
+                    .into()
+                } else {
+                    vec![first.clone()].into()
+                },
+                nullable: null_aware,
+                extension_type: false,
             },
-            nullable: null_aware,
-            extension_type: false,
         });
         let ty = self.lexical.infer(expression, context.as_ref());
         let map_type = (map || self.infer_map_spreads)
@@ -154,7 +160,7 @@ impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
             component.push(
                 ty.as_ref()
                     .and_then(|ty| ty.type_argument(ordinal))
-                    .unwrap_or(ResolvedType::Unknown),
+                    .unwrap_or(ResolvedType::UNKNOWN),
             );
         }
     }

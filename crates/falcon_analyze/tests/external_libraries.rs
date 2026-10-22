@@ -397,13 +397,12 @@ fn indexes_sdk_and_dependency_declarations() {
     assert!(value.interface("dart:core", "int"));
 
     let int = model.core_type("int", false);
-    let list = ResolvedType::Interface {
-        occurrence: Default::default(),
-        identity: model.resolve_name("List").unwrap(),
-        arguments: vec![int.clone()].into(),
-        nullable: false,
-        extension_type: false,
-    };
+    let list = ResolvedType::new_interface(
+        model.resolve_name("List").unwrap(),
+        vec![int.clone()].into(),
+        false,
+        false,
+    );
     let (first, substitutions) = signatures.resolved_field(&list, "first", &model).unwrap();
     assert_eq!(model.substitute(&first, &substitutions), int);
 
@@ -423,15 +422,14 @@ fn indexes_sdk_and_dependency_declarations() {
     );
     assert_eq!(
         callback,
-        ResolvedType::Function {
-            shape: Some(falcon_analyze::FunctionTypeShape::empty()),
-            alias: Default::default(),
-            optional_positional: 0,
-            return_type: Box::new(ResolvedType::Void).into(),
-            positional: vec![int].into(),
-            named: Vec::new().into(),
-            nullable: true,
-        }
+        ResolvedType::new_function(
+            Some(falcon_analyze::FunctionTypeShape::empty()),
+            0,
+            Box::new(ResolvedType::VOID).into(),
+            vec![int].into(),
+            Vec::new().into(),
+            true,
+        )
     );
 }
 
@@ -1075,13 +1073,12 @@ fn compact_external_facts_preserve_defaults_constants_and_parts() {
     ));
     assert!(model.resolve_name("Choice").is_some());
     let box_identity = model.resolve_name("Box").unwrap();
-    let inferred_box = ResolvedType::Interface {
-        occurrence: Default::default(),
-        identity: box_identity,
-        arguments: vec![model.core_type("int", false)].into(),
-        nullable: false,
-        extension_type: false,
-    };
+    let inferred_box = ResolvedType::new_interface(
+        box_identity,
+        vec![model.core_type("int", false)].into(),
+        false,
+        false,
+    );
     for name in ["forward", "later"] {
         assert_eq!(
             signatures.value_type(&model.resolve_value(name).unwrap()),
@@ -1096,11 +1093,11 @@ fn compact_external_facts_preserve_defaults_constants_and_parts() {
     }
     assert_eq!(
         signatures.value_type(&model.resolve_value("inferredTop").unwrap()),
-        Some(&ResolvedType::Dynamic)
+        Some(&ResolvedType::DYNAMIC)
     );
     assert_eq!(
         signatures.field(&base, "inferredValue").unwrap().1,
-        ResolvedType::Dynamic
+        ResolvedType::DYNAMIC
     );
 }
 
@@ -1522,13 +1519,7 @@ abstract class EquivalentDiamond implements SameLeft, SameRight {}
         );
         assert_eq!(
             signatures.implements_sdk(
-                &ResolvedType::Interface {
-                    occurrence: Default::default(),
-                    identity,
-                    arguments: Vec::new().into(),
-                    nullable: false,
-                    extension_type: false,
-                },
+                &ResolvedType::new_interface(identity, Vec::new().into(), false, false,),
                 "dart:core",
                 "Object",
             ),

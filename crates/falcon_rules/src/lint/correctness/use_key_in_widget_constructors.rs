@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use rustc_hash::FxHashMap;
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedSignature, ResolvedType, Rule, RulePreparation,
+    AnalyzeContext, DeclarationIdentity, ResolvedSignature, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
     SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal, TypeParameterId,
     TypeParameterScope, TypeRelation,
 };
@@ -65,7 +65,7 @@ impl Collector<'_> {
         let mut current = &class_type;
         let mut visited = HashSet::new();
         let extends_widget = loop {
-            let ResolvedType::Interface { identity, .. } = current else {
+            let ResolvedTypeView::Interface { identity, .. } = current.view() else {
                 break false;
             };
             if !visited.insert(identity) {
@@ -74,7 +74,7 @@ impl Collector<'_> {
             let Some(superclass) = self.signatures.superclass(identity) else {
                 break false;
             };
-            if matches!(superclass, ResolvedType::Interface { identity, .. } if identity.matches(&widget))
+            if matches!(superclass.view(), ResolvedTypeView::Interface { identity, .. } if identity.matches(&widget))
             {
                 break true;
             }

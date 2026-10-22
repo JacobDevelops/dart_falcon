@@ -9,7 +9,7 @@
 
 use falcon_analyze::SemanticState;
 use falcon_analyze::{
-    AnalyzeContext, ResolvedType, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    AnalyzeContext, ResolvedTypeView, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -81,10 +81,10 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         if node.is_static() || !node.annotations().is_empty() { return StructuralTraversal::Continue; }
         let Some(ty) = node.field_type() else { return StructuralTraversal::Continue; };
         let resolved = self.state.model.resolve_type_in(ty, &self.state.type_parameters);
-        let function = match &resolved {
-            ResolvedType::Function { .. } => true,
-            ResolvedType::Interface { .. } => resolved.interface("dart:core", "Function"),
-            ResolvedType::Record { .. } | ResolvedType::Void | ResolvedType::Null | ResolvedType::Never => false,
+        let function = match resolved.view() {
+            ResolvedTypeView::Function { .. } => true,
+            ResolvedTypeView::Interface { .. } => resolved.interface("dart:core", "Function"),
+            ResolvedTypeView::Record { .. } | ResolvedTypeView::Void | ResolvedTypeView::Null | ResolvedTypeView::Never => false,
             _ => return StructuralTraversal::Continue,
         };
         for declaration in node.declarators() {

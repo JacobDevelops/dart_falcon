@@ -8,7 +8,7 @@
 
 use crate::lint::support::controller_disposal::constructed_identity;
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, SemanticModel,
     SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
@@ -71,8 +71,9 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         if self.signatures.relation(&ty, TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("StatelessWidget")), &self.model) == Truth::Yes {
             self.target = Some(identity);
         } else if let Some(instance) = self.signatures.as_instance_of(&ty, &DeclarationIdentity::flutter("State"), &self.model)
-            && let Some(ResolvedType::Interface { identity, .. }) = instance.type_argument(0) {
-            self.target = Some(identity);
+            && let Some(argument) = instance.type_argument(0)
+            && let ResolvedTypeView::Interface { identity, .. } = argument.view() {
+            self.target = Some(identity.clone());
         }
         if self.target.is_some() { StructuralTraversal::Continue } else { StructuralTraversal::SkipChildren }
     }

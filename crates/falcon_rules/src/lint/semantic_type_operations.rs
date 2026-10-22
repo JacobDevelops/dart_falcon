@@ -1,5 +1,7 @@
 use falcon_analyze::TypeKind;
-use falcon_analyze::{DeclarationIdentity, ResolvedType, SignatureIndex, Truth, TypeIndex};
+use falcon_analyze::{
+    DeclarationIdentity, ResolvedType, ResolvedTypeView, SignatureIndex, Truth, TypeIndex,
+};
 use falcon_syntax::cst::*;
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
@@ -69,27 +71,29 @@ where
 /// type parameter, an extension type without superinterfaces) as well as anything falcon cannot prove:
 /// `dynamic`, `void`, unresolved types, and library names that may be type
 /// aliases. Callers that need the analyzer's `isNullable(dynamic)` must check
-/// [`ResolvedType::Dynamic`] themselves.
+/// [`ResolvedType::DYNAMIC`] themselves.
 pub(crate) fn nullability(
     ty: &ResolvedType,
     signatures: &SignatureIndex,
     types: Option<&TypeIndex>,
 ) -> Truth {
-    match ty {
-        ResolvedType::Null => Truth::Yes,
-        ResolvedType::Never | ResolvedType::NonNullTypeParameter { .. } => Truth::No,
-        ResolvedType::Unknown | ResolvedType::Dynamic | ResolvedType::Void => Truth::Unknown,
-        ResolvedType::Function { nullable, .. } | ResolvedType::Record { nullable, .. } => {
-            if *nullable {
+    match ty.view() {
+        ResolvedTypeView::Null => Truth::Yes,
+        ResolvedTypeView::Never | ResolvedTypeView::NonNullTypeParameter { .. } => Truth::No,
+        ResolvedTypeView::Unknown | ResolvedTypeView::Dynamic | ResolvedTypeView::Void => {
+            Truth::Unknown
+        }
+        ResolvedTypeView::Function { nullable, .. } | ResolvedTypeView::Record { nullable, .. } => {
+            if nullable {
                 Truth::Yes
             } else {
                 Truth::No
             }
         }
-        ResolvedType::TypeParameter {
+        ResolvedTypeView::TypeParameter {
             bound, nullable, ..
         } => {
-            if *nullable {
+            if nullable {
                 Truth::Yes
             } else if nullability(bound, signatures, types) == Truth::No {
                 Truth::No
@@ -97,16 +101,16 @@ pub(crate) fn nullability(
                 Truth::Unknown
             }
         }
-        ResolvedType::Interface {
+        ResolvedTypeView::Interface {
             identity,
             nullable,
             extension_type,
             ..
         } => {
-            if *nullable {
+            if nullable {
                 return Truth::Yes;
             }
-            if *extension_type {
+            if extension_type {
                 // A non-nullable extension type with a superinterface is
                 // non-nullable even when its representation admits null.
                 return if signatures.supertype_matches(identity, &|other| other != identity)

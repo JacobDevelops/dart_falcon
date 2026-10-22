@@ -1,7 +1,7 @@
 //! Prefer EquatableMixin to directly extending package:equatable's Equatable.
 
 use falcon_analyze::{
-    AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
+    AnalyzeContext, ResolvedTypeView, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
     StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
@@ -36,10 +36,10 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         };
         if let Some(superclass) = superclass
             && let Some(identities) = self.ctx.identities()
-            && let ResolvedType::Interface { identity, .. } =
+            && let ResolvedTypeView::Interface { identity, .. } =
                 SemanticModel::new(self.ctx.file_path(), self.ctx.parsed(), identities, self.ctx.types())
-                    .resolve_type(superclass)
-            && identities.is_package_declaration(&identity, "equatable", "Equatable")
+                    .resolve_type(superclass).view()
+            && identities.is_package_declaration(identity, "equatable", "Equatable")
         {
             self.diagnostics.push(self.ctx.diagnostic(
                 "Prefer mixing in `EquatableMixin` instead of extending `Equatable`.",

@@ -1,4 +1,5 @@
 use super::*;
+use crate::resolve::semantic::ResolvedTypeKind;
 
 type IndexedProgram<'a> = (Option<FileId>, &'a Arc<crate::ParsedFile>, bool);
 
@@ -338,7 +339,7 @@ impl SignatureIndex {
                             function
                                 .return_type()
                                 .map(|ty| model.resolve_type(ty))
-                                .unwrap_or(ResolvedType::Dynamic),
+                                .unwrap_or(ResolvedType::DYNAMIC),
                         );
                     }
                 }
@@ -357,9 +358,9 @@ impl SignatureIndex {
                                 .map(|ty| model.resolve_type(ty))
                                 .unwrap_or_else(|| {
                                     if declarator.initializer().is_none() {
-                                        ResolvedType::Dynamic
+                                        ResolvedType::DYNAMIC
                                     } else {
-                                        ResolvedType::Unknown
+                                        ResolvedType::UNKNOWN
                                     }
                                 }),
                         );
@@ -465,7 +466,7 @@ impl SignatureIndex {
                         .filter_map(|member| match member {
                             ClassMember::Getter(getter) if !getter.is_static() => Some((
                                 getter.name().name().to_owned(),
-                                getter.return_type().map_or(ResolvedType::Dynamic, |ty| {
+                                getter.return_type().map_or(ResolvedType::DYNAMIC, |ty| {
                                     model.resolve_type_in(ty, &parameters)
                                 }),
                             )),
@@ -483,8 +484,9 @@ impl SignatureIndex {
                         parameter_bounds: extension
                             .type_params()
                             .filter_map(|parameter| {
-                                let ResolvedType::TypeParameter { id, bound, .. } =
-                                    parameters.lookup(parameter.name().name())?
+                                let ResolvedType {
+                                    kind: ResolvedTypeKind::TypeParameter { id, bound, .. },
+                                } = parameters.lookup(parameter.name().name())?
                                 else {
                                     return None;
                                 };
@@ -493,7 +495,7 @@ impl SignatureIndex {
                                     if parameter.bound().is_some() {
                                         bound.as_ref().clone()
                                     } else {
-                                        ResolvedType::Dynamic
+                                        ResolvedType::DYNAMIC
                                     },
                                 ))
                             })
@@ -638,13 +640,13 @@ impl SignatureIndex {
                         let enum_type = self.with_raw_arguments(&ResolvedType::interface_identity(
                             identity.clone(),
                         ));
-                        let values_type = ResolvedType::Interface {
+                        let values_type = ResolvedType::from_kind(ResolvedTypeKind::Interface {
                             occurrence: Default::default(),
                             identity: DeclarationIdentity::sdk("dart:core", "List"),
                             arguments: vec![enum_type].into(),
                             nullable: false,
                             extension_type: false,
-                        };
+                        });
                         let entry = self
                             .member_entries
                             .entry(identity.clone())
@@ -962,10 +964,13 @@ impl SignatureIndex {
         let Some(identity) = model.resolve_name(name) else {
             return false;
         };
-        let Some(ResolvedType::Interface {
-            identity: superclass,
-            arguments,
-            ..
+        let Some(ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    identity: superclass,
+                    arguments,
+                    ..
+                },
         }) = self
             .type_facts
             .get(&identity)
@@ -988,7 +993,10 @@ impl SignatureIndex {
         };
         let mixins_have_no_fields = self.type_facts.get(&identity).is_some_and(|facts| {
             facts.mixin_applications.iter().all(|mixin| {
-                let ResolvedType::Interface { identity, .. } = mixin else {
+                let ResolvedType {
+                    kind: ResolvedTypeKind::Interface { identity, .. },
+                } = mixin
+                else {
                     return false;
                 };
                 self.type_kind(identity).is_some()
@@ -1135,9 +1143,12 @@ impl SignatureIndex {
         super_constructor: &str,
         parameter: SuperFormal<'_>,
     ) -> Option<ParameterDefault> {
-        let ResolvedType::Interface {
-            identity: super_identity,
-            ..
+        let ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    identity: super_identity,
+                    ..
+                },
         } = superclass
         else {
             return None;
@@ -1172,11 +1183,14 @@ impl SignatureIndex {
         parameter: SuperFormal<'_>,
         model: &SemanticModel<'_>,
     ) -> Option<ResolvedType> {
-        let ResolvedType::Interface {
-            occurrence,
-            identity,
-            arguments,
-            ..
+        let ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    occurrence,
+                    identity,
+                    arguments,
+                    ..
+                },
         } = superclass
         else {
             return None;
@@ -1374,11 +1388,11 @@ impl SignatureIndex {
                                             })
                                             .and_then(|entry| entry.field.as_ref())
                                             .map(|(_, ty)| ty.clone())
-                                            .unwrap_or(ResolvedType::Unknown)
+                                            .unwrap_or(ResolvedType::UNKNOWN)
                                     },
                                 )
                             })
-                            .unwrap_or(ResolvedType::Unknown),
+                            .unwrap_or(ResolvedType::UNKNOWN),
                         is_named: matches!(
                             parameter.kind(),
                             falcon_syntax::cst::ParamKind::Named { .. }
@@ -1452,7 +1466,10 @@ impl SignatureIndex {
                 .type_facts
                 .get(subtype)
                 .and_then(|facts| facts.superclass.as_ref());
-            while let Some(ResolvedType::Interface { identity, .. }) = current {
+            while let Some(ResolvedType {
+                kind: ResolvedTypeKind::Interface { identity, .. },
+            }) = current
+            {
                 if !visited.insert(identity) {
                     break;
                 }
@@ -1503,7 +1520,7 @@ impl SignatureIndex {
                     parameter
                         .bound()
                         .map(|bound| model.resolve_type_in(bound, &scope))
-                        .unwrap_or(ResolvedType::Dynamic),
+                        .unwrap_or(ResolvedType::DYNAMIC),
                 )
             })
             .collect();
@@ -1524,7 +1541,7 @@ impl SignatureIndex {
                 let field_type = field
                     .field_type()
                     .map(|ty| model.resolve_type_in(ty, &scope))
-                    .unwrap_or(ResolvedType::Unknown);
+                    .unwrap_or(ResolvedType::UNKNOWN);
                 field.declarators().map(move |declarator| {
                     (declarator.name().name().to_string(), field_type.clone())
                 })
@@ -1536,7 +1553,7 @@ impl SignatureIndex {
                 parameter
                     .param_type()
                     .map(|ty| model.resolve_type_in(ty, &scope))
-                    .unwrap_or(ResolvedType::Unknown),
+                    .unwrap_or(ResolvedType::UNKNOWN),
             );
         }
         let (superclass, mixins, constraints, interfaces) = match declaration {
@@ -1678,7 +1695,7 @@ impl SignatureIndex {
                     let field_type = field
                         .field_type()
                         .map(|ty| model.resolve_type_in(ty, &scope))
-                        .unwrap_or(ResolvedType::Unknown);
+                        .unwrap_or(ResolvedType::UNKNOWN);
                     for declarator in field.declarators() {
                         let kind = MemberKind::field(field, declarator);
                         let entry = entries
@@ -1735,9 +1752,9 @@ impl SignatureIndex {
                         .return_type()
                         .map(|ty| model.resolve_type_in(ty, &scope))
                         .unwrap_or(if infer_override && !getter.is_static() {
-                            ResolvedType::Unknown
+                            ResolvedType::UNKNOWN
                         } else {
-                            ResolvedType::Dynamic
+                            ResolvedType::DYNAMIC
                         });
                     entry.field = Some((owner_parameters.clone(), return_type.clone()));
                     entry.implicit_getter = getter.return_type().is_none();
@@ -1763,13 +1780,13 @@ impl SignatureIndex {
                         .param_type()
                         .map(|ty| model.resolve_type_in(ty, &scope))
                         .unwrap_or(if setter.is_static() || !infer_override {
-                            ResolvedType::Dynamic
+                            ResolvedType::DYNAMIC
                         } else {
-                            ResolvedType::Unknown
+                            ResolvedType::UNKNOWN
                         });
                     entry.field.get_or_insert_with(|| {
                         let read_type = if setter.param_type().is_none() {
-                            ResolvedType::Dynamic
+                            ResolvedType::DYNAMIC
                         } else {
                             parameter_type.clone()
                         };
@@ -1984,7 +2001,7 @@ fn infer_const_initializer_type(
             .resolve_type_in(new.dart_type(), scope)
             .with_nullable(false),
         Expr::Call(call) => resolve_call_constructor(call.callee(), model, false)
-            .map_or(ResolvedType::Unknown, |(identity, _)| {
+            .map_or(ResolvedType::UNKNOWN, |(identity, _)| {
                 ResolvedType::interface_identity(identity)
             }),
         Expr::Conditional(conditional) => {
@@ -1993,14 +2010,14 @@ fn infer_const_initializer_type(
             if left == right {
                 left
             } else {
-                ResolvedType::Unknown
+                ResolvedType::UNKNOWN
             }
         }
         Expr::IntLit(_) => model.core_type("int", false),
         Expr::DoubleLit(_) => model.core_type("double", false),
         Expr::StringLit(_) => model.core_type("String", false),
         Expr::BoolLit(_) => model.core_type("bool", false),
-        _ => ResolvedType::Unknown,
+        _ => ResolvedType::UNKNOWN,
     }
 }
 
@@ -2081,14 +2098,14 @@ pub(super) fn signature<'a>(
             field_types
                 .and_then(|fields| fields.get(name))
                 .cloned()
-                .unwrap_or(ResolvedType::Unknown)
+                .unwrap_or(ResolvedType::UNKNOWN)
         } else if initializing == Some(InitializingFormal::Super) || infer_override {
-            ResolvedType::Unknown
+            ResolvedType::UNKNOWN
         } else {
-            ResolvedType::Dynamic
+            ResolvedType::DYNAMIC
         }
     };
-    let mut result = ResolvedSignature::returning(ResolvedType::Dynamic);
+    let mut result = ResolvedSignature::returning(ResolvedType::DYNAMIC);
     result.owner_parameters = owner_parameters.to_vec();
     result.call_parameters = parameter_ids(scope, call_parameters.clone());
     let mut required_named = Vec::new();
@@ -2172,9 +2189,9 @@ pub(super) fn signature<'a>(
     result.return_type = return_type
         .map(|ty| model.resolve_type_in(ty, scope))
         .unwrap_or(if infer_override {
-            ResolvedType::Unknown
+            ResolvedType::UNKNOWN
         } else {
-            ResolvedType::Dynamic
+            ResolvedType::DYNAMIC
         });
     result
 }
@@ -2189,8 +2206,8 @@ pub(super) fn mentions_any(ty: &ResolvedType, parameters: &[TypeParameterId]) ->
         &mut |ty| {
             matches!(
                 ty,
-                ResolvedType::TypeParameter { id, .. }
-                    | ResolvedType::NonNullTypeParameter { id, .. } if parameters.contains(id)
+                ResolvedType { kind: ResolvedTypeKind::TypeParameter { id, .. } }
+                    | ResolvedType { kind: ResolvedTypeKind::NonNullTypeParameter { id, .. } } if parameters.contains(id)
             )
         },
         &mut FxHashSet::default(),
@@ -2205,7 +2222,9 @@ fn parameter_ids<'a>(
 ) -> Vec<TypeParameterId> {
     parameters
         .filter_map(|parameter| match scope.lookup(parameter.name().name()) {
-            Some(ResolvedType::TypeParameter { id, .. }) => Some(id),
+            Some(ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter { id, .. },
+            }) => Some(id),
             _ => None,
         })
         .collect()
@@ -2218,7 +2237,9 @@ fn record_bound_declarations<'a>(
     parameters: impl Iterator<Item = TypeParam<'a>>,
 ) {
     for parameter in parameters {
-        if let Some(ResolvedType::TypeParameter { id, .. }) = scope.lookup(parameter.name().name())
+        if let Some(ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter { id, .. },
+        }) = scope.lookup(parameter.name().name())
         {
             declared.insert(id, parameter.bound().is_some());
         }

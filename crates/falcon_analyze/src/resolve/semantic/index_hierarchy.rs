@@ -1,5 +1,6 @@
 use super::super::{hierarchy, sdk_hierarchy::SDK_HIERARCHY};
 use super::*;
+use crate::resolve::semantic::ResolvedTypeKind;
 use std::ops::ControlFlow;
 
 impl SignatureIndex {
@@ -10,13 +11,19 @@ impl SignatureIndex {
         model: &SemanticModel<'_>,
     ) -> Truth {
         if let (
-            ResolvedType::Interface {
-                identity: left_identity,
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity: left_identity,
+                        ..
+                    },
             },
-            ResolvedType::Interface {
-                identity: right_identity,
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity: right_identity,
+                        ..
+                    },
             },
         ) = (left, right)
         {
@@ -82,9 +89,9 @@ impl SignatureIndex {
             .and_then(|facts| facts.supertypes.as_ref())
             .is_some_and(|(_, supertypes)| {
                 supertypes.iter().any(|supertype| match supertype {
-                    ResolvedType::Interface { identity, .. } => {
-                        self.reaches_supertype_cycle(identity, visiting, cyclic, acyclic)
-                    }
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Interface { identity, .. },
+                    } => self.reaches_supertype_cycle(identity, visiting, cyclic, acyclic),
                     _ => false,
                 })
             });
@@ -153,7 +160,9 @@ impl SignatureIndex {
                     complete &= complete_edges(identity, supertypes);
                     for supertype in supertypes {
                         match supertype {
-                            ResolvedType::Interface { identity, .. } => stack.push(identity),
+                            ResolvedType {
+                                kind: ResolvedTypeKind::Interface { identity, .. },
+                            } => stack.push(identity),
                             _ => complete = false,
                         }
                     }
@@ -172,32 +181,37 @@ impl SignatureIndex {
     /// instantiation to bounds; any other type is returned unchanged.
     pub(super) fn with_raw_arguments(&self, ty: &ResolvedType) -> ResolvedType {
         match ty {
-            ResolvedType::Interface {
-                occurrence,
-                identity,
-                arguments,
-                nullable,
-                extension_type,
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        occurrence,
+                        identity,
+                        arguments,
+                        nullable,
+                        extension_type,
+                    },
             } if arguments.is_empty() => match self
                 .type_facts
                 .get(identity)
                 .and_then(|facts| facts.supertypes.as_ref())
             {
-                Some((parameters, _)) if !parameters.is_empty() => ResolvedType::Interface {
-                    occurrence: occurrence.clone(),
-                    identity: identity.clone(),
-                    arguments: parameters
-                        .iter()
-                        .map(|id| {
-                            self.owner_defaults
-                                .get(id)
-                                .cloned()
-                                .unwrap_or(ResolvedType::Dynamic)
-                        })
-                        .collect(),
-                    nullable: *nullable,
-                    extension_type: *extension_type,
-                },
+                Some((parameters, _)) if !parameters.is_empty() => {
+                    ResolvedType::from_kind(ResolvedTypeKind::Interface {
+                        occurrence: occurrence.clone(),
+                        identity: identity.clone(),
+                        arguments: parameters
+                            .iter()
+                            .map(|id| {
+                                self.owner_defaults
+                                    .get(id)
+                                    .cloned()
+                                    .unwrap_or(ResolvedType::DYNAMIC)
+                            })
+                            .collect(),
+                        nullable: *nullable,
+                        extension_type: *extension_type,
+                    })
+                }
                 _ => ty.clone(),
             },
             _ => ty.clone(),
@@ -209,17 +223,20 @@ impl SignatureIndex {
     /// written raw type. Inserted bound defaults are not normalized again.
     pub fn instantiate_to_bounds(&self, ty: &ResolvedType) -> ResolvedType {
         match ty {
-            ResolvedType::Interface {
-                occurrence,
-                identity,
-                arguments,
-                nullable,
-                extension_type,
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        occurrence,
+                        identity,
+                        arguments,
+                        nullable,
+                        extension_type,
+                    },
             } => {
                 if arguments.is_empty() {
                     return self.with_raw_arguments(ty);
                 }
-                ResolvedType::Interface {
+                ResolvedType::from_kind(ResolvedTypeKind::Interface {
                     occurrence: occurrence.clone(),
                     identity: identity.clone(),
                     arguments: arguments
@@ -228,17 +245,20 @@ impl SignatureIndex {
                         .collect(),
                     nullable: *nullable,
                     extension_type: *extension_type,
-                }
+                })
             }
-            ResolvedType::Function {
-                alias,
-                return_type,
-                positional,
-                named,
-                nullable,
-                optional_positional,
-                shape,
-            } => ResolvedType::Function {
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        alias,
+                        return_type,
+                        positional,
+                        named,
+                        nullable,
+                        optional_positional,
+                        shape,
+                    },
+            } => ResolvedType::from_kind(ResolvedTypeKind::Function {
                 shape: shape
                     .as_ref()
                     .map(|shape| shape.map_bounds(|bound| self.instantiate_to_bounds(bound))),
@@ -254,13 +274,16 @@ impl SignatureIndex {
                     .map(|(name, parameter)| (name.clone(), self.instantiate_to_bounds(parameter)))
                     .collect(),
                 nullable: *nullable,
-            },
-            ResolvedType::Record {
-                occurrence,
-                positional,
-                named,
-                nullable,
-            } => ResolvedType::Record {
+            }),
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Record {
+                        occurrence,
+                        positional,
+                        named,
+                        nullable,
+                    },
+            } => ResolvedType::from_kind(ResolvedTypeKind::Record {
                 occurrence: occurrence.clone(),
                 positional: positional
                     .iter()
@@ -271,7 +294,7 @@ impl SignatureIndex {
                     .map(|(name, field)| (name.clone(), self.instantiate_to_bounds(field)))
                     .collect(),
                 nullable: *nullable,
-            },
+            }),
             _ => ty.clone(),
         }
     }
@@ -297,11 +320,17 @@ impl SignatureIndex {
         model: &SemanticModel<'_>,
         visited: &mut FxHashSet<DeclarationIdentity>,
     ) -> Option<ResolvedType> {
-        if let ResolvedType::NonNullTypeParameter { bound, .. } = ty {
+        if let ResolvedType {
+            kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+        } = ty
+        {
             return self.instantiated_matching(&bound.non_null(), target, model, visited);
         }
-        if let ResolvedType::TypeParameter {
-            bound, nullable, ..
+        if let ResolvedType {
+            kind:
+                ResolvedTypeKind::TypeParameter {
+                    bound, nullable, ..
+                },
         } = ty
         {
             return self.instantiated_matching(
@@ -311,11 +340,14 @@ impl SignatureIndex {
                 visited,
             );
         }
-        let ResolvedType::Interface {
-            occurrence,
-            identity,
-            arguments,
-            ..
+        let ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    occurrence,
+                    identity,
+                    arguments,
+                    ..
+                },
         } = ty
         else {
             return None;
@@ -379,12 +411,14 @@ impl SignatureIndex {
         // the inexact one lacks it.
         let lists = |set: &[ResolvedType], identity: &DeclarationIdentity| {
             set.iter().any(
-                |ty| matches!(ty, ResolvedType::Interface { identity: listed, .. } if listed == identity),
+                |ty| matches!(ty, ResolvedType { kind: ResolvedTypeKind::Interface { identity: listed, .. } } if listed == identity),
             )
         };
         let external_beyond = |exact: &[ResolvedType], inexact: &[ResolvedType]| {
             exact.iter().any(|ty| match ty {
-                ResolvedType::Interface { identity, .. } => {
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface { identity, .. },
+                } => {
                     !matches!(identity, DeclarationIdentity::Library { .. })
                         && *identity != DeclarationIdentity::OBJECT
                         && !lists(inexact, identity)
@@ -406,7 +440,10 @@ impl SignatureIndex {
             .into_iter()
             .filter(|candidate| right.contains(candidate))
             .map(|candidate| {
-                let ResolvedType::Interface { identity, .. } = &candidate else {
+                let ResolvedType {
+                    kind: ResolvedTypeKind::Interface { identity, .. },
+                } = &candidate
+                else {
                     return None;
                 };
                 let depth = self.superinterface_depth(identity, &mut depths)?;
@@ -433,7 +470,10 @@ impl SignatureIndex {
         ty: &ResolvedType,
         model: &SemanticModel<'_>,
     ) -> Option<(Vec<ResolvedType>, bool)> {
-        let ResolvedType::Interface { identity, .. } = ty else {
+        let ResolvedType {
+            kind: ResolvedTypeKind::Interface { identity, .. },
+        } = ty
+        else {
             return None;
         };
         if self.has_cyclic_supertypes(identity) {
@@ -444,12 +484,15 @@ impl SignatureIndex {
         let mut stack = vec![ty.with_nullable(false)];
         while let Some(ty) = stack.pop() {
             let ty = self.with_raw_arguments(&ty);
-            let ResolvedType::Interface {
-                occurrence,
-                identity,
-                arguments,
-                extension_type: false,
-                ..
+            let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        occurrence,
+                        identity,
+                        arguments,
+                        extension_type: false,
+                        ..
+                    },
             } = &ty
             else {
                 return None;
@@ -459,7 +502,7 @@ impl SignatureIndex {
                 return None;
             }
             let seen = found.iter().find(|seen| {
-                matches!(seen, ResolvedType::Interface { identity: known, .. } if known == identity)
+                matches!(seen, ResolvedType { kind: ResolvedTypeKind::Interface { identity: known, .. } } if known == identity)
             });
             if let Some(seen) = seen {
                 // Implementing one interface with two instantiations is an error.
@@ -521,7 +564,9 @@ impl SignatureIndex {
             facts.superclass_edge_count()
         };
         let mut depth_of = |supertype: &ResolvedType| match supertype {
-            ResolvedType::Interface { identity, .. } => self.superinterface_depth(identity, depths),
+            ResolvedType {
+                kind: ResolvedTypeKind::Interface { identity, .. },
+            } => self.superinterface_depth(identity, depths),
             _ => None,
         };
         // `S with M1, M2` is `(S & M1) & M2`; an omitted superclass is `Object`.
@@ -551,13 +596,15 @@ impl SignatureIndex {
     /// its `implements` clause reaches, as the analyzer's `allSupertypes`.
     pub fn implements_sdk(&self, ty: &ResolvedType, library: &str, name: &str) -> Truth {
         match ty {
-            ResolvedType::TypeParameter { bound, .. }
-            | ResolvedType::NonNullTypeParameter { bound, .. } => {
-                self.implements_sdk(bound, library, name)
+            ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter { bound, .. },
             }
-            ResolvedType::Interface { identity, .. } => {
-                self.identity_implements(identity, &|identity| identity.is_sdk(library, name))
-            }
+            | ResolvedType {
+                kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+            } => self.implements_sdk(bound, library, name),
+            ResolvedType {
+                kind: ResolvedTypeKind::Interface { identity, .. },
+            } => self.identity_implements(identity, &|identity| identity.is_sdk(library, name)),
             _ => Truth::Unknown,
         }
     }
@@ -572,16 +619,22 @@ impl SignatureIndex {
         model: &SemanticModel<'_>,
     ) -> Truth {
         let mut ty = ty;
-        while let ResolvedType::TypeParameter { bound, .. }
-        | ResolvedType::NonNullTypeParameter { bound, .. } = ty
+        while let ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter { bound, .. },
+        }
+        | ResolvedType {
+            kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+        } = ty
         {
             ty = bound;
         }
         if matches!(
             ty,
-            ResolvedType::Interface {
-                extension_type: true,
-                ..
+            ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    extension_type: true,
+                    ..
+                }
             }
         ) {
             return self
@@ -616,7 +669,9 @@ impl SignatureIndex {
             {
                 for supertype in supertypes.iter().rev() {
                     match supertype {
-                        ResolvedType::Interface { identity, .. } => stack.push(identity),
+                        ResolvedType {
+                            kind: ResolvedTypeKind::Interface { identity, .. },
+                        } => stack.push(identity),
                         _ => complete = false,
                     }
                 }
@@ -695,7 +750,9 @@ mod tests {
             let edges: Vec<_> = supertypes
                 .iter()
                 .map(|ty| match ty {
-                    ResolvedType::Interface { identity, .. } => identity.clone(),
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Interface { identity, .. },
+                    } => identity.clone(),
                     _ => panic!("expected interface edge: {ty:?}"),
                 })
                 .collect();

@@ -28,7 +28,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedTypeView, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{Visitor, walk_class_decl, walk_enum_decl, walk_top_level_decl};
 use falcon_syntax::cst::*;
@@ -228,7 +228,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         let ty = state.environment.lookup(identifier.name());
         let nullable = syntactically_nullable
-            || matches!(ty, ResolvedType::Dynamic)
+            || matches!(ty.view(), ResolvedTypeView::Dynamic)
             || nullability(&ty, &state.signatures, self.ctx.types()) == Truth::Yes;
         if nullable && self.reported.insert((param.start, param.end)) {
             self.diagnostics.push(self.ctx.diagnostic("Use a type annotation rather than `assert` to enforce non-nullability.", param));

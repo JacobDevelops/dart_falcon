@@ -27,7 +27,7 @@
 //!
 //! Adopted from the official `omit_local_variable_types` lint.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -54,15 +54,15 @@ struct Collector<'a> {
 /// Whether `ty` is fully determined: no unknown component and every generic
 /// type carries all of its type arguments.
 fn settled(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
-    match ty {
-        ResolvedType::Unknown => false,
-        ResolvedType::Dynamic
-        | ResolvedType::Void
-        | ResolvedType::Never
-        | ResolvedType::Null
-        | ResolvedType::TypeParameter { .. }
-        | ResolvedType::NonNullTypeParameter { .. } => true,
-        ResolvedType::Interface {
+    match ty.view() {
+        ResolvedTypeView::Unknown => false,
+        ResolvedTypeView::Dynamic
+        | ResolvedTypeView::Void
+        | ResolvedTypeView::Never
+        | ResolvedTypeView::Null
+        | ResolvedTypeView::TypeParameter { .. }
+        | ResolvedTypeView::NonNullTypeParameter { .. } => true,
+        ResolvedTypeView::Interface {
             identity,
             arguments,
             ..
@@ -70,7 +70,7 @@ fn settled(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
             let arity = state.signatures.type_parameter_count(identity);
             arity == Some(arguments.len()) && arguments.iter().all(|arg| settled(arg, state))
         }
-        ResolvedType::Function {
+        ResolvedTypeView::Function {
             return_type,
             positional,
             named,
@@ -80,7 +80,7 @@ fn settled(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
                 && positional.iter().all(|arg| settled(arg, state))
                 && named.iter().all(|(_, arg)| settled(arg, state))
         }
-        ResolvedType::Record {
+        ResolvedTypeView::Record {
             positional, named, ..
         } => {
             positional.iter().all(|field| settled(field, state))
@@ -95,7 +95,7 @@ fn declared_type(ty: DartType<'_>, state: &SemanticState<'_>) -> Option<Resolved
     let declared = state
         .signatures
         .instantiate_to_bounds(&state.model.resolve_type_in(ty, &state.type_parameters));
-    (!matches!(declared, ResolvedType::Null | ResolvedType::Dynamic) && settled(&declared, state))
+    (!matches!(declared.view(), ResolvedTypeView::Null | ResolvedTypeView::Dynamic) && settled(&declared, state))
         .then_some(declared)
 }
 
@@ -119,12 +119,13 @@ fn promoted_type_parameter(initializer: Expr<'_>, state: &SemanticState<'_>) -> 
         return false;
     };
     let environment = &state.environment;
-    let ResolvedType::TypeParameter { id, .. } = environment.declared_type(identifier.name())
+    let declared = environment.declared_type(identifier.name());
+    let ResolvedTypeView::TypeParameter { id, .. } = declared.view()
     else {
         return false;
     };
     environment.promotion_chain(identifier.name()).iter().any(
-        |promotion| !matches!(promotion, ResolvedType::TypeParameter { id: promoted, .. } if *promoted == id),
+        |promotion| !matches!(promotion.view(), ResolvedTypeView::TypeParameter { id: promoted, .. } if promoted == id),
     )
 }
 
@@ -160,15 +161,14 @@ impl Collector<'_> {
         let Some(declared) = declared_type(ty, state) else {
             return;
         };
-        let context = ResolvedType::Interface {
-            occurrence: Default::default(),
-            identity: DeclarationIdentity::sdk("dart:core", "Iterable"),
-            arguments: vec![declared.clone()].into(),
-            nullable: false,
-            extension_type: false,
-        };
+        let context = ResolvedType::new_interface(
+            DeclarationIdentity::sdk("dart:core", "Iterable"),
+            vec![declared.clone()].into(),
+            false,
+            false,
+        );
         let inferred = state.infer_with_context(iterable, Some(&context));
-        if !matches!(inferred, ResolvedType::Interface { .. }) {
+        if !matches!(inferred.view(), ResolvedTypeView::Interface { .. }) {
             return;
         }
         let element = state

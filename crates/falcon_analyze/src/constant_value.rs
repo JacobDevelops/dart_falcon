@@ -10,6 +10,7 @@
 //! Constructor type tests and casts resolve instantiated owner type parameters.
 //! Indexed initializers and constructors retain parsed sources through the signature index.
 
+use crate::resolve::ResolvedTypeKind;
 use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -197,7 +198,6 @@ impl<'a, 'model> ConstantContext<'a, 'model> {
             stable: false,
         }
     }
-
     fn evaluator(self, empty_fields: &'a HashMap<&'a str, Expr<'a>>) -> ConstEvaluator<'a, 'model> {
         let model = self
             .library
@@ -671,7 +671,10 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             }
             Expr::DotShorthand(shorthand) => {
                 let name = shorthand.name();
-                let ResolvedType::Interface { identity, .. } = expected? else {
+                let ResolvedType {
+                    kind: ResolvedTypeKind::Interface { identity, .. },
+                } = expected?
+                else {
                     return None;
                 };
                 self.signatures
@@ -759,11 +762,22 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
     fn cast_accepts(&self, value: &ConstantValue, target: &ResolvedType) -> Option<bool> {
         if matches!(
             target,
-            ResolvedType::Unknown | ResolvedType::TypeParameter { .. }
+            ResolvedType {
+                kind: ResolvedTypeKind::Unknown
+            } | ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter { .. }
+            }
         ) {
             return None;
         }
-        if matches!(target, ResolvedType::Dynamic | ResolvedType::Void) {
+        if matches!(
+            target,
+            ResolvedType {
+                kind: ResolvedTypeKind::Dynamic
+            } | ResolvedType {
+                kind: ResolvedTypeKind::Void
+            }
+        ) {
             return Some(true);
         }
         // FutureOr can admit null through its argument without being nullable.
@@ -772,7 +786,15 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             return None;
         }
         if matches!(value, ConstantValue::Null) {
-            return Some(target.nullable() || matches!(target, ResolvedType::Null));
+            return Some(
+                target.nullable()
+                    || matches!(
+                        target,
+                        ResolvedType {
+                            kind: ResolvedTypeKind::Null
+                        }
+                    ),
+            );
         }
         if target.interface("dart:core", "Object") {
             return Some(true);
@@ -781,7 +803,14 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
     }
 
     fn type_cast_accepts(&self, runtime: &ConstantType, target: &ResolvedType) -> Option<bool> {
-        if matches!(target, ResolvedType::Dynamic | ResolvedType::Void) {
+        if matches!(
+            target,
+            ResolvedType {
+                kind: ResolvedTypeKind::Dynamic
+            } | ResolvedType {
+                kind: ResolvedTypeKind::Void
+            }
+        ) {
             return Some(true);
         }
         // Check the unsupported union before Null, including generic arguments.
@@ -791,10 +820,13 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         if matches!(runtime, ConstantType::Null) {
             return Some(target.nullable());
         }
-        let ResolvedType::Interface {
-            identity,
-            arguments: target_arguments,
-            ..
+        let ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    identity,
+                    arguments: target_arguments,
+                    ..
+                },
         } = target
         else {
             return (constant_type(target).as_ref() == Some(runtime)).then_some(true);
@@ -834,13 +866,13 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             }
             return (!unknown).then_some(true);
         }
-        let source = ResolvedType::Interface {
+        let source = ResolvedType::from_kind(ResolvedTypeKind::Interface {
             occurrence: Default::default(),
             identity: class.clone(),
             arguments: Vec::new().into(),
             nullable: false,
             extension_type: false,
-        };
+        });
         if target_arguments.is_empty()
             && arguments.is_empty()
             && self
@@ -915,13 +947,13 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             if self.stable_evaluation
                 && let Some(owner) = scope.as_ref()
             {
-                let receiver = ResolvedType::Interface {
+                let receiver = ResolvedType::from_kind(ResolvedTypeKind::Interface {
                     occurrence: Default::default(),
                     identity: owner.clone(),
                     arguments: Default::default(),
                     nullable: false,
                     extension_type: false,
-                };
+                });
                 if self
                     .signatures
                     .resolved_readable_member_owner(&receiver, local_name, &self.model)
@@ -953,7 +985,9 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             // A type literal names a declared type rather than a value.
             let ty = self.model.resolve_type_name(names)?;
             if self.stable_evaluation
-                && let ResolvedType::Interface { identity, .. } = &ty
+                && let ResolvedType {
+                    kind: ResolvedTypeKind::Interface { identity, .. },
+                } = &ty
                 && self.model.configurable_constant_path(identity)
             {
                 return None;
@@ -1213,7 +1247,9 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         }
         let ty = self.infer_expression(expression, expected);
         match &ty {
-            ResolvedType::Interface { .. } => Some(ty.type_arguments().collect()),
+            ResolvedType {
+                kind: ResolvedTypeKind::Interface { .. },
+            } => Some(ty.type_arguments().collect()),
             _ => None,
         }
     }
@@ -1265,14 +1301,14 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                         .iter()
                         .find(|constant| constant.name == name)
                 })
-                && constant.ty != ResolvedType::Unknown
+                && constant.ty != ResolvedType::UNKNOWN
             {
                 return Some(constant.ty.clone());
             }
             if let Some(ty) = scope
                 .and_then(|owner| self.signatures.field(owner, name))
                 .map(|(_, ty)| ty)
-                && *ty != ResolvedType::Unknown
+                && *ty != ResolvedType::UNKNOWN
             {
                 return Some(ty.clone());
             }
@@ -1286,12 +1322,12 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 return Some(
                     self.signatures
                         .member(owner, name)
-                        .map_or(ResolvedType::Unknown, |signature| signature.function_type()),
+                        .map_or(ResolvedType::UNKNOWN, |signature| signature.function_type()),
                 );
             }
             if let Some(identity) = self.model.resolve_value(name)
                 && let Some(ty) = self.signatures.value_type(&identity)
-                && *ty != ResolvedType::Unknown
+                && *ty != ResolvedType::UNKNOWN
             {
                 return Some(ty.clone());
             }
@@ -1308,7 +1344,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             .resolve_name(&[name])
             .and_then(|value| value_type(&value))
             .map(|ty| resolved_constant_type(&ty));
-        value.or_else(|| shadowed.then_some(ResolvedType::Unknown))
+        value.or_else(|| shadowed.then_some(ResolvedType::UNKNOWN))
     }
 
     /// The target of `new`/`const` `dart_type[.constructor]`: the parser may
@@ -1376,7 +1412,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                         type_args
                             .get(index)
                             .cloned()
-                            .unwrap_or(ResolvedType::Unknown),
+                            .unwrap_or(ResolvedType::UNKNOWN),
                     )
                 })
                 .collect();
@@ -1419,7 +1455,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             type_args = inference
                 .owner_parameters
                 .iter()
-                .map(|id| inferred.get(id).cloned().unwrap_or(ResolvedType::Unknown))
+                .map(|id| inferred.get(id).cloned().unwrap_or(ResolvedType::UNKNOWN))
                 .collect();
             // Applying a newly inferred double context to an integer literal
             // changes only its numeric identity, not its evaluated expression.
@@ -1889,14 +1925,20 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         let mut inherited = Vec::new();
         match superclass.as_ref() {
             None => {}
-            Some(ResolvedType::Interface {
-                identity: superclass,
-                ..
+            Some(ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity: superclass,
+                        ..
+                    },
             }) if *superclass == DeclarationIdentity::OBJECT => {}
             Some(
-                ty @ ResolvedType::Interface {
-                    identity: superclass,
-                    ..
+                ty @ ResolvedType {
+                    kind:
+                        ResolvedTypeKind::Interface {
+                            identity: superclass,
+                            ..
+                        },
                 },
             ) => {
                 match self.construct(
@@ -1964,7 +2006,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                     return Some(argument);
                 }
                 let (name, _) = parameter_types.clone().find(|(_, ty)| {
-                    matches!(ty, ResolvedType::TypeParameter { id, nullable: false, .. } if id == owner_parameter)
+                    matches!(ty, ResolvedType { kind: ResolvedTypeKind::TypeParameter { id, nullable: false, .. } } if id == owner_parameter)
                 })?;
                 value_type(environment.get(name)?.as_ref()?)
             })
@@ -2245,24 +2287,38 @@ fn constant_type(ty: &ResolvedType) -> Option<ConstantType> {
         Some(result)
     };
     Some(match ty {
-        ResolvedType::Dynamic => ConstantType::Dynamic,
-        ResolvedType::Void => ConstantType::Void,
-        ResolvedType::Never => ConstantType::Never,
-        ResolvedType::Null => ConstantType::Null,
-        ResolvedType::Interface {
-            identity,
-            arguments,
-            nullable,
-            ..
+        ResolvedType {
+            kind: ResolvedTypeKind::Dynamic,
+        } => ConstantType::Dynamic,
+        ResolvedType {
+            kind: ResolvedTypeKind::Void,
+        } => ConstantType::Void,
+        ResolvedType {
+            kind: ResolvedTypeKind::Never,
+        } => ConstantType::Never,
+        ResolvedType {
+            kind: ResolvedTypeKind::Null,
+        } => ConstantType::Null,
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    identity,
+                    arguments,
+                    nullable,
+                    ..
+                },
         } => ConstantType::Interface(identity.clone(), positional(arguments)?, *nullable),
-        ResolvedType::Function {
-            return_type,
-            positional: parameters,
-            named: names,
-            nullable,
-            optional_positional,
-            shape,
-            ..
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    return_type,
+                    positional: parameters,
+                    named: names,
+                    nullable,
+                    optional_positional,
+                    shape,
+                    ..
+                },
         } => ConstantType::Function(
             Box::new(constant_type(return_type)?),
             positional(parameters)?,
@@ -2274,15 +2330,24 @@ fn constant_type(ty: &ResolvedType) -> Option<ConstantType> {
                 .filter(|shape| shape.type_parameters.is_empty())
                 .map(|shape| shape.required_named.to_vec()),
         ),
-        ResolvedType::Record {
-            positional: fields,
-            named: names,
-            nullable,
-            ..
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Record {
+                    positional: fields,
+                    named: names,
+                    nullable,
+                    ..
+                },
         } => ConstantType::Record(positional(fields)?, named(names)?, *nullable),
-        ResolvedType::Unknown
-        | ResolvedType::TypeParameter { .. }
-        | ResolvedType::NonNullTypeParameter { .. } => return None,
+        ResolvedType {
+            kind: ResolvedTypeKind::Unknown,
+        }
+        | ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter { .. },
+        }
+        | ResolvedType {
+            kind: ResolvedTypeKind::NonNullTypeParameter { .. },
+        } => return None,
     })
 }
 
@@ -2294,17 +2359,19 @@ fn resolved_constant_type(ty: &ConstantType) -> ResolvedType {
             .collect()
     };
     match ty {
-        ConstantType::Dynamic => ResolvedType::Dynamic,
-        ConstantType::Void => ResolvedType::Void,
-        ConstantType::Never => ResolvedType::Never,
-        ConstantType::Null => ResolvedType::Null,
-        ConstantType::Interface(declaration, arguments, nullable) => ResolvedType::Interface {
-            occurrence: Default::default(),
-            identity: declaration.clone(),
-            arguments: arguments.iter().map(resolved_constant_type).collect(),
-            nullable: *nullable,
-            extension_type: false,
-        },
+        ConstantType::Dynamic => ResolvedType::DYNAMIC,
+        ConstantType::Void => ResolvedType::VOID,
+        ConstantType::Never => ResolvedType::NEVER,
+        ConstantType::Null => ResolvedType::NULL,
+        ConstantType::Interface(declaration, arguments, nullable) => {
+            ResolvedType::from_kind(ResolvedTypeKind::Interface {
+                occurrence: Default::default(),
+                identity: declaration.clone(),
+                arguments: arguments.iter().map(resolved_constant_type).collect(),
+                nullable: *nullable,
+                extension_type: false,
+            })
+        }
         ConstantType::Function(
             result,
             positional,
@@ -2312,7 +2379,7 @@ fn resolved_constant_type(ty: &ConstantType) -> ResolvedType {
             optional_positional,
             nullable,
             required_named,
-        ) => ResolvedType::Function {
+        ) => ResolvedType::from_kind(ResolvedTypeKind::Function {
             shape: required_named
                 .as_ref()
                 .map(|names| crate::resolve::FunctionTypeShape::new(names.clone(), Vec::new())),
@@ -2322,13 +2389,15 @@ fn resolved_constant_type(ty: &ConstantType) -> ResolvedType {
             positional: positional.iter().map(resolved_constant_type).collect(),
             named: named(names),
             nullable: *nullable,
-        },
-        ConstantType::Record(positional, names, nullable) => ResolvedType::Record {
-            occurrence: Default::default(),
-            positional: positional.iter().map(resolved_constant_type).collect(),
-            named: named(names),
-            nullable: *nullable,
-        },
+        }),
+        ConstantType::Record(positional, names, nullable) => {
+            ResolvedType::from_kind(ResolvedTypeKind::Record {
+                occurrence: Default::default(),
+                positional: positional.iter().map(resolved_constant_type).collect(),
+                named: named(names),
+                nullable: *nullable,
+            })
+        }
     }
 }
 fn eval_unary(op: &UnaryOp, value: ConstantValue) -> Option<ConstantValue> {
@@ -2530,7 +2599,9 @@ mod tests {
         let mut positional_arguments = call.args().positional();
         assert_eq!(
             fallback.lookup(positional_arguments.next().unwrap()),
-            Some(ResolvedType::Null)
+            Some(ResolvedType {
+                kind: ResolvedTypeKind::Null
+            })
         );
         assert_eq!(fallback.lookup(positional_arguments.next().unwrap()), None);
         let mut named_arguments = call.args().named();
@@ -2564,21 +2635,24 @@ mod tests {
             else {
                 panic!("expected a shared library name");
             };
-            let constant = constant_type(&ResolvedType::Interface {
+            let constant = constant_type(&ResolvedType::from_kind(ResolvedTypeKind::Interface {
                 occurrence: Default::default(),
                 identity: identity.clone(),
                 arguments: Vec::new().into(),
                 nullable: false,
                 extension_type: false,
-            })
+            }))
             .unwrap();
-            let ResolvedType::Interface {
-                identity:
-                    DeclarationIdentity::Library {
-                        name: crate::InternedString::Shared(restored),
+            let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity:
+                            DeclarationIdentity::Library {
+                                name: crate::InternedString::Shared(restored),
+                                ..
+                            },
                         ..
                     },
-                ..
             } = resolved_constant_type(&constant)
             else {
                 panic!("expected a shared library name");
@@ -3848,7 +3922,15 @@ const futureOrCast = null as FutureOr<int?>;
                 evaluate_constant(
                     expression("capturedList"),
                     ConstantContext {
-                        locals: Some(&HashMap::from([("a", (&unknown, ResolvedType::Unknown))])),
+                        locals: Some(&HashMap::from([(
+                            "a",
+                            (
+                                &unknown,
+                                ResolvedType {
+                                    kind: ResolvedTypeKind::Unknown
+                                }
+                            )
+                        )])),
                         ..ConstantContext::new(model, signatures)
                     },
                 ),

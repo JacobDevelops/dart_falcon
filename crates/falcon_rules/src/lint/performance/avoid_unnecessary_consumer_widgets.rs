@@ -9,7 +9,7 @@
 use crate::lint::riverpod::is_exact_type;
 use falcon_analyze::used_parameters;
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    AnalyzeContext, DeclarationIdentity, ResolvedTypeView, Rule, RulePreparation, SemanticModel,
     StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
@@ -40,8 +40,8 @@ impl Rule for AvoidUnnecessaryConsumerWidgets {
                 TopLevelDecl::ClassTypeAlias(alias) => Some(alias.superclass()),
                 _ => None,
             })
-            .filter_map(|ty| match model.resolve_type(ty) {
-                ResolvedType::Interface { identity, .. } => Some(identity),
+            .filter_map(|ty| match model.resolve_type(ty).view() {
+                ResolvedTypeView::Interface { identity, .. } => Some(identity.clone()),
                 _ => None,
             })
             .collect();

@@ -13,7 +13,7 @@
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, Rule, RulePreparation,
+    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
     SemanticModel, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
@@ -47,10 +47,11 @@ impl Rule for AvoidUnnecessaryHookWidgets {
             let Some(supertype) = class.extends() else {
                 continue;
             };
-            let ResolvedType::Interface { identity, .. } = model.resolve_type(supertype) else {
+            let supertype = model.resolve_type(supertype);
+            let ResolvedTypeView::Interface { identity, .. } = supertype.view() else {
                 continue;
             };
-            if !is_hook_widget(&identity) {
+            if !is_hook_widget(identity) {
                 continue;
             }
             let Some(class_identity) = model.resolve_name(class.name().name()) else {
@@ -70,8 +71,8 @@ impl Rule for AvoidUnnecessaryHookWidgets {
                         _ => None,
                     };
                     superclass.is_some_and(|superclass| {
-                        matches!(model.resolve_type(superclass),
-                        ResolvedType::Interface { identity, .. } if identity == class_identity)
+                        matches!(model.resolve_type(superclass).view(),
+                        ResolvedTypeView::Interface { identity, .. } if identity == &class_identity)
                     })
                 })
             {
@@ -124,8 +125,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                             .and_then(|segments| segments.first().copied())
                             .is_none_or(|head| {
                                 state.implicit_member_type(head).is_some()
-                                    || matches!(&state.enclosing_type,
-                                        Some(ResolvedType::Interface { identity, .. })
+                                    || matches!(state.enclosing_type.as_ref().map(ResolvedType::view),
+                                        Some(ResolvedTypeView::Interface { identity, .. })
                                             if !state.signatures.declared_member_facts(identity, head).is_empty())
                             }))
             })

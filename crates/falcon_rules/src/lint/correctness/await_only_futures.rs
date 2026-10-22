@@ -3,7 +3,7 @@
 //! assignable only through a bound that is a `Future` subtype, so its bound
 //! gets no `FutureOr` or extension-type exemption. Diagnostics underline only `await`.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -47,9 +47,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
 }
 
 fn awaitable(ty: &ResolvedType, state: &SemanticState<'_>) -> Truth {
-    match ty {
-        ResolvedType::TypeParameter { bound, .. }
-        | ResolvedType::NonNullTypeParameter { bound, .. } => future_subtype(bound, state),
+    match ty.view() {
+        ResolvedTypeView::TypeParameter { bound, .. }
+        | ResolvedTypeView::NonNullTypeParameter { bound, .. } => future_subtype(bound, state),
         _ => state.model.is_future_like(ty),
     }
 }
@@ -57,14 +57,14 @@ fn awaitable(ty: &ResolvedType, state: &SemanticState<'_>) -> Truth {
 /// Whether the type parameter bound `bound` is a subtype of `Future`: neither
 /// `FutureOr` nor `dynamic` is.
 fn future_subtype(bound: &ResolvedType, state: &SemanticState<'_>) -> Truth {
-    match bound {
-        ResolvedType::TypeParameter { bound, .. }
-        | ResolvedType::NonNullTypeParameter { bound, .. } => future_subtype(bound, state),
-        ResolvedType::Dynamic => Truth::No,
-        ResolvedType::Interface { identity, .. } if identity.is_sdk("dart:async", "FutureOr") => {
+    match bound.view() {
+        ResolvedTypeView::TypeParameter { bound, .. }
+        | ResolvedTypeView::NonNullTypeParameter { bound, .. } => future_subtype(bound, state),
+        ResolvedTypeView::Dynamic => Truth::No,
+        ResolvedTypeView::Interface { identity, .. } if identity.is_sdk("dart:async", "FutureOr") => {
             Truth::No
         }
-        ResolvedType::Interface {
+        ResolvedTypeView::Interface {
             extension_type: true,
             ..
         } => {

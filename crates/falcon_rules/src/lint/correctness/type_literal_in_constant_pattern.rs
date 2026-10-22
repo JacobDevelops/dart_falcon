@@ -9,7 +9,7 @@
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth, TypeRelation,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -58,8 +58,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             PatternNames::last(&name).unwrap().span().end,
         );
         if is_dynamic
-            || matches!(state.infer_constant_name(name),
-            ResolvedType::Interface { ref identity, .. }
+            || matches!(state.infer_constant_name(name).view(),
+            ResolvedTypeView::Interface { identity, .. }
                 if *identity == DeclarationIdentity::sdk("dart:core", "Type"))
         {
             self.diags.push(self.ctx.diagnostic("Use a type pattern or wrap the type literal in `const (...)`.", span));
@@ -70,9 +70,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
 /// Whether `ty` is a subtype of `dart:core`'s `Type`.
 fn is_type_subtype(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
     let type_identity = DeclarationIdentity::sdk("dart:core", "Type");
-    match ty {
-        ResolvedType::Never => true,
-        ResolvedType::Interface {
+    match ty.view() {
+        ResolvedTypeView::Never => true,
+        ResolvedTypeView::Interface {
             identity,
             nullable: false,
             ..
@@ -83,12 +83,12 @@ fn is_type_subtype(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
                     .relation(ty, TypeRelation::SubtypeOfDeclaration(&type_identity), &state.model)
                     == Truth::Yes
         }
-        ResolvedType::TypeParameter {
+        ResolvedTypeView::TypeParameter {
             bound,
             nullable: false,
             ..
         } => is_type_subtype(bound, state),
-        ResolvedType::NonNullTypeParameter { bound, .. } => {
+        ResolvedTypeView::NonNullTypeParameter { bound, .. } => {
             is_type_subtype(&bound.non_null(), state)
         }
         _ => false,

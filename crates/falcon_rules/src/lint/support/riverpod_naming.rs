@@ -88,7 +88,7 @@ impl<'a> Collector<'a> {
                 || {
                     variable
                         .initializer()
-                        .map_or(falcon_analyze::ResolvedType::Unknown, |value| {
+                        .map_or(falcon_analyze::ResolvedType::UNKNOWN, |value| {
                             state.infer(value)
                         })
                 },
@@ -156,8 +156,12 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         self.generated_provider(function, state);
                     }
                     TopLevelDecl::Class(class) => {
-                        let Some(falcon_analyze::ResolvedType::Interface { identity, .. }) =
-                            state.model.resolve_type_name(&[class.name().name()])
+                        let Some(resolved) = state.model.resolve_type_name(&[class.name().name()])
+                        else {
+                            continue;
+                        };
+                        let falcon_analyze::ResolvedTypeView::Interface { identity, .. } =
+                            resolved.view()
                         else {
                             continue;
                         };
@@ -167,7 +171,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                             {
                                 for variable in field.declarators() {
                                     if let Some((_, ty)) =
-                                        state.signatures.field(&identity, variable.name().name())
+                                        state.signatures.field(identity, variable.name().name())
                                         && is_type(self.ctx, state, ty, PROVIDERS)
                                     {
                                         self.check(variable.name());

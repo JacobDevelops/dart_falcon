@@ -1,7 +1,8 @@
 //! Shared lexical boundaries and resolved Flutter API checks for State rules.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, Truth, TypeRelation,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, RulePreparation, Truth,
+    TypeRelation,
 };
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
@@ -16,7 +17,7 @@ pub(crate) fn is_state(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
 }
 
 pub(crate) fn is_context(ty: &ResolvedType) -> bool {
-    matches!(ty, ResolvedType::Interface { identity, .. } if identity.is_package("flutter", "BuildContext"))
+    matches!(ty.view(), ResolvedTypeView::Interface { identity, .. } if identity.is_package("flutter", "BuildContext"))
 }
 
 fn context_expression(expression: Expr<'_>, state: &SemanticState<'_>) -> bool {

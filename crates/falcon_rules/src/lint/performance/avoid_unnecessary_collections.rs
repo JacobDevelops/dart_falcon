@@ -151,7 +151,7 @@ fn discarded_future(expression: Expr<'_>, state: &SemanticState<'_>) -> bool {
                 if matches!(Stmt::cast(parent), Some(Stmt::Expr(_))) {
                     return true;
                 }
-                if !matches!(state.expected(), Some(falcon_analyze::ResolvedType::Void))
+                if !matches!(state.expected().map(falcon_analyze::ResolvedType::view), Some(falcon_analyze::ResolvedTypeView::Void))
                     || !matches!(FunctionBody::cast(parent), Some(FunctionBody::Arrow(_)))
                 {
                     return false;

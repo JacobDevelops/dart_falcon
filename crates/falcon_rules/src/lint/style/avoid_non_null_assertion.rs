@@ -1,6 +1,6 @@
 //! Flags the null-assertion operator `!` except on a resolved `Map` index.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst;
 
@@ -53,13 +53,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'_> {
 
 fn known_non_map(ty: &ResolvedType) -> bool {
     matches!(
-        ty,
-        ResolvedType::Null
-            | ResolvedType::Void
-            | ResolvedType::Never
-            | ResolvedType::Function { .. }
-            | ResolvedType::Record { .. }
-            | ResolvedType::Interface {
+        ty.view(),
+        ResolvedTypeView::Null
+            | ResolvedTypeView::Void
+            | ResolvedTypeView::Never
+            | ResolvedTypeView::Function { .. }
+            | ResolvedTypeView::Record { .. }
+            | ResolvedTypeView::Interface {
                 identity: falcon_analyze::DeclarationIdentity::Sdk { .. },
                 ..
             }

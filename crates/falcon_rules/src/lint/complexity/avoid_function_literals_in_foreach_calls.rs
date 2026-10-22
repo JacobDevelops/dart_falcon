@@ -6,7 +6,7 @@
 //! left alone, matching the SDK lint.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth, TypeRelation,
+    AnalyzeContext, DeclarationIdentity, ResolvedTypeView, Rule, RulePreparation, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -75,15 +75,15 @@ fn has_null_aware_chain<'a>(mut receiver: Expr<'a>, state: &SemanticState<'a>) -
 fn is_iterable<'a>(receiver: Expr<'a>, state: &SemanticState<'a>) -> bool {
     let inferred = state.infer(receiver);
     let mut ty = &inferred;
-    while let ResolvedType::TypeParameter { bound, .. }
-    | ResolvedType::NonNullTypeParameter { bound, .. } = ty
+    while let ResolvedTypeView::TypeParameter { bound, .. }
+    | ResolvedTypeView::NonNullTypeParameter { bound, .. } = ty.view()
     {
         ty = bound;
     }
     let erased;
     if matches!(
-        ty,
-        ResolvedType::Interface {
+        ty.view(),
+        ResolvedTypeView::Interface {
             extension_type: true,
             ..
         }

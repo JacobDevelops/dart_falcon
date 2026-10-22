@@ -3,7 +3,7 @@
 //! Annotation names match the final name segment exactly, including case.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, RulePreparation,
+    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedTypeView, Rule, RulePreparation,
     SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth,
     TypeParameterScope,
 };
@@ -160,9 +160,9 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             self.parameters.push(function.type_params(), &self.model);
         }
         if let DartType::Named(named) = node
-            && let ResolvedType::Interface { identity, .. } = self.model.resolve_type_in(node, &self.parameters)
+            && let ResolvedTypeView::Interface { identity, .. } = self.model.resolve_type_in(node, &self.parameters).view()
             && let Some(name) = named.segments().last()
-        { self.check(identity, name.span()); }
+        { self.check(identity.clone(), name.span()); }
         StructuralTraversal::Continue
     }
     fn exit_dart_type(&mut self, node: DartType<'a>) {

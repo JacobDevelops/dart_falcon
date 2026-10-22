@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use falcon_analyze::{ConstantContext, evaluate_constant};
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, ConstantValue, DeclarationIdentity, ResolvedType, Rule, RulePreparation,
+    AnalyzeContext, ConstantValue, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -172,18 +172,21 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         }
         let ty = state.infer_with_context(node, state.expected());
-        let ResolvedType::Interface {
+        let ResolvedTypeView::Interface {
             identity,
             arguments,
             ..
-        } = &ty
+        } = ty.view()
         else {
             return;
         };
         if !identity.is_sdk("dart:core", "Map") {
             return;
         }
-        let Some(key_type @ ResolvedType::Interface { identity, .. }) = arguments.first() else {
+        let Some(key_type) = arguments.first() else {
+            return;
+        };
+        let ResolvedTypeView::Interface { identity, .. } = key_type.view() else {
             return;
         };
         let Some(values) = state.signatures.enum_value_names(identity) else {

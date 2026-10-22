@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{
-    AnalyzeContext, ResolvedType, SemanticModel, Truth, resolve_call_constructor,
+    AnalyzeContext, ResolvedType, ResolvedTypeView, SemanticModel, Truth, resolve_call_constructor,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{
@@ -374,7 +374,10 @@ impl<'a> SemanticRuleVisitor<'a> for LocalCandidates<'a> {
                 Expr::Index(access) => Some(access.object()),
                 _ => None,
             })
-            && matches!(state.infer_receiver(object), ResolvedType::Dynamic)
+            && matches!(
+                state.infer_receiver(object).view(),
+                ResolvedTypeView::Dynamic
+            )
         {
             let target = assignment.target();
             self.references
@@ -485,7 +488,7 @@ impl<'a> SemanticRuleVisitor<'a> for LocalCandidates<'a> {
         if !indexed {
             self.references.cascade_properties.insert(span);
         }
-        if matches!(receiver, ResolvedType::Dynamic) {
+        if matches!(receiver.view(), ResolvedTypeView::Dynamic) {
             self.references.dynamic_writes.insert(span);
         }
     }

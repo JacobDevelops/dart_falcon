@@ -8,7 +8,7 @@
 //! required or meaningful.
 
 use falcon_analyze::{
-    AnalyzeContext, ParameterDefault, ResolvedType, Rule, RulePreparation, StructuralRuleVisitor,
+    AnalyzeContext, ParameterDefault, ResolvedType, ResolvedTypeView, Rule, RulePreparation, StructuralRuleVisitor,
     StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
@@ -72,8 +72,8 @@ impl<'a> Collector<'a> {
         params: FormalParamList<'a>,
         mut initializers: impl Iterator<Item = ConstructorInitializer<'a>>,
     ) {
-        let (Some(state), Some(ResolvedType::Interface { identity, .. })) =
-            (self.state.as_ref(), self.superclass.as_ref())
+        let (Some(state), Some(ResolvedTypeView::Interface { identity, .. })) =
+            (self.state.as_ref(), self.superclass.as_ref().map(ResolvedType::view))
         else {
             return;
         };

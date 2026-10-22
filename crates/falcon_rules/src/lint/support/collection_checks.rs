@@ -1,5 +1,5 @@
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, MemberResult, ResolvedType, Truth, TypeRelation,
+    AnalyzeContext, DeclarationIdentity, MemberResult, ResolvedTypeView, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -28,14 +28,15 @@ pub(crate) fn lacks_collection_member(
     {
         return false;
     }
-    let (Some(types), ResolvedType::Interface { identity, .. }) = (ctx.types(), ty) else {
+    let (Some(types), ResolvedTypeView::Interface { identity, .. }) = (ctx.types(), ty.view())
+    else {
         return false;
     };
     // The identity index proves positive facts; TypeIndex still supplies negative proofs.
-    types.member_lookup_identity(&identity, member) == MemberResult::Absent
+    types.member_lookup_identity(identity, member) == MemberResult::Absent
         && targets.iter().all(|target| {
             types.supertype_matches(
-                &identity,
+                identity,
                 |ancestor| ancestor.is_sdk("dart:core", target),
                 |name| name == *target,
             ) == Truth::No

@@ -1,6 +1,6 @@
 //! Shared semantic collection and conservative argument checks for widget replacements.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, RulePreparation, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, RulePreparation, Truth};
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -43,7 +43,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         }
         if self.widget == "Container"
-            && let Some(ResolvedType::Interface { identity, .. }) = state.expected()
+            && let Some(ResolvedTypeView::Interface { identity, .. }) =
+                state.expected().map(ResolvedType::view)
             && self
                 .ctx
                 .identities()

@@ -11,7 +11,7 @@
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel, Truth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, SemanticModel, Truth,
     TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
@@ -183,9 +183,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        let Some(ResolvedType::Interface {
+        let Some(ResolvedTypeView::Interface {
             identity: owner, ..
-        }) = &state.enclosing_type
+        }) = state.enclosing_type.as_ref().map(ResolvedType::view)
         else {
             return;
         };

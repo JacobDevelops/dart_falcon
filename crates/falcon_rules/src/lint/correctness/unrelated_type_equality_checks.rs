@@ -8,7 +8,7 @@
 //!
 //! [`TypeRelation::RuntimeUnrelatedTo`]: falcon_analyze::TypeRelation::RuntimeUnrelatedTo
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth, TypeRelation};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth, TypeRelation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -52,7 +52,7 @@ impl Collector<'_> {
 
 /// The linter's `isFixnumIntX`: `Int32` or `Int64` from `package:fixnum`.
 fn is_fixnum_int(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
-    let ResolvedType::Interface { identity, .. } = ty else {
+    let ResolvedTypeView::Interface { identity, .. } = ty.view() else {
         return false;
     };
     matches!(identity.name(), "Int32" | "Int64")

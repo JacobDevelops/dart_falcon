@@ -99,7 +99,10 @@ fn exact_function_shapes_support_alpha_binders_and_named_variance() {
                 &FunctionTypeShape::new(Vec::new(), Vec::new())
             ));
             let mut unknown = known.clone();
-            let ResolvedType::Function { shape, .. } = &mut unknown else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::Function { shape, .. },
+            } = &mut unknown
+            else {
                 panic!("missing function")
             };
             *shape = None;
@@ -113,10 +116,13 @@ fn exact_function_shapes_support_alpha_binders_and_named_variance() {
                 Truth::Unknown
             );
             let mut unknown_slot = resolve("Plain");
-            let ResolvedType::Function { return_type, .. } = &mut unknown_slot else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::Function { return_type, .. },
+            } = &mut unknown_slot
+            else {
                 panic!("missing function")
             };
-            *return_type = Arc::new(ResolvedType::Unknown);
+            *return_type = Arc::new(ResolvedType::UNKNOWN);
             assert_eq!(
                 signatures.relation(
                     &unknown_slot,
@@ -135,26 +141,38 @@ fn function_shapes_preserve_declared_binders_and_required_names() {
         "typedef F = void Function<T extends num, U>({required T item, U? other});",
         |model| {
             let ty = model.resolve_type_name(&["F"]).unwrap();
-            let ResolvedType::Function {
-                shape: Some(shape), ..
+            let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        shape: Some(shape), ..
+                    },
             } = &ty
             else {
                 panic!("missing exact function shape")
             };
             assert_eq!(shape.required_named.as_ref(), &["item"]);
             assert_eq!(shape.type_parameters.len(), 2);
-            let ResolvedType::TypeParameter { id, bound, .. } = &shape.type_parameters[0] else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter { id, bound, .. },
+            } = &shape.type_parameters[0]
+            else {
                 panic!("missing declared binder")
             };
             assert_eq!(id.name.as_ref(), "T");
             assert!(bound.interface("dart:core", "num"));
-            let ResolvedType::TypeParameter { id, .. } = &shape.type_parameters[1] else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter { id, .. },
+            } = &shape.type_parameters[1]
+            else {
                 panic!("missing unused binder")
             };
             assert_eq!(id.name.as_ref(), "U");
-            let ResolvedType::Function {
-                shape: Some(nullable_shape),
-                ..
+            let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        shape: Some(nullable_shape),
+                        ..
+                    },
             } = ty.with_nullable(true)
             else {
                 panic!("lost nullable function shape")
@@ -179,14 +197,18 @@ fn function_shape_bounds_substitute_without_replacing_declared_binders() {
         };
         let shape = FunctionTypeShape::new(
             vec!["item".into()],
-            vec![ResolvedType::TypeParameter {
-                id: binder.clone(),
-                bound: Arc::new(ResolvedType::TypeParameter {
-                    id: outer.clone(),
-                    bound: Arc::new(ResolvedType::Dynamic),
+            vec![ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter {
+                    id: binder.clone(),
+                    bound: Arc::new(ResolvedType {
+                        kind: ResolvedTypeKind::TypeParameter {
+                            id: outer.clone(),
+                            bound: Arc::new(ResolvedType::DYNAMIC),
+                            nullable: false,
+                        },
+                    }),
                     nullable: false,
-                }),
-                nullable: false,
+                },
             }],
         );
         assert!(Arc::ptr_eq(&shape, &shape.map_bounds(Clone::clone)));
@@ -194,45 +216,55 @@ fn function_shape_bounds_substitute_without_replacing_declared_binders() {
             identity: DeclarationIdentity::OBJECT,
             origin: Some((None, 1)),
         });
-        let function = ResolvedType::Function {
-            shape: Some(shape),
-            alias: FunctionTypeAlias(Some(Arc::clone(&origin))),
-            optional_positional: 0,
-            return_type: Arc::new(ResolvedType::Void),
-            positional: empty_type_arguments(),
-            named: empty_named_types(),
-            nullable: false,
+        let function = ResolvedType {
+            kind: ResolvedTypeKind::Function {
+                shape: Some(shape),
+                alias: FunctionTypeAlias(Some(Arc::clone(&origin))),
+                optional_positional: 0,
+                return_type: Arc::new(ResolvedType::VOID),
+                positional: empty_type_arguments(),
+                named: empty_named_types(),
+                nullable: false,
+            },
         };
-        let substitutions = FxHashMap::from_iter([(outer.clone(), ResolvedType::Void)]);
-        assert_eq!(substitutions.get(&outer), Some(&ResolvedType::Void));
+        let substitutions = FxHashMap::from_iter([(outer.clone(), ResolvedType::VOID)]);
+        assert_eq!(substitutions.get(&outer), Some(&ResolvedType::VOID));
         assert!(!substitutions.contains_key(&binder));
         let result = model.substitute(&function, &substitutions);
         let repeated = model.substitute(&function, &substitutions);
         assert!(SubstitutionKey(&result) == SubstitutionKey(&repeated));
-        let ResolvedType::Function { alias, .. } = &result else {
+        let ResolvedType {
+            kind: ResolvedTypeKind::Function { alias, .. },
+        } = &result
+        else {
             panic!("lost substituted function")
         };
         assert_eq!(alias.identity(), Some(&DeclarationIdentity::OBJECT));
         assert!(matches!(alias.0.as_deref(),
             Some(AliasProvenance::Substituted { source }) if Arc::ptr_eq(source, &origin)));
-        let ResolvedType::Function {
-            shape: Some(shape), ..
+        let ResolvedType {
+            kind: ResolvedTypeKind::Function {
+                shape: Some(shape), ..
+            },
         } = &result
         else {
             panic!("lost substituted shape")
         };
         assert_eq!(shape.required_named.as_ref(), &["item"]);
         assert!(matches!(&shape.type_parameters[0],
-            ResolvedType::TypeParameter { id, bound, .. } if *id == binder && **bound == ResolvedType::Void));
+            ResolvedType { kind: ResolvedTypeKind::TypeParameter { id, bound, .. } } if *id == binder && **bound == ResolvedType::VOID));
         let joined = inference_join(
             &result,
             &result.with_nullable(true),
             &SignatureIndex::default(),
             model,
         );
-        let ResolvedType::Function {
-            shape: Some(joined_shape),
-            ..
+        let ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    shape: Some(joined_shape),
+                    ..
+                },
         } = joined
         else {
             panic!("lost joined shape")
@@ -256,19 +288,28 @@ fn deep_alias_fanout_shares_templates_without_a_depth_limit() {
     with_model(&source, |model| {
         let mut ty = model.resolve_type_name(&["A0"]).unwrap();
         for _ in 0..40 {
-            let ResolvedType::Record { positional, .. } = &ty else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::Record { positional, .. },
+            } = &ty
+            else {
                 panic!("lost alias depth")
             };
-            let ResolvedType::Record {
-                positional: first, ..
+            let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Record {
+                        positional: first, ..
+                    },
             } = &positional[0]
             else {
                 assert!(positional[0].interface("dart:core", "int"));
                 ty = ty.record_positional(0).unwrap();
                 continue;
             };
-            let ResolvedType::Record {
-                positional: second, ..
+            let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Record {
+                        positional: second, ..
+                    },
             } = &positional[1]
             else {
                 panic!("unequal branches")
@@ -285,8 +326,8 @@ fn cyclic_aliases_terminate_and_do_not_poison_unrelated_aliases() {
     with_model(
         "typedef F = void Function(F, F, F); typedef G = H; typedef H = G; typedef Good = int;",
         |model| {
-            assert_eq!(model.resolve_type_name(&["F"]), Some(ResolvedType::Unknown));
-            assert_eq!(model.resolve_type_name(&["G"]), Some(ResolvedType::Unknown));
+            assert_eq!(model.resolve_type_name(&["F"]), Some(ResolvedType::UNKNOWN));
+            assert_eq!(model.resolve_type_name(&["G"]), Some(ResolvedType::UNKNOWN));
             assert!(
                 model
                     .resolve_type_name(&["Good"])
@@ -384,7 +425,7 @@ fn competing_cold_alias_computations_return_the_installed_winner() {
                 templates
                     .resolve(false, || {
                         barrier.wait();
-                        Arc::new((Vec::new(), ResolvedType::Dynamic))
+                        Arc::new((Vec::new(), ResolvedType::DYNAMIC))
                     })
                     .unwrap()
             })
@@ -395,9 +436,9 @@ fn competing_cold_alias_computations_return_the_installed_winner() {
     });
     assert!(Arc::ptr_eq(&results.0, &results.1));
     let typed = templates
-        .resolve(true, || Arc::new((Vec::new(), ResolvedType::Void)))
+        .resolve(true, || Arc::new((Vec::new(), ResolvedType::VOID)))
         .unwrap();
-    assert_eq!(typed.1, ResolvedType::Void);
+    assert_eq!(typed.1, ResolvedType::VOID);
     assert!(!Arc::ptr_eq(&results.0, &typed));
 }
 
@@ -418,7 +459,7 @@ fn invalid_publication_wins_over_a_competing_candidate_and_invalidates_its_paren
                             .resolve(false, || panic!("recursive build"))
                             .is_none()
                     );
-                    Arc::new((Vec::new(), ResolvedType::Unknown))
+                    Arc::new((Vec::new(), ResolvedType::UNKNOWN))
                 })
                 .is_none()
         );
@@ -434,11 +475,11 @@ fn invalid_publication_wins_over_a_competing_candidate_and_invalidates_its_paren
                         receiver
                             .recv_timeout(std::time::Duration::from_secs(5))
                             .expect("invalid template must publish without waiting");
-                        Arc::new((Vec::new(), ResolvedType::Dynamic))
+                        Arc::new((Vec::new(), ResolvedType::DYNAMIC))
                     })
                     .is_none()
                 );
-                Arc::new((Vec::new(), ResolvedType::Dynamic))
+                Arc::new((Vec::new(), ResolvedType::DYNAMIC))
             })
             .is_none()
     );
@@ -473,11 +514,11 @@ fn opposing_alias_roots_do_not_wait_and_invalidate_cached_parents() {
                                 assert!(
                                     root.resolve(false, || panic!("recursive build")).is_none()
                                 );
-                                Arc::new((Vec::new(), ResolvedType::Unknown))
+                                Arc::new((Vec::new(), ResolvedType::UNKNOWN))
                             })
                             .is_none()
                     );
-                    Arc::new((Vec::new(), ResolvedType::Unknown))
+                    Arc::new((Vec::new(), ResolvedType::UNKNOWN))
                 });
                 sender.send(result.is_none()).unwrap();
             })
@@ -500,7 +541,7 @@ fn opposing_alias_roots_do_not_wait_and_invalidate_cached_parents() {
             parent
                 .resolve(false, || {
                     assert!(root.resolve(false, || panic!("cached cycle")).is_none());
-                    Arc::new((Vec::new(), ResolvedType::Unknown))
+                    Arc::new((Vec::new(), ResolvedType::UNKNOWN))
                 })
                 .is_none()
         );
@@ -517,10 +558,10 @@ fn cached_alias_cycles_invalidate_enclosing_model_templates() {
     with_model(
         "typedef A = B; typedef B = A; typedef Parent = List<A>;",
         |model| {
-            assert_eq!(model.resolve_type_name(&["A"]), Some(ResolvedType::Unknown));
+            assert_eq!(model.resolve_type_name(&["A"]), Some(ResolvedType::UNKNOWN));
             assert_eq!(
                 model.resolve_type_name(&["Parent"]),
-                Some(ResolvedType::Unknown)
+                Some(ResolvedType::UNKNOWN)
             );
             let identity = model.resolve_name("Parent").unwrap();
             let alias = model.identities.type_alias(&identity).unwrap();
@@ -537,60 +578,75 @@ fn recursive_bounds_reverse_variance_in_function_parameters() {
             ordinal: 0,
             name: "T".into(),
         };
-        let parameter = ResolvedType::TypeParameter {
-            id: id.clone(),
-            bound: Arc::new(ResolvedType::Dynamic),
-            nullable: false,
+        let parameter = ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter {
+                id: id.clone(),
+                bound: Arc::new(ResolvedType::DYNAMIC),
+                nullable: false,
+            },
         };
-        let bound = ResolvedType::Function {
-            shape: Some(FunctionTypeShape::empty()),
-            alias: Default::default(),
-            optional_positional: 0,
-            return_type: Arc::new(parameter.clone()),
-            positional: vec![parameter.clone()].into(),
-            named: vec![("value".to_owned(), parameter)].into(),
-            nullable: false,
+        let bound = ResolvedType {
+            kind: ResolvedTypeKind::Function {
+                shape: Some(FunctionTypeShape::empty()),
+                alias: Default::default(),
+                optional_positional: 0,
+                return_type: Arc::new(parameter.clone()),
+                positional: vec![parameter.clone()].into(),
+                named: vec![("value".to_owned(), parameter)].into(),
+                nullable: false,
+            },
         };
         let bounds = FxHashMap::from_iter([(id.clone(), bound)]);
         let result = instantiate_parameter_bound(&id, &bounds, &mut HashSet::new(), model);
-        let ResolvedType::Function {
-            return_type,
-            positional,
-            named,
-            ..
+        let ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    return_type,
+                    positional,
+                    named,
+                    ..
+                },
         } = result
         else {
             panic!("expected function bound")
         };
-        assert_eq!(*return_type, ResolvedType::Dynamic);
-        assert_eq!(positional.as_ref(), &[ResolvedType::Never]);
-        assert_eq!(named[0].1, ResolvedType::Never);
+        assert_eq!(*return_type, ResolvedType::DYNAMIC);
+        assert_eq!(positional.as_ref(), &[ResolvedType::NEVER]);
+        assert_eq!(named[0].1, ResolvedType::NEVER);
     });
 }
 
 #[test]
 fn cloned_type_parameters_share_their_bound() {
-    let ty = ResolvedType::TypeParameter {
-        id: TypeParameterId {
-            owner: ParameterOwner::Sdk("share-test"),
-            ordinal: 0,
-            name: "T".into(),
+    let ty = ResolvedType {
+        kind: ResolvedTypeKind::TypeParameter {
+            id: TypeParameterId {
+                owner: ParameterOwner::Sdk("share-test"),
+                ordinal: 0,
+                name: "T".into(),
+            },
+            bound: Arc::new(ResolvedType::DYNAMIC),
+            nullable: false,
         },
-        bound: Arc::new(ResolvedType::Dynamic),
-        nullable: false,
     };
-    let ResolvedType::TypeParameter {
-        bound: original,
-        id: original_id,
-        ..
+    let ResolvedType {
+        kind:
+            ResolvedTypeKind::TypeParameter {
+                bound: original,
+                id: original_id,
+                ..
+            },
     } = &ty
     else {
         unreachable!()
     };
-    let ResolvedType::TypeParameter {
-        bound: cloned,
-        id: cloned_id,
-        ..
+    let ResolvedType {
+        kind:
+            ResolvedTypeKind::TypeParameter {
+                bound: cloned,
+                id: cloned_id,
+                ..
+            },
     } = ty.with_nullable(true)
     else {
         unreachable!()
@@ -622,7 +678,10 @@ fn generic_alias_fanout_substitution_retains_shared_nodes() {
             None,
         );
         for _ in 0..24 {
-            let ResolvedType::Record { .. } = &ty else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::Record { .. },
+            } = &ty
+            else {
                 panic!("lost generic alias depth")
             };
             ty = ty.record_positional(0).unwrap();
@@ -653,8 +712,12 @@ fn function_and_interface_alias_fanout_retains_shared_children() {
             let mut ty = model.resolve_type_name(&["A0"]).unwrap();
             for _ in 0..24 {
                 ty = match &ty {
-                    ResolvedType::Function { return_type, .. } => return_type.as_ref().clone(),
-                    ResolvedType::Interface { .. } => ty.type_argument(0).unwrap(),
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Function { return_type, .. },
+                    } => return_type.as_ref().clone(),
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Interface { .. },
+                    } => ty.type_argument(0).unwrap(),
                     _ => panic!("lost alias nesting"),
                 };
             }
@@ -683,10 +746,13 @@ fn generic_function_alias_fanout_preserves_origins_and_shared_descendants() {
             false,
             None,
         );
-        let ResolvedType::Function {
-            return_type,
-            positional,
-            ..
+        let ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    return_type,
+                    positional,
+                    ..
+                },
         } = &ty
         else {
             panic!("lost generic function alias")
@@ -694,22 +760,34 @@ fn generic_function_alias_fanout_preserves_origins_and_shared_descendants() {
         assert!(SubstitutionKey(return_type) != SubstitutionKey(&positional[0]));
         assert!(SubstitutionKey(&positional[0]) != SubstitutionKey(&positional[1]));
         let (
-            ResolvedType::Function {
-                return_type: left, ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        return_type: left, ..
+                    },
             },
-            ResolvedType::Function {
-                return_type: right, ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        return_type: right, ..
+                    },
             },
         ) = (return_type.as_ref(), &positional[0])
         else {
             panic!("lost generic function children")
         };
         let (
-            ResolvedType::Function {
-                positional: left, ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        positional: left, ..
+                    },
             },
-            ResolvedType::Function {
-                positional: right, ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        positional: right, ..
+                    },
             },
         ) = (left.as_ref(), right.as_ref())
         else {
@@ -720,11 +798,14 @@ fn generic_function_alias_fanout_preserves_origins_and_shared_descendants() {
         let mut visited = FxHashSet::default();
         let mut pending = vec![&ty];
         while let Some(node) = pending.pop() {
-            let ResolvedType::Function {
-                return_type,
-                positional,
-                named,
-                ..
+            let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        return_type,
+                        positional,
+                        named,
+                        ..
+                    },
             } = node
             else {
                 assert!(node.interface("dart:core", "int"));
@@ -740,7 +821,10 @@ fn generic_function_alias_fanout_preserves_origins_and_shared_descendants() {
         assert!(visited.len() <= 3 * 24);
         let mut leaf = &ty;
         for _ in 0..24 {
-            let ResolvedType::Function { return_type, .. } = leaf else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::Function { return_type, .. },
+            } = leaf
+            else {
                 panic!("lost generic function depth")
             };
             leaf = return_type;
@@ -772,42 +856,51 @@ fn mutually_recursive_bounds_replace_the_entire_component_by_variance() {
         };
         let a = parameter("A", 0);
         let b = parameter("B", 1);
-        let reference = |id: &TypeParameterId| ResolvedType::TypeParameter {
-            id: id.clone(),
-            bound: Arc::new(ResolvedType::Dynamic),
-            nullable: false,
+        let reference = |id: &TypeParameterId| ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter {
+                id: id.clone(),
+                bound: Arc::new(ResolvedType::DYNAMIC),
+                nullable: false,
+            },
         };
         let bounds = FxHashMap::from_iter([
             (
                 a.clone(),
-                ResolvedType::Interface {
-                    occurrence: Default::default(),
-                    identity: DeclarationIdentity::sdk("dart:core", "List"),
-                    arguments: vec![reference(&b)].into(),
-                    nullable: false,
-                    extension_type: false,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface {
+                        occurrence: Default::default(),
+                        identity: DeclarationIdentity::sdk("dart:core", "List"),
+                        arguments: vec![reference(&b)].into(),
+                        nullable: false,
+                        extension_type: false,
+                    },
                 },
             ),
             (
                 b.clone(),
-                ResolvedType::Function {
-                    shape: Some(FunctionTypeShape::empty()),
-                    alias: Default::default(),
-                    optional_positional: 0,
-                    return_type: Arc::new(ResolvedType::Void),
-                    positional: vec![reference(&a)].into(),
-                    named: Arc::from([]),
-                    nullable: false,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function {
+                        shape: Some(FunctionTypeShape::empty()),
+                        alias: Default::default(),
+                        optional_positional: 0,
+                        return_type: Arc::new(ResolvedType::VOID),
+                        positional: vec![reference(&a)].into(),
+                        named: Arc::from([]),
+                        nullable: false,
+                    },
                 },
             ),
         ]);
         let a_bound = instantiate_parameter_bound(&a, &bounds, &mut HashSet::new(), model);
-        assert_eq!(a_bound.arguments(), &[ResolvedType::Dynamic]);
+        assert_eq!(a_bound.arguments(), &[ResolvedType::DYNAMIC]);
         let b_bound = instantiate_parameter_bound(&b, &bounds, &mut HashSet::new(), model);
-        let ResolvedType::Function { positional, .. } = b_bound else {
+        let ResolvedType {
+            kind: ResolvedTypeKind::Function { positional, .. },
+        } = b_bound
+        else {
             panic!("expected function bound")
         };
-        assert_eq!(positional.as_ref(), &[ResolvedType::Never]);
+        assert_eq!(positional.as_ref(), &[ResolvedType::NEVER]);
     });
 }
 
@@ -820,13 +913,13 @@ fn cyclic_alias_roots_are_unknown_independent_of_query_order() {
                 for name in order {
                     assert_eq!(
                         model.resolve_type_name(&[name]),
-                        Some(ResolvedType::Unknown)
+                        Some(ResolvedType::UNKNOWN)
                     );
                 }
                 for name in order {
                     assert_eq!(
                         model.resolve_type_name(&[name]),
-                        Some(ResolvedType::Unknown)
+                        Some(ResolvedType::UNKNOWN)
                     );
                 }
             },
@@ -847,41 +940,50 @@ fn external_parameter_bounds_are_instantiated_in_their_own_variance() {
             ordinal: 1,
             name: "B".into(),
         };
-        let reference = |id: &TypeParameterId| ResolvedType::TypeParameter {
-            id: id.clone(),
-            bound: Arc::new(ResolvedType::Dynamic),
-            nullable: false,
+        let reference = |id: &TypeParameterId| ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter {
+                id: id.clone(),
+                bound: Arc::new(ResolvedType::DYNAMIC),
+                nullable: false,
+            },
         };
         let bounds = FxHashMap::from_iter([
             (
                 a.clone(),
-                ResolvedType::Interface {
-                    occurrence: Default::default(),
-                    identity: DeclarationIdentity::sdk("dart:core", "Comparable"),
-                    arguments: vec![reference(&a)].into(),
-                    nullable: false,
-                    extension_type: false,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface {
+                        occurrence: Default::default(),
+                        identity: DeclarationIdentity::sdk("dart:core", "Comparable"),
+                        arguments: vec![reference(&a)].into(),
+                        nullable: false,
+                        extension_type: false,
+                    },
                 },
             ),
             (
                 b.clone(),
-                ResolvedType::Function {
-                    shape: Some(FunctionTypeShape::empty()),
-                    alias: Default::default(),
-                    optional_positional: 0,
-                    return_type: Arc::new(ResolvedType::Void),
-                    positional: vec![reference(&a)].into(),
-                    named: Arc::from([]),
-                    nullable: false,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function {
+                        shape: Some(FunctionTypeShape::empty()),
+                        alias: Default::default(),
+                        optional_positional: 0,
+                        return_type: Arc::new(ResolvedType::VOID),
+                        positional: vec![reference(&a)].into(),
+                        named: Arc::from([]),
+                        nullable: false,
+                    },
                 },
             ),
         ]);
         let result = instantiate_parameter_bound(&b, &bounds, &mut HashSet::new(), model);
-        let ResolvedType::Function { positional, .. } = result else {
+        let ResolvedType {
+            kind: ResolvedTypeKind::Function { positional, .. },
+        } = result
+        else {
             panic!("expected function bound")
         };
         assert!(positional[0].interface("dart:core", "Comparable"));
-        assert_eq!(positional[0].arguments(), &[ResolvedType::Dynamic]);
+        assert_eq!(positional[0].arguments(), &[ResolvedType::DYNAMIC]);
     });
 }
 
@@ -910,37 +1012,46 @@ fn substitution_source_keys_preserve_live_storage_and_scalar_context() {
             ordinal: 0,
             name: "T".into(),
         };
-        let parameter = ResolvedType::TypeParameter {
-            id: parameter_id.clone(),
-            bound: Arc::new(ResolvedType::Dynamic),
-            nullable: false,
+        let parameter = ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter {
+                id: parameter_id.clone(),
+                bound: Arc::new(ResolvedType::DYNAMIC),
+                nullable: false,
+            },
         };
-        let source = ResolvedType::Function {
-            return_type: Arc::new(parameter.clone()),
-            positional: vec![parameter.clone()].into(),
-            named: empty_named_types(),
-            optional_positional: 0,
-            nullable: false,
-            alias: Default::default(),
-            shape: None,
+        let source = ResolvedType {
+            kind: ResolvedTypeKind::Function {
+                return_type: Arc::new(parameter.clone()),
+                positional: vec![parameter.clone()].into(),
+                named: empty_named_types(),
+                optional_positional: 0,
+                nullable: false,
+                alias: Default::default(),
+                shape: None,
+            },
         };
         let mut optional = source.clone();
-        let ResolvedType::Function {
-            optional_positional,
-            ..
+        let ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    optional_positional,
+                    ..
+                },
         } = &mut optional
         else {
             unreachable!()
         };
         *optional_positional = 1;
-        let distinct = ResolvedType::Function {
-            return_type: Arc::new(parameter.clone()),
-            positional: vec![parameter].into(),
-            named: empty_named_types(),
-            optional_positional: 0,
-            nullable: false,
-            alias: Default::default(),
-            shape: None,
+        let distinct = ResolvedType {
+            kind: ResolvedTypeKind::Function {
+                return_type: Arc::new(parameter.clone()),
+                positional: vec![parameter].into(),
+                named: empty_named_types(),
+                optional_positional: 0,
+                nullable: false,
+                alias: Default::default(),
+                shape: None,
+            },
         };
         let sources = [
             source.clone(),
@@ -955,22 +1066,25 @@ fn substitution_source_keys_preserve_live_storage_and_scalar_context() {
             assert!(keys.insert(SubstitutionSourceKey::of(ty).unwrap()));
         }
 
-        let substitutions = FxHashMap::from_iter([(parameter_id, ResolvedType::Void)]);
+        let substitutions = FxHashMap::from_iter([(parameter_id, ResolvedType::VOID)]);
         let mut memo = SubstitutionMemo::default();
         for (index, ty) in sources.iter().enumerate() {
             let result = model.substitute_memoized(ty, &substitutions, &mut memo);
-            let ResolvedType::Function {
-                return_type,
-                positional,
-                nullable,
-                optional_positional,
-                ..
+            let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        return_type,
+                        positional,
+                        nullable,
+                        optional_positional,
+                        ..
+                    },
             } = result
             else {
                 panic!("lost substituted function")
             };
-            assert_eq!(*return_type, ResolvedType::Void);
-            assert_eq!(positional.as_ref(), &[ResolvedType::Void]);
+            assert_eq!(*return_type, ResolvedType::VOID);
+            assert_eq!(positional.as_ref(), &[ResolvedType::VOID]);
             assert_eq!(nullable, index == 1);
             assert_eq!(optional_positional, usize::from(index == 2));
         }

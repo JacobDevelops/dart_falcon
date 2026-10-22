@@ -11,7 +11,7 @@
 //! or `@internal` classes are exempt. Untyped initializing and super formals
 //! use their resolved semantic types, including declarations in part files.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -273,8 +273,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             {
                 continue;
             }
-            if let ResolvedType::Interface { identity, .. } =
-                state.environment.lookup(param.name().name())
+            if let ResolvedTypeView::Interface { identity, .. } =
+                state.environment.lookup(param.name().name()).view()
                 && identity.name().starts_with('_')
             {
                 self.report(param.name().span());

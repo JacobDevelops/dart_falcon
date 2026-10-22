@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, ConstantValue, DeclarationFacts, DeclarationIdentity, ResolvedType, Rule,
+    AnalyzeContext, ConstantValue, DeclarationFacts, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule,
     ConstantContext, RulePreparation, SemanticModel, SignatureIndex, evaluate_constant,
     evaluate_constant_name,
 };
@@ -44,25 +44,26 @@ impl Collector<'_> {
         }) {
             return;
         }
-        let ResolvedType::Interface { identity, .. } = state.infer(node.subject()) else {
+        let subject_type = state.infer(node.subject());
+        let ResolvedTypeView::Interface { identity, .. } = subject_type.view() else {
             return;
         };
-        if state.signatures.type_kind(&identity) == Some(falcon_analyze::TypeKind::Enum) {
+        if state.signatures.type_kind(identity) == Some(falcon_analyze::TypeKind::Enum) {
             return;
         }
-        let Some(facts) = state.signatures.declaration(&identity) else {
+        let Some(facts) = state.signatures.declaration(identity) else {
             return;
         };
-        if !is_enum_like(facts, &identity) {
+        if !is_enum_like(facts, identity) {
             return;
         }
-        let values = constant_values(facts, &identity, &state.model, &state.signatures);
+        let values = constant_values(facts, identity, &state.model, &state.signatures);
         if values.len() < 2 {
             return;
         }
         let locals = state.visible_local_constants();
-        let enclosing = match &state.enclosing_type {
-            Some(ResolvedType::Interface { identity, .. }) => Some(identity),
+        let enclosing = match state.enclosing_type.as_ref().map(ResolvedType::view) {
+            Some(ResolvedTypeView::Interface { identity, .. }) => Some(identity),
             _ => None,
         };
         let mut covered = HashSet::new();
@@ -80,7 +81,7 @@ impl Collector<'_> {
                                     .iter()
                                     .find(|constant| constant.name == name.name())
                                     .and_then(|constant| {
-                                        evaluate_constant(constant.initializer.expr(), ConstantContext { owner: Some(&identity), ..ConstantContext::new(&state.model, &state.signatures) })
+                                        evaluate_constant(constant.initializer.expr(), ConstantContext { owner: Some(identity), ..ConstantContext::new(&state.model, &state.signatures) })
                                     })
                             })
                         }

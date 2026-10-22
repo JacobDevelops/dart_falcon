@@ -6,7 +6,7 @@
 //! A scalar read type does not establish stability: unqualified top-level and
 //! inherited getter names still execute a getter on each evaluation.
 
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{Visitor, walk_expr};
 use falcon_syntax::cst::*;
@@ -107,8 +107,8 @@ impl<'a> Visitor<'a> for ScalarValueProof<'_, 'a> {
 }
 
 fn scalar_type(ty: &ResolvedType) -> bool {
-    matches!(ty, ResolvedType::Null)
-        || matches!(ty, ResolvedType::Interface {
+    matches!(ty.view(), ResolvedTypeView::Null)
+        || matches!(ty.view(), ResolvedTypeView::Interface {
             identity: DeclarationIdentity::Sdk { library, name }, ..
         } if library.as_str() == "dart:core"
             && matches!(name.as_str(), "bool" | "int" | "double" | "num" | "String"))

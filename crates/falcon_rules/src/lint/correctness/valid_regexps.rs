@@ -5,7 +5,7 @@
 
 use crate::lint::string_lit::{has_interpolation, literal_parts, multiline_lead_len};
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    AnalyzeContext, DeclarationIdentity, ResolvedTypeView, Rule, RulePreparation, SemanticModel,
     StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
@@ -81,7 +81,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         match node {
             Expr::Call(call) if self.sdk_regexp_name(call.callee()) => self.check(call.args()),
-            Expr::New(construction) if matches!(self.model.resolve_type(construction.dart_type()), ResolvedType::Interface { identity: DeclarationIdentity::Sdk { library, name }, .. } if library == "dart:core" && name == "RegExp") => {
+            Expr::New(construction) if matches!(self.model.resolve_type(construction.dart_type()).view(), ResolvedTypeView::Interface { identity: DeclarationIdentity::Sdk { library, name }, .. } if library == "dart:core" && name == "RegExp") => {
                 self.check(construction.args())
             }
             _ => {}

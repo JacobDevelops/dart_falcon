@@ -17,7 +17,7 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, QualifiedName, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, QualifiedName, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -162,13 +162,12 @@ impl<'a> Collector<'a> {
     fn check(&mut self, target: DartType<'a>, state: &SemanticState<'_>) {
         let ty = state.model.resolve_type_in(target, &state.type_parameters);
         let broad = |ty: &ResolvedType| {
-            matches!(
-                ty,
-                ResolvedType::Dynamic
-                    | ResolvedType::Void
-                    | ResolvedType::Unknown
-                    | ResolvedType::TypeParameter { .. }
-                    | ResolvedType::NonNullTypeParameter { .. }
+            matches!(ty.view(),
+                ResolvedTypeView::Dynamic
+                    | ResolvedTypeView::Void
+                    | ResolvedTypeView::Unknown
+                    | ResolvedTypeView::TypeParameter { .. }
+                    | ResolvedTypeView::NonNullTypeParameter { .. }
             ) || (ty.interface("dart:core", "Object") && ty.nullable())
         };
         let unsafe_cast = if ty.interface("dart:core", "List") {

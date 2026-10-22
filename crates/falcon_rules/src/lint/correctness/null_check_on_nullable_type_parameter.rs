@@ -27,7 +27,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::{
     visit::{Visitor, walk_expr, walk_stmt},
@@ -100,18 +100,18 @@ fn returns_parameter(types: &[ResolvedType]) -> Option<ResolvedType> {
     let mut upper: Option<ResolvedType> = None;
     let mut id = None;
     for ty in types {
-        let current = match ty {
-            ResolvedType::Null => continue,
-            ResolvedType::TypeParameter { id, nullable, .. } => {
+        let current = match ty.view() {
+            ResolvedTypeView::Null => continue,
+            ResolvedTypeView::TypeParameter { id, nullable, .. } => {
                 if upper
                     .as_ref()
-                    .is_none_or(|upper| *nullable && !upper.nullable())
+                    .is_none_or(|upper| nullable && !upper.nullable())
                 {
                     upper = Some(ty.clone());
                 }
                 id
             }
-            ResolvedType::NonNullTypeParameter { id, .. } => id,
+            ResolvedTypeView::NonNullTypeParameter { id, .. } => id,
             _ => return None,
         };
         if id.is_some_and(|id| id != current) {
@@ -431,20 +431,20 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     return;
                 };
                 // An inferred `T & Object` stands for its demoted `T`.
-                let expected = match expected {
-                    ResolvedType::TypeParameter { id, .. } => {
+                let expected = match expected.view() {
+                    ResolvedTypeView::TypeParameter { id, .. } => {
                         Some((id, !state.signatures.is_non_nullable(expected)))
                     }
-                    ResolvedType::NonNullTypeParameter { id, bound } => {
+                    ResolvedTypeView::NonNullTypeParameter { id, bound } => {
                         Some((id, !state.signatures.is_non_nullable(bound)))
                     }
                     _ => None,
                 };
                 if let Some((expected_id, potentially_nullable)) = expected
                     && potentially_nullable
-                    && matches!(state.infer(assertion.operand()), ResolvedType::TypeParameter {
+                    && matches!(state.infer(assertion.operand()).view(), ResolvedTypeView::TypeParameter {
                         id, nullable: true, ..
-                    } if id == *expected_id)
+                    } if id == expected_id)
                 {
                     self.diagnostics.push(self.ctx.diagnostic(MESSAGE, Span::new(span.end - 1, span.end)));
                 }
@@ -494,9 +494,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         _state: &SemanticState<'a>,
     ) {
         if let Pattern::NullAssert(assertion) = node
-            && matches!(
-                matched,
-                Some(ResolvedType::TypeParameter { nullable: true, .. })
+            && matches!(matched.map(ResolvedType::view),
+                Some(ResolvedTypeView::TypeParameter { nullable: true, .. })
             )
         {
             self.diagnostics.push(self.ctx.diagnostic(MESSAGE, Span::new(assertion.span().end - 1, assertion.span().end)));

@@ -7,6 +7,7 @@
 //! allowing a known candidate to hide it from downstream interfaces.
 
 use super::*;
+use crate::resolve::semantic::ResolvedTypeKind;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct OverrideShape {
@@ -34,8 +35,10 @@ impl OverrideShape {
             bounds: type_params
                 .into_iter()
                 .map(|param| match scope.lookup(param.name().name()) {
-                    Some(ResolvedType::TypeParameter { bound, .. }) => bound.as_ref().clone(),
-                    _ => ResolvedType::Unknown,
+                    Some(ResolvedType {
+                        kind: ResolvedTypeKind::TypeParameter { bound, .. },
+                    }) => bound.as_ref().clone(),
+                    _ => ResolvedType::UNKNOWN,
                 })
                 .collect(),
         }
@@ -111,12 +114,19 @@ impl SignatureIndex {
         visiting: &mut FxHashSet<DeclarationIdentity>,
     ) -> Option<Arc<[ParameterContract]>> {
         let mut receiver = receiver;
-        while let ResolvedType::TypeParameter { bound, .. }
-        | ResolvedType::NonNullTypeParameter { bound, .. } = receiver
+        while let ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter { bound, .. },
+        }
+        | ResolvedType {
+            kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+        } = receiver
         {
             receiver = bound;
         }
-        let ResolvedType::Interface { identity, .. } = receiver else {
+        let ResolvedType {
+            kind: ResolvedTypeKind::Interface { identity, .. },
+        } = receiver
+        else {
             return None;
         };
         let matches_access = |facts: &MemberFacts| {
@@ -220,7 +230,10 @@ impl SignatureIndex {
         write: bool,
         model: &SemanticModel<'_>,
     ) -> Option<Arc<[ParameterContract]>> {
-        let ResolvedType::Interface { identity, .. } = receiver else {
+        let ResolvedType {
+            kind: ResolvedTypeKind::Interface { identity, .. },
+        } = receiver
+        else {
             return None;
         };
         if self.type_kind(identity) == Some(TypeKind::Mixin) {
@@ -344,16 +357,23 @@ impl SignatureIndex {
         model: &SemanticModel<'_>,
     ) -> Option<ResolvedType> {
         let mut receiver = receiver;
-        while let ResolvedType::TypeParameter { bound, .. }
-        | ResolvedType::NonNullTypeParameter { bound, .. } = receiver
+        while let ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter { bound, .. },
+        }
+        | ResolvedType {
+            kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+        } = receiver
         {
             receiver = bound;
         }
-        let ResolvedType::Interface {
-            identity,
-            arguments,
-            occurrence,
-            ..
+        let ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    identity,
+                    arguments,
+                    occurrence,
+                    ..
+                },
         } = receiver
         else {
             return None;
@@ -417,7 +437,10 @@ impl SignatureIndex {
         model: &SemanticModel<'_>,
         visiting: &mut FxHashSet<DeclarationIdentity>,
     ) -> bool {
-        let ResolvedType::Interface { identity, .. } = supertype else {
+        let ResolvedType {
+            kind: ResolvedTypeKind::Interface { identity, .. },
+        } = supertype
+        else {
             return true;
         };
         if identity == &DeclarationIdentity::OBJECT || !visiting.insert(identity.clone()) {
@@ -509,17 +532,28 @@ impl SignatureIndex {
             let signature = self.member_entry(identity, name)?.signature.as_ref();
             return Some((
                 signature.map_or_else(
-                    || vec![ResolvedType::Unknown],
-                    |signature| vec![ResolvedType::Unknown; signature.positional.len()],
+                    || {
+                        vec![ResolvedType {
+                            kind: ResolvedTypeKind::Unknown,
+                        }]
+                    },
+                    |signature| {
+                        vec![
+                            ResolvedType {
+                                kind: ResolvedTypeKind::Unknown
+                            };
+                            signature.positional.len()
+                        ]
+                    },
                 ),
                 signature.map_or_else(FxHashMap::default, |signature| {
                     signature
                         .named
                         .keys()
-                        .map(|name| (name.clone(), ResolvedType::Unknown))
+                        .map(|name| (name.clone(), ResolvedType::UNKNOWN))
                         .collect()
                 }),
-                ResolvedType::Unknown,
+                ResolvedType::UNKNOWN,
             ));
         }
         if getter {
@@ -527,7 +561,7 @@ impl SignatureIndex {
                 (
                     vec![member.return_type],
                     FxHashMap::default(),
-                    ResolvedType::Void,
+                    ResolvedType::VOID,
                 )
             });
         }
@@ -550,7 +584,7 @@ impl SignatureIndex {
             .map(|(index, (from, to))| {
                 (
                     from.clone(),
-                    ResolvedType::TypeParameter {
+                    ResolvedType::from_kind(ResolvedTypeKind::TypeParameter {
                         id: to.clone(),
                         bound: Arc::new(
                             entry
@@ -558,10 +592,10 @@ impl SignatureIndex {
                                 .as_ref()
                                 .and_then(|shape| shape.bounds.get(index))
                                 .cloned()
-                                .unwrap_or(ResolvedType::Unknown),
+                                .unwrap_or(ResolvedType::UNKNOWN),
                         ),
                         nullable: false,
-                    },
+                    }),
                 )
             })
             .collect();
@@ -673,7 +707,7 @@ impl SignatureIndex {
             // the next mixin or any implemented interfaces are considered.
             if is_mixin
                 && inherited.iter().any(|member| {
-                    matches!(supertype, ResolvedType::Interface { identity, .. }
+                    matches!(supertype, ResolvedType { kind: ResolvedTypeKind::Interface { identity, .. } }
                     if member.declaring_type == *identity)
                 })
             {
@@ -697,11 +731,14 @@ impl SignatureIndex {
         visiting: &mut FxHashSet<DeclarationIdentity>,
         memo: &mut FxHashMap<DeclarationIdentity, Vec<InheritedMember>>,
     ) -> Vec<InheritedMember> {
-        let ResolvedType::Interface {
-            identity,
-            arguments,
-            occurrence,
-            ..
+        let ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    identity,
+                    arguments,
+                    occurrence,
+                    ..
+                },
         } = ty
         else {
             return Vec::new();
@@ -756,9 +793,11 @@ impl SignatureIndex {
                         } else if setter {
                             shape.required_positional = 1;
                             (
-                                vec![entry.write.clone().unwrap_or(ResolvedType::Unknown)],
+                                vec![entry.write.clone().unwrap_or(ResolvedType {
+                                    kind: ResolvedTypeKind::Unknown,
+                                })],
                                 FxHashMap::default(),
-                                ResolvedType::Void,
+                                ResolvedType::VOID,
                                 Vec::new(),
                                 true,
                             )
@@ -766,7 +805,7 @@ impl SignatureIndex {
                             (
                                 Vec::new(),
                                 FxHashMap::default(),
-                                entry.read.clone().unwrap_or(ResolvedType::Unknown),
+                                entry.read.clone().unwrap_or(ResolvedType::UNKNOWN),
                                 Vec::new(),
                                 !matches!(fact.kind, MemberKind::Method | MemberKind::Operator),
                             )
@@ -811,7 +850,7 @@ impl SignatureIndex {
                             kind,
                             positional: Vec::new(),
                             named: FxHashMap::default(),
-                            return_type: ResolvedType::Unknown,
+                            return_type: ResolvedType::UNKNOWN,
                             call_parameters: Vec::new(),
                             shape: OverrideShape::default(),
                             known: false,
@@ -972,7 +1011,12 @@ impl SignatureIndex {
         };
         // In function subtyping, a void result accepts any result type.
         let return_compatible = |left: &ResolvedType, right: &ResolvedType| {
-            matches!(right, ResolvedType::Void) || compatible(left, right)
+            matches!(
+                right,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Void
+                }
+            ) || compatible(left, right)
         };
         if sub.call_parameters.is_empty() {
             return return_compatible(&sub.return_type, &sup.return_type)
@@ -996,17 +1040,17 @@ impl SignatureIndex {
             .map(|(index, (from, to))| {
                 (
                     from.clone(),
-                    ResolvedType::TypeParameter {
+                    ResolvedType::from_kind(ResolvedTypeKind::TypeParameter {
                         id: to.clone(),
                         bound: Arc::new(
                             sup.shape
                                 .bounds
                                 .get(index)
                                 .cloned()
-                                .unwrap_or(ResolvedType::Unknown),
+                                .unwrap_or(ResolvedType::UNKNOWN),
                         ),
                         nullable: false,
-                    },
+                    }),
                 )
             })
             .collect();
@@ -1350,7 +1394,7 @@ mod tests {
             .as_ref()
             .unwrap();
         assert!(
-            matches!(&echo.positional[0], ResolvedType::TypeParameter { id, .. } if *id == echo.call_parameters[0])
+            matches!(&echo.positional[0], ResolvedType { kind: ResolvedTypeKind::TypeParameter { id, .. } } if *id == echo.call_parameters[0])
         );
         assert_eq!(echo.return_type, echo.positional[0]);
         assert_eq!(
@@ -1395,7 +1439,9 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .positional[0],
-            ResolvedType::Dynamic
+            ResolvedType {
+                kind: ResolvedTypeKind::Dynamic
+            }
         );
         for name in ["GetterSetter", "FieldSetter"] {
             let owner = model.resolve_name(name).unwrap();
@@ -1407,7 +1453,9 @@ mod tests {
         let unavailable = model.resolve_name("Unavailable").unwrap();
         assert_eq!(
             index.member(&unavailable, "method").unwrap().positional[0],
-            ResolvedType::Unknown
+            ResolvedType {
+                kind: ResolvedTypeKind::Unknown
+            }
         );
         let partial = model.resolve_name("Partial").unwrap();
         assert_eq!(
@@ -1422,7 +1470,9 @@ mod tests {
         let conflict = model.resolve_name("Conflict").unwrap();
         assert_eq!(
             index.member(&conflict, "conflict").unwrap().return_type,
-            ResolvedType::Dynamic
+            ResolvedType {
+                kind: ResolvedTypeKind::Dynamic
+            }
         );
         let unknown_argument = model.resolve_name("UnknownArgument").unwrap();
         assert_eq!(
@@ -1430,17 +1480,23 @@ mod tests {
                 .member(&unknown_argument, "helper")
                 .unwrap()
                 .positional[0],
-            ResolvedType::Dynamic
+            ResolvedType {
+                kind: ResolvedTypeKind::Dynamic
+            }
         );
         let version = model.resolve_name("Version").unwrap();
         assert_eq!(
             index.member(&version, "compareTo").unwrap().positional[0],
-            ResolvedType::Unknown
+            ResolvedType {
+                kind: ResolvedTypeKind::Unknown
+            }
         );
         let mixed = model.resolve_name("Mixed").unwrap();
         assert_eq!(
             index.member(&mixed, "mixed").unwrap().positional[0],
-            ResolvedType::Unknown
+            ResolvedType {
+                kind: ResolvedTypeKind::Unknown
+            }
         );
         let api_repo = model.resolve_name("ApiRepo").unwrap();
         assert_eq!(
@@ -1459,18 +1515,22 @@ mod tests {
             .or_default()
             .supertypes = Some((
             Vec::new(),
-            vec![ResolvedType::Interface {
-                identity: DeclarationIdentity::sdk("dart:collection", "Unindexed"),
-                arguments: Vec::new().into(),
-                occurrence: Default::default(),
-                nullable: false,
-                extension_type: false,
+            vec![ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    identity: DeclarationIdentity::sdk("dart:collection", "Unindexed"),
+                    arguments: Vec::new().into(),
+                    occurrence: Default::default(),
+                    nullable: false,
+                    extension_type: false,
+                },
             }],
         ));
         pending.infer_programs(&[(parsed.program(), model)]);
         assert_eq!(
             pending.member(&sdk_child, "helper").unwrap().positional[0],
-            ResolvedType::Unknown
+            ResolvedType {
+                kind: ResolvedTypeKind::Unknown
+            }
         );
     }
 
@@ -1514,13 +1574,13 @@ mod tests {
                 .get_mut("compareTo")
                 .unwrap()
                 .override_shape = None;
-            let p = ResolvedType::Interface {
+            let p = ResolvedType::from_kind(ResolvedTypeKind::Interface {
                 identity: model.resolve_name("P").unwrap(),
                 arguments: Vec::new().into(),
                 occurrence: Default::default(),
                 nullable: false,
                 extension_type: false,
-            };
+            });
             let mut visiting = FxHashSet::default();
             let mut memo = FxHashMap::default();
             let members = index.interface_candidates::<false>(
@@ -1581,13 +1641,13 @@ mod tests {
             &types,
         );
         let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
-        let leaf = ResolvedType::Interface {
+        let leaf = ResolvedType::from_kind(ResolvedTypeKind::Interface {
             identity: model.resolve_name("Leaf").unwrap(),
             arguments: vec![model.core_type("int", false)].into(),
             occurrence: Default::default(),
             nullable: false,
             extension_type: false,
-        };
+        });
         let mut visiting = FxHashSet::default();
         let mut memo = FxHashMap::default();
         let members = index.interface_candidates::<false>(
@@ -1607,13 +1667,13 @@ mod tests {
         // Block every graph node: a memo hit must not re-enter the diamond,
         // and its owner substitution must still use this edge's arguments.
         visiting.extend(memo.keys().cloned());
-        let second = ResolvedType::Interface {
+        let second = ResolvedType::from_kind(ResolvedTypeKind::Interface {
             identity: model.resolve_name("Leaf").unwrap(),
             arguments: vec![model.core_type("String", false)].into(),
             occurrence: Default::default(),
             nullable: false,
             extension_type: false,
-        };
+        });
         let members = index.interface_candidates::<false>(
             &second,
             "make",

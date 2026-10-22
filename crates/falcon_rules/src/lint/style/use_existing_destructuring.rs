@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -56,8 +56,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         if !self.mutated.contains(&source_id)
             && matches!(
-                state.infer(declaration.init()),
-                ResolvedType::Record {
+                state.infer(declaration.init()).view(),
+                ResolvedTypeView::Record {
                     nullable: false,
                     ..
                 }
@@ -81,12 +81,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         let Some(source_id) = self.references.get(&source.span().start) else {
             return;
         };
-        let ResolvedType::Record {
+        let receiver = state.infer(field.object());
+        let ResolvedTypeView::Record {
             positional,
             named,
             nullable: false,
             ..
-        } = state.infer(field.object())
+        } = receiver.view()
         else {
             return;
         };

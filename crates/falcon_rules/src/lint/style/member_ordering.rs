@@ -22,7 +22,7 @@
 //! `dispose`, `build`, and `overridden-methods`.
 
 use falcon_analyze::{
-    AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
+    AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
     StructuralTraversal, TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
@@ -151,7 +151,7 @@ fn check_class(
 
 /// True when the class extends `State` / `State<T>` (Flutter widget state).
 fn extends_state(extends: Option<&ResolvedType>) -> bool {
-    matches!(extends, Some(ResolvedType::Interface { identity, .. })
+    matches!(extends.map(ResolvedType::view), Some(ResolvedTypeView::Interface { identity, .. })
         if identity.is_package("flutter", "State"))
 }
 

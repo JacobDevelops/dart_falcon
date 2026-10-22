@@ -272,7 +272,7 @@ impl<'a> AnalyzeContext<'a> {
                         for declarator in variable.declarators() {
                             globals.insert(
                                 declarator.name().name(),
-                                declared.clone().unwrap_or(ResolvedType::Unknown),
+                                declared.clone().unwrap_or(ResolvedType::UNKNOWN),
                             );
                         }
                     }

@@ -12,7 +12,7 @@
 //! such as `Container`.
 
 use falcon_analyze::{
-    AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
+    AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
     StructuralTraversal, TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
@@ -81,7 +81,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 }
 
 fn is_widget_type(dart_type: &ResolvedType) -> bool {
-    matches!(dart_type, ResolvedType::Interface { identity, .. }
+    matches!(dart_type.view(), ResolvedTypeView::Interface { identity, .. }
         if ["Widget", "StatelessWidget", "StatefulWidget"]
             .iter()
             .any(|name| identity.is_package("flutter", name)))

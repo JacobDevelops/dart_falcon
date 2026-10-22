@@ -1,6 +1,6 @@
 //! Flags an `async` closure passed to a proven synchronous callback parameter.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -39,7 +39,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         ) {
             return;
         }
-        let Some(ResolvedType::Function { return_type, .. }) = state.expected() else {
+        let Some(ResolvedTypeView::Function { return_type, .. }) = state.expected().map(ResolvedType::view) else {
             return;
         };
         if state.model.is_future_like(return_type) == Truth::No {

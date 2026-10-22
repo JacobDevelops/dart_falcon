@@ -12,7 +12,7 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, LanguageVersion, ResolvedType, Rule, RulePreparation, Truth, TypeRelation,
+    AnalyzeContext, LanguageVersion, ResolvedTypeView, Rule, RulePreparation, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -204,8 +204,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             }) { continue; }
             let super_type = state.model.substitute(super_type, &substitutions);
             let this_type = state.environment.declared_type(parameter.name().name());
-            if matches!(super_type, ResolvedType::Dynamic)
-                || matches!(this_type, ResolvedType::Dynamic)
+            if matches!(super_type.view(), ResolvedTypeView::Dynamic)
+                || matches!(this_type.view(), ResolvedTypeView::Dynamic)
                 || state
                     .signatures
                     .relation(&super_type, TypeRelation::SubtypeOf(&this_type), &state.model)

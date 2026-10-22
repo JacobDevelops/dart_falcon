@@ -21,7 +21,7 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, SemanticModel,
     SignatureIndex, StructuralNode, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
@@ -86,12 +86,12 @@ impl<'a> Collector<'a> {
         let super_params = self
             .receiver
             .as_ref()
-            .and_then(|receiver| match receiver {
-                ResolvedType::Interface { identity, .. } => self.signatures.superclass(identity),
+            .and_then(|receiver| match receiver.view() {
+                ResolvedTypeView::Interface { identity, .. } => self.signatures.superclass(identity),
                 _ => None,
             })
-            .and_then(|superclass| match superclass {
-                ResolvedType::Interface { identity, .. } => Some(identity),
+            .and_then(|superclass| match superclass.view() {
+                ResolvedTypeView::Interface { identity, .. } => Some(identity),
                 _ => None,
             })
             .and_then(|superclass| {
@@ -406,7 +406,7 @@ fn needs_instance(
         let Some(owner) = signatures.resolved_readable_member_owner(receiver, name, model) else {
             // An absent owner only proves absence when the inherited namespace
             // is complete. Unloaded dependencies may still provide this name.
-            let ResolvedType::Interface { identity, .. } = receiver else {
+            let ResolvedTypeView::Interface { identity, .. } = receiver.view() else {
                 return true;
             };
             return signatures

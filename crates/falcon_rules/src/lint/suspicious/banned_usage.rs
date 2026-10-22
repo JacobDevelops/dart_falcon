@@ -5,7 +5,7 @@
 //! Dynamic and unresolved targets are skipped.
 
 use falcon_analyze::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, QualifiedName, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, QualifiedName, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -194,7 +194,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 }
                 _ => continue,
             };
-            if let Some(ResolvedType::Interface { identity, .. }) = receiver {
+            if let Some(ResolvedTypeView::Interface { identity, .. }) = receiver.map(ResolvedType::view) {
                 let owner = state.model.unaliased(identity.clone());
                 self.emit(
                     &format!(
@@ -275,7 +275,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         || state.signatures.is_enum_value(owner, identifier.name()))
                 {
                     if let Some(receiver) = &state.enclosing_type
-                        && matches!(receiver, ResolvedType::Interface { identity, .. } if identity == owner)
+                        && matches!(receiver.view(), ResolvedTypeView::Interface { identity, .. } if identity == owner)
                         && !state.signatures.is_enum_value(owner, identifier.name())
                         && !state
                             .signatures
@@ -388,7 +388,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 );
             }
             Expr::DotShorthand(shorthand) => {
-                if let Some(ResolvedType::Interface { identity, .. }) = state.expected() {
+                if let Some(ResolvedTypeView::Interface { identity, .. }) = state.expected().map(ResolvedType::view) {
                     let owner = state.model.unaliased(identity.clone());
                     self.emit(
                         &format!("{}.{}", owner.name(), shorthand.name().name()),

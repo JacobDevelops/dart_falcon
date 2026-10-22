@@ -23,7 +23,7 @@
 //! Adopted from the official `prefer_constructors_over_static_methods` lint.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    AnalyzeContext, DeclarationIdentity, ResolvedTypeView, Rule, RulePreparation, SemanticModel,
     StructuralNode, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
@@ -131,9 +131,9 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             return StructuralTraversal::SkipChildren;
         }
         let returns_owner = matches!(
-            self.model.resolve_type(return_type),
-            ResolvedType::Interface { identity, nullable: false, .. }
-                if self.owner.as_ref() == Some(&identity)
+            self.model.resolve_type(return_type).view(),
+            ResolvedTypeView::Interface { identity, nullable: false, .. }
+                if self.owner.as_ref() == Some(identity)
         );
         if !returns_owner {
             return StructuralTraversal::SkipChildren;

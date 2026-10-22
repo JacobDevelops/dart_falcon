@@ -44,7 +44,7 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, LibraryId, MemberKind, ResolvedType, Rule, RulePreparation,
+    AnalyzeContext, DeclarationIdentity, LibraryId, MemberKind, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::cst::visit::{Visitor, for_each_stmt_list, walk_expr};
@@ -420,8 +420,8 @@ impl<'a> Scope<'_, 'a> {
     /// there is no enclosing type or no such member, `Some(None)` when the
     /// hierarchy is unresolvable.
     fn enclosing_member_owner(&self, name: &str) -> Option<Option<DeclarationIdentity>> {
-        match self.state.enclosing_type.as_ref()? {
-            ResolvedType::Interface { identity, .. } => member_owner(identity, name, self.state),
+        match self.state.enclosing_type.as_ref()?.view() {
+            ResolvedTypeView::Interface { identity, .. } => member_owner(identity, name, self.state),
             _ => None,
         }
     }
@@ -436,7 +436,7 @@ impl<'a> Scope<'_, 'a> {
         let receiver = match object {
             None => return self.enclosing_member_owner(name).flatten().as_ref() == Some(owner),
             Some(Expr::Super(_)) => {
-                let Some(ResolvedType::Interface { identity, .. }) = &self.state.enclosing_type
+                let Some(ResolvedTypeView::Interface { identity, .. }) = self.state.enclosing_type.as_ref().map(ResolvedType::view)
                 else {
                     return true;
                 };
@@ -452,11 +452,11 @@ impl<'a> Scope<'_, 'a> {
             }
             Some(object) => self.static_type(object),
         };
-        match receiver {
-            Some(ResolvedType::Interface { identity, .. }) => {
-                member_owner(&identity, name, self.state).flatten().as_ref() == Some(owner)
+        match receiver.as_ref().map(ResolvedType::view) {
+            Some(ResolvedTypeView::Interface { identity, .. }) => {
+                member_owner(identity, name, self.state).flatten().as_ref() == Some(owner)
             }
-            Some(ResolvedType::Dynamic) => false,
+            Some(ResolvedTypeView::Dynamic) => false,
             // An unresolved receiver may be the owner itself.
             _ => true,
         }
@@ -466,17 +466,18 @@ impl<'a> Scope<'_, 'a> {
     /// field/getter. Dynamic receivers resolve only matching `Object` methods;
     /// `call` on a function has no method element.
     fn invokes_method(&self, object: Expr<'a>, name: &str, args: ArgList<'a>) -> bool {
-        let mut receiver = self.static_type(object);
+        let inferred = self.static_type(object);
+        let mut receiver = inferred.as_ref();
         while let Some(
-            ResolvedType::TypeParameter { bound, .. }
-            | ResolvedType::NonNullTypeParameter { bound, .. },
-        ) = receiver
+            ResolvedTypeView::TypeParameter { bound, .. }
+            | ResolvedTypeView::NonNullTypeParameter { bound, .. },
+        ) = receiver.map(ResolvedType::view)
         {
-            receiver = Some((*bound).clone());
+            receiver = Some(bound);
         }
-        match receiver {
-            Some(ResolvedType::Never | ResolvedType::Unknown) | None => false,
-            Some(ResolvedType::Dynamic) => {
+        match receiver.map(ResolvedType::view) {
+            Some(ResolvedTypeView::Never | ResolvedTypeView::Unknown) | None => false,
+            Some(ResolvedTypeView::Dynamic) => {
                 let parameters = match name {
                     "toString" => 0,
                     "noSuchMethod" => 1,
@@ -484,8 +485,8 @@ impl<'a> Scope<'_, 'a> {
                 };
                 args.named().is_empty() && args.positional().count() == parameters
             }
-            Some(ResolvedType::Function { .. }) => name != "call",
-            Some(ResolvedType::Record {
+            Some(ResolvedTypeView::Function { .. }) => name != "call",
+            Some(ResolvedTypeView::Record {
                 positional, named, ..
             }) => {
                 !named.iter().any(|(field, _)| field == name)
@@ -494,16 +495,17 @@ impl<'a> Scope<'_, 'a> {
                         .and_then(|index| index.parse::<usize>().ok())
                         .is_some_and(|index| (1..=positional.len()).contains(&index))
             }
-            Some(receiver) if receiver.interface("dart:core", "Function") => name != "call",
-            Some(receiver @ ResolvedType::Interface { .. }) => self
-                .state
-                .signatures
-                .resolved_member_facts(&receiver, name, &self.state.model)
-                .is_none_or(|facts| {
-                    !facts.iter().any(|fact| {
-                        matches!(fact.kind, MemberKind::Field { .. } | MemberKind::Getter)
+            Some(_) if receiver.is_some_and(|ty| ty.interface("dart:core", "Function")) => name != "call",
+            Some(ResolvedTypeView::Interface { .. }) => receiver.is_some_and(|receiver| {
+                self.state
+                    .signatures
+                    .resolved_member_facts(receiver, name, &self.state.model)
+                    .is_none_or(|facts| {
+                        !facts.iter().any(|fact| {
+                            matches!(fact.kind, MemberKind::Field { .. } | MemberKind::Getter)
+                        })
                     })
-                }),
+            }),
             _ => false,
         }
     }
@@ -516,7 +518,7 @@ impl<'a> Scope<'_, 'a> {
             .signatures
             .resolved_field(enclosing, name, &self.state.model)
             .map(|(ty, _)| ty)
-            .filter(|ty| !matches!(ty, ResolvedType::Unknown))
+            .filter(|ty| !matches!(ty.view(), ResolvedTypeView::Unknown))
             // An own field without a declared type has its initializer's type.
             .or_else(|| Some(self.state.environment.lookup(name)))
     }
@@ -535,19 +537,13 @@ impl<'a> Scope<'_, 'a> {
                         .signatures
                         .resolved_field(enclosing, name, &self.state.model)
                         .map(|(ty, substitutions)| self.state.model.substitute(&ty, &substitutions))
-                        .filter(|ty| !matches!(ty, ResolvedType::Unknown))
+                        .filter(|ty| !matches!(ty.view(), ResolvedTypeView::Unknown))
                         .or_else(|| Some(self.state.infer(object)));
                 }
                 if self.state.model.resolve_value(name).is_none()
                     && let Some(identity) = self.state.model.resolve_name(name)
                 {
-                    return Some(ResolvedType::Interface {
-                        occurrence: Default::default(),
-                        identity,
-                        arguments: Vec::new().into(),
-                        nullable: false,
-                        extension_type: false,
-                    });
+                    return Some(ResolvedType::new_interface(identity, Vec::new().into(), false, false));
                 }
                 Some(self.state.infer(object))
             }

@@ -1,15 +1,23 @@
 use super::*;
+use crate::resolve::semantic::ResolvedTypeKind;
 
 /// The position of a top type in Dart's `MORETOP` order, where `void` is above
 /// `dynamic`, which is above `Object?`; `None` for any other type.
 pub(super) fn top_rank(ty: &ResolvedType) -> Option<u8> {
     match ty {
-        ResolvedType::Void => Some(2),
-        ResolvedType::Dynamic => Some(1),
-        ResolvedType::Interface {
-            identity,
-            nullable: true,
-            ..
+        ResolvedType {
+            kind: ResolvedTypeKind::Void,
+        } => Some(2),
+        ResolvedType {
+            kind: ResolvedTypeKind::Dynamic,
+        } => Some(1),
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    identity,
+                    nullable: true,
+                    ..
+                },
         } if identity.is_sdk("dart:core", "Object") => Some(0),
         _ => None,
     }
@@ -64,8 +72,12 @@ pub(super) fn inference_join_memoized(
     memo.depth += 1;
     let cacheable = matches!(
         left,
-        ResolvedType::Function { .. } | ResolvedType::Record { .. }
-    ) || matches!(left, ResolvedType::Interface { arguments, .. } if !arguments.is_empty());
+        ResolvedType {
+            kind: ResolvedTypeKind::Function { .. }
+        } | ResolvedType {
+            kind: ResolvedTypeKind::Record { .. }
+        }
+    ) || matches!(left, ResolvedType { kind: ResolvedTypeKind::Interface { arguments, .. } } if !arguments.is_empty());
     let key = cacheable.then(|| (memo.hash(left), memo.hash(right)));
     if let Some(entries) = key.and_then(|key| memo.shapes.get(&key))
         && let Some((_, _, result)) = entries.iter().find(|(cached_left, cached_right, _)| {
@@ -128,22 +140,33 @@ fn inference_join_impl(
     let left = signatures.normalized_raw_type(Cow::Borrowed(left));
     let right = signatures.normalized_raw_type(Cow::Borrowed(right));
     let (left, right) = (left.as_ref(), right.as_ref());
-    if matches!(right, ResolvedType::Never) {
+    if matches!(
+        right,
+        ResolvedType {
+            kind: ResolvedTypeKind::Never
+        }
+    ) {
         return left.clone();
     }
     if left == right {
         if let (
-            ResolvedType::Record {
-                occurrence: left_occurrence,
-                positional: left_positional,
-                named: left_named,
-                nullable,
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Record {
+                        occurrence: left_occurrence,
+                        positional: left_positional,
+                        named: left_named,
+                        nullable,
+                    },
             },
-            ResolvedType::Record {
-                occurrence: right_occurrence,
-                positional: right_positional,
-                named: right_named,
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Record {
+                        occurrence: right_occurrence,
+                        positional: right_positional,
+                        named: right_named,
+                        ..
+                    },
             },
         ) = (left, right)
         {
@@ -153,113 +176,138 @@ fn inference_join_impl(
             {
                 return right.clone();
             }
-            return ResolvedType::Record {
-                occurrence: Default::default(),
-                positional: left_positional
-                    .iter()
-                    .zip(right_positional.iter())
-                    .map(|(left, right)| {
-                        inference_join_memoized(
-                            &memo.project(left, left_occurrence),
-                            &memo.project(right, right_occurrence),
-                            signatures,
-                            model,
-                            memo,
-                        )
-                    })
-                    .collect(),
-                named: left_named
-                    .iter()
-                    .zip(right_named.iter())
-                    .map(|((name, left), (_, right))| {
-                        (
-                            name.clone(),
+            return ResolvedType {
+                kind: ResolvedTypeKind::Record {
+                    occurrence: Default::default(),
+                    positional: left_positional
+                        .iter()
+                        .zip(right_positional.iter())
+                        .map(|(left, right)| {
                             inference_join_memoized(
                                 &memo.project(left, left_occurrence),
                                 &memo.project(right, right_occurrence),
                                 signatures,
                                 model,
                                 memo,
-                            ),
-                        )
-                    })
-                    .collect(),
-                nullable: *nullable,
+                            )
+                        })
+                        .collect(),
+                    named: left_named
+                        .iter()
+                        .zip(right_named.iter())
+                        .map(|((name, left), (_, right))| {
+                            (
+                                name.clone(),
+                                inference_join_memoized(
+                                    &memo.project(left, left_occurrence),
+                                    &memo.project(right, right_occurrence),
+                                    signatures,
+                                    model,
+                                    memo,
+                                ),
+                            )
+                        })
+                        .collect(),
+                    nullable: *nullable,
+                },
             };
         }
         if let (
-            ResolvedType::Function {
-                alias,
-                return_type,
-                positional,
-                named,
-                nullable,
-                optional_positional,
-                shape,
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        alias,
+                        return_type,
+                        positional,
+                        named,
+                        nullable,
+                        optional_positional,
+                        shape,
+                    },
             },
-            ResolvedType::Function {
-                alias: other,
-                return_type: other_return,
-                positional: other_positional,
-                named: other_named,
-                ..
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        alias: other,
+                        return_type: other_return,
+                        positional: other_positional,
+                        named: other_named,
+                        ..
+                    },
             },
         ) = (right, left)
             && !alias.same_origin(other)
         {
             // UP synthesizes a structural function type unless both operands
             // retain the same aliased type instance.
-            return ResolvedType::Function {
-                shape: shape.clone(),
-                optional_positional: *optional_positional,
-                alias: FunctionTypeAlias::default(),
-                return_type: Arc::new(inference_join_memoized(
-                    &memo.project(other_return, other),
-                    &memo.project(return_type, alias),
-                    signatures,
-                    model,
-                    memo,
-                )),
-                positional: other_positional
-                    .iter()
-                    .zip(positional.iter())
-                    .map(|(left, right)| {
-                        inference_join_memoized(
-                            &memo.project(left, other),
-                            &memo.project(right, alias),
-                            signatures,
-                            model,
-                            memo,
-                        )
-                    })
-                    .collect(),
-                named: other_named
-                    .iter()
-                    .zip(named.iter())
-                    .map(|((name, left), (_, right))| {
-                        (
-                            name.clone(),
+            return ResolvedType {
+                kind: ResolvedTypeKind::Function {
+                    shape: shape.clone(),
+                    optional_positional: *optional_positional,
+                    alias: FunctionTypeAlias::default(),
+                    return_type: Arc::new(inference_join_memoized(
+                        &memo.project(other_return, other),
+                        &memo.project(return_type, alias),
+                        signatures,
+                        model,
+                        memo,
+                    )),
+                    positional: other_positional
+                        .iter()
+                        .zip(positional.iter())
+                        .map(|(left, right)| {
                             inference_join_memoized(
                                 &memo.project(left, other),
                                 &memo.project(right, alias),
                                 signatures,
                                 model,
                                 memo,
-                            ),
-                        )
-                    })
-                    .collect(),
-                nullable: *nullable,
+                            )
+                        })
+                        .collect(),
+                    named: other_named
+                        .iter()
+                        .zip(named.iter())
+                        .map(|((name, left), (_, right))| {
+                            (
+                                name.clone(),
+                                inference_join_memoized(
+                                    &memo.project(left, other),
+                                    &memo.project(right, alias),
+                                    signatures,
+                                    model,
+                                    memo,
+                                ),
+                            )
+                        })
+                        .collect(),
+                    nullable: *nullable,
+                },
             };
         }
         // Equal interfaces retain the right operand's argument provenance.
         return right.clone();
     }
-    if matches!(left, ResolvedType::Never) {
+    if matches!(
+        left,
+        ResolvedType {
+            kind: ResolvedTypeKind::Never
+        }
+    ) {
         return right.clone();
     }
-    if matches!(left, ResolvedType::Unknown) || matches!(right, ResolvedType::Unknown) {
-        return ResolvedType::Unknown;
+    if matches!(
+        left,
+        ResolvedType {
+            kind: ResolvedTypeKind::Unknown
+        }
+    ) || matches!(
+        right,
+        ResolvedType {
+            kind: ResolvedTypeKind::Unknown
+        }
+    ) {
+        return ResolvedType::UNKNOWN;
     }
     if let (Some(left_rank), Some(right_rank)) = (top_rank(left), top_rank(right)) {
         return if left_rank > right_rank {
@@ -268,16 +316,40 @@ fn inference_join_impl(
             right.clone()
         };
     }
-    if matches!(left, ResolvedType::Void | ResolvedType::Dynamic) {
+    if matches!(
+        left,
+        ResolvedType {
+            kind: ResolvedTypeKind::Void
+        } | ResolvedType {
+            kind: ResolvedTypeKind::Dynamic
+        }
+    ) {
         return left.clone();
     }
-    if matches!(right, ResolvedType::Void | ResolvedType::Dynamic) {
+    if matches!(
+        right,
+        ResolvedType {
+            kind: ResolvedTypeKind::Void
+        } | ResolvedType {
+            kind: ResolvedTypeKind::Dynamic
+        }
+    ) {
         return right.clone();
     }
-    if matches!(left, ResolvedType::Null) {
+    if matches!(
+        left,
+        ResolvedType {
+            kind: ResolvedTypeKind::Null
+        }
+    ) {
         return right.with_nullable(true);
     }
-    if matches!(right, ResolvedType::Null) {
+    if matches!(
+        right,
+        ResolvedType {
+            kind: ResolvedTypeKind::Null
+        }
+    ) {
         return left.with_nullable(true);
     }
     let nullable = left.nullable() || right.nullable();
@@ -287,23 +359,29 @@ fn inference_join_impl(
             .with_nullable(nullable);
     }
     if let (
-        ResolvedType::Function {
-            alias: left_alias,
-            return_type: left_return,
-            positional: left_positional,
-            named: left_named,
-            optional_positional: left_optional,
-            shape: left_shape,
-            ..
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    alias: left_alias,
+                    return_type: left_return,
+                    positional: left_positional,
+                    named: left_named,
+                    optional_positional: left_optional,
+                    shape: left_shape,
+                    ..
+                },
         },
-        ResolvedType::Function {
-            alias: right_alias,
-            return_type: right_return,
-            positional: right_positional,
-            named: right_named,
-            optional_positional: right_optional,
-            shape: right_shape,
-            ..
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    alias: right_alias,
+                    return_type: right_return,
+                    positional: right_positional,
+                    named: right_named,
+                    optional_positional: right_optional,
+                    shape: right_shape,
+                    ..
+                },
         },
     ) = (left, right)
     {
@@ -321,8 +399,12 @@ fn inference_join_impl(
                 .zip(left_shape.type_parameters.iter())
                 .filter_map(|(right, left)| match (right, left) {
                     (
-                        ResolvedType::TypeParameter { id: right_id, .. },
-                        ResolvedType::TypeParameter { id: left_id, .. },
+                        ResolvedType {
+                            kind: ResolvedTypeKind::TypeParameter { id: right_id, .. },
+                        },
+                        ResolvedType {
+                            kind: ResolvedTypeKind::TypeParameter { id: left_id, .. },
+                        },
                     ) if right_id != left_id => Some((right_id.clone(), left.clone())),
                     _ => None,
                 })
@@ -334,11 +416,15 @@ fn inference_join_impl(
                     .zip(right_shape.type_parameters.iter())
                 {
                     let (
-                        ResolvedType::TypeParameter { bound: left, .. },
-                        ResolvedType::TypeParameter { bound: right, .. },
+                        ResolvedType {
+                            kind: ResolvedTypeKind::TypeParameter { bound: left, .. },
+                        },
+                        ResolvedType {
+                            kind: ResolvedTypeKind::TypeParameter { bound: right, .. },
+                        },
                     ) = (left, right)
                     else {
-                        return ResolvedType::Unknown;
+                        return ResolvedType::UNKNOWN;
                     };
                     let right = model.substitute(right, &substitutions);
                     match (
@@ -349,11 +435,14 @@ fn inference_join_impl(
                         (Truth::No, _) | (_, Truth::No) => {
                             return model.core_type("Function", nullable);
                         }
-                        _ => return ResolvedType::Unknown,
+                        _ => return ResolvedType::UNKNOWN,
                     }
                 }
                 let mut right = model.substitute(right, &substitutions);
-                if let ResolvedType::Function { shape, .. } = &mut right {
+                if let ResolvedType {
+                    kind: ResolvedTypeKind::Function { shape, .. },
+                } = &mut right
+                {
                     *shape = Some(FunctionTypeShape::new(
                         right_shape.required_named.to_vec(),
                         left_shape.type_parameters.to_vec(),
@@ -385,7 +474,7 @@ fn inference_join_impl(
             }
             match signatures.relation(right, crate::TypeRelation::SubtypeOf(left), model) {
                 Truth::Yes => Some(right.clone()),
-                Truth::No if left_to_right == Truth::No => Some(ResolvedType::Never),
+                Truth::No if left_to_right == Truth::No => Some(ResolvedType::NEVER),
                 _ => None,
             }
         };
@@ -395,7 +484,7 @@ fn inference_join_impl(
             .map(|(left, right)| meet(left, right))
             .collect::<Option<Vec<_>>>()
         else {
-            return ResolvedType::Unknown;
+            return ResolvedType::UNKNOWN;
         };
         let Some(mut named) = left_named
             .iter()
@@ -405,81 +494,93 @@ fn inference_join_impl(
             })
             .collect::<Option<Vec<_>>>()
         else {
-            return ResolvedType::Unknown;
+            return ResolvedType::UNKNOWN;
         };
         named.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-        return ResolvedType::Function {
-            shape: match (left_shape, right_shape) {
-                (Some(left), Some(right)) if left == right => Some(Arc::clone(left)),
-                (Some(left), Some(right)) if left.type_parameters == right.type_parameters => {
-                    Some(FunctionTypeShape::new(
-                        named
-                            .iter()
-                            .filter(|(name, _)| {
-                                left.required_named.contains(name)
-                                    || right.required_named.contains(name)
-                            })
-                            .map(|(name, _)| name.clone())
-                            .collect(),
-                        left.type_parameters.to_vec(),
-                    ))
-                }
-                _ => None,
+        return ResolvedType {
+            kind: ResolvedTypeKind::Function {
+                shape: match (left_shape, right_shape) {
+                    (Some(left), Some(right)) if left == right => Some(Arc::clone(left)),
+                    (Some(left), Some(right)) if left.type_parameters == right.type_parameters => {
+                        Some(FunctionTypeShape::new(
+                            named
+                                .iter()
+                                .filter(|(name, _)| {
+                                    left.required_named.contains(name)
+                                        || right.required_named.contains(name)
+                                })
+                                .map(|(name, _)| name.clone())
+                                .collect(),
+                            left.type_parameters.to_vec(),
+                        ))
+                    }
+                    _ => None,
+                },
+                optional_positional: (*left_optional).min(*right_optional),
+                alias: FunctionTypeAlias::default(),
+                return_type: Arc::new(inference_join_memoized(
+                    &memo.project(left_return, left_alias),
+                    &memo.project(right_return, right_alias),
+                    signatures,
+                    model,
+                    memo,
+                )),
+                positional: positional.into(),
+                named: named.into(),
+                nullable,
             },
-            optional_positional: (*left_optional).min(*right_optional),
-            alias: FunctionTypeAlias::default(),
-            return_type: Arc::new(inference_join_memoized(
-                &memo.project(left_return, left_alias),
-                &memo.project(right_return, right_alias),
-                signatures,
-                model,
-                memo,
-            )),
-            positional: positional.into(),
-            named: named.into(),
-            nullable,
         };
     }
     if let (
-        ResolvedType::Interface {
-            occurrence: left_occurrence,
-            identity: left_identity,
-            arguments: left_args,
-            ..
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    occurrence: left_occurrence,
+                    identity: left_identity,
+                    arguments: left_args,
+                    ..
+                },
         },
-        ResolvedType::Interface {
-            occurrence: right_occurrence,
-            identity: right_identity,
-            arguments: right_args,
-            ..
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    occurrence: right_occurrence,
+                    identity: right_identity,
+                    arguments: right_args,
+                    ..
+                },
         },
     ) = (left, right)
     {
         if left_identity == right_identity && left_args.len() == right_args.len() {
-            return ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: left_identity.clone(),
-                arguments: left_args
-                    .iter()
-                    .zip(right_args.iter())
-                    .map(|(left, right)| {
-                        inference_join_memoized(
-                            &memo.project(left, left_occurrence),
-                            &memo.project(right, right_occurrence),
-                            signatures,
-                            model,
-                            memo,
-                        )
-                    })
-                    .collect(),
-                nullable,
-                extension_type: matches!(
-                    left,
-                    ResolvedType::Interface {
-                        extension_type: true,
-                        ..
-                    }
-                ),
+            return ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: left_identity.clone(),
+                    arguments: left_args
+                        .iter()
+                        .zip(right_args.iter())
+                        .map(|(left, right)| {
+                            inference_join_memoized(
+                                &memo.project(left, left_occurrence),
+                                &memo.project(right, right_occurrence),
+                                signatures,
+                                model,
+                                memo,
+                            )
+                        })
+                        .collect(),
+                    nullable,
+                    extension_type: matches!(
+                        left,
+                        ResolvedType {
+                            kind: ResolvedTypeKind::Interface {
+                                extension_type: true,
+                                ..
+                            }
+                        }
+                    ),
+                },
             };
         }
         if numeric(left) && numeric(right) {
@@ -516,7 +617,7 @@ fn inference_join_impl(
         }
         return signatures
             .common_superinterface(left, right, model)
-            .map_or(ResolvedType::Unknown, |bound| bound.with_nullable(nullable));
+            .map_or(ResolvedType::UNKNOWN, |bound| bound.with_nullable(nullable));
     }
     if signatures.relation(
         &right_base,
@@ -534,7 +635,7 @@ fn inference_join_impl(
     {
         return right.with_nullable(nullable);
     }
-    ResolvedType::Unknown
+    ResolvedType::UNKNOWN
 }
 
 /// The return type of the operator method `name` invoked on `receiver`.
@@ -544,12 +645,17 @@ pub(super) fn operator_return_type(
     signatures: &SignatureIndex,
     model: &SemanticModel<'_>,
 ) -> ResolvedType {
-    if matches!(receiver, ResolvedType::Dynamic) {
-        return ResolvedType::Dynamic;
+    if matches!(
+        receiver,
+        ResolvedType {
+            kind: ResolvedTypeKind::Dynamic
+        }
+    ) {
+        return ResolvedType::DYNAMIC;
     }
     signatures
         .resolved_member(receiver, name, model)
-        .map_or(ResolvedType::Unknown, |(signature, substitutions)| {
+        .map_or(ResolvedType::UNKNOWN, |(signature, substitutions)| {
             model.substitute(&signature.return_type, &substitutions)
         })
 }
@@ -581,10 +687,10 @@ pub(super) fn binary_result(
     model: &SemanticModel<'_>,
 ) -> ResolvedType {
     let builtin = operator_result(op, left, right, model);
-    if builtin != ResolvedType::Unknown || numeric(left) {
+    if builtin != ResolvedType::UNKNOWN || numeric(left) {
         return builtin;
     }
-    op.operator_name().map_or(ResolvedType::Unknown, |name| {
+    op.operator_name().map_or(ResolvedType::UNKNOWN, |name| {
         operator_return_type(left, name, signatures, model)
     })
 }
@@ -598,25 +704,36 @@ pub(super) fn contextual_join(
     signatures: &SignatureIndex,
     model: &SemanticModel<'_>,
 ) -> ResolvedType {
-    if types.contains(&ResolvedType::Unknown) {
-        return ResolvedType::Unknown;
+    if types.contains(&ResolvedType::UNKNOWN) {
+        return ResolvedType::UNKNOWN;
     }
     let join = types.iter().skip(1).fold(
-        types.first().cloned().unwrap_or(ResolvedType::Never),
+        types.first().cloned().unwrap_or(ResolvedType::NEVER),
         |join, ty| inference_join(&join, ty, signatures, model),
     );
     let Some(context) = expected.filter(|context| {
-        !has_inference_holes(context) && !matches!(context, ResolvedType::Dynamic)
+        !has_inference_holes(context)
+            && !matches!(
+                context,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Dynamic
+                }
+            )
     }) else {
         return join;
     };
-    if join == ResolvedType::Unknown || join == *context {
+    if join == ResolvedType::UNKNOWN || join == *context {
         return join;
     }
     // A concrete downward function context can retain a shared callable type
     // even when shape-sensitive UP produced the general Function interface.
     if join.interface("dart:core", "Function")
-        && matches!(context, ResolvedType::Function { .. })
+        && matches!(
+            context,
+            ResolvedType {
+                kind: ResolvedTypeKind::Function { .. }
+            }
+        )
         && types.iter().all(|ty| {
             signatures.relation(ty, crate::TypeRelation::SubtypeOf(context), model) == Truth::Yes
         })
@@ -634,7 +751,7 @@ pub(super) fn contextual_join(
             context.clone()
         }
         Truth::No => join,
-        Truth::Unknown => ResolvedType::Unknown,
+        Truth::Unknown => ResolvedType::UNKNOWN,
     }
 }
 
@@ -652,7 +769,7 @@ pub(crate) fn operator_result(
         && !right.nullable()
     {
         model.core_type("String", false)
-    } else if numeric(left) && (numeric(right) || *right == ResolvedType::Dynamic) {
+    } else if numeric(left) && (numeric(right) || *right == ResolvedType::DYNAMIC) {
         let name = if op == BinaryOp::Div {
             "double"
         } else if matches!(
@@ -675,26 +792,26 @@ pub(crate) fn operator_result(
         };
         model.core_type(name, false)
     } else {
-        ResolvedType::Unknown
+        ResolvedType::UNKNOWN
     }
 }
 
 pub(super) fn numeric(ty: &ResolvedType) -> bool {
     matches!(
         ty,
-        ResolvedType::Interface {
+        ResolvedType { kind: ResolvedTypeKind::Interface {
             identity: DeclarationIdentity::Sdk { library, name },
             ..
-        } if library.as_str() == "dart:core" && matches!(name.as_str(), "int" | "double" | "num")
+        } } if library.as_str() == "dart:core" && matches!(name.as_str(), "int" | "double" | "num")
     )
 }
 
 pub(super) fn fixnum_and_int(fixnum: &ResolvedType, int: &ResolvedType) -> bool {
     matches!(
         fixnum,
-        ResolvedType::Interface {
+        ResolvedType { kind: ResolvedTypeKind::Interface {
             identity: DeclarationIdentity::Package { package, name, .. },
             ..
-        } if package.as_str() == "fixnum" && matches!(name.as_str(), "Int32" | "Int64")
+        } } if package.as_str() == "fixnum" && matches!(name.as_str(), "Int32" | "Int64")
     ) && int.interface("dart:core", "int")
 }

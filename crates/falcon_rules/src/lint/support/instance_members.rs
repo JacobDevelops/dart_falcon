@@ -1,4 +1,4 @@
-use falcon_analyze::{ResolvedType, SemanticModel, SignatureIndex};
+use falcon_analyze::{ResolvedType, ResolvedTypeView, SemanticModel, SignatureIndex};
 
 pub(crate) fn has_instance_member(
     model: &SemanticModel<'_>,
@@ -6,20 +6,20 @@ pub(crate) fn has_instance_member(
     receiver: &ResolvedType,
     name: &str,
 ) -> bool {
-    let receiver = match receiver {
-        ResolvedType::TypeParameter {
+    let receiver = match receiver.view() {
+        ResolvedTypeView::TypeParameter {
             bound,
             nullable: false,
             ..
         } => bound.as_ref(),
-        receiver => receiver,
+        _ => receiver,
     };
     if !matches!(
-        receiver,
-        ResolvedType::Interface {
+        receiver.view(),
+        ResolvedTypeView::Interface {
             nullable: false,
             ..
-        } | ResolvedType::Record {
+        } | ResolvedTypeView::Record {
             nullable: false,
             ..
         }

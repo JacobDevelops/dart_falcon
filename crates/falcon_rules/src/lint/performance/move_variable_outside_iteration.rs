@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{Visitor, walk_expr};
 use falcon_syntax::cst::*;
@@ -94,7 +94,7 @@ fn direct_loop(declaration: LocalVarDecl<'_>) -> Option<Span> {
     .then_some(parent.span())
 }
 fn numeric<'a>(expression: Expr<'a>, state: &SemanticState<'a>) -> bool {
-    matches!(state.infer(expression), ResolvedType::Interface { identity, nullable: false, .. }
+    matches!(state.infer(expression).view(), ResolvedTypeView::Interface { identity, nullable: false, .. }
         if identity.is_sdk("dart:core", "int") || identity.is_sdk("dart:core", "double"))
 }
 
@@ -110,7 +110,7 @@ fn read_only_use<'a>(identifier: Identifier<'a>, state: &SemanticState<'a>) -> b
             return field.object().syntax().id() == node.id()
                 && (matches!(field.field().name(), "length" | "isEmpty" | "isNotEmpty")
                     || (field.field().name() == "reversed"
-                        && matches!(state.infer(field.object()), ResolvedType::Interface { identity, nullable: false, .. }
+                        && matches!(state.infer(field.object()).view(), ResolvedTypeView::Interface { identity, nullable: false, .. }
                             if identity.is_sdk("dart:core", "List"))))
                 && !parent.parent().is_some_and(|outer| {
                     matches!(
@@ -202,7 +202,7 @@ impl<'a> Collector<'a> {
                 || {
                     variable
                         .initializer()
-                        .map_or(ResolvedType::Unknown, |value| state.infer(value))
+                        .map_or(ResolvedType::UNKNOWN, |value| state.infer(value))
                 },
                 |ty| state.model.resolve_type(ty),
             );
@@ -249,7 +249,7 @@ impl<'a> Collector<'a> {
                     if !matches!(
                         binding.variable.initializer().map(Expr::unparenthesized),
                         Some(Expr::List(_))
-                    ) || !matches!(state.infer(field.object()), ResolvedType::Interface { identity, nullable: false, .. }
+                    ) || !matches!(state.infer(field.object()).view(), ResolvedTypeView::Interface { identity, nullable: false, .. }
                             if identity.is_sdk("dart:core", "List"))
                     {
                         continue;

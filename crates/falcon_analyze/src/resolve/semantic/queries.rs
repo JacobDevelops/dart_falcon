@@ -1,6 +1,7 @@
 //! Invocation metadata is resolved before null-chain result lifting.
 
 use super::*;
+use crate::resolve::semantic::ResolvedTypeKind;
 
 /// A callable declaration and its receiver substitutions. Indexed signatures
 /// remain borrowed; only function-typed values need a synthesized signature.
@@ -102,7 +103,7 @@ impl TypeEnvironment {
                 !self.is_bound(head)
                     && (context.lookup)(head).is_none()
                     && !matches!(self.receiver(),
-                        ResolvedType::Interface { identity, .. }
+                        ResolvedType { kind: ResolvedTypeKind::Interface { identity, .. } }
                         if context.signatures.declared_member_facts(&identity, head)
                             .iter().any(|facts| facts.kind == MemberKind::Method))
             })
@@ -174,7 +175,12 @@ impl TypeEnvironment {
                 };
                 extension.or_else(|| {
                     if reached_receiver.as_ref().is_none_or(|ty| {
-                        matches!(ty, ResolvedType::Unknown) || ty.interface("dart:core", "Type")
+                        matches!(
+                            ty,
+                            ResolvedType {
+                                kind: ResolvedTypeKind::Unknown
+                            }
+                        ) || ty.interface("dart:core", "Type")
                     }) && let Some(segments) = expression_segments(object, true)
                         && let [prefix] = segments.as_slice()
                         && !self.is_bound(prefix)
@@ -270,7 +276,12 @@ impl TypeEnvironment {
                 .take()
                 .or_else(|| reached_receiver.take())
                 .unwrap_or_else(|| self.receiver_type(object, "call", context, None));
-            if !matches!(receiver, ResolvedType::Function { .. }) {
+            if !matches!(
+                receiver,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function { .. }
+                }
+            ) {
                 *reached_receiver = Some(receiver);
                 break;
             }
@@ -305,17 +316,20 @@ impl TypeEnvironment {
             let receiver = callee_type.unwrap_or_else(|| {
                 self.infer_unshorted(target, context_copy(context), None, reached_receiver.take())
             });
-            if let ResolvedType::Function {
-                positional,
-                named,
-                shape,
-                optional_positional,
-                ..
+            if let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        positional,
+                        named,
+                        shape,
+                        optional_positional,
+                        ..
+                    },
             } = &receiver
             {
                 let return_type = receiver
                     .function_return_type()
-                    .ok_or(ResolvedType::Unknown)?;
+                    .ok_or(ResolvedType::UNKNOWN)?;
                 let local_generic = matches!(target, Expr::Ident(identifier) if self.is_local_function(identifier.name()));
                 // Non-generic function values need no parameter metadata.
                 // Generic values still infer their binders from this call.
@@ -342,12 +356,16 @@ impl TypeEnvironment {
                 let (signature, owner) = signatures
                     .resolved_member(&receiver, "call", model)
                     .ok_or({
-                        if matches!(receiver, ResolvedType::Dynamic)
-                            || receiver.interface("dart:core", "Function")
+                        if matches!(
+                            receiver,
+                            ResolvedType {
+                                kind: ResolvedTypeKind::Dynamic
+                            }
+                        ) || receiver.interface("dart:core", "Function")
                         {
-                            ResolvedType::Dynamic
+                            ResolvedType::DYNAMIC
                         } else {
-                            ResolvedType::Unknown
+                            ResolvedType::UNKNOWN
                         }
                     })?;
                 (Cow::Borrowed(signature), owner)
@@ -588,10 +606,13 @@ mod tests {
                         "{name}"
                     );
                 }
-                let Some(ResolvedType::Function {
-                    return_type,
-                    positional,
-                    ..
+                let Some(ResolvedType {
+                    kind:
+                        ResolvedTypeKind::Function {
+                            return_type,
+                            positional,
+                            ..
+                        },
                 }) = signatures.instantiated_member_read(&receiver, "method", model)
                 else {
                     panic!("expected a method tear-off")
@@ -648,11 +669,15 @@ mod tests {
                 let child = ResolvedType::interface_identity(model.resolve_name("Child").unwrap());
                 assert_eq!(
                     signatures.instantiated_override_return(&child, "method", false, model),
-                    Some(ResolvedType::Void)
+                    Some(ResolvedType {
+                        kind: ResolvedTypeKind::Void
+                    })
                 );
                 assert_eq!(
                     signatures.instantiated_override_return(&child, "value", true, model),
-                    Some(ResolvedType::Void)
+                    Some(ResolvedType {
+                        kind: ResolvedTypeKind::Void
+                    })
                 );
                 assert_eq!(
                     signatures.instantiated_override_return(&child, "missing", false, model),
@@ -717,13 +742,13 @@ mod tests {
                         matches!(function.name().name(), "unnamed" | "named")
                     );
                     let result = if invocation.constructor_result.is_some() {
-                        ResolvedType::Interface {
+                        ResolvedType::from_kind(ResolvedTypeKind::Interface {
                             occurrence: Default::default(),
                             identity: model.resolve_name("Box").unwrap(),
                             arguments: vec![token.clone()].into(),
                             nullable: false,
                             extension_type: false,
-                        }
+                        })
                     } else {
                         token.with_nullable(function.name().name() == "nullable")
                     };
@@ -884,11 +909,15 @@ mod tests {
                     environment.resolved_invocation_in(
                         callee, type_args, &context, None, &mut None, false,
                     ),
-                    Err(ResolvedType::Dynamic)
+                    Err(ResolvedType {
+                        kind: ResolvedTypeKind::Dynamic
+                    })
                 ));
                 assert_eq!(
                     environment.infer_invocation(body, &context, None),
-                    ResolvedType::Dynamic
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Dynamic
+                    }
                 );
             },
         );

@@ -18,7 +18,7 @@
 //! Adopted from the official `avoid_catches_without_on_clauses` lint.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
+    AnalyzeContext, DeclarationIdentity, ResolvedTypeView, Rule, RulePreparation, Truth,
     expression_segments,
 };
 use falcon_diagnostics::Diagnostic;
@@ -171,7 +171,7 @@ impl<'s, 'a> ValidUse<'s, 'a> {
         }
         self.state
             .call_return_type(callee, type_args, args, None)
-            .is_some_and(|return_type| matches!(return_type, ResolvedType::Never))
+            .is_some_and(|return_type| matches!(return_type.view(), ResolvedTypeView::Never))
     }
 
 }

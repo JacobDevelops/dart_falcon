@@ -1,4 +1,5 @@
 use super::*;
+use crate::resolve::semantic::ResolvedTypeKind;
 
 /// Declaration spelling facts that are not part of a parameter's resolved type.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,7 +81,7 @@ impl ResolvedSignature {
             .map(|(name, ty)| (name.clone(), ty.clone()))
             .collect();
         named.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-        ResolvedType::Function {
+        ResolvedType::from_kind(ResolvedTypeKind::Function {
             optional_positional: self.optional_positional,
             alias: FunctionTypeAlias::default(),
             return_type: Arc::new(self.return_type.clone()),
@@ -88,7 +89,7 @@ impl ResolvedSignature {
             named: named.into(),
             shape: self.shape.clone(),
             nullable: false,
-        }
+        })
     }
 
     /// Recover a local callable's own parameters, excluding enclosing lexical parameters.
@@ -98,7 +99,9 @@ impl ResolvedSignature {
                 .type_parameters
                 .iter()
                 .filter_map(|ty| match ty {
-                    ResolvedType::TypeParameter { id, .. } => Some(id.clone()),
+                    ResolvedType {
+                        kind: ResolvedTypeKind::TypeParameter { id, .. },
+                    } => Some(id.clone()),
                     _ => None,
                 })
                 .collect();
@@ -113,7 +116,7 @@ impl ResolvedSignature {
         }
         self.call_parameters.retain(|id| {
             !matches!(scope.lookup(&id.name),
-            Some(ResolvedType::TypeParameter { id: scoped, .. }) if scoped == *id)
+            Some(ResolvedType { kind: ResolvedTypeKind::TypeParameter { id: scoped, .. } }) if scoped == *id)
         });
         self.call_parameters.sort_by_key(|id| id.ordinal);
     }

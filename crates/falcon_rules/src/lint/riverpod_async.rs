@@ -101,7 +101,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn visit_expr(&mut self, expression: Expr<'a>, state: &SemanticState<'a>) {
         let id = expression.syntax().id();
         if matches!(expression, Expr::Ident(_) | Expr::Field(_) | Expr::Call(_))
-            && state.infer(expression) == ResolvedType::Never
+            && state.infer(expression) == ResolvedType::NEVER
         {
             self.facts.never.insert(id);
         }

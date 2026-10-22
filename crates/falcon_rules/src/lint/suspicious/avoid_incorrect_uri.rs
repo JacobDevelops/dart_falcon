@@ -3,7 +3,7 @@
 //! Only resolved dart:core Uri constructors are checked; unknown values are skipped.
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -84,7 +84,7 @@ fn invalid_string<'a>(value: Expr<'a>, state: &SemanticState<'a>) -> bool {
         | Expr::FuncExpr(_)
         | Expr::List(_)
         | Expr::Set(_) => true,
-        _ => matches!(state.infer(value), ResolvedType::Interface { identity, nullable: false, .. }
+        _ => matches!(state.infer(value).view(), ResolvedTypeView::Interface { identity, nullable: false, .. }
             if ["int", "double", "num", "bool", "Symbol", "Uri", "DateTime", "Duration", "Map"]
                 .iter().any(|name| identity.is_sdk("dart:core", name))),
     }
@@ -119,15 +119,15 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                             && matches!(first.value().unparenthesized(), Expr::StringLit(literal)
                                 if literal.interpolations().next().is_none() && literal.value().is_empty()))
                         && matches!(
-                            state.infer(first.value()),
-                            ResolvedType::Interface {
+                            state.infer(first.value()).view(),
+                            ResolvedTypeView::Interface {
                                 nullable: false,
                                 ..
                             }
                         )
                         && matches!(
-                            state.infer(second.value()),
-                            ResolvedType::Interface {
+                            state.infer(second.value()).view(),
+                            ResolvedTypeView::Interface {
                                 nullable: false,
                                 ..
                             }

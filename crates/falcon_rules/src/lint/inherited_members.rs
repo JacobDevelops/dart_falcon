@@ -3,7 +3,7 @@
 //! member it overrides in the superclass chain.
 
 use falcon_analyze::{
-    DeclarationIdentity, MemberFacts, ResolvedType, SemanticModel, SignatureIndex,
+    DeclarationIdentity, MemberFacts, ResolvedType, ResolvedTypeView, SemanticModel, SignatureIndex,
 };
 use falcon_syntax::cst::{
     AstChildren, ClassMember, DartType, Identifier, PrimaryConstructor, TopLevelDecl,
@@ -84,7 +84,7 @@ pub(crate) fn inherited_concrete_member<'a>(
     source: &InheritanceSource<'_>,
 ) -> Option<&'a MemberFacts> {
     let interface_member = |ty: &ResolvedType| {
-        let ResolvedType::Interface { identity, .. } = ty else {
+        let ResolvedTypeView::Interface { identity, .. } = ty.view() else {
             return None;
         };
         signatures.interface_member(owner, identity, name)?

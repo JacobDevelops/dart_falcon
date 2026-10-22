@@ -13,7 +13,7 @@
 //!
 //! Adopted from the official `avoid_catching_errors` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedTypeView, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -59,7 +59,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             {
                 continue;
             }
-            let message = if matches!(&ty, ResolvedType::Interface { identity, .. } if identity.is_sdk("dart:core", "Error"))
+            let message = if matches!(ty.view(), ResolvedTypeView::Interface { identity, .. } if identity.is_sdk("dart:core", "Error"))
             {
                 "The type `Error` should not be caught.".to_string()
             } else {

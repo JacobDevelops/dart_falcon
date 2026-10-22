@@ -15,7 +15,7 @@
 
 use falcon_analyze::Number;
 use falcon_analyze::{
-    AnalyzeContext, ConstantValue, ResolvedType, Rule, RulePreparation, Truth,
+    AnalyzeContext, ConstantValue, ResolvedTypeView, Rule, RulePreparation, Truth,
     ConstantContext, evaluate_constant, parse_int,
 };
 use falcon_diagnostics::Diagnostic;
@@ -196,7 +196,7 @@ fn is_int_constant<'a>(expression: Expr<'a>, name: &str, state: &SemanticState<'
     if declared.interface("dart:core", "int") {
         return true;
     }
-    matches!(declared, ResolvedType::Unknown)
+    matches!(declared.view(), ResolvedTypeView::Unknown)
         && state
             .model
             .resolve_value(name)

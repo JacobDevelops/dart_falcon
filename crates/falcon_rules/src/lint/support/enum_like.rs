@@ -1,9 +1,9 @@
 //! Resolved enum-like class classification.
 
-use falcon_analyze::{DeclarationFacts, DeclarationIdentity, ResolvedType};
+use falcon_analyze::{DeclarationFacts, DeclarationIdentity, ResolvedType, ResolvedTypeView};
 
 pub(crate) fn exact_identity(ty: &ResolvedType, expected: &DeclarationIdentity) -> bool {
-    matches!(ty, ResolvedType::Interface { identity, arguments, nullable: false, .. }
+    matches!(ty.view(), ResolvedTypeView::Interface { identity, arguments, nullable: false, .. }
         if identity == expected && arguments.is_empty())
 }
 pub(crate) fn is_enum_like(facts: &DeclarationFacts, identity: &DeclarationIdentity) -> bool {

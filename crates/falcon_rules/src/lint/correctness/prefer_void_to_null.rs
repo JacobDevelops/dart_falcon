@@ -25,7 +25,7 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, MemberKind, QualifiedName, ResolvedType, Rule,
+    AnalyzeContext, DeclarationIdentity, MemberKind, QualifiedName, ResolvedType, ResolvedTypeView, Rule,
     RulePreparation, SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_syntax::cst::*;
@@ -109,7 +109,7 @@ impl<'a> NullTypes<'a> {
             return !enclosing
                 .supertypes
                 .iter()
-                .any(|ty| matches!(ty, ResolvedType::Unknown));
+                .any(|ty| matches!(ty.view(), ResolvedTypeView::Unknown));
         };
         let overrides = inherited.iter().any(|fact| {
             if getter {
@@ -145,15 +145,16 @@ fn resolve_all<'t>(
 
 /// `void` or `FutureOr<void>`.
 fn is_void_like(ty: &ResolvedType) -> bool {
-    match ty {
-        ResolvedType::Void => true,
-        ResolvedType::Interface {
+    match ty.view() {
+        ResolvedTypeView::Void => true,
+        ResolvedTypeView::Interface {
             identity,
             arguments,
             ..
         } => {
             identity.is_sdk("dart:async", "FutureOr")
-                && matches!(arguments.as_ref(), [ResolvedType::Void])
+                && arguments.len() == 1
+                && matches!(arguments[0].view(), ResolvedTypeView::Void)
         }
         _ => false,
     }

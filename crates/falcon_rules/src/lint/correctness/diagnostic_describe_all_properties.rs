@@ -30,7 +30,7 @@
 use std::collections::HashSet;
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, Rule, RulePreparation,
+    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
     SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth,
     TypeParameterScope, TypeRelation,
 };
@@ -192,9 +192,9 @@ impl Checker<'_> {
     /// Whether `ty` is a widget, or a `List`/`Set`/`LinkedHashSet` of widget
     /// properties; `None` when the type cannot be classified.
     fn is_widget_property(&self, ty: &ResolvedType) -> Option<bool> {
-        match ty {
-            ResolvedType::Unknown => None,
-            ResolvedType::Interface {
+        match ty.view() {
+            ResolvedTypeView::Unknown => None,
+            ResolvedTypeView::Interface {
                 identity,
                 arguments,
                 ..
@@ -235,14 +235,14 @@ impl Checker<'_> {
                     }
                 }
             }
-            ResolvedType::Dynamic
-            | ResolvedType::Void
-            | ResolvedType::Never
-            | ResolvedType::Null
-            | ResolvedType::TypeParameter { .. }
-            | ResolvedType::NonNullTypeParameter { .. }
-            | ResolvedType::Function { .. }
-            | ResolvedType::Record { .. } => Some(false),
+            ResolvedTypeView::Dynamic
+            | ResolvedTypeView::Void
+            | ResolvedTypeView::Never
+            | ResolvedTypeView::Null
+            | ResolvedTypeView::TypeParameter { .. }
+            | ResolvedTypeView::NonNullTypeParameter { .. }
+            | ResolvedTypeView::Function { .. }
+            | ResolvedTypeView::Record { .. } => Some(false),
         }
     }
 }

@@ -19,7 +19,7 @@
 //! Adopted from the official `avoid_slow_async_io` lint.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -102,7 +102,7 @@ fn is_static_entity_query(object: Expr<'_>, method: &str, state: &SemanticState<
 /// Whether `method` on `receiver` resolves to `File.lastModified` or to
 /// `FileSystemEntity.exists` / `FileSystemEntity.stat`.
 fn slow_instance_method(receiver: &ResolvedType, method: &str, state: &SemanticState<'_>) -> bool {
-    let ResolvedType::Interface { identity, .. } = receiver else {
+    let ResolvedTypeView::Interface { identity, .. } = receiver.view() else {
         return false;
     };
     if let Some(slow) = slow_sdk_method(identity, method) {

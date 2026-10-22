@@ -6,7 +6,7 @@
 //! diagnose those too.
 
 use falcon_analyze::{
-    AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel, SignatureIndex,
+    AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, SemanticModel, SignatureIndex,
     StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
@@ -97,7 +97,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 ) else { continue };
                 let field_type = self.model.substitute(&field_type, &field_substitutions);
                 let getter_type = self.model.substitute(&getter_type, &getter_substitutions);
-                if matches!(field_type, ResolvedType::Unknown) || field_type != getter_type { continue; }
+                if matches!(field_type.view(), ResolvedTypeView::Unknown) || field_type != getter_type { continue; }
             }
             self.diagnostics.push(self.ctx.diagnostic(
                 "This getter only exposes a final field; replace both with a public final field.",

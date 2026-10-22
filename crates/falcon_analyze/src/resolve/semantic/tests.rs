@@ -118,7 +118,7 @@ fn fallback_sdk_records_fill_gaps_without_merging_overrides() {
         FxHashMap::from_iter([(
             "custom".to_string(),
             MemberEntry {
-                read: Some(ResolvedType::Void),
+                read: Some(ResolvedType::VOID),
                 ..MemberEntry::default()
             },
         )]),
@@ -131,7 +131,7 @@ fn fallback_sdk_records_fill_gaps_without_merging_overrides() {
 
     let members = signatures.member_entries.get(&object).unwrap();
     assert_eq!(members.len(), 1);
-    assert_eq!(members["custom"].read, Some(ResolvedType::Void));
+    assert_eq!(members["custom"].read, Some(ResolvedType::VOID));
     let facts = signatures.type_facts.get(&string).unwrap();
     assert!(facts.fallback_type_parameters.is_none());
     assert!(facts.supertypes.is_none());
@@ -142,7 +142,7 @@ fn fallback_sdk_records_fill_gaps_without_merging_overrides() {
             .as_ref()
             .unwrap()
             .return_type,
-        ResolvedType::Void,
+        ResolvedType::VOID,
     );
     assert_eq!(
         signatures.implements_sdk(
@@ -163,12 +163,12 @@ fn fallback_merge_covers_shared_maps_with_each_key_type() {
         let identical = DeclarationIdentity::sdk("dart:core", "identical");
         signatures.functions.insert(
             print.clone(),
-            ResolvedSignature::returning(ResolvedType::Unknown),
+            ResolvedSignature::returning(ResolvedType::UNKNOWN),
         );
         for identity in [print.clone(), identical.clone()] {
             fallback
                 .functions
-                .insert(identity, ResolvedSignature::returning(ResolvedType::Void));
+                .insert(identity, ResolvedSignature::returning(ResolvedType::VOID));
         }
         let library = model.library.unwrap();
         fallback
@@ -178,12 +178,12 @@ fn fallback_merge_covers_shared_maps_with_each_key_type() {
         let missing = sdk_parameter("Map", 0);
         signatures
             .owner_defaults
-            .insert(existing.clone(), ResolvedType::Unknown);
+            .insert(existing.clone(), ResolvedType::UNKNOWN);
         signatures.bound_declared.insert(existing.clone(), false);
         for parameter in [existing.clone(), missing.clone()] {
             fallback
                 .owner_defaults
-                .insert(parameter.clone(), ResolvedType::Dynamic);
+                .insert(parameter.clone(), ResolvedType::DYNAMIC);
             fallback.bound_declared.insert(parameter, true);
         }
 
@@ -191,11 +191,11 @@ fn fallback_merge_covers_shared_maps_with_each_key_type() {
 
         assert_eq!(
             signatures.functions.get(&print).unwrap().return_type,
-            ResolvedType::Unknown,
+            ResolvedType::UNKNOWN,
         );
         assert_eq!(
             signatures.functions.get(&identical).unwrap().return_type,
-            ResolvedType::Void,
+            ResolvedType::VOID,
         );
         assert!(
             signatures
@@ -206,11 +206,11 @@ fn fallback_merge_covers_shared_maps_with_each_key_type() {
         );
         assert_eq!(
             signatures.owner_defaults.get(&existing),
-            Some(&ResolvedType::Unknown),
+            Some(&ResolvedType::UNKNOWN),
         );
         assert_eq!(
             signatures.owner_defaults.get(&missing),
-            Some(&ResolvedType::Dynamic),
+            Some(&ResolvedType::DYNAMIC),
         );
         assert_eq!(signatures.bound_declared.get(&existing), Some(&false));
         assert_eq!(signatures.bound_declared.get(&missing), Some(&true));
@@ -832,7 +832,7 @@ fn type_facts_overlays_shadow_whole_records_without_mutating_the_base() {
             immutable: Some(Truth::Yes),
             constructors: FxHashMap::from_iter([(
                 "new".to_string(),
-                ResolvedSignature::returning(ResolvedType::Dynamic),
+                ResolvedSignature::returning(ResolvedType::DYNAMIC),
             )]),
             ..TypeFacts::default()
         },
@@ -871,31 +871,31 @@ fn signature_map_iteration_preserves_base_and_project_shadowing() {
     let mut external = SignatureIndex::default();
     external
         .value_types
-        .insert(shared.clone(), ResolvedType::Dynamic);
+        .insert(shared.clone(), ResolvedType::DYNAMIC);
     external
         .value_types
-        .insert(external_only.clone(), ResolvedType::Void);
+        .insert(external_only.clone(), ResolvedType::VOID);
     let external = Arc::new(external);
     let mut overlay = SignatureMap {
         external: Some((Arc::clone(&external), |base| &base.value_types)),
         ..SignatureMap::default()
     };
-    overlay.insert(shared.clone(), ResolvedType::Never);
-    overlay.insert(project_only.clone(), ResolvedType::Null);
-    assert_eq!(overlay.get(&shared), Some(&ResolvedType::Never));
-    assert_eq!(overlay.get(&external_only), Some(&ResolvedType::Void));
+    overlay.insert(shared.clone(), ResolvedType::NEVER);
+    overlay.insert(project_only.clone(), ResolvedType::NULL);
+    assert_eq!(overlay.get(&shared), Some(&ResolvedType::NEVER));
+    assert_eq!(overlay.get(&external_only), Some(&ResolvedType::VOID));
     assert!(overlay.contains_key(&external_only));
-    assert_eq!(overlay.get(&project_only), Some(&ResolvedType::Null));
+    assert_eq!(overlay.get(&project_only), Some(&ResolvedType::NULL));
     assert_eq!(overlay.local.len(), 2);
     let entries: FxHashMap<_, _> = overlay
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
     assert_eq!(entries.len(), 3);
-    assert_eq!(entries.get(&shared), Some(&ResolvedType::Never));
-    assert_eq!(entries.get(&external_only), Some(&ResolvedType::Void));
-    assert_eq!(entries.get(&project_only), Some(&ResolvedType::Null));
-    assert_eq!(external.value_type(&shared), Some(&ResolvedType::Dynamic));
+    assert_eq!(entries.get(&shared), Some(&ResolvedType::NEVER));
+    assert_eq!(entries.get(&external_only), Some(&ResolvedType::VOID));
+    assert_eq!(entries.get(&project_only), Some(&ResolvedType::NULL));
+    assert_eq!(external.value_type(&shared), Some(&ResolvedType::DYNAMIC));
 }
 
 #[test]
@@ -946,56 +946,56 @@ fn typedef_provenance_preserves_resolved_type_size() {
 #[test]
 fn no_op_flow_mutations_preserve_shared_scopes() {
     let mut environment = TypeEnvironment::new();
-    environment.declare_receiver(ResolvedType::Dynamic);
-    environment.declare("plain", ResolvedType::Dynamic);
-    environment.declare("value", ResolvedType::Dynamic);
-    environment.declare_unpromotable("blocked", ResolvedType::Dynamic);
-    environment.promote("value", ResolvedType::Null);
-    environment.promote_this_field("synthetic", ResolvedType::Null);
+    environment.declare_receiver(ResolvedType::DYNAMIC);
+    environment.declare("plain", ResolvedType::DYNAMIC);
+    environment.declare("value", ResolvedType::DYNAMIC);
+    environment.declare_unpromotable("blocked", ResolvedType::DYNAMIC);
+    environment.promote("value", ResolvedType::NULL);
+    environment.promote_this_field("synthetic", ResolvedType::NULL);
     environment.enter_callable();
     environment.record_write("blocked");
     environment.mark_captured("blocked");
     let snapshot = environment.clone();
 
-    environment.promote("plain", ResolvedType::Unknown);
-    environment.promote("value", ResolvedType::Null);
-    environment.promote("blocked", ResolvedType::Null);
-    environment.promote("missing", ResolvedType::Null);
+    environment.promote("plain", ResolvedType::UNKNOWN);
+    environment.promote("value", ResolvedType::NULL);
+    environment.promote("blocked", ResolvedType::NULL);
+    environment.promote("missing", ResolvedType::NULL);
     environment.forget("plain");
     environment.forget("missing");
-    environment.promote_this_field("blocked", ResolvedType::Null);
-    environment.promote_this_field("value", ResolvedType::Null);
-    environment.promote_this_field("synthetic", ResolvedType::Null);
+    environment.promote_this_field("blocked", ResolvedType::NULL);
+    environment.promote_this_field("value", ResolvedType::NULL);
+    environment.promote_this_field("synthetic", ResolvedType::NULL);
     environment.record_write("blocked");
     environment.mark_captured("blocked");
     environment.attach_finally(&snapshot, &snapshot);
     assert!(Arc::ptr_eq(&environment.scopes[0], &snapshot.scopes[0]));
-    assert_eq!(environment.lookup("value"), ResolvedType::Null);
-    assert_eq!(environment.lookup("plain"), ResolvedType::Dynamic);
+    assert_eq!(environment.lookup("value"), ResolvedType::NULL);
+    assert_eq!(environment.lookup("plain"), ResolvedType::DYNAMIC);
 }
 
 #[test]
 fn flow_snapshots_copy_only_written_scopes() {
     let mut environment = TypeEnvironment::new();
-    environment.declare("outer", ResolvedType::Dynamic);
+    environment.declare("outer", ResolvedType::DYNAMIC);
     environment.push_scope();
-    environment.declare("inner", ResolvedType::Dynamic);
+    environment.declare("inner", ResolvedType::DYNAMIC);
     let snapshot = environment.clone();
     assert!(Arc::ptr_eq(&environment.scopes[0], &snapshot.scopes[0]));
     assert!(Arc::ptr_eq(&environment.scopes[1], &snapshot.scopes[1]));
 
-    environment.promote("outer", ResolvedType::Null);
-    assert_eq!(snapshot.lookup("outer"), ResolvedType::Dynamic);
-    assert_eq!(environment.lookup("outer"), ResolvedType::Null);
+    environment.promote("outer", ResolvedType::NULL);
+    assert_eq!(snapshot.lookup("outer"), ResolvedType::DYNAMIC);
+    assert_eq!(environment.lookup("outer"), ResolvedType::NULL);
     assert!(!Arc::ptr_eq(&environment.scopes[0], &snapshot.scopes[0]));
     assert!(Arc::ptr_eq(&environment.scopes[1], &snapshot.scopes[1]));
 
-    environment.declare("inner", ResolvedType::Null);
-    assert_eq!(snapshot.lookup("inner"), ResolvedType::Dynamic);
+    environment.declare("inner", ResolvedType::NULL);
+    assert_eq!(snapshot.lookup("inner"), ResolvedType::DYNAMIC);
     assert!(!Arc::ptr_eq(&environment.scopes[1], &snapshot.scopes[1]));
     let joined = environment.join(&snapshot);
-    assert_eq!(joined.lookup("outer"), ResolvedType::Dynamic);
-    assert_eq!(environment.lookup("outer"), ResolvedType::Null);
+    assert_eq!(joined.lookup("outer"), ResolvedType::DYNAMIC);
+    assert_eq!(environment.lookup("outer"), ResolvedType::NULL);
 }
 
 #[test]
@@ -1003,32 +1003,32 @@ fn nearest_flow_binding_preserves_declaration_identity_and_snapshots() {
     let root = Span::new(1, 6);
     let inner = Span::new(10, 15);
     let mut environment = TypeEnvironment::new();
-    environment.declare_at("value", ResolvedType::Dynamic, root);
+    environment.declare_at("value", ResolvedType::DYNAMIC, root);
     assert!(environment.is_bound_in_root_scope("value"));
     environment.push_scope();
-    environment.declare_at("value", ResolvedType::Dynamic, inner);
+    environment.declare_at("value", ResolvedType::DYNAMIC, inner);
     assert_eq!(environment.binding_depth("value"), Some(1));
     assert_eq!(environment.binding_declaration("value"), Some(inner));
     assert!(!environment.is_bound_in_root_scope("value"));
     let snapshot = environment.clone();
 
-    environment.promote("value", ResolvedType::Null);
+    environment.promote("value", ResolvedType::NULL);
     assert!(Arc::ptr_eq(&environment.scopes[0], &snapshot.scopes[0]));
     assert!(!Arc::ptr_eq(&environment.scopes[1], &snapshot.scopes[1]));
-    assert_eq!(snapshot.lookup("value"), ResolvedType::Dynamic);
+    assert_eq!(snapshot.lookup("value"), ResolvedType::DYNAMIC);
     assert_eq!(snapshot.binding_declaration("value"), Some(inner));
     let joined = environment.join(&snapshot);
-    assert_eq!(joined.lookup("value"), ResolvedType::Dynamic);
+    assert_eq!(joined.lookup("value"), ResolvedType::DYNAMIC);
     assert_eq!(joined.binding_declaration("value"), Some(inner));
     assert!(!joined.is_bound_in_root_scope("value"));
 
     let mut target = snapshot.clone();
     target.attach_finally(&snapshot, &environment);
-    assert_eq!(target.lookup("value"), ResolvedType::Null);
+    assert_eq!(target.lookup("value"), ResolvedType::NULL);
     assert_eq!(target.binding_declaration("value"), Some(inner));
     assert!(Arc::ptr_eq(&target.scopes[0], &snapshot.scopes[0]));
     target.pop_scope();
-    assert_eq!(target.lookup("value"), ResolvedType::Dynamic);
+    assert_eq!(target.lookup("value"), ResolvedType::DYNAMIC);
     assert_eq!(target.binding_declaration("value"), Some(root));
     assert!(target.is_bound_in_root_scope("value"));
 }
@@ -1036,18 +1036,18 @@ fn nearest_flow_binding_preserves_declaration_identity_and_snapshots() {
 #[test]
 fn missing_flow_mutations_preserve_every_shared_scope() {
     let mut environment = TypeEnvironment::new();
-    environment.declare("outer", ResolvedType::Dynamic);
+    environment.declare("outer", ResolvedType::DYNAMIC);
     environment.enter_callable();
     environment.push_scope();
-    environment.declare("inner", ResolvedType::Dynamic);
+    environment.declare("inner", ResolvedType::DYNAMIC);
     let snapshot = environment.clone();
 
     environment.assign("missing", Vec::new());
-    environment.promote("missing", ResolvedType::Null);
+    environment.promote("missing", ResolvedType::NULL);
     environment.forget("missing");
     environment.mark_captured("missing");
     environment.record_write("missing");
-    environment.promote_this_field("missing", ResolvedType::Null);
+    environment.promote_this_field("missing", ResolvedType::NULL);
     assert!(environment.same_flow_state(&snapshot));
     for (scope, original) in environment.scopes.iter().zip(snapshot.scopes.iter()) {
         assert!(Arc::ptr_eq(scope, original));
@@ -1057,105 +1057,105 @@ fn missing_flow_mutations_preserve_every_shared_scope() {
 #[test]
 fn this_promotions_copy_only_the_nearest_receiver_scope() {
     let mut environment = TypeEnvironment::new();
-    environment.declare_receiver(ResolvedType::Dynamic);
-    environment.promote_this_field("field", ResolvedType::Dynamic);
+    environment.declare_receiver(ResolvedType::DYNAMIC);
+    environment.promote_this_field("field", ResolvedType::DYNAMIC);
     environment.push_scope();
-    environment.declare_receiver(ResolvedType::Null);
-    assert_eq!(environment.receiver(), ResolvedType::Null);
+    environment.declare_receiver(ResolvedType::NULL);
+    assert_eq!(environment.receiver(), ResolvedType::NULL);
     environment.push_scope();
-    environment.declare("field", ResolvedType::Dynamic);
+    environment.declare("field", ResolvedType::DYNAMIC);
     let snapshot = environment.clone();
 
-    environment.promote_this_field("field", ResolvedType::Null);
+    environment.promote_this_field("field", ResolvedType::NULL);
     assert_eq!(
         environment.promoted_this_field("field"),
-        Some(ResolvedType::Null)
+        Some(ResolvedType::NULL)
     );
     assert_eq!(snapshot.promoted_this_field("field"), None);
-    assert_eq!(environment.lookup("field"), ResolvedType::Dynamic);
+    assert_eq!(environment.lookup("field"), ResolvedType::DYNAMIC);
     assert!(Arc::ptr_eq(&environment.scopes[0], &snapshot.scopes[0]));
     assert!(!Arc::ptr_eq(&environment.scopes[1], &snapshot.scopes[1]));
     assert!(Arc::ptr_eq(&environment.scopes[2], &snapshot.scopes[2]));
     environment.pop_scope();
     environment.pop_scope();
-    assert_eq!(environment.receiver(), ResolvedType::Dynamic);
+    assert_eq!(environment.receiver(), ResolvedType::DYNAMIC);
     assert_eq!(
         environment.promoted_this_field("field"),
-        Some(ResolvedType::Dynamic)
+        Some(ResolvedType::DYNAMIC)
     );
 }
 
 #[test]
 fn receiver_slot_is_not_a_named_binding() {
     let mut environment = TypeEnvironment::new();
-    environment.declare_receiver(ResolvedType::Dynamic);
-    environment.promote_this_field("field", ResolvedType::Null);
+    environment.declare_receiver(ResolvedType::DYNAMIC);
+    environment.promote_this_field("field", ResolvedType::NULL);
     assert!(!environment.is_bound("this"));
     assert_eq!(environment.binding_depth("this"), None);
     assert_eq!(environment.binding_declaration("this"), None);
-    assert_eq!(environment.lookup("this"), ResolvedType::Unknown);
-    assert_eq!(environment.declared_type("this"), ResolvedType::Unknown);
+    assert_eq!(environment.lookup("this"), ResolvedType::UNKNOWN);
+    assert_eq!(environment.declared_type("this"), ResolvedType::UNKNOWN);
     let snapshot = environment.clone();
     environment.enter_callable();
-    assert!(!environment.assign("this", vec![ResolvedType::Null]));
-    environment.promote("this", ResolvedType::Null);
+    assert!(!environment.assign("this", vec![ResolvedType::NULL]));
+    environment.promote("this", ResolvedType::NULL);
     environment.demote("this");
     environment.mark_captured("this");
     environment.demote_captured();
     assert!(Arc::ptr_eq(&environment.scopes[0], &snapshot.scopes[0]));
-    assert_eq!(environment.receiver(), ResolvedType::Dynamic);
+    assert_eq!(environment.receiver(), ResolvedType::DYNAMIC);
     assert_eq!(
         environment.promoted_this_field("field"),
-        Some(ResolvedType::Null)
+        Some(ResolvedType::NULL)
     );
 
-    environment.declare("this", ResolvedType::Null);
+    environment.declare("this", ResolvedType::NULL);
     environment.mark_captured("this");
-    assert_eq!(environment.lookup("this"), ResolvedType::Null);
-    assert_eq!(environment.receiver(), ResolvedType::Dynamic);
+    assert_eq!(environment.lookup("this"), ResolvedType::NULL);
+    assert_eq!(environment.receiver(), ResolvedType::DYNAMIC);
     assert_eq!(
         environment.promoted_this_field("field"),
-        Some(ResolvedType::Null)
+        Some(ResolvedType::NULL)
     );
 }
 
 #[test]
 fn this_field_promotions_prefer_bindings_in_the_receiver_scope() {
     let mut environment = TypeEnvironment::new();
-    environment.declare_receiver(ResolvedType::Dynamic);
-    environment.promote_this_field("field", ResolvedType::Dynamic);
-    environment.declare("field", ResolvedType::Dynamic);
+    environment.declare_receiver(ResolvedType::DYNAMIC);
+    environment.promote_this_field("field", ResolvedType::DYNAMIC);
+    environment.declare("field", ResolvedType::DYNAMIC);
     assert_eq!(environment.promoted_this_field("field"), None);
     environment.push_scope();
-    environment.declare("field", ResolvedType::Dynamic);
-    environment.promote_this_field("field", ResolvedType::Null);
-    assert_eq!(environment.lookup("field"), ResolvedType::Dynamic);
+    environment.declare("field", ResolvedType::DYNAMIC);
+    environment.promote_this_field("field", ResolvedType::NULL);
+    assert_eq!(environment.lookup("field"), ResolvedType::DYNAMIC);
     assert_eq!(
         environment.promoted_this_field("field"),
-        Some(ResolvedType::Null)
+        Some(ResolvedType::NULL)
     );
     environment.pop_scope();
-    assert_eq!(environment.lookup("field"), ResolvedType::Null);
+    assert_eq!(environment.lookup("field"), ResolvedType::NULL);
 }
 
 #[test]
 fn receiver_promotions_join_and_finally_transfer_independently() {
     let mut entry = TypeEnvironment::new();
-    entry.declare_receiver(ResolvedType::Dynamic);
-    entry.promote_this_field("unchanged", ResolvedType::Dynamic);
+    entry.declare_receiver(ResolvedType::DYNAMIC);
+    entry.promote_this_field("unchanged", ResolvedType::DYNAMIC);
     entry.push_scope();
-    entry.declare("local", ResolvedType::Dynamic);
+    entry.declare("local", ResolvedType::DYNAMIC);
     let mut left = entry.clone();
     let mut right = entry.clone();
-    left.promote_this_field("shared", ResolvedType::Null);
-    right.promote_this_field("shared", ResolvedType::Null);
-    left.promote_this_field("left", ResolvedType::Null);
-    right.promote_this_field("right", ResolvedType::Null);
+    left.promote_this_field("shared", ResolvedType::NULL);
+    right.promote_this_field("shared", ResolvedType::NULL);
+    left.promote_this_field("left", ResolvedType::NULL);
+    right.promote_this_field("right", ResolvedType::NULL);
     let joined = left.join(&right);
-    assert_eq!(joined.receiver(), ResolvedType::Dynamic);
+    assert_eq!(joined.receiver(), ResolvedType::DYNAMIC);
     assert_eq!(
         joined.promoted_this_field("shared"),
-        Some(ResolvedType::Null)
+        Some(ResolvedType::NULL)
     );
     assert_eq!(joined.promoted_this_field("left"), None);
     assert_eq!(joined.promoted_this_field("right"), None);
@@ -1165,16 +1165,16 @@ fn receiver_promotions_join_and_finally_transfer_independently() {
     target.attach_finally(&entry, &right);
     assert_eq!(
         target.promoted_this_field("shared"),
-        Some(ResolvedType::Null)
+        Some(ResolvedType::NULL)
     );
     assert_eq!(target.promoted_this_field("left"), None);
     assert_eq!(
         target.promoted_this_field("right"),
-        Some(ResolvedType::Null)
+        Some(ResolvedType::NULL)
     );
     assert_eq!(
         target.promoted_this_field("unchanged"),
-        Some(ResolvedType::Dynamic)
+        Some(ResolvedType::DYNAMIC)
     );
     assert!(Arc::ptr_eq(&target.scopes[1], &entry.scopes[1]));
     assert_eq!(entry.promoted_this_field("shared"), None);
@@ -1183,17 +1183,17 @@ fn receiver_promotions_join_and_finally_transfer_independently() {
 #[test]
 fn receiver_no_ops_preserve_scope_snapshots() {
     let mut entry = TypeEnvironment::new();
-    entry.declare_receiver(ResolvedType::Dynamic);
+    entry.declare_receiver(ResolvedType::DYNAMIC);
     let snapshot = entry.clone();
-    entry.declare_receiver(ResolvedType::Dynamic);
+    entry.declare_receiver(ResolvedType::DYNAMIC);
     assert!(entry.same_flow_state(&snapshot));
 
     let mut left = entry.clone();
     let mut right = entry.clone();
-    left.promote_this_field("field", ResolvedType::Null);
-    right.promote_this_field("field", ResolvedType::Null);
+    left.promote_this_field("field", ResolvedType::NULL);
+    right.promote_this_field("field", ResolvedType::NULL);
     let snapshot = left.clone();
-    left.promote_this_field("field", ResolvedType::Null);
+    left.promote_this_field("field", ResolvedType::NULL);
     left.attach_finally(&entry, &right);
     assert!(left.same_flow_state(&snapshot));
     assert!(left.join(&right).same_flow_state(&snapshot));
@@ -1203,14 +1203,14 @@ fn receiver_no_ops_preserve_scope_snapshots() {
 #[test]
 fn receiver_join_with_missing_peer_preserves_type_without_promotions() {
     let mut environment = TypeEnvironment::new();
-    environment.declare_receiver(ResolvedType::Dynamic);
-    environment.promote_this_field("field", ResolvedType::Null);
+    environment.declare_receiver(ResolvedType::DYNAMIC);
+    environment.promote_this_field("field", ResolvedType::NULL);
     let joined = environment.join(&TypeEnvironment::new());
-    assert_eq!(joined.receiver(), ResolvedType::Dynamic);
+    assert_eq!(joined.receiver(), ResolvedType::DYNAMIC);
     assert_eq!(joined.promoted_this_field("field"), None);
     assert_eq!(
         environment.promoted_this_field("field"),
-        Some(ResolvedType::Null)
+        Some(ResolvedType::NULL)
     );
 }
 
@@ -1218,29 +1218,29 @@ fn receiver_join_with_missing_peer_preserves_type_without_promotions() {
 fn finally_transfer_preserves_receiver_presence_and_snapshot_sharing() {
     let missing = TypeEnvironment::new();
     let mut present = TypeEnvironment::new();
-    present.declare_receiver(ResolvedType::Dynamic);
-    present.promote_this_field("field", ResolvedType::Null);
+    present.declare_receiver(ResolvedType::DYNAMIC);
+    present.promote_this_field("field", ResolvedType::NULL);
 
     let mut target = present.clone();
     target.attach_finally(&present, &missing);
     assert!(target.same_flow_state(&present));
-    assert_eq!(target.receiver(), ResolvedType::Dynamic);
+    assert_eq!(target.receiver(), ResolvedType::DYNAMIC);
     assert_eq!(
         target.promoted_this_field("field"),
-        Some(ResolvedType::Null)
+        Some(ResolvedType::NULL)
     );
 
     let mut target = missing.clone();
     target.attach_finally(&missing, &present);
     assert!(target.same_flow_state(&missing));
-    assert_eq!(target.receiver(), ResolvedType::Unknown);
+    assert_eq!(target.receiver(), ResolvedType::UNKNOWN);
     assert_eq!(target.promoted_this_field("field"), None);
 }
 
 #[test]
 fn shared_flow_joins_preserve_capture_demotion() {
     let mut environment = TypeEnvironment::new();
-    environment.declare("value", ResolvedType::Dynamic);
+    environment.declare("value", ResolvedType::DYNAMIC);
     let unchanged = environment.join(&environment);
     assert!(Arc::ptr_eq(&environment.scopes[0], &unchanged.scopes[0]));
 
@@ -1281,25 +1281,29 @@ fn unknown_generic_arguments_poison_constraints_in_either_order_and_nested() {
                 };
                 let expression = expression.expr();
                 let hole = if function.name().name() == "inside" {
-                    ResolvedType::Interface {
-                        occurrence: Default::default(),
-                        identity: DeclarationIdentity::sdk("dart:core", "List"),
-                        arguments: vec![ResolvedType::Unknown].into(),
-                        nullable: false,
-                        extension_type: false,
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Interface {
+                            occurrence: Default::default(),
+                            identity: DeclarationIdentity::sdk("dart:core", "List"),
+                            arguments: vec![ResolvedType::UNKNOWN].into(),
+                            nullable: false,
+                            extension_type: false,
+                        },
                     }
                 } else if function.name().name().starts_with("contra") {
-                    ResolvedType::Function {
-                        shape: None,
-                        alias: FunctionTypeAlias::default(),
-                        optional_positional: 0,
-                        return_type: Arc::new(ResolvedType::Void),
-                        positional: vec![ResolvedType::Unknown].into(),
-                        named: Arc::from([]),
-                        nullable: false,
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Function {
+                            shape: None,
+                            alias: FunctionTypeAlias::default(),
+                            optional_positional: 0,
+                            return_type: Arc::new(ResolvedType::VOID),
+                            positional: vec![ResolvedType::UNKNOWN].into(),
+                            named: Arc::from([]),
+                            nullable: false,
+                        },
                     }
                 } else {
-                    ResolvedType::Unknown
+                    ResolvedType::UNKNOWN
                 };
                 let mut environment = TypeEnvironment::new();
                 environment.declare("missing", hole);
@@ -1310,28 +1314,28 @@ fn unknown_generic_arguments_poison_constraints_in_either_order_and_nested() {
                         &signatures,
                         &TypeParameterScope::default()
                     ),
-                    ResolvedType::Unknown,
+                    ResolvedType::UNKNOWN,
                     "{}",
                     function.name().name(),
                 );
             }
             assert_eq!(
                 inference_join(
-                    &ResolvedType::Dynamic,
-                    &ResolvedType::Void,
+                    &ResolvedType::DYNAMIC,
+                    &ResolvedType::VOID,
                     &signatures,
                     model
                 ),
-                ResolvedType::Void
+                ResolvedType::VOID
             );
             assert_eq!(
                 inference_join(
-                    &ResolvedType::Void,
-                    &ResolvedType::Dynamic,
+                    &ResolvedType::VOID,
+                    &ResolvedType::DYNAMIC,
                     &signatures,
                     model
                 ),
-                ResolvedType::Void
+                ResolvedType::VOID
             );
         },
     );
@@ -1356,7 +1360,7 @@ fn unknown_downward_schema_does_not_poison_argument_inference() {
                     model,
                     &signatures,
                     &TypeParameterScope::default(),
-                    Some(&ResolvedType::Unknown),
+                    Some(&ResolvedType::UNKNOWN),
                     &|_| None,
                 ),
                 model.core_type("int", false),
@@ -1385,19 +1389,23 @@ fn partial_downward_schemas_leave_whole_variables_for_upward_inference() {
              FutureProvider((ref) async => ref.watch(dep));",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
-            let partial = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: DeclarationIdentity::sdk("dart:async", "FutureOr"),
-                arguments: vec![ResolvedType::Unknown].into(),
-                nullable: false,
-                extension_type: false,
+            let partial = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: DeclarationIdentity::sdk("dart:async", "FutureOr"),
+                    arguments: vec![ResolvedType::UNKNOWN].into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
-            let partial_pair = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: model.resolve_name("Pair").unwrap(),
-                arguments: vec![model.core_type("num", false), ResolvedType::Unknown].into(),
-                nullable: false,
-                extension_type: false,
+            let partial_pair = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: model.resolve_name("Pair").unwrap(),
+                    arguments: vec![model.core_type("num", false), ResolvedType::UNKNOWN].into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
             for declaration in program.declarations() {
                 let TopLevelDecl::Function(function) = declaration else {
@@ -1445,12 +1453,14 @@ fn partial_contexts_remain_fallbacks_for_calls_and_tearoffs_without_evidence() {
          dynamic call() => empty(); dynamic tearoff() => identity;",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
-            let partial = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: DeclarationIdentity::sdk("dart:core", "List"),
-                arguments: vec![ResolvedType::Unknown].into(),
-                nullable: false,
-                extension_type: false,
+            let partial = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: DeclarationIdentity::sdk("dart:core", "List"),
+                    arguments: vec![ResolvedType::UNKNOWN].into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
             let mut signature = ResolvedSignature::returning(partial.clone());
             signature.positional.push(partial.clone());
@@ -1475,7 +1485,10 @@ fn partial_contexts_remain_fallbacks_for_calls_and_tearoffs_without_evidence() {
                 if is_call {
                     assert_eq!(inferred, partial);
                 } else {
-                    let ResolvedType::Function { positional, .. } = &inferred else {
+                    let ResolvedType {
+                        kind: ResolvedTypeKind::Function { positional, .. },
+                    } = &inferred
+                    else {
                         panic!("expected an instantiated tear-off")
                     };
                     assert_eq!(inferred.function_return_type(), Some(partial.clone()));
@@ -1516,7 +1529,9 @@ fn downward_future_or_contexts_constrain_returned_interface_supertypes() {
                     &|_| None,
                 );
                 let value = match &inferred {
-                    ResolvedType::Function { return_type, .. } => return_type.as_ref(),
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Function { return_type, .. },
+                    } => return_type.as_ref(),
                     other => other,
                 };
                 let value = if value.interface("dart:async", "Future") {
@@ -1584,8 +1599,9 @@ fn async_closure_flattens_returns_before_joining() {
                 let scope = TypeParameterScope::default();
                 let mut environment = TypeEnvironment::new();
                 environment.bind_params(function.params().unwrap(), model, &scope);
-                let ResolvedType::Function { return_type, .. } =
-                    environment.infer_with_signatures(expression, model, &signatures, &scope)
+                let ResolvedType {
+                    kind: ResolvedTypeKind::Function { return_type, .. },
+                } = environment.infer_with_signatures(expression, model, &signatures, &scope)
                 else {
                     panic!()
                 };
@@ -1790,15 +1806,19 @@ fn inherited_interface_owner_follows_nested_type_parameter_bounds() {
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
             let a = ResolvedType::interface_identity(model.resolve_name("A").unwrap());
-            let s = ResolvedType::TypeParameter {
-                id: sdk_parameter("bounds", 0),
-                bound: Arc::new(a),
-                nullable: false,
+            let s = ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter {
+                    id: sdk_parameter("bounds", 0),
+                    bound: Arc::new(a),
+                    nullable: false,
+                },
             };
-            let t = ResolvedType::TypeParameter {
-                id: sdk_parameter("bounds", 1),
-                bound: Arc::new(s.clone()),
-                nullable: false,
+            let t = ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter {
+                    id: sdk_parameter("bounds", 1),
+                    bound: Arc::new(s.clone()),
+                    nullable: false,
+                },
             };
             for receiver in [s, t] {
                 assert_eq!(
@@ -1813,27 +1833,29 @@ fn inherited_interface_owner_follows_nested_type_parameter_bounds() {
 #[test]
 fn finally_and_capture_mutations_leave_snapshots_unchanged() {
     let mut entry = TypeEnvironment::new();
-    entry.declare("value", ResolvedType::Dynamic);
+    entry.declare("value", ResolvedType::DYNAMIC);
     let mut end = entry.clone();
-    end.promote("value", ResolvedType::Null);
+    end.promote("value", ResolvedType::NULL);
     let mut target = entry.clone();
     target.attach_finally(&entry, &end);
-    assert_eq!(target.lookup("value"), ResolvedType::Null);
-    assert_eq!(entry.lookup("value"), ResolvedType::Dynamic);
+    assert_eq!(target.lookup("value"), ResolvedType::NULL);
+    assert_eq!(entry.lookup("value"), ResolvedType::DYNAMIC);
 
     let snapshot = target.clone();
     target.mark_captured("value");
-    assert_eq!(target.lookup("value"), ResolvedType::Dynamic);
-    assert_eq!(snapshot.lookup("value"), ResolvedType::Null);
+    assert_eq!(target.lookup("value"), ResolvedType::DYNAMIC);
+    assert_eq!(snapshot.lookup("value"), ResolvedType::NULL);
     assert!(!snapshot.binding("value").unwrap().captured);
 }
 
 #[test]
 fn inferred_intersections_demote_before_later_writes() {
-    let parameter = ResolvedType::TypeParameter {
-        id: sdk_parameter("test", 0),
-        bound: Arc::new(ResolvedType::Dynamic),
-        nullable: false,
+    let parameter = ResolvedType {
+        kind: ResolvedTypeKind::TypeParameter {
+            id: sdk_parameter("test", 0),
+            bound: Arc::new(ResolvedType::DYNAMIC),
+            nullable: false,
+        },
     };
     let intersection = parameter.non_null();
     let mut environment = TypeEnvironment::new();
@@ -1870,7 +1892,7 @@ fn unresolved_property_chains_infer_in_linear_work() {
             &TypeParameterScope::default(),
             &lookup,
         );
-        assert_eq!(result, ResolvedType::Unknown);
+        assert_eq!(result, ResolvedType::UNKNOWN);
         assert!(
             lookups.get() <= 200,
             "{} lookups for 40 fields",
@@ -2339,38 +2361,50 @@ fn substitution_removes_instantiated_function_binders_and_maps_retained_bounds()
             )
             .unwrap();
             assert_eq!(shape.type_parameters.len(), 2);
-            let ResolvedType::TypeParameter { id, .. } = &shape.type_parameters[0] else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter { id, .. },
+            } = &shape.type_parameters[0]
+            else {
                 panic!("expected binder")
             };
-            let substitutions = FxHashMap::from_iter([(id.clone(), ResolvedType::Void)]);
+            let substitutions = FxHashMap::from_iter([(id.clone(), ResolvedType::VOID)]);
             let signatures = SignatureIndex::from_program(program, model);
             let source = signatures
                 .function(&model.resolve_value("f").unwrap())
                 .unwrap()
                 .function_type();
             let result = model.substitute(&source, &substitutions);
-            let ResolvedType::Function {
-                shape: Some(shape),
-                return_type,
-                positional,
-                ..
+            let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        shape: Some(shape),
+                        return_type,
+                        positional,
+                        ..
+                    },
             } = &result
             else {
                 panic!("expected exact function shape")
             };
-            assert_eq!(**return_type, ResolvedType::Void);
-            assert_eq!(positional.as_ref(), &[ResolvedType::Void]);
+            assert_eq!(**return_type, ResolvedType::VOID);
+            assert_eq!(positional.as_ref(), &[ResolvedType::VOID]);
             assert_eq!(shape.required_named.as_ref(), &["value".to_owned()]);
             assert_eq!(shape.type_parameters.len(), 1);
-            let ResolvedType::TypeParameter { id, bound, .. } = &shape.type_parameters[0] else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter { id, bound, .. },
+            } = &shape.type_parameters[0]
+            else {
                 panic!("expected retained binder")
             };
             assert_eq!(id.name.as_ref(), "U");
-            assert_eq!(**bound, ResolvedType::Void);
-            let substitutions = FxHashMap::from_iter([(id.clone(), ResolvedType::Dynamic)]);
+            assert_eq!(**bound, ResolvedType::VOID);
+            let substitutions = FxHashMap::from_iter([(id.clone(), ResolvedType::DYNAMIC)]);
             // An unused binder still changes the generic arity when supplied.
-            let ResolvedType::Function {
-                shape: Some(shape), ..
+            let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        shape: Some(shape), ..
+                    },
             } = model.substitute(&result, &substitutions)
             else {
                 panic!("expected instantiated function")
@@ -2571,13 +2605,17 @@ final intermediate = nested.$1();
             ("sharedJoinedNested", true),
         ] {
             let identity = model.resolve_value(name).unwrap();
-            let ResolvedType::Function { alias, .. } = signatures.value_type(&identity).unwrap()
+            let ResolvedType {
+                kind: ResolvedTypeKind::Function { alias, .. },
+            } = signatures.value_type(&identity).unwrap()
             else {
                 panic!("lost function type for {name}")
             };
             assert_eq!(alias.identity(), retains_alias.then_some(&g), "{name}");
         }
-        let ResolvedType::Function { alias, .. } = signatures
+        let ResolvedType {
+            kind: ResolvedTypeKind::Function { alias, .. },
+        } = signatures
             .value_type(&model.resolve_value("intermediate").unwrap())
             .unwrap()
         else {
@@ -2619,8 +2657,9 @@ final namedExtension = namedRecord.extra();
                 "namedExtension",
             ] {
                 let identity = model.resolve_value(name).unwrap();
-                let Some(ResolvedType::Interface { identity, .. }) =
-                    signatures.value_type(&identity)
+                let Some(ResolvedType {
+                    kind: ResolvedTypeKind::Interface { identity, .. },
+                }) = signatures.value_type(&identity)
                 else {
                     panic!("lost interface type for {name}")
                 };
@@ -2669,7 +2708,9 @@ final integer = integers.first;
                 ("sharedDirect", true),
             ] {
                 let identity = model.resolve_value(name).unwrap();
-                let Some(ResolvedType::Function { alias, .. }) = signatures.value_type(&identity)
+                let Some(ResolvedType {
+                    kind: ResolvedTypeKind::Function { alias, .. },
+                }) = signatures.value_type(&identity)
                 else {
                     panic!("lost SDK iterable function type for {name}")
                 };
@@ -2793,12 +2834,14 @@ fn concrete_property_chain_readiness_reuses_receiver_results() {
                     .unwrap()
                     .initializer()
                     .unwrap();
-                let receiver = ResolvedType::Interface {
-                    occurrence: Default::default(),
-                    identity: model.resolve_name("Link").unwrap(),
-                    arguments: Vec::new().into(),
-                    nullable: false,
-                    extension_type: false,
+                let receiver = ResolvedType {
+                    kind: ResolvedTypeKind::Interface {
+                        occurrence: Default::default(),
+                        identity: model.resolve_name("Link").unwrap(),
+                        arguments: Vec::new().into(),
+                        nullable: false,
+                        extension_type: false,
+                    },
                 };
                 let lookups = std::cell::Cell::new(0);
                 assert!(signatures.declaration_dependencies_known_using_lookup(
@@ -2831,18 +2874,20 @@ fn root_dependencies_preserve_partial_progress_and_dynamic_roots() {
             let signatures = SignatureIndex::from_program(program, model);
             assert_eq!(
                 signatures.value_type(&model.resolve_value("rows").unwrap()),
-                Some(&ResolvedType::Interface {
-                    occurrence: Default::default(),
-                    identity: DeclarationIdentity::sdk("dart:core", "List"),
-                    arguments: vec![model.core_type("String", false)].into(),
-                    nullable: false,
-                    extension_type: false,
+                Some(&ResolvedType {
+                    kind: ResolvedTypeKind::Interface {
+                        occurrence: Default::default(),
+                        identity: DeclarationIdentity::sdk("dart:core", "List"),
+                        arguments: vec![model.core_type("String", false)].into(),
+                        nullable: false,
+                        extension_type: false,
+                    },
                 }),
             );
             if let Some(identity) = model.resolve_value("legacy") {
                 assert_eq!(
                     signatures.value_type(&identity),
-                    Some(&ResolvedType::Dynamic)
+                    Some(&ResolvedType::DYNAMIC)
                 );
             }
         });
@@ -2871,12 +2916,14 @@ fn root_dependency_scopes_do_not_create_shadowing_cycles() {
                 assert!(signatures.cyclic_values.is_empty(), "{initializer}");
                 assert_eq!(
                     signatures.value_type(&model.resolve_value("items").unwrap()),
-                    Some(&ResolvedType::Interface {
-                        occurrence: Default::default(),
-                        identity: DeclarationIdentity::sdk("dart:core", "List"),
-                        arguments: vec![model.core_type("int", false)].into(),
-                        nullable: false,
-                        extension_type: false,
+                    Some(&ResolvedType {
+                        kind: ResolvedTypeKind::Interface {
+                            occurrence: Default::default(),
+                            identity: DeclarationIdentity::sdk("dart:core", "List"),
+                            arguments: vec![model.core_type("int", false)].into(),
+                            nullable: false,
+                            extension_type: false,
+                        },
                     }),
                     "{initializer}",
                 );
@@ -2899,12 +2946,14 @@ fn field_readiness_respects_closure_parameters() {
                     .field(&model.resolve_name("C").unwrap(), "value")
                     .unwrap()
                     .1,
-                ResolvedType::Interface {
-                    occurrence: Default::default(),
-                    identity: DeclarationIdentity::sdk("dart:core", "List"),
-                    arguments: vec![model.core_type("int", false)].into(),
-                    nullable: false,
-                    extension_type: false,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface {
+                        occurrence: Default::default(),
+                        identity: DeclarationIdentity::sdk("dart:core", "List"),
+                        arguments: vec![model.core_type("int", false)].into(),
+                        nullable: false,
+                        extension_type: false,
+                    },
                 },
             );
         },
@@ -2925,12 +2974,14 @@ fn inherited_getter_dependencies_wait_for_declaration_inference() {
          class Plain { get value => throw 0; }",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
-            let packet = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: model.resolve_name("Packet").unwrap(),
-                arguments: Vec::new().into(),
-                nullable: false,
-                extension_type: false,
+            let packet = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: model.resolve_name("Packet").unwrap(),
+                    arguments: Vec::new().into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
             for name in ["result", "indirect"] {
                 assert_eq!(
@@ -2950,7 +3001,7 @@ fn inherited_getter_dependencies_wait_for_declaration_inference() {
             for name in ["dynamicResult", "plainResult"] {
                 assert_eq!(
                     signatures.value_type(&model.resolve_value(name).unwrap()),
-                    Some(&ResolvedType::Dynamic),
+                    Some(&ResolvedType::DYNAMIC),
                 );
             }
         },
@@ -2975,12 +3026,14 @@ fn interface_diamonds_preserve_substitution_in_bounded_lookup() {
     with_model(&source, |program, model| {
         let signatures = SignatureIndex::from_program(program, model);
         assert!(signatures.cyclic_supertypes.is_some());
-        let child = ResolvedType::Interface {
-            occurrence: Default::default(),
-            identity: model.resolve_name("Child").unwrap(),
-            arguments: Vec::new().into(),
-            nullable: false,
-            extension_type: false,
+        let child = ResolvedType {
+            kind: ResolvedTypeKind::Interface {
+                occurrence: Default::default(),
+                identity: model.resolve_name("Child").unwrap(),
+                arguments: Vec::new().into(),
+                nullable: false,
+                extension_type: false,
+            },
         };
         assert!(
             signatures
@@ -2990,12 +3043,14 @@ fn interface_diamonds_preserve_substitution_in_bounded_lookup() {
         let (ty, substitutions) = signatures.resolved_field(&child, "value", model).unwrap();
         assert_eq!(
             model.substitute(&ty, &substitutions),
-            ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: model.resolve_name("Packet").unwrap(),
-                arguments: Vec::new().into(),
-                nullable: false,
-                extension_type: false,
+            ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: model.resolve_name("Packet").unwrap(),
+                    arguments: Vec::new().into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             },
         );
     });
@@ -3015,12 +3070,14 @@ fn missing_declaration_types_use_completed_signatures() {
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
             let box_identity = model.resolve_name("Box").unwrap();
-            let box_of = |argument| ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: box_identity.clone(),
-                arguments: vec![argument].into(),
-                nullable: false,
-                extension_type: false,
+            let box_of = |argument| ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: box_identity.clone(),
+                    arguments: vec![argument].into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
             for name in ["forward", "later"] {
                 assert_eq!(
@@ -3030,12 +3087,12 @@ fn missing_declaration_types_use_completed_signatures() {
             }
             assert_eq!(
                 signatures.value_type(&model.resolve_value("top").unwrap()),
-                Some(&ResolvedType::Dynamic)
+                Some(&ResolvedType::DYNAMIC)
             );
             for name in ["cycle", "other"] {
                 assert_eq!(
                     signatures.value_type(&model.resolve_value(name).unwrap()),
-                    Some(&ResolvedType::Unknown)
+                    Some(&ResolvedType::UNKNOWN)
                 );
             }
             let values = model.resolve_name("Values").unwrap();
@@ -3052,12 +3109,14 @@ fn missing_declaration_types_use_completed_signatures() {
             for name in ["result", "inferred", "generic"] {
                 assert_eq!(
                     signatures.field(&values, name).unwrap().1,
-                    ResolvedType::Dynamic
+                    ResolvedType::DYNAMIC
                 );
             }
             assert!(matches!(
                 signatures.field(&values, "typed").unwrap().1,
-                ResolvedType::TypeParameter { .. }
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { .. },
+                }
             ));
         },
     );
@@ -3104,13 +3163,13 @@ fn untyped_overrides_inherit_instantiated_declared_types() {
             );
             assert_eq!(
                 signatures.field(&static_value, "empty").unwrap().1,
-                ResolvedType::Dynamic
+                ResolvedType::DYNAMIC
             );
             for owner in ["Conflict", "GetterConflict"] {
                 let identity = model.resolve_name(owner).unwrap();
                 assert_eq!(
                     signatures.field(&identity, "value").unwrap().1,
-                    ResolvedType::Unknown
+                    ResolvedType::UNKNOWN
                 );
             }
         },
@@ -3127,11 +3186,11 @@ fn null_global_initializers_infer_dynamic_except_explicit_null() {
                 let identity = model.resolve_value(name).unwrap();
                 assert_eq!(
                     signatures.value_type(&identity),
-                    Some(&ResolvedType::Dynamic)
+                    Some(&ResolvedType::DYNAMIC)
                 );
             }
             let identity = model.resolve_value("explicit").unwrap();
-            assert_eq!(signatures.value_type(&identity), Some(&ResolvedType::Null));
+            assert_eq!(signatures.value_type(&identity), Some(&ResolvedType::NULL));
         },
     );
 }
@@ -3161,20 +3220,25 @@ fn global_partial_inference_converges_without_expanding_recursive_containers() {
             assert!(nested.arguments()[0].arguments()[0].interface("dart:core", "int"));
             // Cyclic values stay unknown, as does member access on them.
             for name in ["self", "left", "right", "selfCount"] {
-                assert_eq!(value(name), &ResolvedType::Unknown, "{name}");
+                assert_eq!(value(name), &ResolvedType::UNKNOWN, "{name}");
             }
             let missing = value("missing");
             assert!(missing.interface("dart:core", "List"));
-            assert_eq!(missing.arguments(), &[ResolvedType::Unknown]);
+            assert_eq!(missing.arguments(), &[ResolvedType::UNKNOWN]);
             assert!(value("missingCount").interface("dart:core", "int"));
             assert!(value("partialSelfCount").interface("dart:core", "int"));
             let consumer = value("consumer");
             assert!(consumer.interface("dart:core", "List"));
-            assert_eq!(consumer.arguments(), &[ResolvedType::Unknown]);
+            assert_eq!(consumer.arguments(), &[ResolvedType::UNKNOWN]);
             let barrier = value("barrier");
             assert!(barrier.arguments()[0].interface("dart:core", "List"));
             assert!(barrier.arguments()[0].arguments()[0].interface("dart:core", "int"));
-            assert!(matches!(value("shadow"), ResolvedType::Function { .. }));
+            assert!(matches!(
+                value("shadow"),
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function { .. },
+                }
+            ));
         },
     );
 }
@@ -3224,7 +3288,7 @@ fn partial_dependency_retry_is_independent_of_declaration_order() {
                     .unwrap();
                 assert!(has_inference_holes(partial), "{partial:?}");
                 assert!(partial.arguments()[0].interface("dart:core", "List"));
-                assert_eq!(partial.arguments()[0].arguments(), &[ResolvedType::Unknown],);
+                assert_eq!(partial.arguments()[0].arguments(), &[ResolvedType::UNKNOWN],);
                 for name in ["firstCopy", "secondCopy"] {
                     assert_eq!(
                         signatures.value_type(&model.resolve_value(name).unwrap()),
@@ -3315,13 +3379,13 @@ fn imported_partial_global_inference_is_independent_of_file_order() {
         ] {
             assert_eq!(
                 signatures.value_type(&identity),
-                Some(&ResolvedType::Unknown)
+                Some(&ResolvedType::UNKNOWN)
             );
         }
         for (declaration, expected) in main
             .declarations()
             .skip(1)
-            .zip([items.clone(), ResolvedType::Dynamic])
+            .zip([items.clone(), ResolvedType::DYNAMIC])
         {
             let TopLevelDecl::Function(function) = declaration else {
                 panic!()
@@ -3477,7 +3541,7 @@ fn extension_method_resolution_preserves_receiver_uncertainty_and_nullability() 
         "extension OnObject on Object { int strict() => 0; } extension OnNullable on Object? { int nullable() => 0; }",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
-            for receiver in [ResolvedType::Dynamic, ResolvedType::Unknown] {
+            for receiver in [ResolvedType::DYNAMIC, ResolvedType::UNKNOWN] {
                 assert!(
                     signatures
                         .resolved_member(&receiver, "strict", model)
@@ -3553,11 +3617,13 @@ fn collection_scopes_and_record_contexts_infer_without_sdk_sources() {
                     "named" => assert_eq!(actual, string),
                     "record" => assert_eq!(
                         actual,
-                        ResolvedType::Record {
-                            occurrence: Default::default(),
-                            positional: vec![int].into(),
-                            named: vec![("name".into(), string)].into(),
-                            nullable: false
+                        ResolvedType {
+                            kind: ResolvedTypeKind::Record {
+                                occurrence: Default::default(),
+                                positional: vec![int].into(),
+                                named: vec![("name".into(), string)].into(),
+                                nullable: false,
+                            },
                         }
                     ),
                     "contextual" => assert_eq!(Some(actual), expected),
@@ -3739,7 +3805,7 @@ fn collection_literal_element_inference() {
             );
             assert_eq!(actual.arguments().len(), arguments.len(), "{expression}");
             for (actual, expected) in actual.arguments().iter().zip(*arguments) {
-                let expected = expected.map_or(ResolvedType::Unknown, |ty| {
+                let expected = expected.map_or(ResolvedType::UNKNOWN, |ty| {
                     let program_source = format!("{ty} expected;");
                     let falcon_dart_parser::ParseResult { tree, errors } = parse(&program_source);
                     let parsed = Arc::new(crate::ParsedFile {
@@ -3841,8 +3907,9 @@ fn generic_closure_inputs_complete_before_upward_bound_inference() {
                     model.resolve_type(function.return_type().unwrap()),
                 );
                 assert_eq!(argument_contexts.len(), 1);
-                let ResolvedType::Function { positional, .. } =
-                    argument_contexts.values().next().unwrap()
+                let ResolvedType {
+                    kind: ResolvedTypeKind::Function { positional, .. },
+                } = argument_contexts.values().next().unwrap()
                 else {
                     panic!()
                 };
@@ -4148,8 +4215,9 @@ fn generic_calls_infer_from_arguments_and_result_context() {
                         model.core_type("double", false)
                     );
                 } else if function.name().name() == "contextBoxNumber" {
-                    let ResolvedType::Interface { arguments, .. } =
-                        environment.infer_with_signatures(expression, model, &signatures, &scope)
+                    let ResolvedType {
+                        kind: ResolvedTypeKind::Interface { arguments, .. },
+                    } = environment.infer_with_signatures(expression, model, &signatures, &scope)
                     else {
                         panic!()
                     };
@@ -4190,7 +4258,7 @@ fn omitted_generic_arguments_use_defaults_without_erasing_unknown_evidence() {
                     &scope,
                 );
                 if function.name().name() == "unresolved" {
-                    assert_eq!(actual.arguments(), &[ResolvedType::Unknown]);
+                    assert_eq!(actual.arguments(), &[ResolvedType::UNKNOWN]);
                 } else {
                     assert_eq!(
                         actual,
@@ -4290,12 +4358,15 @@ fn record_schema_downcasts_dynamic_fields_without_downcasting_object_fields() {
                 match function.name().name() {
                     "dynamicField" => assert_eq!(actual, expected),
                     "objectField" => {
-                        let ResolvedType::Record { positional, .. } = actual else {
+                        let ResolvedType {
+                            kind: ResolvedTypeKind::Record { positional, .. },
+                        } = actual
+                        else {
                             panic!()
                         };
                         assert_eq!(positional[0], model.core_type("Object", false));
                     }
-                    "standalone" => assert_eq!(actual, ResolvedType::Dynamic),
+                    "standalone" => assert_eq!(actual, ResolvedType::DYNAMIC),
                     _ => unreachable!(),
                 }
             }
@@ -4343,9 +4414,10 @@ fn mixin_application_constructors_retain_names_types_and_defaults() {
             assert!(
                 matches!(
                     &signature.positional[0],
-                    ResolvedType::Interface { identity, arguments, .. }
-                        if identity.is_sdk("dart:core", "List")
-                            && arguments[0].interface("dart:core", "String")
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Interface { identity, arguments, .. },
+                    } if identity.is_sdk("dart:core", "List")
+                        && arguments[0].interface("dart:core", "String")
                 ),
                 "forwarded parameter: {:?}",
                 signature.positional[0],
@@ -4629,7 +4701,7 @@ fn declared_bounds_meet_top_contexts_and_instantiate_unconstrained_tearoffs() {
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
             let scope = TypeParameterScope::default();
-            let dynamic = ResolvedType::Dynamic;
+            let dynamic = ResolvedType::DYNAMIC;
             let object = model.core_type("Object", true);
             let num = model.core_type("num", false);
             for declaration in program.declarations() {
@@ -4655,7 +4727,9 @@ fn declared_bounds_meet_top_contexts_and_instantiate_unconstrained_tearoffs() {
                     &|_| None,
                 );
                 let instance = match &inferred {
-                    ResolvedType::Function { return_type, .. } => return_type.as_ref(),
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Function { return_type, .. },
+                    } => return_type.as_ref(),
                     other => other,
                 };
                 let argument = match function.name().name() {
@@ -4866,12 +4940,14 @@ fn block_closures_preserve_private_field_promotion_mode() {
                 panic!("expected arrow body");
             };
             let expression = expression.expr();
-            let receiver = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: model.resolve_name("Promoted").unwrap(),
-                arguments: Vec::new().into(),
-                nullable: false,
-                extension_type: false,
+            let receiver = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: model.resolve_name("Promoted").unwrap(),
+                    arguments: Vec::new().into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
             let mut environment = TypeEnvironment::with_field_promotions(true);
             environment.declare_receiver(receiver.clone());
@@ -5385,7 +5461,7 @@ fn expression_inference_regression_table() {
             let body = body.expr();
             let mut environment = TypeEnvironment::new();
             environment.bind_params(function.params().unwrap(), model, &scope);
-            let expected = expected.map_or(ResolvedType::Unknown, |_| {
+            let expected = expected.map_or(ResolvedType::UNKNOWN, |_| {
                 model.resolve_type(function.return_type().unwrap())
             });
             assert_eq!(
@@ -5451,9 +5527,9 @@ fn never_returning_calls_are_acceptable_in_void_contexts() {
                 &signatures,
                 &TypeParameterScope::default(),
             );
-            assert_eq!(actual, ResolvedType::Never);
+            assert_eq!(actual, ResolvedType::NEVER);
             assert_eq!(
-                model.acceptable_for_void_context(&ResolvedType::Void, &actual),
+                model.acceptable_for_void_context(&ResolvedType::VOID, &actual),
                 Truth::Yes,
             );
         },
@@ -5520,13 +5596,13 @@ fn core_never_resolves_as_bottom_but_project_never_does_not() {
                 assert_eq!(
                     ty,
                     if index == 0 {
-                        ResolvedType::Never
+                        ResolvedType::NEVER
                     } else {
-                        ResolvedType::Null
+                        ResolvedType::NULL
                     }
                 );
                 assert_eq!(
-                    model.acceptable_for_void_context(&ResolvedType::Void, &ty),
+                    model.acceptable_for_void_context(&ResolvedType::VOID, &ty),
                     Truth::Yes
                 );
             }
@@ -5540,9 +5616,11 @@ fn core_never_resolves_as_bottom_but_project_never_does_not() {
             };
             assert!(matches!(
                 model.resolve_type(function.return_type().unwrap()),
-                ResolvedType::Interface {
-                    identity: DeclarationIdentity::Library { .. },
-                    ..
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface {
+                        identity: DeclarationIdentity::Library { .. },
+                        ..
+                    },
                 }
             ));
         },
@@ -5561,9 +5639,11 @@ fn declaration_model_preserves_extension_types_and_parameter_owners() {
             };
             assert!(matches!(
                 declaration_model.resolve_type(function.return_type().unwrap()),
-                ResolvedType::Interface {
-                    extension_type: true,
-                    ..
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface {
+                        extension_type: true,
+                        ..
+                    },
                 }
             ));
             let mut original = TypeParameterScope::default();
@@ -5645,10 +5725,13 @@ fn resolves_canonical_generic_and_special_types() {
                     .param_type()
                     .unwrap(),
             );
-            let ResolvedType::Interface {
-                identity,
-                arguments,
-                ..
+            let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity,
+                        arguments,
+                        ..
+                    },
             } = box_type
             else {
                 panic!()
@@ -5722,15 +5805,21 @@ fn type_parameter_bounds_can_reference_the_complete_parameter_list() {
             let signature = signatures
                 .function(&model.resolve_value("compare").unwrap())
                 .unwrap();
-            let ResolvedType::TypeParameter { bound, .. } = &signature.positional[0] else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter { bound, .. },
+            } = &signature.positional[0]
+            else {
                 panic!()
             };
-            let ResolvedType::Interface { arguments, .. } = bound.as_ref() else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::Interface { arguments, .. },
+            } = bound.as_ref()
+            else {
                 panic!()
             };
-            assert!(
-                matches!(arguments.first(), Some(ResolvedType::TypeParameter { id, .. }) if id.name.as_ref() == "U")
-            );
+            assert!(matches!(arguments.first(), Some(ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { id, .. },
+                }) if id.name.as_ref() == "U"));
         },
     );
 }
@@ -5747,18 +5836,27 @@ fn signature_shapes_preserve_required_names_and_unused_declared_binders() {
             let shape = signature.shape.as_ref().unwrap();
             assert_eq!(shape.required_named.as_ref(), &["z".to_string()]);
             assert_eq!(shape.type_parameters.len(), 2);
-            let ResolvedType::TypeParameter { id, bound, .. } = &shape.type_parameters[0] else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter { id, bound, .. },
+            } = &shape.type_parameters[0]
+            else {
                 panic!("missing declared binder");
             };
             assert_eq!(bound.as_ref(), &model.core_type("num", false));
             assert!(matches!(
                 &shape.type_parameters[1],
-                ResolvedType::TypeParameter { bound, .. }
-                    if matches!(bound.as_ref(), ResolvedType::TypeParameter { id: dependency, .. } if dependency == id)
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { bound, .. },
+                } if matches!(bound.as_ref(), ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { id: dependency, .. },
+                } if dependency == id)
             ));
-            let ResolvedType::Function {
-                shape: Some(forwarded),
-                ..
+            let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        shape: Some(forwarded),
+                        ..
+                    },
             } = signature.function_type()
             else {
                 panic!("missing function shape");
@@ -5773,8 +5871,9 @@ fn signature_shapes_preserve_required_names_and_unused_declared_binders() {
             assert_eq!(instantiated.required_named, shape.required_named);
             assert!(matches!(
                 instantiated.type_parameters.as_ref(),
-                [ResolvedType::TypeParameter { bound, .. }]
-                    if bound.as_ref() == &model.core_type("int", false)
+                [ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { bound, .. },
+                }] if bound.as_ref() == &model.core_type("int", false)
             ));
         },
     );
@@ -5863,9 +5962,11 @@ fn declaration_contracts_preserve_names_kinds_defaults_and_optional_arity() {
             assert_eq!(method.optional_positional, 1);
             assert!(matches!(
                 method.function_type(),
-                ResolvedType::Function {
-                    optional_positional: 1,
-                    ..
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function {
+                        optional_positional: 1,
+                        ..
+                    },
                 }
             ));
             let facts = &signatures.declared_member_facts(&identity, "m")[0];
@@ -6016,15 +6117,15 @@ fn signatures_preserve_type_parameters_for_void_substitution() {
             .unwrap();
         assert!(contains_parameter(&signature.positional[0]));
         let substitutions =
-            FxHashMap::from_iter([(signature.call_parameters[0].clone(), ResolvedType::Void)]);
+            FxHashMap::from_iter([(signature.call_parameters[0].clone(), ResolvedType::VOID)]);
         let expected = model.substitute(&signature.positional[0], &substitutions);
-        assert_eq!(expected, ResolvedType::Void);
+        assert_eq!(expected, ResolvedType::VOID);
         assert_eq!(
             model.acceptable_for_void_context(&expected, &model.core_type("int", false)),
             Truth::No
         );
         assert_eq!(
-            model.acceptable_for_void_context(&expected, &ResolvedType::Null),
+            model.acceptable_for_void_context(&expected, &ResolvedType::NULL),
             Truth::Yes
         );
     });
@@ -6136,7 +6237,10 @@ fn inference_lookup_fallback_reaches_recursive_expressions_and_respects_bindings
                     &lookup,
                 );
                 if index == 5 {
-                    let ResolvedType::Function { return_type, .. } = inferred else {
+                    let ResolvedType {
+                        kind: ResolvedTypeKind::Function { return_type, .. },
+                    } = inferred
+                    else {
                         panic!()
                     };
                     assert_eq!(*return_type, expected);
@@ -6152,7 +6256,7 @@ fn inference_lookup_fallback_reaches_recursive_expressions_and_respects_bindings
                             model,
                             &signatures,
                             &scope,
-                            &|_| Some(ResolvedType::Unknown),
+                            &|_| Some(ResolvedType::UNKNOWN),
                         ),
                         model.core_type("int", false),
                     );
@@ -6207,7 +6311,12 @@ fn cast_inference_preserves_written_nullability_and_type_parameter_scope() {
                 );
                 assert_eq!(expected.nullable(), index != 1);
                 if index == 2 {
-                    assert!(matches!(expected, ResolvedType::TypeParameter { .. }));
+                    assert!(matches!(
+                        expected,
+                        ResolvedType {
+                            kind: ResolvedTypeKind::TypeParameter { .. },
+                        }
+                    ));
                 }
             }
         },
@@ -6253,12 +6362,14 @@ fn same_named_type_parameters_of_different_declarations_stay_distinct() {
         "class B<T> { T get x => throw 0; } class A<T> extends B<int> {}",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
-            let a = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: model.resolve_name("A").unwrap(),
-                arguments: vec![model.core_type("String", false)].into(),
-                nullable: false,
-                extension_type: false,
+            let a = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: model.resolve_name("A").unwrap(),
+                    arguments: vec![model.core_type("String", false)].into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
             let (field, substitutions) = signatures.resolved_field(&a, "x", model).unwrap();
             assert!(
@@ -6277,12 +6388,14 @@ fn member_lookup_prefers_later_mixins_and_includes_interface_contracts() {
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
             let child_identity = model.resolve_name("Child").unwrap();
-            let child = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: child_identity,
-                arguments: Vec::new().into(),
-                nullable: false,
-                extension_type: false,
+            let child = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: child_identity,
+                    arguments: Vec::new().into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
             let (signature, substitutions) =
                 signatures.resolved_member(&child, "value", model).unwrap();
@@ -6303,12 +6416,14 @@ fn member_lookup_prefers_later_mixins_and_includes_interface_contracts() {
             );
 
             let contract = model.resolve_name("Contract").unwrap();
-            let interface_only = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: model.resolve_name("InterfaceOnly").unwrap(),
-                arguments: Vec::new().into(),
-                nullable: false,
-                extension_type: false,
+            let interface_only = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: model.resolve_name("InterfaceOnly").unwrap(),
+                    arguments: Vec::new().into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
             assert_eq!(
                 signatures.relation(
@@ -6340,12 +6455,14 @@ fn static_mixin_members_do_not_shadow_inherited_instance_members() {
         "class Base { int method() => 0; int field = 0; int get getter => 0; set setter(int value) {} } mixin StaticMembers { static String method() => ''; static bool field = false; static double get getter => 0; static set setter(num value) {} } class Child extends Base with StaticMembers {}",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
-            let child = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: model.resolve_name("Child").unwrap(),
-                arguments: Vec::new().into(),
-                nullable: false,
-                extension_type: false,
+            let child = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: model.resolve_name("Child").unwrap(),
+                    arguments: Vec::new().into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
             let base = model.resolve_name("Base").unwrap();
             let mixin = model.resolve_name("StaticMembers").unwrap();
@@ -6408,28 +6525,33 @@ fn legacy_function_typed_setter_has_a_nullable_function_write_type() {
         "class Value { set callback(void value()?) {} }",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
-            let receiver = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: model.resolve_name("Value").unwrap(),
-                arguments: Vec::new().into(),
-                nullable: false,
-                extension_type: false,
+            let receiver = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: model.resolve_name("Value").unwrap(),
+                    arguments: Vec::new().into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
             let (write_type, substitutions) = signatures
                 .resolved_writable_field(&receiver, "callback", model)
                 .unwrap();
             let write_type = model.substitute(&write_type, &substitutions);
-            let ResolvedType::Function {
-                return_type,
-                positional,
-                named,
-                nullable,
-                ..
+            let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        return_type,
+                        positional,
+                        named,
+                        nullable,
+                        ..
+                    },
             } = write_type
             else {
                 panic!("setter parameter must remain a function type");
             };
-            assert_eq!(*return_type, ResolvedType::Void);
+            assert_eq!(*return_type, ResolvedType::VOID);
             assert!(positional.is_empty());
             assert!(named.is_empty());
             assert!(nullable);
@@ -6465,12 +6587,14 @@ fn only_uninitialized_late_final_fields_have_writable_owners() {
             let signatures = SignatureIndex::from_program(program, model);
             let base = model.resolve_name("Base").unwrap();
             for owner in ["Child", "View", "Init"] {
-                let child = ResolvedType::Interface {
-                    occurrence: Default::default(),
-                    identity: model.resolve_name(owner).unwrap(),
-                    arguments: Vec::new().into(),
-                    nullable: false,
-                    extension_type: false,
+                let child = ResolvedType {
+                    kind: ResolvedTypeKind::Interface {
+                        occurrence: Default::default(),
+                        identity: model.resolve_name(owner).unwrap(),
+                        arguments: Vec::new().into(),
+                        nullable: false,
+                        extension_type: false,
+                    },
                 };
                 assert_eq!(
                     signatures.resolved_writable_member_owner(&child, "pending", model),
@@ -6479,8 +6603,9 @@ fn only_uninitialized_late_final_fields_have_writable_owners() {
                 let (ty, substitutions) = signatures
                     .resolved_writable_field(&child, "pending", model)
                     .unwrap();
-                let ResolvedType::Interface { identity, .. } =
-                    model.substitute(&ty, &substitutions)
+                let ResolvedType {
+                    kind: ResolvedTypeKind::Interface { identity, .. },
+                } = model.substitute(&ty, &substitutions)
                 else {
                     panic!("late-final setter should retain its declared field type");
                 };
@@ -6512,12 +6637,14 @@ fn child_setter_does_not_hide_inherited_generic_getter() {
         "class Base<T> { T get value => throw UnimplementedError(); } class Child extends Base<String> { set value(num next) {} }",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
-            let child = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: model.resolve_name("Child").unwrap(),
-                arguments: Vec::new().into(),
-                nullable: false,
-                extension_type: false,
+            let child = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: model.resolve_name("Child").unwrap(),
+                    arguments: Vec::new().into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
 
             let (read_type, read_substitutions) =
@@ -6548,12 +6675,14 @@ fn named_constructor_and_instance_method_signatures_do_not_collide() {
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
             let base = model.resolve_name("Base").unwrap();
-            let receiver = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: base.clone(),
-                arguments: Vec::new().into(),
-                nullable: false,
-                extension_type: false,
+            let receiver = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: base.clone(),
+                    arguments: Vec::new().into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
 
             let constructor = signatures.constructor(&base, "named").unwrap();
@@ -6613,12 +6742,14 @@ fn later_mixin_getter_overrides_base_field_with_owner_substitution() {
         "class Base { num value = 0; } mixin ReadValue<T> { T get value => throw UnimplementedError(); } class Child extends Base with ReadValue<int> {}",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
-            let child = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: model.resolve_name("Child").unwrap(),
-                arguments: Vec::new().into(),
-                nullable: false,
-                extension_type: false,
+            let child = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: model.resolve_name("Child").unwrap(),
+                    arguments: Vec::new().into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
 
             let (field, substitutions) = signatures.resolved_field(&child, "value", model).unwrap();
@@ -6638,12 +6769,14 @@ fn later_mixin_getter_shadows_base_method_for_all_instance_lookup() {
         "class Base { num value() => 0; } mixin ReadValue<T> { T get value => throw UnimplementedError(); } class Child extends Base with ReadValue<String> {}",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
-            let child = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: model.resolve_name("Child").unwrap(),
-                arguments: Vec::new().into(),
-                nullable: false,
-                extension_type: false,
+            let child = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: model.resolve_name("Child").unwrap(),
+                    arguments: Vec::new().into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
 
             assert!(signatures.resolved_member(&child, "value", model).is_none());
@@ -6664,12 +6797,14 @@ fn later_mixin_method_shadows_base_read_for_all_instance_lookup() {
         "class Base { num get value => 0; } mixin ComputeValue<T> { T value() => throw UnimplementedError(); } class Child extends Base with ComputeValue<int> {}",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
-            let child = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: model.resolve_name("Child").unwrap(),
-                arguments: Vec::new().into(),
-                nullable: false,
-                extension_type: false,
+            let child = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: model.resolve_name("Child").unwrap(),
+                    arguments: Vec::new().into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
 
             assert!(signatures.resolved_field(&child, "value", model).is_none());
@@ -6764,12 +6899,14 @@ fn negative_supertype_queries_visit_each_diamond_declaration_once() {
     }
     with_model(&source, |program, model| {
         let signatures = SignatureIndex::from_program(program, model);
-        let receiver = ResolvedType::Interface {
-            occurrence: Default::default(),
-            identity: model.resolve_name("Join23").unwrap(),
-            arguments: vec![model.core_type("int", false)].into(),
-            nullable: false,
-            extension_type: false,
+        let receiver = ResolvedType {
+            kind: ResolvedTypeKind::Interface {
+                occurrence: Default::default(),
+                identity: model.resolve_name("Join23").unwrap(),
+                arguments: vec![model.core_type("int", false)].into(),
+                nullable: false,
+                extension_type: false,
+            },
         };
         let visits = std::cell::Cell::new(0);
         let mut visited = FxHashSet::default();
@@ -6960,12 +7097,14 @@ fn object_fallback_does_not_beat_earlier_application_chain_members() {
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
             for (class_name, owner_name) in [("FromBase", "Base"), ("FromMixin", "First")] {
-                let receiver = ResolvedType::Interface {
-                    occurrence: Default::default(),
-                    identity: model.resolve_name(class_name).unwrap(),
-                    arguments: Vec::new().into(),
-                    nullable: false,
-                    extension_type: false,
+                let receiver = ResolvedType {
+                    kind: ResolvedTypeKind::Interface {
+                        occurrence: Default::default(),
+                        identity: model.resolve_name(class_name).unwrap(),
+                        arguments: Vec::new().into(),
+                        nullable: false,
+                        extension_type: false,
+                    },
                 };
                 assert_eq!(
                     signatures.resolved_member_owner(&receiver, "toString", model),
@@ -6988,12 +7127,14 @@ fn super_owner_checks_mixin_constraints_before_object_and_superclasses() {
                 ("Child", "toString", "Base"),
                 ("Child", "member", "Applied"),
             ] {
-                let receiver = ResolvedType::Interface {
-                    occurrence: Default::default(),
-                    identity: model.resolve_name(receiver).unwrap(),
-                    arguments: Vec::new().into(),
-                    nullable: false,
-                    extension_type: false,
+                let receiver = ResolvedType {
+                    kind: ResolvedTypeKind::Interface {
+                        occurrence: Default::default(),
+                        identity: model.resolve_name(receiver).unwrap(),
+                        arguments: Vec::new().into(),
+                        nullable: false,
+                        extension_type: false,
+                    },
                 };
                 assert_eq!(
                     signatures.resolved_super_member_owner(&receiver, member, false, model),
@@ -7011,42 +7152,50 @@ fn extension_owner_checks_concrete_arguments_and_preserves_unknowns() {
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
             for (element, owner) in [("IntElement", "General"), ("StringElement", "Strings")] {
-                let receiver = ResolvedType::Interface {
-                    occurrence: Default::default(),
-                    identity: model.resolve_name("SourceList").unwrap(),
-                    arguments: vec![ResolvedType::Interface {
+                let receiver = ResolvedType {
+                    kind: ResolvedTypeKind::Interface {
                         occurrence: Default::default(),
-                        identity: model.resolve_name(element).unwrap(),
-                        arguments: Vec::new().into(),
+                        identity: model.resolve_name("SourceList").unwrap(),
+                        arguments: vec![ResolvedType {
+                            kind: ResolvedTypeKind::Interface {
+                                occurrence: Default::default(),
+                                identity: model.resolve_name(element).unwrap(),
+                                arguments: Vec::new().into(),
+                                nullable: false,
+                                extension_type: false,
+                            },
+                        }]
+                        .into(),
                         nullable: false,
                         extension_type: false,
-                    }]
-                    .into(),
-                    nullable: false,
-                    extension_type: false,
+                    },
                 };
                 assert_eq!(
                     signatures.resolved_extension_owner(&receiver, "member", model),
                     model.resolve_extension(owner)
                 );
             }
-            let receiver = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: model.resolve_name("IntList").unwrap(),
-                arguments: Vec::new().into(),
-                nullable: false,
-                extension_type: false,
+            let receiver = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: model.resolve_name("IntList").unwrap(),
+                    arguments: Vec::new().into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
             assert_eq!(
                 signatures.resolved_extension_owner(&receiver, "member", model),
                 model.resolve_extension("General")
             );
-            let unknown = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: model.resolve_name("SourceList").unwrap(),
-                arguments: vec![ResolvedType::Unknown].into(),
-                nullable: false,
-                extension_type: false,
+            let unknown = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: model.resolve_name("SourceList").unwrap(),
+                    arguments: vec![ResolvedType::UNKNOWN].into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
             assert_eq!(
                 signatures.resolved_extension_owner(&unknown, "member", model),
@@ -7186,7 +7335,7 @@ fn extension_inference_looks_through_receiver_bounds_and_retains_missing_argumen
             let (method, substitutions) = signatures
                 .resolved_extension_override_method(
                     &model.resolve_extension("Pick").unwrap(),
-                    &ResolvedType::Unknown,
+                    &ResolvedType::UNKNOWN,
                     &[],
                     "pick",
                     model,
@@ -7194,7 +7343,7 @@ fn extension_inference_looks_through_receiver_bounds_and_retains_missing_argumen
                 .unwrap();
             assert_eq!(
                 model.substitute(&method.return_type, &substitutions),
-                ResolvedType::Unknown,
+                ResolvedType::UNKNOWN,
             );
         },
     );
@@ -7210,10 +7359,13 @@ fn extension_applicability_proves_only_universal_missing_arguments() {
                 .function(&model.resolve_value("uses").unwrap())
                 .unwrap();
             let mut receiver = signature.positional[0].clone();
-            let ResolvedType::Interface { arguments, .. } = &mut receiver else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::Interface { arguments, .. },
+            } = &mut receiver
+            else {
                 panic!()
             };
-            Arc::make_mut(arguments)[0] = ResolvedType::Unknown;
+            Arc::make_mut(arguments)[0] = ResolvedType::UNKNOWN;
             for (name, expected) in [
                 ("Completion", Truth::Yes),
                 ("Fixed", Truth::Unknown),
@@ -7243,7 +7395,7 @@ fn extension_applicability_proves_only_universal_missing_arguments() {
                 .unwrap();
             assert_eq!(
                 model.substitute(&method.return_type, &substitutions),
-                ResolvedType::Unknown
+                ResolvedType::UNKNOWN
             );
             assert_eq!(
                 signatures.resolved_extension_owner(&signature.positional[1], "invoke", model),
@@ -7251,8 +7403,8 @@ fn extension_applicability_proves_only_universal_missing_arguments() {
             );
             assert_eq!(
                 signatures.relation(
-                    &ResolvedType::Unknown,
-                    crate::TypeRelation::SubtypeOf(&ResolvedType::Dynamic),
+                    &ResolvedType::UNKNOWN,
+                    crate::TypeRelation::SubtypeOf(&ResolvedType::DYNAMIC),
                     model
                 ),
                 Truth::Unknown,
@@ -7272,14 +7424,20 @@ fn mixed_variance_extension_identity_does_not_conflate_missing_arguments() {
                 .unwrap()
                 .positional[0]
                 .clone();
-            let ResolvedType::Interface { arguments, .. } = &mut receiver else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::Interface { arguments, .. },
+            } = &mut receiver
+            else {
                 panic!()
             };
-            Arc::make_mut(arguments)[0] = ResolvedType::Unknown;
-            let ResolvedType::Function { positional, .. } = &mut Arc::make_mut(arguments)[1] else {
+            Arc::make_mut(arguments)[0] = ResolvedType::UNKNOWN;
+            let ResolvedType {
+                kind: ResolvedTypeKind::Function { positional, .. },
+            } = &mut Arc::make_mut(arguments)[1]
+            else {
                 panic!()
             };
-            Arc::make_mut(positional)[0] = ResolvedType::Unknown;
+            Arc::make_mut(positional)[0] = ResolvedType::UNKNOWN;
             assert_eq!(
                 signatures
                     .instantiated_extension_on_type(&receiver, &signatures.extensions[0], model,)
@@ -7305,10 +7463,13 @@ fn dependent_extension_bounds_do_not_accept_proof_only_dynamic_arguments() {
                 .unwrap()
                 .positional[0]
                 .clone();
-            let ResolvedType::Interface { arguments, .. } = &mut receiver else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::Interface { arguments, .. },
+            } = &mut receiver
+            else {
                 panic!()
             };
-            Arc::make_mut(arguments)[0] = ResolvedType::Unknown;
+            Arc::make_mut(arguments)[0] = ResolvedType::UNKNOWN;
             let extension = &signatures.extensions[0];
             assert_eq!(
                 signatures
@@ -7336,10 +7497,13 @@ fn extension_specificity_retains_missing_arguments_instead_of_proof_dynamic() {
                 .unwrap()
                 .positional[0]
                 .clone();
-            let ResolvedType::Interface { arguments, .. } = &mut receiver else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::Interface { arguments, .. },
+            } = &mut receiver
+            else {
                 panic!()
             };
-            Arc::make_mut(arguments)[0] = ResolvedType::Unknown;
+            Arc::make_mut(arguments)[0] = ResolvedType::UNKNOWN;
             let extension = signatures
                 .extensions
                 .iter()
@@ -7368,27 +7532,36 @@ fn extension_identity_proof_distinguishes_declared_from_receiver_derived_holes()
                 .unwrap();
             let mut callback = signature.positional[0].clone();
             let mut pair = signature.positional[1].clone();
-            let ResolvedType::Function { positional, .. } = &mut callback else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::Function { positional, .. },
+            } = &mut callback
+            else {
                 panic!()
             };
-            Arc::make_mut(positional)[0] = ResolvedType::Unknown;
+            Arc::make_mut(positional)[0] = ResolvedType::UNKNOWN;
             assert_eq!(
                 signatures.resolved_extension_owner(&callback, "invoke", model),
                 model.resolve_extension("Generic"),
             );
-            let ResolvedType::Interface { arguments, .. } = &mut pair else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::Interface { arguments, .. },
+            } = &mut pair
+            else {
                 panic!()
             };
-            Arc::make_mut(arguments)[0] = ResolvedType::Unknown;
+            Arc::make_mut(arguments)[0] = ResolvedType::UNKNOWN;
             let fixed = signatures
                 .extensions
                 .iter_mut()
                 .find(|extension| extension.name.as_deref() == Some("Fixed"))
                 .unwrap();
-            let ResolvedType::Interface { arguments, .. } = &mut fixed.on_type else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::Interface { arguments, .. },
+            } = &mut fixed.on_type
+            else {
                 panic!()
             };
-            Arc::make_mut(arguments)[0] = ResolvedType::Unknown;
+            Arc::make_mut(arguments)[0] = ResolvedType::UNKNOWN;
             let fixed = signatures
                 .extensions
                 .iter()
@@ -7432,12 +7605,14 @@ fn project_extension_owner_beats_more_specific_platform_extension() {
                 .find(|extension| extension.name.as_deref() == Some("Platform"))
                 .unwrap()
                 .identity = Some(DeclarationIdentity::sdk("dart:core", "Platform"));
-            let receiver = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: model.resolve_name("Receiver").unwrap(),
-                arguments: Vec::new().into(),
-                nullable: false,
-                extension_type: false,
+            let receiver = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: model.resolve_name("Receiver").unwrap(),
+                    arguments: Vec::new().into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
             assert_eq!(
                 signatures.resolved_extension_owner(&receiver, "member", model),
@@ -7478,15 +7653,20 @@ fn sdk_iterable_map_preserves_its_call_type_parameter() {
             let iterable = DeclarationIdentity::sdk("dart:core", "Iterable");
             let signature = signatures.member(&iterable, "map").unwrap();
             assert_eq!(signature.call_parameters.len(), 1);
-            let ResolvedType::Function { return_type, .. } = &signature.positional[0] else {
+            let ResolvedType {
+                kind: ResolvedTypeKind::Function { return_type, .. },
+            } = &signature.positional[0]
+            else {
                 panic!()
             };
             assert_eq!(
                 return_type.as_ref(),
-                &ResolvedType::TypeParameter {
-                    id: signature.call_parameters[0].clone(),
-                    bound: Arc::new(ResolvedType::Dynamic),
-                    nullable: false,
+                &ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter {
+                        id: signature.call_parameters[0].clone(),
+                        bound: Arc::new(ResolvedType::DYNAMIC),
+                        nullable: false,
+                    },
                 }
             );
 
@@ -7502,10 +7682,13 @@ fn sdk_iterable_map_preserves_its_call_type_parameter() {
             environment.bind_params(function.params().unwrap(), model, &type_parameters);
             let inferred =
                 environment.infer_with_signatures(expression, model, &signatures, &type_parameters);
-            let ResolvedType::Interface {
-                identity,
-                arguments,
-                ..
+            let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity,
+                        arguments,
+                        ..
+                    },
             } = inferred
             else {
                 panic!()
@@ -7573,12 +7756,14 @@ fn private_inherited_members_are_visible_from_same_library_parts() {
     ];
     let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
     let model = SemanticModel::new(&part_path, &part_parsed, &identities, Some(&types));
-    let child = ResolvedType::Interface {
-        occurrence: Default::default(),
-        identity: model.resolve_name("Child").unwrap(),
-        arguments: Vec::new().into(),
-        nullable: false,
-        extension_type: false,
+    let child = ResolvedType {
+        kind: ResolvedTypeKind::Interface {
+            occurrence: Default::default(),
+            identity: model.resolve_name("Child").unwrap(),
+            arguments: Vec::new().into(),
+            nullable: false,
+            extension_type: false,
+        },
     };
 
     assert!(
@@ -7659,12 +7844,14 @@ fn private_inherited_members_are_hidden_across_libraries() {
         &identities,
         Some(&types),
     );
-    let child = ResolvedType::Interface {
-        occurrence: Default::default(),
-        identity: model.resolve_name("Child").unwrap(),
-        arguments: Vec::new().into(),
-        nullable: false,
-        extension_type: false,
+    let child = ResolvedType {
+        kind: ResolvedTypeKind::Interface {
+            occurrence: Default::default(),
+            identity: model.resolve_name("Child").unwrap(),
+            arguments: Vec::new().into(),
+            nullable: false,
+            extension_type: false,
+        },
     };
 
     assert!(
@@ -7742,12 +7929,14 @@ fn private_inherited_lookup_skips_invisible_override() {
     let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
     let model = SemanticModel::new(&base_path, &base_parsed, &identities, Some(&types));
     let base_identity = model.resolve_name("Base").unwrap();
-    let child = ResolvedType::Interface {
-        occurrence: Default::default(),
-        identity: model.resolve_name("Child").unwrap(),
-        arguments: Vec::new().into(),
-        nullable: false,
-        extension_type: false,
+    let child = ResolvedType {
+        kind: ResolvedTypeKind::Interface {
+            occurrence: Default::default(),
+            identity: model.resolve_name("Child").unwrap(),
+            arguments: Vec::new().into(),
+            nullable: false,
+            extension_type: false,
+        },
     };
 
     for (name, access) in [
@@ -7755,7 +7944,9 @@ fn private_inherited_lookup_skips_invisible_override() {
         ("_field", InstanceAccess::Read),
         ("_field", InstanceAccess::Write),
     ] {
-        let ResolvedType::Interface { identity, .. } = signatures
+        let ResolvedType {
+            kind: ResolvedTypeKind::Interface { identity, .. },
+        } = signatures
             .resolved_instance_owner(&child, name, access, &model)
             .unwrap()
         else {
@@ -7804,12 +7995,14 @@ fn cyclic_supertypes_are_unknown() {
             let signatures = SignatureIndex::from_program(program, model);
             let a = model.resolve_name("A").unwrap();
             let b = model.resolve_name("B").unwrap();
-            let receiver = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: a,
-                arguments: Vec::new().into(),
-                nullable: false,
-                extension_type: false,
+            let receiver = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: a,
+                    arguments: Vec::new().into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
 
             assert_eq!(
@@ -8084,12 +8277,14 @@ fn field_forwarders_check_private_getters_from_their_own_library() {
     ];
     let signatures = SignatureIndex::from_project_files(&files, &identities, &types);
     let model = SemanticModel::new(&fake_path, &fake_parsed, &identities, Some(&types));
-    let receiver = ResolvedType::Interface {
-        occurrence: Default::default(),
-        identity: model.resolve_name("Impl").unwrap(),
-        arguments: Vec::new().into(),
-        nullable: false,
-        extension_type: false,
+    let receiver = ResolvedType {
+        kind: ResolvedTypeKind::Interface {
+            occurrence: Default::default(),
+            identity: model.resolve_name("Impl").unwrap(),
+            arguments: Vec::new().into(),
+            nullable: false,
+            extension_type: false,
+        },
     };
 
     assert!(signatures.is_promotable_field(&receiver, "_value", &model));
@@ -8184,7 +8379,12 @@ fn interface_getter_implementations_do_not_hide_no_such_method_forwarders() {
 }
 
 fn contains_parameter(ty: &ResolvedType) -> bool {
-    matches!(ty, ResolvedType::TypeParameter { .. })
+    matches!(
+        ty,
+        ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter { .. },
+        }
+    )
 }
 
 #[test]
@@ -8243,15 +8443,15 @@ fn inference_worklist_preserves_explicit_types_while_forwarding_headers() {
             let constructor = signatures.constructor(&child, "new").unwrap();
             assert!(constructor.positional[0].interface("dart:core", "int"));
             let method = signatures.member(&child, "echo").unwrap();
-            assert_eq!(method.positional, [ResolvedType::Dynamic]);
-            assert_eq!(method.return_type, ResolvedType::Dynamic);
+            assert_eq!(method.positional, [ResolvedType::DYNAMIC]);
+            assert_eq!(method.return_type, ResolvedType::DYNAMIC);
             assert_eq!(
                 &signatures.field(&child, "selected").unwrap().1,
-                &ResolvedType::Dynamic
+                &ResolvedType::DYNAMIC
             );
             assert_eq!(
                 signatures.value_type(&model.resolve_value("pinned").unwrap()),
-                Some(&ResolvedType::Dynamic)
+                Some(&ResolvedType::DYNAMIC)
             );
             assert!(
                 signatures
@@ -8268,15 +8468,15 @@ fn inference_worklist_preserves_explicit_types_while_forwarding_headers() {
             let plain = model.resolve_name("Plain").unwrap();
             assert_eq!(
                 &signatures.field(&plain, "selected").unwrap().1,
-                &ResolvedType::Dynamic
+                &ResolvedType::DYNAMIC
             );
             assert_eq!(
                 signatures.value_type(&model.resolve_value("noEvidence").unwrap()),
-                Some(&ResolvedType::Dynamic)
+                Some(&ResolvedType::DYNAMIC)
             );
             let method = signatures.member(&plain, "echo").unwrap();
-            assert_eq!(method.positional, [ResolvedType::Dynamic]);
-            assert_eq!(method.return_type, ResolvedType::Dynamic);
+            assert_eq!(method.positional, [ResolvedType::DYNAMIC]);
+            assert_eq!(method.return_type, ResolvedType::DYNAMIC);
         },
     );
 }
@@ -8292,11 +8492,11 @@ fn inference_worklist_publishes_recursive_partial_evidence_only_once() {
                 .value_type(&model.resolve_value("result").unwrap())
                 .unwrap();
             assert!(result.interface("dart:core", "List"));
-            assert_eq!(result.arguments(), &[ResolvedType::Unknown]);
+            assert_eq!(result.arguments(), &[ResolvedType::UNKNOWN]);
             let holder = model.resolve_name("Holder").unwrap();
             assert_eq!(
                 &signatures.field(&holder, "value").unwrap().1,
-                &ResolvedType::Unknown
+                &ResolvedType::UNKNOWN
             );
         },
     );
@@ -8360,7 +8560,7 @@ fn inference_worklist_waits_for_every_inherited_candidate_before_combining() {
                         .member(&combined, "conflict")
                         .unwrap()
                         .return_type,
-                    ResolvedType::Dynamic,
+                    ResolvedType::DYNAMIC,
                     "{source}"
                 );
                 assert!(
@@ -8384,13 +8584,13 @@ fn inference_worklist_preserves_extension_getters_and_setter_read_placeholders()
             let signatures = SignatureIndex::from_program(program, model);
             assert_eq!(
                 signatures.value_type(&model.resolve_value("alias").unwrap()),
-                Some(&ResolvedType::Dynamic)
+                Some(&ResolvedType::DYNAMIC)
             );
             let owner = model.resolve_name("C").unwrap();
             for name in ["value", "answer"] {
                 assert_eq!(
                     &signatures.field(&owner, name).unwrap().1,
-                    &ResolvedType::Dynamic,
+                    &ResolvedType::DYNAMIC,
                     "{name}"
                 );
             }
@@ -8464,7 +8664,7 @@ fn inference_worklist_preserves_permanent_partial_diamond_evidence() {
                 .member(&model.resolve_name("D").unwrap(), "g")
                 .unwrap();
             assert!(method.positional[0].interface("dart:core", "int"));
-            assert_eq!(method.positional[1], ResolvedType::Unknown);
+            assert_eq!(method.positional[1], ResolvedType::UNKNOWN);
             let receiver = ResolvedType::interface_identity(model.resolve_name("E").unwrap());
             assert_eq!(
                 signatures.resolved_member_owner(&receiver, "g", model),
@@ -8472,7 +8672,7 @@ fn inference_worklist_preserves_permanent_partial_diamond_evidence() {
             );
             let (method, _) = signatures.resolved_member(&receiver, "g", model).unwrap();
             assert!(method.positional[0].interface("dart:core", "int"));
-            assert_eq!(method.positional[1], ResolvedType::Unknown);
+            assert_eq!(method.positional[1], ResolvedType::UNKNOWN);
         },
     );
 }
@@ -8497,7 +8697,7 @@ fn inference_worklist_settles_distinct_permanent_partials_in_dependency_order() 
                     method.positional[0].interface("dart:core", "num"),
                     "{owner}: {method:?}"
                 );
-                assert_eq!(method.positional[1], ResolvedType::Unknown);
+                assert_eq!(method.positional[1], ResolvedType::UNKNOWN);
             }
             let receiver = ResolvedType::interface_identity(model.resolve_name("Lookup").unwrap());
             assert_eq!(
@@ -8587,7 +8787,7 @@ fn inference_worklist_settles_shared_getter_setter_output_without_a_false_cycle(
             let owner = model.resolve_name("C").unwrap();
             assert_eq!(
                 &signatures.field(&owner, "value").unwrap().1,
-                &ResolvedType::Dynamic,
+                &ResolvedType::DYNAMIC,
             );
             assert!(
                 signatures

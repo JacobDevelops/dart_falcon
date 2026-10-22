@@ -87,11 +87,11 @@ fn declaration_relations_preserve_non_interface_uncertainty_and_bounds() {
         |signatures, model| {
             let base = model.resolve_name("Base").unwrap();
             for ty in [
-                ResolvedType::Unknown,
-                ResolvedType::Dynamic,
-                ResolvedType::Void,
-                ResolvedType::Never,
-                ResolvedType::Null,
+                ResolvedType::UNKNOWN,
+                ResolvedType::DYNAMIC,
+                ResolvedType::VOID,
+                ResolvedType::NEVER,
+                ResolvedType::NULL,
                 model.resolve_type_name(&["Fn"]).unwrap(),
                 model.resolve_type_name(&["Rec"]).unwrap(),
             ] {
@@ -106,12 +106,16 @@ fn declaration_relations_preserve_non_interface_uncertainty_and_bounds() {
                 name: "T".into(),
             };
             let bound = Arc::new(ResolvedType::interface_identity(base.clone()));
-            let parameter = ResolvedType::TypeParameter {
-                id: id.clone(),
-                bound: Arc::clone(&bound),
-                nullable: false,
+            let parameter = ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter {
+                    id: id.clone(),
+                    bound: Arc::clone(&bound),
+                    nullable: false,
+                },
             };
-            let non_null = ResolvedType::NonNullTypeParameter { id, bound };
+            let non_null = ResolvedType {
+                kind: ResolvedTypeKind::NonNullTypeParameter { id, bound },
+            };
             let other = model.resolve_name("Other").unwrap();
             for ty in [&parameter, &non_null] {
                 assert_eq!(
@@ -159,14 +163,14 @@ fn facade_preserves_each_resolved_type_relation_mode() {
                     Truth::No,
                 ),
                 (
-                    ResolvedType::Null,
+                    ResolvedType::NULL,
                     int.clone(),
                     Truth::No,
                     Truth::Unknown,
                     Truth::Yes,
                 ),
                 (
-                    ResolvedType::Unknown,
+                    ResolvedType::UNKNOWN,
                     int,
                     Truth::Unknown,
                     Truth::Unknown,
@@ -351,12 +355,14 @@ fn malformed_type_parameter_supertype_preserves_instantiated_positive() {
         |signatures, model| {
             let base = model.resolve_name("Base").unwrap();
             let identity = model.resolve_name("C").unwrap();
-            let ty = ResolvedType::Interface {
-                occurrence: Default::default(),
-                identity: identity.clone(),
-                arguments: vec![ResolvedType::interface_identity(base.clone())].into(),
-                nullable: false,
-                extension_type: false,
+            let ty = ResolvedType {
+                kind: ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: identity.clone(),
+                    arguments: vec![ResolvedType::interface_identity(base.clone())].into(),
+                    nullable: false,
+                    extension_type: false,
+                },
             };
             assert_eq!(
                 signatures.supertype_matches(&identity, &|ancestor| ancestor.matches(&base)),

@@ -50,10 +50,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         let Some(identity) = self.model.resolve_name(declaration.name.name()) else {
             return StructuralTraversal::SkipChildren;
         };
-        let ty = ResolvedType::Interface {
-            occurrence: Default::default(), identity, arguments: Vec::new().into(),
-            nullable: false, extension_type: false,
-        };
+        let ty = ResolvedType::new_interface(identity, Vec::new().into(), false, false);
         if !["Exception", "Error"].iter().any(|name| {
             self.signatures.interface_check_sdk(&ty, "dart:core", name, &self.model) == Truth::Yes
         }) {

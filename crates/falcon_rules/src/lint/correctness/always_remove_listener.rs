@@ -14,7 +14,7 @@
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, Truth, TypeRelation,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -154,7 +154,7 @@ impl<'a> Collector<'a> {
         {
             ty = property;
         }
-        let known_listenable = matches!(&ty, ResolvedType::Interface { identity: DeclarationIdentity::Package { package, name, .. }, .. }
+        let known_listenable = matches!(ty.view(), ResolvedTypeView::Interface { identity: DeclarationIdentity::Package { package, name, .. }, .. }
             if package.as_str() == "flutter" && matches!(name.as_str(), "Listenable" | "ValueListenable" | "Animation" | "ChangeNotifier" | "ValueNotifier" | "FocusNode" | "TextEditingController" | "ScrollController" | "PageController" | "TabController" | "AnimationController"));
         if !known_listenable
             && state.signatures.relation(&ty, TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::flutter("Listenable")), &state.model) != Truth::Yes

@@ -1,4 +1,5 @@
 use super::*;
+use crate::resolve::semantic::ResolvedTypeKind;
 use falcon_syntax::cst::BinaryExpr;
 
 impl TypeEnvironment {
@@ -97,7 +98,7 @@ impl TypeEnvironment {
         context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
     ) -> ResolvedType {
         let Some(first) = names.next() else {
-            return ResolvedType::Unknown;
+            return ResolvedType::UNKNOWN;
         };
         let model = context.model;
         let signatures = context.signatures;
@@ -128,9 +129,21 @@ impl TypeEnvironment {
                 static_type
             } else if let Some(data) = signatures.instantiated_data_read(&ty, field, model) {
                 data
-            } else if matches!(ty, ResolvedType::Dynamic) {
-                ResolvedType::Dynamic
-            } else if field == "call" && matches!(ty, ResolvedType::Function { .. }) {
+            } else if matches!(
+                ty,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Dynamic
+                }
+            ) {
+                ResolvedType::DYNAMIC
+            } else if field == "call"
+                && matches!(
+                    ty,
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Function { .. }
+                    }
+                )
+            {
                 ty.with_nullable(false)
             } else {
                 let constructor = if unshadowed && model.resolve_dotted(&segments).is_none() {
@@ -147,7 +160,13 @@ impl TypeEnvironment {
                     None
                 };
                 let prefixed = || {
-                    if matches!(ty, ResolvedType::Unknown) || ty.interface("dart:core", "Type") {
+                    if matches!(
+                        ty,
+                        ResolvedType {
+                            kind: ResolvedTypeKind::Unknown
+                        }
+                    ) || ty.interface("dart:core", "Type")
+                    {
                         let [prefix] = owner else {
                             return None;
                         };
@@ -186,14 +205,14 @@ impl TypeEnvironment {
                         ))
                     })
                     .unwrap_or_else(|| {
-                        if ty == ResolvedType::Unknown
+                        if ty == ResolvedType::UNKNOWN
                             && !self.is_bound(first.name())
                             && (context.lookup)(first.name()).is_none()
                             && model.resolve_dotted(&segments).is_some()
                         {
                             model.core_type("Type", false)
                         } else {
-                            ResolvedType::Unknown
+                            ResolvedType::UNKNOWN
                         }
                     })
             };
@@ -227,9 +246,17 @@ impl TypeEnvironment {
         context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
         expected: Option<&ResolvedType>,
     ) -> ResolvedType {
-        if matches!(expected, Some(ResolvedType::Function { .. }))
-            && !matches!(ty, ResolvedType::Function { .. })
-            && !ty.nullable()
+        if matches!(
+            expected,
+            Some(ResolvedType {
+                kind: ResolvedTypeKind::Function { .. }
+            })
+        ) && !matches!(
+            ty,
+            ResolvedType {
+                kind: ResolvedTypeKind::Function { .. }
+            }
+        ) && !ty.nullable()
             && let Some((signature, owner)) =
                 context
                     .signatures
@@ -294,17 +321,29 @@ impl TypeEnvironment {
             if let Some(ty) = signatures.instantiated_data_read(&receiver, field.name(), model) {
                 return ty;
             }
-            if matches!(receiver, ResolvedType::Dynamic) {
-                return ResolvedType::Dynamic;
+            if matches!(
+                receiver,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Dynamic
+                }
+            ) {
+                return ResolvedType::DYNAMIC;
             }
-            if field.name() == "call" && matches!(receiver, ResolvedType::Function { .. }) {
+            if field.name() == "call"
+                && matches!(
+                    receiver,
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Function { .. }
+                    }
+                )
+            {
                 return receiver.with_nullable(false);
             }
             let explicit = match object {
                 Expr::GenericInstantiation(generic) => generic.type_args(),
                 _ => AstChildren::empty(),
             };
-            let unknown_receiver = receiver == ResolvedType::Unknown;
+            let unknown_receiver = receiver == ResolvedType::UNKNOWN;
             if let Some(ty) =
                 self.callable_tearoff(expr, explicit, &context, expected, &mut Some(receiver))
             {
@@ -333,7 +372,9 @@ impl TypeEnvironment {
                 target => (target, type_args),
             };
             if let Expr::DotShorthand(shorthand) = target
-                && let Some(ResolvedType::Interface { identity, .. }) = expected
+                && let Some(ResolvedType {
+                    kind: ResolvedTypeKind::Interface { identity, .. },
+                }) = expected
             {
                 let name = shorthand.name();
                 if signatures.constructor(identity, name.name()).is_some() || name.name() == "new" {
@@ -364,7 +405,12 @@ impl TypeEnvironment {
                 }
             }
             let unshadowed = receiver.as_ref().is_none_or(|ty| {
-                matches!(ty, ResolvedType::Unknown) || ty.interface("dart:core", "Type")
+                matches!(
+                    ty,
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Unknown
+                    }
+                ) || ty.interface("dart:core", "Type")
             }) && self.invocation_unshadowed(target, &context);
             if unshadowed {
                 if matches!(target, Expr::Ident(_))
@@ -527,7 +573,7 @@ impl TypeEnvironment {
             Expr::DoubleLit(_) => model.core_type("double", false),
             Expr::StringLit(_) => model.core_type("String", false),
             Expr::BoolLit(_) => model.core_type("bool", false),
-            Expr::NullLit(_) => ResolvedType::Null,
+            Expr::NullLit(_) => ResolvedType::NULL,
             Expr::SymbolLit(_) => model.core_type("Symbol", false),
             Expr::GenericInstantiation(generic) => {
                 let target = generic.target();
@@ -548,27 +594,33 @@ impl TypeEnvironment {
                         {
                             model.core_type("Type", false)
                         } else {
-                            ResolvedType::Unknown
+                            ResolvedType::UNKNOWN
                         }
                     })
             }
             Expr::DotShorthand(shorthand) => {
                 let name = shorthand.name();
                 let receiver = match expected {
-                    Some(ResolvedType::Function {
-                        return_type, alias, ..
+                    Some(ResolvedType {
+                        kind:
+                            ResolvedTypeKind::Function {
+                                return_type, alias, ..
+                            },
                     }) => Cow::Owned(return_type.as_ref().clone().projected_from(alias)),
                     Some(ty) => Cow::Borrowed(ty),
-                    None => return ResolvedType::Unknown,
+                    None => return ResolvedType::UNKNOWN,
                 };
-                let ResolvedType::Interface {
-                    occurrence,
-                    identity,
-                    arguments,
-                    ..
+                let ResolvedType {
+                    kind:
+                        ResolvedTypeKind::Interface {
+                            occurrence,
+                            identity,
+                            arguments,
+                            ..
+                        },
                 } = receiver.as_ref()
                 else {
-                    return ResolvedType::Unknown;
+                    return ResolvedType::UNKNOWN;
                 };
                 if signatures.is_enum_value(identity, name.name()) {
                     return receiver.with_nullable(false);
@@ -604,7 +656,7 @@ impl TypeEnvironment {
                         )
                     })
                 })
-                .unwrap_or(ResolvedType::Unknown)
+                .unwrap_or(ResolvedType::UNKNOWN)
             }
             Expr::This(_) => self.receiver(),
             Expr::Ident(identifier) => {
@@ -685,12 +737,14 @@ impl TypeEnvironment {
                 // `await e` gives `e` the context `FutureOr<K>`.
                 let operand_context = expected
                     .filter(|context| !has_inference_holes(context))
-                    .map(|context| ResolvedType::Interface {
-                        occurrence: Default::default(),
-                        identity: DeclarationIdentity::sdk("dart:async", "FutureOr"),
-                        arguments: vec![context.clone()].into(),
-                        nullable: false,
-                        extension_type: false,
+                    .map(|context| ResolvedType {
+                        kind: ResolvedTypeKind::Interface {
+                            occurrence: Default::default(),
+                            identity: DeclarationIdentity::sdk("dart:async", "FutureOr"),
+                            arguments: vec![context.clone()].into(),
+                            nullable: false,
+                            extension_type: false,
+                        },
                     });
                 let ty = self.infer_with_context(
                     operand,
@@ -704,7 +758,12 @@ impl TypeEnvironment {
                     || ty.interface("dart:async", "FutureOr")
                 {
                     Some(ty.clone())
-                } else if matches!(ty, ResolvedType::Interface { .. }) {
+                } else if matches!(
+                    ty,
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Interface { .. }
+                    }
+                ) {
                     signatures.instantiated_supertype(&ty, "dart:async", "Future", model)
                 } else {
                     None
@@ -715,13 +774,13 @@ impl TypeEnvironment {
                         .map(|argument| {
                             argument.with_nullable(argument.nullable() || ty.nullable())
                         })
-                        .unwrap_or(ResolvedType::Dynamic),
+                        .unwrap_or(ResolvedType::DYNAMIC),
                     None => ty,
                 }
             }
             Expr::Record(record) => {
                 let fields = record.fields();
-                let expected = expected.filter(|ty| matches!(ty, ResolvedType::Record { positional, named, .. }
+                let expected = expected.filter(|ty| matches!(ty, ResolvedType { kind: ResolvedTypeKind::Record { positional, named, .. } }
                     if positional.len() == fields.clone().filter(|field| field.name().is_none()).count()
                         && named.len() == fields.clone().filter(|field| field.name().is_some()).count()
                         && fields.clone().filter_map(|field| field.name()).all(|field| named.iter().any(|(name, _)| name == field.name()))));
@@ -746,10 +805,15 @@ impl TypeEnvironment {
                     );
                     // Record fields implicitly downcast dynamic values to
                     // their schema, but a void context does not impute void.
-                    let ty = if ty == ResolvedType::Dynamic {
+                    let ty = if ty == ResolvedType::DYNAMIC {
                         context
                             .filter(|ty| {
-                                !matches!(ty, ResolvedType::Void) && !has_inference_holes(ty)
+                                !matches!(
+                                    ty,
+                                    ResolvedType {
+                                        kind: ResolvedTypeKind::Void
+                                    }
+                                ) && !has_inference_holes(ty)
                             })
                             .unwrap_or(ty)
                     } else {
@@ -761,11 +825,13 @@ impl TypeEnvironment {
                     }
                 }
                 named.sort_by(|left, right| left.0.cmp(&right.0));
-                ResolvedType::Record {
-                    occurrence: Default::default(),
-                    positional: positional.into(),
-                    named: named.into(),
-                    nullable: false,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Record {
+                        occurrence: Default::default(),
+                        positional: positional.into(),
+                        named: named.into(),
+                        nullable: false,
+                    },
                 }
             }
             Expr::List(_) | Expr::Set(_) => {
@@ -833,43 +899,47 @@ impl TypeEnvironment {
                     return map.non_null();
                 }
                 if !components[1].is_empty() {
-                    return ResolvedType::Interface {
-                        occurrence: Default::default(),
-                        identity: DeclarationIdentity::sdk("dart:core", "Map"),
-                        arguments: components
-                            .into_iter()
-                            .map(|types| {
-                                types
-                                    .into_iter()
-                                    .reduce(|left, right| {
-                                        inference_join(&left, &right, signatures, model)
-                                    })
-                                    .unwrap_or(ResolvedType::Dynamic)
-                            })
-                            .collect(),
-                        nullable: false,
-                        extension_type: false,
+                    return ResolvedType {
+                        kind: ResolvedTypeKind::Interface {
+                            occurrence: Default::default(),
+                            identity: DeclarationIdentity::sdk("dart:core", "Map"),
+                            arguments: components
+                                .into_iter()
+                                .map(|types| {
+                                    types
+                                        .into_iter()
+                                        .reduce(|left, right| {
+                                            inference_join(&left, &right, signatures, model)
+                                        })
+                                        .unwrap_or(ResolvedType::DYNAMIC)
+                                })
+                                .collect(),
+                            nullable: false,
+                            extension_type: false,
+                        },
                     };
                 }
                 let element = context.unwrap_or_else(|| {
                     components[0]
                         .drain(..)
                         .reduce(|left, right| inference_join(&left, &right, signatures, model))
-                        .unwrap_or(ResolvedType::Dynamic)
+                        .unwrap_or(ResolvedType::DYNAMIC)
                 });
-                ResolvedType::Interface {
-                    occurrence: Default::default(),
-                    identity: DeclarationIdentity::sdk(
-                        "dart:core",
-                        if matches!(expr, Expr::List(_)) {
-                            "List"
-                        } else {
-                            "Set"
-                        },
-                    ),
-                    arguments: vec![element].into(),
-                    nullable: false,
-                    extension_type: false,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface {
+                        occurrence: Default::default(),
+                        identity: DeclarationIdentity::sdk(
+                            "dart:core",
+                            if matches!(expr, Expr::List(_)) {
+                                "List"
+                            } else {
+                                "Set"
+                            },
+                        ),
+                        arguments: vec![element].into(),
+                        nullable: false,
+                        extension_type: false,
+                    },
                 }
             }
             Expr::Map(map) => {
@@ -890,12 +960,14 @@ impl TypeEnvironment {
                         })
                         .and_then(|iterable| iterable.type_argument(0))
                 {
-                    return ResolvedType::Interface {
-                        occurrence: Default::default(),
-                        identity: DeclarationIdentity::sdk("dart:core", "Set"),
-                        arguments: vec![element].into(),
-                        nullable: false,
-                        extension_type: false,
+                    return ResolvedType {
+                        kind: ResolvedTypeKind::Interface {
+                            occurrence: Default::default(),
+                            identity: DeclarationIdentity::sdk("dart:core", "Set"),
+                            arguments: vec![element].into(),
+                            nullable: false,
+                            extension_type: false,
+                        },
                     };
                 }
                 let contexts = [0, 1].map(|ordinal| {
@@ -947,16 +1019,18 @@ impl TypeEnvironment {
                                 .reduce(|left, right| {
                                     inference_join(&left, &right, signatures, model)
                                 })
-                                .unwrap_or(ResolvedType::Dynamic)
+                                .unwrap_or(ResolvedType::DYNAMIC)
                         })
                     })
                     .collect();
-                ResolvedType::Interface {
-                    occurrence: Default::default(),
-                    identity: DeclarationIdentity::sdk("dart:core", "Map"),
-                    arguments,
-                    nullable: false,
-                    extension_type: false,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface {
+                        occurrence: Default::default(),
+                        identity: DeclarationIdentity::sdk("dart:core", "Map"),
+                        arguments,
+                        nullable: false,
+                        extension_type: false,
+                    },
                 }
             }
             Expr::Binary(binary) => {
@@ -994,7 +1068,7 @@ impl TypeEnvironment {
                             type_parameters,
                             expected
                                 .filter(|ty| !has_inference_holes(ty))
-                                .or(Some(&left).filter(|ty| **ty != ResolvedType::Unknown)),
+                                .or(Some(&left).filter(|ty| **ty != ResolvedType::UNKNOWN)),
                             lookup,
                         );
                         contextual_join(&[left, right], expected, signatures, model)
@@ -1072,7 +1146,7 @@ impl TypeEnvironment {
                         model,
                         signatures,
                         type_parameters,
-                        Some(&target_type).filter(|ty| **ty != ResolvedType::Unknown),
+                        Some(&target_type).filter(|ty| **ty != ResolvedType::UNKNOWN),
                         lookup,
                     ),
                     Some(BinaryOp::NullCoalesce) => {
@@ -1090,8 +1164,8 @@ impl TypeEnvironment {
                     Some(op) => binary_result(op, &target_type, &infer(value), signatures, model),
                 }
             }
-            Expr::Throw(_) => ResolvedType::Never,
-            _ => ResolvedType::Unknown,
+            Expr::Throw(_) => ResolvedType::NEVER,
+            _ => ResolvedType::UNKNOWN,
         }
     }
 }

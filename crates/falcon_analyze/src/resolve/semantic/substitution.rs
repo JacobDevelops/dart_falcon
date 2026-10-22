@@ -1,4 +1,5 @@
 use super::*;
+use crate::resolve::semantic::ResolvedTypeKind;
 
 /// Substitution interns equal source subgraphs within one pass. Unlike semantic
 /// equality, its keys retain function-use provenance for diagnostics.
@@ -49,12 +50,15 @@ pub(super) enum SubstitutionSourceKey<'a> {
 impl<'a> SubstitutionSourceKey<'a> {
     pub(super) fn of(ty: &'a ResolvedType) -> Option<Self> {
         match ty {
-            ResolvedType::Interface {
-                occurrence,
-                identity,
-                arguments,
-                nullable,
-                extension_type,
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        occurrence,
+                        identity,
+                        arguments,
+                        nullable,
+                        extension_type,
+                    },
             } if !arguments.is_empty() => Some(Self::Interface(
                 identity,
                 BorrowedIdentity::new(arguments.as_ref()),
@@ -62,14 +66,17 @@ impl<'a> SubstitutionSourceKey<'a> {
                 *extension_type,
                 occurrence.0.as_deref().map(BorrowedIdentity::new),
             )),
-            ResolvedType::Function {
-                return_type,
-                positional,
-                named,
-                optional_positional,
-                nullable,
-                alias,
-                shape,
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        return_type,
+                        positional,
+                        named,
+                        optional_positional,
+                        nullable,
+                        alias,
+                        shape,
+                    },
             } => Some(Self::Function(
                 BorrowedIdentity::new(return_type.as_ref()),
                 BorrowedIdentity::new(positional.as_ref()),
@@ -79,11 +86,14 @@ impl<'a> SubstitutionSourceKey<'a> {
                 alias.0.as_deref().map(BorrowedIdentity::new),
                 shape.as_deref().map(BorrowedIdentity::new),
             )),
-            ResolvedType::Record {
-                occurrence,
-                positional,
-                named,
-                nullable,
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Record {
+                        occurrence,
+                        positional,
+                        named,
+                        nullable,
+                    },
             } => Some(Self::Record(
                 BorrowedIdentity::new(positional.as_ref()),
                 BorrowedIdentity::new(named.as_ref()),
@@ -120,18 +130,18 @@ impl<'a> SubstitutionMemo<'a> {
         // Match substitution's free-parameter boundary, not mentions_any's
         // bound traversal: an unreplaced parameter retains its original bound.
         let relevant = match ty {
-            ResolvedType::TypeParameter { id, .. }
-            | ResolvedType::NonNullTypeParameter { id, .. } => substitutions.contains_key(id),
-            ResolvedType::Interface { arguments, .. } => arguments
+            ResolvedType { kind: ResolvedTypeKind::TypeParameter { id, .. } }
+            | ResolvedType { kind: ResolvedTypeKind::NonNullTypeParameter { id, .. } } => substitutions.contains_key(id),
+            ResolvedType { kind: ResolvedTypeKind::Interface { arguments, .. } } => arguments
                 .iter()
                 .any(|ty| self.is_relevant(ty, substitutions, true)),
-            ResolvedType::Function {
+            ResolvedType { kind: ResolvedTypeKind::Function {
                 return_type,
                 positional,
                 named,
                 shape,
                 ..
-            } => {
+            } } => {
                 self.is_relevant(return_type, substitutions, true)
                     || positional
                         .iter()
@@ -140,13 +150,13 @@ impl<'a> SubstitutionMemo<'a> {
                         .iter()
                         .any(|(_, ty)| self.is_relevant(ty, substitutions, true))
                     || shape.as_ref().is_some_and(|shape| shape.type_parameters.iter().any(|ty| {
-                        matches!(ty, ResolvedType::TypeParameter { id, bound, .. }
+                        matches!(ty, ResolvedType { kind: ResolvedTypeKind::TypeParameter { id, bound, .. } }
                             if substitutions.contains_key(id) || self.is_relevant(bound, substitutions, true))
                     }))
             }
-            ResolvedType::Record {
+            ResolvedType { kind: ResolvedTypeKind::Record {
                 positional, named, ..
-            } => {
+            } } => {
                 positional
                     .iter()
                     .any(|ty| self.is_relevant(ty, substitutions, true))
@@ -181,12 +191,12 @@ fn instantiate_bound(
 ) -> ResolvedType {
     if !visiting.insert(id.clone()) {
         return if covariant {
-            ResolvedType::Dynamic
+            ResolvedType::DYNAMIC
         } else {
-            ResolvedType::Never
+            ResolvedType::NEVER
         };
     }
-    let result = bounds.get(id).map_or(ResolvedType::Dynamic, |bound| {
+    let result = bounds.get(id).map_or(ResolvedType::DYNAMIC, |bound| {
         instantiate_bound_type(bound, bounds, visiting, covariant)
     });
     visiting.remove(id);
@@ -217,12 +227,14 @@ fn instantiate_bound_type_memoized<'a>(
         return result.clone();
     }
     let result = match ty {
-        ResolvedType::TypeParameter { id, nullable, .. } if bounds.contains_key(id) => {
+        ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter { id, nullable, .. },
+        } if bounds.contains_key(id) => {
             let result = if bound_reaches_visiting(id, bounds, visiting, &mut HashSet::new()) {
                 if covariant {
-                    ResolvedType::Dynamic
+                    ResolvedType::DYNAMIC
                 } else {
-                    ResolvedType::Never
+                    ResolvedType::NEVER
                 }
             } else {
                 instantiate_bound(id, bounds, visiting, true)
@@ -233,12 +245,14 @@ fn instantiate_bound_type_memoized<'a>(
                 result
             }
         }
-        ResolvedType::NonNullTypeParameter { id, .. } if bounds.contains_key(id) => {
+        ResolvedType {
+            kind: ResolvedTypeKind::NonNullTypeParameter { id, .. },
+        } if bounds.contains_key(id) => {
             let result = if bound_reaches_visiting(id, bounds, visiting, &mut HashSet::new()) {
                 if covariant {
-                    ResolvedType::Dynamic
+                    ResolvedType::DYNAMIC
                 } else {
-                    ResolvedType::Never
+                    ResolvedType::NEVER
                 }
             } else {
                 instantiate_bound(id, bounds, visiting, true)
@@ -251,10 +265,15 @@ fn instantiate_bound_type_memoized<'a>(
             // keys must remain valid for this entire traversal.
             match (ty, &mut result) {
                 (
-                    ResolvedType::Interface {
-                        arguments: source, ..
+                    ResolvedType {
+                        kind:
+                            ResolvedTypeKind::Interface {
+                                arguments: source, ..
+                            },
                     },
-                    ResolvedType::Interface { arguments, .. },
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Interface { arguments, .. },
+                    },
                 ) => {
                     *arguments = source
                         .iter()
@@ -266,19 +285,25 @@ fn instantiate_bound_type_memoized<'a>(
                         .collect();
                 }
                 (
-                    ResolvedType::Function {
-                        return_type: source_return,
-                        positional: source_positional,
-                        named: source_named,
-                        shape: source_shape,
-                        ..
+                    ResolvedType {
+                        kind:
+                            ResolvedTypeKind::Function {
+                                return_type: source_return,
+                                positional: source_positional,
+                                named: source_named,
+                                shape: source_shape,
+                                ..
+                            },
                     },
-                    ResolvedType::Function {
-                        return_type,
-                        positional,
-                        named,
-                        shape,
-                        ..
+                    ResolvedType {
+                        kind:
+                            ResolvedTypeKind::Function {
+                                return_type,
+                                positional,
+                                named,
+                                shape,
+                                ..
+                            },
                     },
                 ) => {
                     *shape = source_shape.as_ref().map(|shape| {
@@ -316,13 +341,19 @@ fn instantiate_bound_type_memoized<'a>(
                         .collect();
                 }
                 (
-                    ResolvedType::Record {
-                        positional: source_positional,
-                        named: source_named,
-                        ..
+                    ResolvedType {
+                        kind:
+                            ResolvedTypeKind::Record {
+                                positional: source_positional,
+                                named: source_named,
+                                ..
+                            },
                     },
-                    ResolvedType::Record {
-                        positional, named, ..
+                    ResolvedType {
+                        kind:
+                            ResolvedTypeKind::Record {
+                                positional, named, ..
+                            },
                     },
                 ) => {
                     *positional = source_positional
@@ -352,11 +383,17 @@ fn instantiate_bound_type_memoized<'a>(
     };
     if matches!(
         ty,
-        ResolvedType::Interface { .. }
-            | ResolvedType::Function { .. }
-            | ResolvedType::Record { .. }
-            | ResolvedType::TypeParameter { .. }
-            | ResolvedType::NonNullTypeParameter { .. }
+        ResolvedType {
+            kind: ResolvedTypeKind::Interface { .. }
+        } | ResolvedType {
+            kind: ResolvedTypeKind::Function { .. }
+        } | ResolvedType {
+            kind: ResolvedTypeKind::Record { .. }
+        } | ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter { .. }
+        } | ResolvedType {
+            kind: ResolvedTypeKind::NonNullTypeParameter { .. }
+        }
     ) {
         memo.insert(key, result.clone());
     }

@@ -6,7 +6,7 @@
 //! State bases are ignored because they may own lifecycle behavior.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, SemanticModel,
     SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
@@ -60,10 +60,11 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         }
         let Some(base) = class.extends() else { return StructuralTraversal::SkipChildren; };
         let base = self.model.resolve_type(base);
-        if !matches!(&base, ResolvedType::Interface { identity, .. } if self.ctx.identities().is_some_and(|index| index.is_package_declaration(identity, "flutter", "State"))) || !class.with_clause().is_empty() {
+        if !matches!(base.view(), ResolvedTypeView::Interface { identity, .. } if self.ctx.identities().is_some_and(|index| index.is_package_declaration(identity, "flutter", "State"))) || !class.with_clause().is_empty() {
             return StructuralTraversal::SkipChildren;
         }
-        let Some(ResolvedType::Interface { identity, .. }) = base.type_argument(0) else { return StructuralTraversal::SkipChildren; };
+        let Some(argument) = base.type_argument(0) else { return StructuralTraversal::SkipChildren; };
+        let ResolvedTypeView::Interface { identity, .. } = argument.view() else { return StructuralTraversal::SkipChildren; };
         let mut build = false;
         for member in class.members() {
             match member {
@@ -71,7 +72,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 _ => self.necessary = true,
             }
         }
-        if build { self.current = Some(identity); }
+        if build { self.current = Some(identity.clone()); }
         StructuralTraversal::Continue
     }
     fn exit_top_level_decl(&mut self, _node: TopLevelDecl<'a>) {

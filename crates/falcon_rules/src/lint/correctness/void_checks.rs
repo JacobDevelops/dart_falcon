@@ -27,7 +27,7 @@
 //!
 //! Adopted from the official `void_checks` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -90,7 +90,7 @@ impl<'a> Collector<'a> {
                 .enclosing(&statement)
                 .is_some_and(|body| body.owner == BodyOwner::Setter) =>
             {
-                Some(ResolvedType::Void)
+                Some(ResolvedType::VOID)
             }
             _ => state.expected().cloned(),
         }
@@ -106,10 +106,10 @@ impl<'a> Collector<'a> {
         reported_span: Span,
         return_statement: bool,
     ) {
-        if !matches!(expected, ResolvedType::Void)
+        if !matches!(expected.view(), ResolvedTypeView::Void)
             && !(expected.interface("dart:async", "FutureOr")
-                && matches!(expected.arguments().first(), Some(ResolvedType::Void)))
-            && !(matches!(expected, ResolvedType::Function { .. })
+                && matches!(expected.arguments().first().map(ResolvedType::view), Some(ResolvedTypeView::Void)))
+            && !(matches!(expected.view(), ResolvedTypeView::Function { .. })
                 && matches!(value, Expr::FuncExpr(function)
                     if matches!(function.body(), FunctionBody::Block(_))))
         {
@@ -118,7 +118,7 @@ impl<'a> Collector<'a> {
         // Static argument types include downward inference from their location,
         // including generic constructor calls such as `Future.value(value)`.
         let contextual = state.infer_with_context(value, Some(expected));
-        let actual = if contextual == ResolvedType::Unknown {
+        let actual = if contextual == ResolvedType::UNKNOWN {
             state.infer(value)
         } else {
             contextual
@@ -269,9 +269,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             let (positional, named) = state.substituted_parameters(signature, &substitutions);
             self.check_arguments(&positional, &named, args, state);
         } else if name.name() == "call"
-            && let ResolvedType::Function {
+            && let ResolvedTypeView::Function {
                 positional, named, ..
-            } = receiver
+            } = receiver.view()
         {
             for (argument, expected) in args.positional().zip(positional.iter()) {
                 self.check_value(expected, argument, state, argument.span(), false);
@@ -351,7 +351,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     &state.model,
                 );
                 let resolved = state.infer_with_context(node, state.expected());
-                if let ResolvedType::Interface { identity, .. } = &resolved
+                if let ResolvedTypeView::Interface { identity, .. } = resolved.view()
                     && let Some(signature) = state
                         .signatures
                         .constructor(
@@ -388,7 +388,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                                 .get(1)
                                 .map(|ty| state.model.substitute(ty, &substitutions))
                         })
-                        .unwrap_or(ResolvedType::Unknown)
+                        .unwrap_or(ResolvedType::UNKNOWN)
                 } else {
                     state.writable_type(target)
                 };
@@ -398,7 +398,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 let return_type = state
                     .infer_with_context(node, state.expected())
                     .function_return_type()
-                    .unwrap_or(ResolvedType::Unknown);
+                    .unwrap_or(ResolvedType::UNKNOWN);
                 self.enter_function(node.span(), Some(return_type));
             }
             _ => {}
@@ -446,26 +446,26 @@ fn acceptable(
     block_literal: bool,
     return_statement: bool,
 ) -> Truth {
-    if matches!(expected, ResolvedType::Void) {
-        if return_statement && !matches!(actual, ResolvedType::Dynamic) {
+    if matches!(expected.view(), ResolvedTypeView::Void) {
+        if return_statement && !matches!(actual.view(), ResolvedTypeView::Dynamic) {
             return Truth::Yes;
         }
         return acceptable_for_void(actual);
     }
     if expected.interface("dart:async", "FutureOr")
-        && matches!(expected.arguments().first(), Some(ResolvedType::Void))
+        && matches!(expected.arguments().first().map(ResolvedType::view), Some(ResolvedTypeView::Void))
     {
         return acceptable_for_future_or_void(actual);
     }
     if block_literal
-        && let ResolvedType::Function {
+        && let ResolvedTypeView::Function {
             return_type: expected,
             ..
-        } = expected
-        && let ResolvedType::Function {
+        } = expected.view()
+        && let ResolvedTypeView::Function {
             return_type: actual,
             ..
-        } = actual
+        } = actual.view()
     {
         return acceptable(expected, actual, block_literal, return_statement);
     }
@@ -474,10 +474,10 @@ fn acceptable(
 
 /// The official `isTypeAcceptableWhenExpectingVoid`.
 fn acceptable_for_void(actual: &ResolvedType) -> Truth {
-    match actual {
-        ResolvedType::Unknown => Truth::Unknown,
-        ResolvedType::Void | ResolvedType::Null | ResolvedType::Never => Truth::Yes,
-        ResolvedType::Interface { .. } if actual.interface("dart:async", "Future") => actual
+    match actual.view() {
+        ResolvedTypeView::Unknown => Truth::Unknown,
+        ResolvedTypeView::Void | ResolvedTypeView::Null | ResolvedTypeView::Never => Truth::Yes,
+        ResolvedTypeView::Interface { .. } if actual.interface("dart:async", "Future") => actual
             .type_argument(0)
             .map_or(Truth::No, |argument| acceptable_for_void(&argument)),
         _ => Truth::No,
@@ -486,10 +486,10 @@ fn acceptable_for_void(actual: &ResolvedType) -> Truth {
 
 /// The official `isTypeAcceptableWhenExpectingFutureOrVoid`.
 fn acceptable_for_future_or_void(actual: &ResolvedType) -> Truth {
-    match actual {
-        ResolvedType::Dynamic => Truth::Yes,
+    match actual.view() {
+        ResolvedTypeView::Dynamic => Truth::Yes,
         _ if actual.interface("dart:async", "FutureOr") => Truth::Yes,
-        ResolvedType::Interface { .. } if actual.interface("dart:async", "Future") => {
+        ResolvedTypeView::Interface { .. } if actual.interface("dart:async", "Future") => {
             actual.type_argument(0).map_or(Truth::Yes, |argument| {
                 acceptable_for_future_or_void(&argument)
             })
@@ -576,7 +576,7 @@ void use() {
                     && matches!(call.callee(), Expr::Ident(name) if name.name() == "make")
                 {
                     let inferred = state.infer_with_context(node, state.expected());
-                    assert_eq!(inferred.type_argument(0), Some(ResolvedType::Void));
+                    assert_eq!(inferred.type_argument(0), Some(ResolvedType::VOID));
                     self.0 += 1;
                 }
             }

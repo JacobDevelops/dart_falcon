@@ -10,7 +10,7 @@
 //!
 //! Adopted from the official `use_if_null_to_convert_nulls_to_bools` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -36,7 +36,7 @@ struct Collector<'a> {
 }
 
 fn is_nullable_bool(ty: &ResolvedType) -> bool {
-    matches!(ty, ResolvedType::Interface { identity, nullable: true, .. }
+    matches!(ty.view(), ResolvedTypeView::Interface { identity, nullable: true, .. }
         if identity.is_sdk("dart:core", "bool"))
 }
 

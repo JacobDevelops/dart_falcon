@@ -32,7 +32,7 @@ use std::collections::HashSet;
 
 use falcon_analyze::locally_bound_identifiers;
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, NameIdentity, QualifiedName, ResolvedType, Rule,
+    AnalyzeContext, DeclarationIdentity, NameIdentity, QualifiedName, ResolvedTypeView, Rule,
     RulePreparation, StructuralRuleVisitor, StructuralTraversal, resolve_call_constructor,
 };
 use falcon_diagnostics::Diagnostic;
@@ -136,7 +136,7 @@ impl<'a> Collector<'a> {
         let Some(state) = &self.state else {
             return false;
         };
-        let ResolvedType::Interface { .. } = state.model.declared_type(identity) else {
+        let ResolvedTypeView::Interface { .. } = state.model.declared_type(identity).view() else {
             return false;
         };
         let arity = state
@@ -176,10 +176,11 @@ impl<'a> Collector<'a> {
         let Some(state) = &self.state else {
             return false;
         };
-        let ResolvedType::Interface { identity, .. } = state.model.declared_type(identity) else {
+        let resolved = state.model.declared_type(identity);
+        let ResolvedTypeView::Interface { identity, .. } = resolved.view() else {
             return false;
         };
-        state.signatures.has_constructor(&identity, name)
+        state.signatures.has_constructor(identity, name)
     }
 
     fn push_type_parameters(&mut self, parameters: impl Iterator<Item = TypeParam<'a>>) {

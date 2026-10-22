@@ -30,7 +30,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::cst::*;
 
@@ -86,13 +86,13 @@ struct Collector<'a> {
 
 /// Analyzer nullability includes `dynamic` and `void`, but not unresolved types.
 fn explicitly_nullable(ty: &ResolvedType) -> bool {
-    match ty {
-        ResolvedType::Null | ResolvedType::Dynamic | ResolvedType::Void => true,
-        ResolvedType::Interface { nullable, .. }
-        | ResolvedType::TypeParameter { nullable, .. }
-        | ResolvedType::Function { nullable, .. }
-        | ResolvedType::Record { nullable, .. } => *nullable,
-        ResolvedType::Unknown | ResolvedType::Never | ResolvedType::NonNullTypeParameter { .. } => {
+    match ty.view() {
+        ResolvedTypeView::Null | ResolvedTypeView::Dynamic | ResolvedTypeView::Void => true,
+        ResolvedTypeView::Interface { nullable, .. }
+        | ResolvedTypeView::TypeParameter { nullable, .. }
+        | ResolvedTypeView::Function { nullable, .. }
+        | ResolvedTypeView::Record { nullable, .. } => nullable,
+        ResolvedTypeView::Unknown | ResolvedTypeView::Never | ResolvedTypeView::NonNullTypeParameter { .. } => {
             false
         }
     }
@@ -114,8 +114,8 @@ fn is_future_value<'a>(node: Expr<'a>, state: &SemanticState<'a>) -> bool {
             expression
                 .constructor_name()
                 .is_some_and(|constructor| constructor.name() == "value")
-                && matches!(state.model.resolve_type(expression.dart_type()),
-                    ResolvedType::Interface { identity, .. } if future(&identity))
+                && matches!(state.model.resolve_type(expression.dart_type()).view(),
+                    ResolvedTypeView::Interface { identity, .. } if future(identity))
         }
         Expr::Call(call) => match call.callee().unparenthesized() {
             Expr::Field(access) if access.field().name() == "value" => {
@@ -140,7 +140,7 @@ fn is_completer_complete<'a>(callee: Expr<'a>, state: &SemanticState<'a>) -> boo
         return false;
     };
     access.field().name() == "complete"
-        && matches!(state.infer(access.object()), ResolvedType::Interface { identity, .. }
+        && matches!(state.infer(access.object()).view(), ResolvedTypeView::Interface { identity, .. }
             if identity.is_sdk("dart:async", "Completer"))
 }
 
@@ -268,8 +268,8 @@ impl<'a> Collector<'a> {
                     .collect(),
             );
         }
-        match state.expected()? {
-            ResolvedType::Interface {
+        match state.expected()?.view() {
+            ResolvedTypeView::Interface {
                 identity,
                 arguments,
                 ..

@@ -18,7 +18,7 @@
 //!
 //! Adopted from the official `unnecessary_await_in_return` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth, TypeRelation};
+use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth, TypeRelation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -85,7 +85,7 @@ impl<'a> Collector<'a> {
                     .find(|(span, _)| *span == body.span)
                     .and_then(|(_, ty)| ty.as_ref());
                 match context {
-                    Some(ResolvedType::Unknown) => false,
+                    Some(context) if matches!(context.view(), ResolvedTypeView::Unknown) => false,
                     Some(context)
                         if is_future(context) || context.interface("dart:async", "FutureOr") =>
                     {
@@ -97,10 +97,10 @@ impl<'a> Collector<'a> {
                         };
                         assignable(&argument, result, state)
                     }
-                    Some(ResolvedType::Void | ResolvedType::Dynamic) | None => {
+                    context if context.is_none_or(|context| matches!(context.view(), ResolvedTypeView::Void | ResolvedTypeView::Dynamic)) => {
                         assignable(&argument, &inferred, state)
                     }
-                    Some(_) => false,
+                    _ => false,
                 }
             }
             None => false,
@@ -126,12 +126,12 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
 
     fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         if let Expr::FuncExpr(function) = node {
-            let return_type = state.expected().map(|context| match context {
-                ResolvedType::Function { .. } => context
+            let return_type = state.expected().map(|context| match context.view() {
+                ResolvedTypeView::Function { .. } => context
                     .function_return_type()
-                    .unwrap_or(ResolvedType::Unknown),
-                ResolvedType::Dynamic | ResolvedType::Void => context.clone(),
-                _ => ResolvedType::Unknown,
+                    .unwrap_or(ResolvedType::UNKNOWN),
+                ResolvedTypeView::Dynamic | ResolvedTypeView::Void => context.clone(),
+                _ => ResolvedType::UNKNOWN,
             });
             self.closure_returns
                 .push((function.body().span(), return_type));
@@ -153,7 +153,7 @@ fn is_future(ty: &ResolvedType) -> bool {
 
 /// `Future`'s type argument; a raw `Future` is `Future<dynamic>`.
 fn future_argument(ty: &ResolvedType) -> ResolvedType {
-    ty.type_argument(0).unwrap_or(ResolvedType::Dynamic)
+    ty.type_argument(0).unwrap_or(ResolvedType::DYNAMIC)
 }
 
 fn flattened(mut ty: ResolvedType) -> ResolvedType {
@@ -165,66 +165,66 @@ fn flattened(mut ty: ResolvedType) -> ResolvedType {
 
 /// Whether `actual` is provably a subtype of `expected`.
 fn assignable(actual: &ResolvedType, expected: &ResolvedType, state: &SemanticState<'_>) -> bool {
-    if matches!(actual, ResolvedType::Unknown) {
+    if matches!(actual.view(), ResolvedTypeView::Unknown) {
         return false;
     }
-    if actual == expected || matches!(expected, ResolvedType::Dynamic | ResolvedType::Void) {
+    if actual == expected || matches!(expected.view(), ResolvedTypeView::Dynamic | ResolvedTypeView::Void) {
         return true;
     }
-    if matches!(actual, ResolvedType::Never) {
+    if matches!(actual.view(), ResolvedTypeView::Never) {
         return true;
     }
     // `T & Object` (an asserted `T?`) and `T` are subtypes of `T` and `T?`,
     // and of whatever their bound is a subtype of.
-    let parameter = match actual {
-        ResolvedType::TypeParameter { id, nullable, .. } => Some((id, *nullable)),
-        ResolvedType::NonNullTypeParameter { id, .. } => Some((id, false)),
+    let parameter = match actual.view() {
+        ResolvedTypeView::TypeParameter { id, nullable, .. } => Some((id, nullable)),
+        ResolvedTypeView::NonNullTypeParameter { id, .. } => Some((id, false)),
         _ => None,
     };
     if let (
         Some((id, actual_nullable)),
-        ResolvedType::TypeParameter {
+        ResolvedTypeView::TypeParameter {
             id: expected_id,
             nullable: expected_nullable,
             ..
         },
-    ) = (parameter, expected)
+    ) = (parameter, expected.view())
         && id == expected_id
-        && (!actual_nullable || *expected_nullable)
+        && (!actual_nullable || expected_nullable)
     {
         return true;
     }
-    match actual {
-        ResolvedType::TypeParameter {
+    match actual.view() {
+        ResolvedTypeView::TypeParameter {
             bound, nullable, ..
         } => {
             return assignable(
-                &bound.with_nullable(*nullable || bound.nullable()),
+                &bound.with_nullable(nullable || bound.nullable()),
                 expected,
                 state,
             );
         }
-        ResolvedType::NonNullTypeParameter { bound, .. } => {
+        ResolvedTypeView::NonNullTypeParameter { bound, .. } => {
             return assignable(&bound.non_null(), expected, state);
         }
         _ => {}
     }
     if let (
-        ResolvedType::Interface {
+        ResolvedTypeView::Interface {
             identity: actual_identity,
             arguments: actual_arguments,
             nullable: actual_nullable,
             ..
         },
-        ResolvedType::Interface {
+        ResolvedTypeView::Interface {
             identity: expected_identity,
             arguments: expected_arguments,
             nullable: expected_nullable,
             ..
         },
-    ) = (actual, expected)
+    ) = (actual.view(), expected.view())
         && actual_identity == expected_identity
-        && (!*actual_nullable || *expected_nullable)
+        && (!actual_nullable || expected_nullable)
         && actual_arguments.len() == expected_arguments.len()
     {
         return actual_arguments
@@ -232,19 +232,19 @@ fn assignable(actual: &ResolvedType, expected: &ResolvedType, state: &SemanticSt
             .zip(expected_arguments.iter())
             .all(|(actual, expected)| assignable(actual, expected, state));
     }
-    let ResolvedType::Interface {
+    let ResolvedTypeView::Interface {
         identity,
         arguments,
         ..
-    } = expected
+    } = expected.view()
     else {
         return false;
     };
     if *identity == falcon_analyze::DeclarationIdentity::OBJECT {
         return expected.nullable()
             || matches!(
-                actual,
-                ResolvedType::Interface {
+                actual.view(),
+                ResolvedTypeView::Interface {
                     nullable: false,
                     ..
                 }

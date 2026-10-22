@@ -6,14 +6,6 @@ Every hardening item and rule row below must be resolved before falcon 1.0; ther
 
 Engine fixes from the October 2026 audit plus the 1.0 workflow features. Every item blocks 1.0. Items are grouped into batches sized for one agent: each batch says what code it owns and what it waits on. Batches in the same stage can run in parallel unless a batch says otherwise. Each fix lands with a regression test built from its repro.
 
-### Stage 5: start now
-
-#### 16. Type model
-
-Owns the semantic index, `type_index.rs`, `ResolvedType` and the rule sites that construct or match it. After batch 15.
-
-- [ ] **Hide `ResolvedType` internals.** 7 rule sites build `Interface { occurrence: Default::default(), … }` and 328 match its variants. Add constructors and views, make metadata fields crate-private.
-
 ### Stage 6: editor and CI workflows
 
 #### 19. Shared pipeline and incremental LSP
