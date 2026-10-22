@@ -9,15 +9,16 @@ use crate::resolve::{IdentitySource, LibrarySource};
 fn fallback_generic_arities_live_in_the_signature_index() {
     let mut signatures = SignatureIndex::default();
     let list = DeclarationIdentity::sdk("dart:core", "List");
-    signatures.supertypes.insert(
-        list.clone(),
-        (
-            (0..3)
-                .map(|ordinal| sdk_parameter("List", ordinal))
-                .collect(),
-            Vec::new(),
-        ),
-    );
+    signatures
+        .type_facts
+        .entry(list.clone())
+        .or_default()
+        .supertypes = Some((
+        (0..3)
+            .map(|ordinal| sdk_parameter("List", ordinal))
+            .collect(),
+        Vec::new(),
+    ));
     signatures.add_fallback_signatures();
     assert_eq!(signatures.type_parameter_count(&list), Some(3));
     for (identity, arity) in [
@@ -687,6 +688,55 @@ fn external_overlays_share_facts_and_replace_project_snapshots() {
             &base_signatures
         ));
     }
+}
+
+#[test]
+fn type_facts_overlays_shadow_whole_records_without_mutating_the_base() {
+    let identity = DeclarationIdentity::sdk("dart:core", "Choice");
+    let mut external = SignatureIndex::default();
+    external.type_facts.insert(
+        identity.clone(),
+        TypeFacts {
+            supertypes: Some((
+                Vec::new(),
+                vec![ResolvedType::interface_identity(
+                    DeclarationIdentity::OBJECT,
+                )],
+            )),
+            enum_values: Some(vec!["first".to_string()]),
+            kind: Some(TypeKind::Enum),
+            immutable: Some(Truth::Yes),
+            constructors: FxHashMap::from_iter([(
+                "new".to_string(),
+                ResolvedSignature::returning(ResolvedType::Dynamic),
+            )]),
+            ..TypeFacts::default()
+        },
+    );
+    external.finish();
+    let external = Arc::new(external);
+    let untouched = SignatureIndex::borrowing_external(Arc::clone(&external));
+    let mut overlay = SignatureIndex::borrowing_external(Arc::clone(&external));
+    assert!(std::ptr::eq(
+        overlay.type_facts.get(&identity).unwrap(),
+        external.type_facts.get(&identity).unwrap(),
+    ));
+    overlay.type_facts.insert(
+        identity.clone(),
+        TypeFacts {
+            kind: Some(TypeKind::Class),
+            ..TypeFacts::default()
+        },
+    );
+    assert_eq!(overlay.type_kind(&identity), Some(TypeKind::Class));
+    assert_eq!(overlay.enum_value_names(&identity), None);
+    assert_eq!(overlay.type_parameters(&identity), None);
+    assert!(overlay.constructor(&identity, "new").is_none());
+    assert!(!overlay.has_cyclic_supertypes(&identity));
+    assert_eq!(untouched.enum_value_names(&identity).unwrap(), ["first"]);
+    assert_eq!(external.type_kind(&identity), Some(TypeKind::Enum));
+    assert!(external.constructor(&identity, "new").is_some());
+    assert_eq!(overlay.type_facts.iter().count(), 1);
 }
 
 #[test]
@@ -4660,7 +4710,7 @@ fn inferred_field_formals_refresh_reversed_super_chains() {
             for name in ["Box", "Middle", "Leaf"] {
                 let identity = model.resolve_name(name).unwrap();
                 let signature = signatures.constructor(&identity, "new").unwrap();
-                let facts = signatures.declarations.get(&identity).unwrap();
+                let facts = signatures.declaration(&identity).unwrap();
                 assert_eq!(
                     facts.constructors[0].parameters[0].ty,
                     signature.positional[0]
@@ -6396,8 +6446,11 @@ fn mixin_constraints_do_not_override_applied_generic_superclass_fields() {
             );
             let constraint = model.resolve_name("Constraint").unwrap();
             assert_eq!(
-                signatures.member_supertypes[&constraint],
-                vec![ResolvedType::interface_identity(
+                signatures.type_facts[&constraint]
+                    .member_supertypes
+                    .as_ref()
+                    .unwrap(),
+                &vec![ResolvedType::interface_identity(
                     DeclarationIdentity::OBJECT
                 )],
             );
@@ -7570,7 +7623,10 @@ fn precomputed_cycles_match_uncached_queries_for_every_owner() {
         |program, model| {
             let mut signatures = SignatureIndex::from_program(program, model);
             let cached = signatures.cyclic_supertypes.take().unwrap();
-            for identity in signatures.supertypes.keys() {
+            for (identity, facts) in &signatures.type_facts.local {
+                if facts.supertypes.is_none() {
+                    continue;
+                }
                 assert_eq!(
                     cached.contains(identity),
                     signatures.has_cyclic_supertypes(identity),

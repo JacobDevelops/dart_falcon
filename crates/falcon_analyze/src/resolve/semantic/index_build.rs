@@ -201,16 +201,8 @@ impl SignatureIndex {
         }
         fill(&mut self.functions, fallback.functions);
         fill(&mut self.value_types, fallback.value_types);
-        fill(&mut self.constructors, fallback.constructors);
         fill(&mut self.member_entries, fallback.member_entries);
-        fill(&mut self.supertypes, fallback.supertypes);
-        fill(
-            &mut self.fallback_type_parameters,
-            fallback.fallback_type_parameters,
-        );
-        fill(&mut self.superclasses, fallback.superclasses);
-        fill(&mut self.member_supertypes, fallback.member_supertypes);
-        fill(&mut self.declarations, fallback.declarations);
+        fill(&mut self.type_facts, fallback.type_facts);
         fill(&mut self.constants, fallback.constants);
         fill(&mut self.constant_types, fallback.constant_types);
     }
@@ -269,12 +261,10 @@ impl SignatureIndex {
             if let Some((name, kind, inherited_object, restriction)) = kind
                 && let Some(identity) = model.resolve_name(name.name())
             {
-                self.inherited_object
-                    .insert(identity.clone(), inherited_object);
-                if let Some(restriction) = restriction {
-                    self.restrictions.insert(identity.clone(), restriction);
-                }
-                self.kinds.insert(identity, kind);
+                let facts = self.type_facts.entry(identity).or_default();
+                facts.inherited_object = Some(inherited_object);
+                facts.restriction = restriction;
+                facts.kind = Some(kind);
             }
             match declaration {
                 TopLevelDecl::ClassTypeAlias(alias) => {
@@ -289,28 +279,10 @@ impl SignatureIndex {
                     self.add_type(
                         alias.name().name(),
                         alias.type_params(),
-                        std::iter::once(alias.superclass())
-                            .chain(alias.with_clause())
-                            .chain(alias.implements())
-                            .collect(),
-                        alias
-                            .with_clause()
-                            .rev()
-                            .chain(std::iter::once(alias.superclass()))
-                            .collect(),
+                        declaration,
                         EffectiveMembers::declared(AstChildren::empty()),
                         model,
                     );
-                    if let Some(identity) = model.resolve_name(alias.name().name()) {
-                        let mut scope = TypeParameterScope::default();
-                        scope.push(alias.type_params(), model);
-                        self.superclasses.insert(
-                            identity.clone(),
-                            model.resolve_type_in(alias.superclass(), &scope),
-                        );
-                        self.mixin_applications
-                            .insert(identity, 1..1 + alias.with_clause().len());
-                    }
                 }
                 // Alias parameters are the inference variables of alias
                 // constructor calls and tear-offs (`alias_template`).
@@ -409,29 +381,13 @@ impl SignatureIndex {
                 }
                 TopLevelDecl::Class(class) => {
                     let members = class.element_members();
-                    let supertypes = class
-                        .extends()
-                        .into_iter()
-                        .chain(class.with_clause())
-                        .chain(class.implements())
-                        .collect();
-                    let member_supertypes =
-                        class.with_clause().rev().chain(class.extends()).collect();
                     self.add_type(
                         class.name().name(),
                         class.type_params(),
-                        supertypes,
-                        member_supertypes,
+                        declaration,
                         members.clone(),
                         model,
                     );
-                    if !class.with_clause().is_empty()
-                        && let Some(identity) = model.resolve_name(class.name().name())
-                    {
-                        let start = usize::from(class.extends().is_some());
-                        self.mixin_applications
-                            .insert(identity, start..start + class.with_clause().len());
-                    }
                     self.add_declaration_facts(
                         class.name().name(),
                         class.annotations(),
@@ -443,19 +399,10 @@ impl SignatureIndex {
                 }
                 TopLevelDecl::MixinClass(class) => {
                     let members = class.element_members();
-                    let supertypes = class
-                        .extends()
-                        .into_iter()
-                        .chain(class.with_clause())
-                        .chain(class.implements())
-                        .collect();
-                    let member_supertypes =
-                        class.with_clause().rev().chain(class.extends()).collect();
                     self.add_type(
                         class.name().name(),
                         class.type_params(),
-                        supertypes,
-                        member_supertypes,
+                        declaration,
                         members.clone(),
                         model,
                     );
@@ -473,8 +420,7 @@ impl SignatureIndex {
                         self.add_type(
                             name.name(),
                             extension.type_params(),
-                            Vec::new(),
-                            Vec::new(),
+                            declaration,
                             EffectiveMembers::declared(extension.members()),
                             model,
                         );
@@ -612,8 +558,7 @@ impl SignatureIndex {
                     self.add_type(
                         extension.name().name(),
                         extension.type_params(),
-                        extension.implements().collect(),
-                        Vec::new(),
+                        declaration,
                         members.clone(),
                         model,
                     );
@@ -632,19 +577,13 @@ impl SignatureIndex {
                     );
                 }
                 TopLevelDecl::Mixin(mixin) => {
-                    let supertypes = mixin.on_clause().chain(mixin.implements()).collect();
                     self.add_type(
                         mixin.name().name(),
                         mixin.type_params(),
-                        supertypes,
-                        Vec::new(),
+                        declaration,
                         EffectiveMembers::declared(mixin.members()),
                         model,
                     );
-                    if let Some(identity) = model.resolve_name(mixin.name().name()) {
-                        self.mixin_constraint_counts
-                            .insert(identity, mixin.on_clause().len());
-                    }
                     // Mixins are never instantiated: abstract for every consumer.
                     self.add_declaration_facts(
                         mixin.name().name(),
@@ -660,11 +599,7 @@ impl SignatureIndex {
                     self.add_type(
                         enumeration.name().name(),
                         enumeration.type_params(),
-                        enumeration
-                            .with_clause()
-                            .chain(enumeration.implements())
-                            .collect(),
-                        enumeration.with_clause().rev().collect(),
+                        declaration,
                         members.clone(),
                         model,
                     );
@@ -682,12 +617,20 @@ impl SignatureIndex {
                         && let Some(identity) = model.resolve_name(enumeration.name().name())
                     {
                         let enum_type = model.core_type("Enum", false);
-                        if let Some((_, supertypes)) = self.supertypes.get_mut(&identity) {
+                        if let Some((_, supertypes)) = self
+                            .type_facts
+                            .get_mut(&identity)
+                            .and_then(|facts| facts.supertypes.as_mut())
+                        {
                             // Inherited interfaces start with Enum, then apply
                             // mixins in source order and finally interfaces.
                             supertypes.insert(0, enum_type.clone());
                         }
-                        if let Some(supertypes) = self.member_supertypes.get_mut(&identity) {
+                        if let Some(supertypes) = self
+                            .type_facts
+                            .get_mut(&identity)
+                            .and_then(|facts| facts.member_supertypes.as_mut())
+                        {
                             // Concrete lookup searches mixins in reverse order
                             // before the superclass.
                             let object = supertypes.len().saturating_sub(1);
@@ -695,13 +638,6 @@ impl SignatureIndex {
                         }
                     }
                     if let Some(identity) = model.resolve_name(enumeration.name().name()) {
-                        if !enumeration.with_clause().is_empty() {
-                            let start = usize::from(model.identities.has_sdk_sources());
-                            self.mixin_applications.insert(
-                                identity.clone(),
-                                start..start + enumeration.with_clause().len(),
-                            );
-                        }
                         // The language synthesizes a static const list, including
                         // the enum's instantiation to bounds for generic enums.
                         let enum_type = self.with_raw_arguments(&ResolvedType::interface_identity(
@@ -733,8 +669,7 @@ impl SignatureIndex {
                             parameter_contracts: Some(empty_parameter_contracts()),
                             annotations: Vec::new(),
                         });
-                        self.enum_values.insert(
-                            identity,
+                        self.type_facts.entry(identity).or_default().enum_values = Some(
                             enumeration
                                 .variants()
                                 .map(|variant| variant.name().name().to_owned())
@@ -798,7 +733,10 @@ impl SignatureIndex {
             } else {
                 Truth::No
             };
-            self.immutable.insert(identity.clone(), immutable);
+            self.type_facts
+                .entry(identity.clone())
+                .or_default()
+                .immutable = Some(immutable);
             if let Some(superclass) = superclass {
                 let mut scope = TypeParameterScope::default();
                 if matches!(
@@ -807,8 +745,8 @@ impl SignatureIndex {
                 ) {
                     scope.push(declaration.type_params(), model);
                 }
-                self.superclasses
-                    .insert(identity, model.resolve_type_in(superclass, &scope));
+                self.type_facts.entry(identity).or_default().superclass =
+                    Some(model.resolve_type_in(superclass, &scope));
             }
         }
     }
@@ -1019,35 +957,38 @@ impl SignatureIndex {
             identity: superclass,
             arguments,
             ..
-        }) = self.superclasses.get(&identity)
+        }) = self
+            .type_facts
+            .get(&identity)
+            .and_then(|facts| facts.superclass.as_ref())
         else {
             return false;
         };
-        let Some(source_facts) = self.declarations.get(superclass) else {
+        let Some(source_facts) = self
+            .type_facts
+            .get(superclass)
+            .and_then(|facts| facts.declaration.as_ref())
+        else {
             return false;
         };
         let Some(owner_parameters) = self.type_parameters(&identity) else {
             return false;
         };
-        let mixins_have_no_fields = self
-            .mixin_applications
-            .get(&identity)
-            .and_then(|range| self.supertypes.get(&identity)?.1.get(range.clone()))
-            .is_some_and(|mixins| {
-                mixins.iter().all(|mixin| {
-                    let ResolvedType::Interface { identity, .. } = mixin else {
-                        return false;
-                    };
-                    self.kinds.contains_key(identity)
-                        && self.member_entries.get(identity).is_some_and(|entries| {
-                            entries.values().all(|entry| {
-                                entry.facts.iter().all(|fact| {
-                                    fact.is_static || !matches!(fact.kind, MemberKind::Field { .. })
-                                })
+        let mixins_have_no_fields = self.type_facts.get(&identity).is_some_and(|facts| {
+            facts.mixin_applications.iter().all(|mixin| {
+                let ResolvedType::Interface { identity, .. } = mixin else {
+                    return false;
+                };
+                self.type_kind(identity).is_some()
+                    && self.member_entries.get(identity).is_some_and(|entries| {
+                        entries.values().all(|entry| {
+                            entry.facts.iter().all(|fact| {
+                                fact.is_static || !matches!(fact.kind, MemberKind::Field { .. })
                             })
                         })
-                })
-            });
+                    })
+            })
+        });
         let owner_parameters = owner_parameters.to_vec();
         let mut forwarded = Vec::with_capacity(source_facts.constructors.len());
         for facts in &source_facts.constructors {
@@ -1111,11 +1052,16 @@ impl SignatureIndex {
         }
         let changed = !forwarded.is_empty();
         for (facts, signature) in forwarded {
-            self.constructors
+            self.type_facts
                 .entry(identity.clone())
                 .or_default()
+                .constructors
                 .insert(facts.name.clone(), signature);
-            if let Some(declaration) = self.declarations.get_mut(&identity) {
+            if let Some(declaration) = self
+                .type_facts
+                .get_mut(&identity)
+                .and_then(|facts| facts.declaration.as_mut())
+            {
                 if let Some(existing) = declaration
                     .constructors
                     .iter_mut()
@@ -1167,8 +1113,9 @@ impl SignatureIndex {
             },
         };
         let Some(signature) = self
-            .constructors
+            .type_facts
             .get_mut(identity)
+            .map(|facts| &mut facts.constructors)
             .and_then(|constructors| constructors.get_mut(constructor_name))
         else {
             return false;
@@ -1222,8 +1169,9 @@ impl SignatureIndex {
         let parameter_name = parameter.name();
         let mut changed = false;
         if let Some(signature) = self
-            .constructors
+            .type_facts
             .get_mut(identity)
+            .map(|facts| &mut facts.constructors)
             .and_then(|constructors| constructors.get_mut(constructor_name))
         {
             if matches!(
@@ -1245,7 +1193,10 @@ impl SignatureIndex {
                 changed = true;
             }
         }
-        if let Some(facts) = self.declarations.get_mut(identity)
+        if let Some(facts) = self
+            .type_facts
+            .get_mut(identity)
+            .and_then(|facts| facts.declaration.as_mut())
             && let Some(constructor) = facts
                 .constructors
                 .iter_mut()
@@ -1314,9 +1265,14 @@ impl SignatureIndex {
                 })
             })
             .collect();
-        self.const_field_initializers
-            .insert(identity.clone(), fields);
-        self.const_constructors.insert(identity.clone(), bodies);
+        self.type_facts
+            .entry(identity.clone())
+            .or_default()
+            .const_field_initializers = fields;
+        self.type_facts
+            .entry(identity.clone())
+            .or_default()
+            .const_constructors = bodies;
     }
 
     fn add_declaration_facts(
@@ -1430,19 +1386,16 @@ impl SignatureIndex {
                 })
             })
             .collect();
-        self.declarations.insert(
-            identity,
-            DeclarationFacts {
-                annotations,
-                library_target,
-                constructors,
-                static_consts,
-                extension_representation: extension_representation
-                    .map(|ty| model.resolve_type_in(ty, &scope)),
-                is_abstract,
-                has_subclass_in_library: false,
-            },
-        );
+        self.type_facts.entry(identity).or_default().declaration = Some(DeclarationFacts {
+            annotations,
+            library_target,
+            constructors,
+            static_consts,
+            extension_representation: extension_representation
+                .map(|ty| model.resolve_type_in(ty, &scope)),
+            is_abstract,
+            has_subclass_in_library: false,
+        });
     }
 
     /// The linter's `_hasSubclassInDefiningCompilationUnit`: a class whose
@@ -1451,13 +1404,16 @@ impl SignatureIndex {
     fn mark_library_subclasses(&mut self) {
         let mut marked = Vec::new();
         let mut visited = HashSet::new();
-        for subtype in self.superclasses.local.keys() {
+        for subtype in self.type_facts.local.keys() {
             let DeclarationIdentity::Library { library, .. } = subtype else {
                 continue;
             };
             visited.clear();
             visited.insert(subtype);
-            let mut current = self.superclasses.get(subtype);
+            let mut current = self
+                .type_facts
+                .get(subtype)
+                .and_then(|facts| facts.superclass.as_ref());
             while let Some(ResolvedType::Interface { identity, .. }) = current {
                 if !visited.insert(identity) {
                     break;
@@ -1466,11 +1422,18 @@ impl SignatureIndex {
                 {
                     marked.push(identity.clone());
                 }
-                current = self.superclasses.get(identity);
+                current = self
+                    .type_facts
+                    .get(identity)
+                    .and_then(|facts| facts.superclass.as_ref());
             }
         }
         for identity in marked {
-            if let Some(facts) = self.declarations.get_mut(&identity) {
+            if let Some(facts) = self
+                .type_facts
+                .get_mut(&identity)
+                .and_then(|facts| facts.declaration.as_mut())
+            {
                 facts.has_subclass_in_library = true;
             }
         }
@@ -1480,8 +1443,7 @@ impl SignatureIndex {
         &mut self,
         name: &str,
         type_parameters: AstChildren<'_, TypeParam<'_>>,
-        supertypes: Vec<DartType<'_>>,
-        member_supertypes: Vec<DartType<'_>>,
+        declaration: TopLevelDecl<'_>,
         members: EffectiveMembers<'_>,
         model: &SemanticModel<'_>,
     ) {
@@ -1539,10 +1501,60 @@ impl SignatureIndex {
                     .unwrap_or(ResolvedType::Unknown),
             );
         }
-        let mut resolved_supertypes: Vec<_> = supertypes
-            .into_iter()
-            .map(|supertype| model.resolve_type_in(supertype, &scope))
+        let (superclass, mixins, constraints, interfaces) = match declaration {
+            TopLevelDecl::Class(node) => {
+                (node.extends(), node.with_clause(), None, node.implements())
+            }
+            TopLevelDecl::MixinClass(node) => {
+                (node.extends(), node.with_clause(), None, node.implements())
+            }
+            TopLevelDecl::ClassTypeAlias(node) => (
+                Some(node.superclass()),
+                node.with_clause(),
+                None,
+                node.implements(),
+            ),
+            TopLevelDecl::Mixin(node) => (
+                None,
+                AstChildren::empty(),
+                Some(node.on_clause()),
+                node.implements(),
+            ),
+            TopLevelDecl::Enum(node) => (None, node.with_clause(), None, node.implements()),
+            TopLevelDecl::ExtensionType(node) => {
+                (None, AstChildren::empty(), None, node.implements())
+            }
+            _ => (None, AstChildren::empty(), None, AstChildren::empty()),
+        };
+        let superclass = superclass.map(|ty| model.resolve_type_in(ty, &scope));
+        let mixins: Vec<_> = mixins.map(|ty| model.resolve_type_in(ty, &scope)).collect();
+        let constraints: Option<Vec<_>> =
+            constraints.map(|types| types.map(|ty| model.resolve_type_in(ty, &scope)).collect());
+        // Resolve each declared edge once, retaining source order for subtype
+        // traversal and reverse mixin order for concrete member lookup.
+        let mut resolved_supertypes: Vec<_> = superclass
+            .iter()
+            .chain(&mixins)
+            .chain(constraints.iter().flatten())
+            .cloned()
+            .chain(interfaces.map(|ty| model.resolve_type_in(ty, &scope)))
             .collect();
+        let mut resolved_member_supertypes: Vec<_> = mixins
+            .iter()
+            .rev()
+            .chain(superclass.iter())
+            .cloned()
+            .collect();
+        let facts = self.type_facts.entry(identity.clone()).or_default();
+        if matches!(declaration, TopLevelDecl::ClassTypeAlias(_)) {
+            facts.superclass = superclass;
+        }
+        // Mixin classes historically expose their with-clause edges only in
+        // the traversal lists, not as declaration mixin applications.
+        if !matches!(declaration, TopLevelDecl::MixinClass(_)) {
+            facts.mixin_applications = mixins;
+        }
+        facts.mixin_constraints = constraints;
         // Extension types retain only their declared superinterfaces: their
         // representation may admit null, so an implicit Object edge is unsound.
         let inherits_object = !is_extension
@@ -1551,19 +1563,17 @@ impl SignatureIndex {
         if inherits_object {
             resolved_supertypes.push(model.core_type("Object", false));
         }
-        self.supertypes.insert(
-            identity.clone(),
-            (owner_parameters.clone(), resolved_supertypes),
-        );
-        let mut resolved_member_supertypes: Vec<_> = member_supertypes
-            .into_iter()
-            .map(|supertype| model.resolve_type_in(supertype, &scope))
-            .collect();
+        self.type_facts
+            .entry(identity.clone())
+            .or_default()
+            .supertypes = Some((owner_parameters.clone(), resolved_supertypes));
         if inherits_object {
             resolved_member_supertypes.push(model.core_type("Object", false));
         }
-        self.member_supertypes
-            .insert(identity.clone(), resolved_member_supertypes);
+        self.type_facts
+            .entry(identity.clone())
+            .or_default()
+            .member_supertypes = Some(resolved_member_supertypes);
         let entries = self.member_entries.entry(identity.clone()).or_default();
         for member in members.declared.clone() {
             match member {
@@ -1604,9 +1614,10 @@ impl SignatureIndex {
                     scope.pop();
                 }
                 ClassMember::Constructor(constructor) => {
-                    self.constructors
+                    self.type_facts
                         .entry(identity.clone())
                         .or_default()
+                        .constructors
                         .insert(
                             constructor
                                 .constructor_name()
@@ -1836,9 +1847,10 @@ impl SignatureIndex {
                     shape.type_parameters.to_vec(),
                 ));
             }
-            self.constructors
+            self.type_facts
                 .entry(identity.clone())
                 .or_default()
+                .constructors
                 .insert(
                     primary
                         .constructor_name()

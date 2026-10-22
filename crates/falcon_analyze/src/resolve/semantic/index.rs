@@ -251,6 +251,38 @@ pub struct DeclarationFacts {
     pub has_subclass_in_library: bool,
 }
 
+/// All facts owned by one type declaration; local declarations shadow this record whole.
+#[derive(Debug, Clone, Default)]
+pub(super) struct TypeFacts {
+    pub(super) supertypes: Option<(Vec<TypeParameterId>, Vec<ResolvedType>)>,
+    pub(super) fallback_type_parameters: Option<Vec<TypeParameterId>>,
+    pub(super) member_supertypes: Option<Vec<ResolvedType>>,
+    pub(super) declaration: Option<DeclarationFacts>,
+    pub(super) enum_values: Option<Vec<String>>,
+    pub(super) kind: Option<TypeKind>,
+    pub(super) immutable: Option<Truth>,
+    pub(super) superclass: Option<ResolvedType>,
+    /// Resolved `with` types in source order, independent of canonical hierarchy ordering.
+    pub(super) mixin_applications: Vec<ResolvedType>,
+    /// Resolved `on` types in source order; absent for non-mixins.
+    pub(super) mixin_constraints: Option<Vec<ResolvedType>>,
+    pub(super) inherited_object: Option<bool>,
+    pub(super) restriction: Option<ClassRestriction>,
+    pub(super) constructors: FxHashMap<String, ResolvedSignature>,
+    pub(super) const_constructors: FxHashMap<String, ConstConstructorBody>,
+    pub(super) const_field_initializers: Vec<(String, crate::NodeRef)>,
+}
+
+impl TypeFacts {
+    /// Leading superclass edges in the flattened, source-ordered supertypes.
+    pub(super) fn superclass_edge_count(&self) -> usize {
+        usize::from(
+            self.superclass.is_some()
+                || (self.kind == Some(TypeKind::Enum) && self.inherited_object == Some(false)),
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct ExtensionFacts {
     pub(super) declaring_library: Option<LibraryId>,
@@ -447,48 +479,18 @@ signature_index! {
         functions: SignatureMap<DeclarationIdentity, ResolvedSignature>,
         /// Read types of top-level getters and variables, including imported ones.
         value_types: SignatureMap<DeclarationIdentity, ResolvedType>,
-        constructors: SignatureMap<DeclarationIdentity, FxHashMap<String, ResolvedSignature>>,
         member_entries: SignatureMap<DeclarationIdentity, FxHashMap<String, MemberEntry>>,
         /// Non-promotable private instance names conflict library-wide.
         blocked_field_promotions: SignatureMap<LibraryId, FxHashSet<String>>,
-        supertypes: SignatureMap<DeclarationIdentity, (Vec<TypeParameterId>, Vec<ResolvedType>)>,
-        /// Generic owner parameters for curated identities without hierarchy facts.
-        fallback_type_parameters: SignatureMap<DeclarationIdentity, Vec<TypeParameterId>>,
+        type_facts: SignatureMap<DeclarationIdentity, TypeFacts>,
         owner_defaults: SignatureMap<TypeParameterId, ResolvedType>,
         /// Whether the declaration of each type parameter of an indexed type,
         /// alias, function or method states a bound; parameters of local
         /// functions are absent.
         bound_declared: SignatureMap<TypeParameterId, bool>,
-        member_supertypes: SignatureMap<DeclarationIdentity, Vec<ResolvedType>>,
-        declarations: SignatureMap<DeclarationIdentity, DeclarationFacts>,
         constants: SignatureMap<DeclarationIdentity, crate::NodeRef>,
         constant_types: SignatureMap<DeclarationIdentity, DeclarationIdentity>,
-        enum_values: SignatureMap<DeclarationIdentity, Vec<String>>,
-        /// Bodies of project `const` constructors, keyed by class and name.
-        const_constructors: SignatureMap<DeclarationIdentity, FxHashMap<String, ConstConstructorBody>>,
-        /// Instance field initializers of project classes with a `const`
-        /// constructor, in declaration order.
-        const_field_initializers: SignatureMap<DeclarationIdentity, Vec<(String, crate::NodeRef)>>,
         /// Resolved external annotations of top-level functions that have any.
         function_annotations: SignatureMap<DeclarationIdentity, Vec<DeclarationIdentity>>,
-        /// The declaration kind of every indexed class-like declaration.
-        kinds: SignatureMap<DeclarationIdentity, TypeKind>,
-        /// Whether each class, mixin, enum, or extension type is itself annotated
-        /// with package:meta's `@immutable` (`Unknown` for an unresolvable
-        /// `immutable` annotation, which may arrive through an export chain).
-        immutable: SignatureMap<DeclarationIdentity, Truth>,
-        /// The superclass of classes, mixin classes, and named mixin applications.
-        superclasses: SignatureMap<DeclarationIdentity, ResolvedType>,
-        /// The `with` clause of each class or enum declaring one, as the index
-        /// range of its mixins within the declaration's `supertypes` entry.
-        mixin_applications: SignatureMap<DeclarationIdentity, Range<usize>>,
-        /// The `on`-clause prefix of each mixin's canonical `supertypes` entry.
-        mixin_constraint_counts: SignatureMap<DeclarationIdentity, usize>,
-        /// Whether the trailing implicit `Object` subtype edge is also a direct
-        /// inherited-interface candidate. When used, it precedes mixins/interfaces.
-        inherited_object: SignatureMap<DeclarationIdentity, bool>,
-        /// The explicit class modifier of each class, mixin class, and mixin that
-        /// declares one (`base` for base mixins and mixin classes).
-        restrictions: SignatureMap<DeclarationIdentity, ClassRestriction>,
     }
 }

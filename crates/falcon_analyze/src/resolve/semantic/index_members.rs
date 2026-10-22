@@ -2,11 +2,14 @@ use super::*;
 
 impl SignatureIndex {
     pub fn declaration(&self, identity: &DeclarationIdentity) -> Option<&DeclarationFacts> {
-        self.declarations.get(identity)
+        self.type_facts.get(identity)?.declaration.as_ref()
     }
 
     pub fn declaration_identities(&self) -> impl Iterator<Item = &DeclarationIdentity> {
-        self.declarations.keys()
+        self.type_facts
+            .local
+            .iter()
+            .filter_map(|(identity, facts)| facts.declaration.as_ref().map(|_| identity))
     }
 
     /// Type of a closure parameter or return that `context` does not supply:
@@ -41,7 +44,7 @@ impl SignatureIndex {
     /// The declaration kind (class, mixin, enum, ...) of the indexed type
     /// `identity`, project or external; `None` when unindexed.
     pub fn type_kind(&self, identity: &DeclarationIdentity) -> Option<TypeKind> {
-        self.kinds.get(identity).copied()
+        self.type_facts.get(identity)?.kind
     }
 
     pub fn constant_initializer(&self, identity: &DeclarationIdentity) -> Option<Expr<'_>> {
@@ -54,24 +57,25 @@ impl SignatureIndex {
 
     /// Whether `name` is a value of the project enum `identity`.
     pub fn is_enum_value(&self, identity: &DeclarationIdentity, name: &str) -> bool {
-        self.enum_values
+        self.type_facts
             .get(identity)
+            .and_then(|facts| facts.enum_values.as_ref())
             .is_some_and(|values| values.iter().any(|value| value == name))
     }
 
     /// Whether `identity` is a project enum.
     pub fn is_enum(&self, identity: &DeclarationIdentity) -> bool {
-        self.enum_values.contains_key(identity)
+        self.enum_value_names(identity).is_some()
     }
 
     /// Names of the declared values of an indexed enum, in declaration order.
     pub fn enum_value_names(&self, identity: &DeclarationIdentity) -> Option<&[String]> {
-        self.enum_values.get(identity).map(Vec::as_slice)
+        self.type_facts.get(identity)?.enum_values.as_deref()
     }
 
     /// The explicit `extends` type of an indexed class or mixin class.
     pub fn superclass(&self, identity: &DeclarationIdentity) -> Option<&ResolvedType> {
-        self.superclasses.get(identity)
+        self.type_facts.get(identity)?.superclass.as_ref()
     }
 
     /// The body of the project `const` constructor `identity.name`.
@@ -80,7 +84,7 @@ impl SignatureIndex {
         identity: &DeclarationIdentity,
         name: &str,
     ) -> Option<&ConstConstructorBody> {
-        self.const_constructors.get(identity)?.get(name)
+        self.type_facts.get(identity)?.const_constructors.get(name)
     }
 
     /// Instance field initializers of a project class with a `const`
@@ -89,10 +93,10 @@ impl SignatureIndex {
         &self,
         identity: &DeclarationIdentity,
     ) -> impl Iterator<Item = (&str, Expr<'_>)> {
-        self.const_field_initializers
+        self.type_facts
             .get(identity)
             .into_iter()
-            .flatten()
+            .flat_map(|facts| &facts.const_field_initializers)
             .map(|(name, initializer)| (name.as_str(), initializer.expr()))
     }
 
@@ -163,7 +167,7 @@ impl SignatureIndex {
         identity: &DeclarationIdentity,
         name: &str,
     ) -> Option<&ResolvedSignature> {
-        self.constructors.get(identity)?.get(name)
+        self.type_facts.get(identity)?.constructors.get(name)
     }
 
     /// Whether source facts prove an explicit or implicit constructor exists.
@@ -225,14 +229,12 @@ impl SignatureIndex {
 
     /// The declaration's generic owner parameters in source order.
     pub fn type_parameters(&self, identity: &DeclarationIdentity) -> Option<&[TypeParameterId]> {
-        self.supertypes
-            .get(identity)
+        let facts = self.type_facts.get(identity)?;
+        facts
+            .supertypes
+            .as_ref()
             .map(|(parameters, _)| parameters.as_slice())
-            .or_else(|| {
-                self.fallback_type_parameters
-                    .get(identity)
-                    .map(Vec::as_slice)
-            })
+            .or(facts.fallback_type_parameters.as_deref())
     }
 
     /// `identity` instantiated with its own `parameters`, each bounded by its
@@ -382,7 +384,7 @@ impl SignatureIndex {
         identity: &DeclarationIdentity,
         name: &str,
     ) -> Option<(Vec<MemberFacts>, bool)> {
-        let (_, supertypes) = self.supertypes.get(identity)?;
+        let (_, supertypes) = self.type_facts.get(identity)?.supertypes.as_ref()?;
         let mut facts = Vec::new();
         let mut visited = HashSet::new();
         let mut complete = true;
@@ -421,7 +423,7 @@ impl SignatureIndex {
             name: type_name,
         } = identity
             && !is_object
-            && !self.kinds.contains_key(identity)
+            && self.type_kind(identity).is_none()
         {
             // An SDK type whose source is not loaded: the curated supertype
             // edges say nothing about what it declares, so reaching one is
@@ -457,7 +459,11 @@ impl SignatureIndex {
                     .cloned(),
             );
         }
-        if let Some((_, supertypes)) = self.supertypes.get(identity) {
+        if let Some((_, supertypes)) = self
+            .type_facts
+            .get(identity)
+            .and_then(|facts| facts.supertypes.as_ref())
+        {
             for supertype in supertypes {
                 complete &=
                     self.collect_inherited_member_facts(owner, supertype, name, visited, facts);
@@ -477,7 +483,11 @@ impl SignatureIndex {
         identity: &DeclarationIdentity,
         model: &SemanticModel<'_>,
     ) -> Truth {
-        let Some((_, supertypes)) = self.supertypes.get(identity) else {
+        let Some((_, supertypes)) = self
+            .type_facts
+            .get(identity)
+            .and_then(|facts| facts.supertypes.as_ref())
+        else {
             return Truth::Unknown;
         };
         let mut visited = HashSet::new();
@@ -493,7 +503,7 @@ impl SignatureIndex {
                 continue;
             }
             if let DeclarationIdentity::Sdk { library, name } = identity
-                && !self.kinds.contains_key(identity)
+                && self.type_kind(identity).is_none()
             {
                 match SDK_INTERFACE_MEMBERS
                     .iter()
@@ -506,7 +516,7 @@ impl SignatureIndex {
                         continue;
                     }
                 }
-            } else if self.kinds.get(identity) != Some(&TypeKind::Mixin)
+            } else if self.type_kind(identity) != Some(TypeKind::Mixin)
                 && self.member_entries.get(identity).is_some_and(|entries| {
                     entries.iter().any(|(name, entry)| {
                         entry.facts.iter().any(|fact| {
@@ -531,7 +541,7 @@ impl SignatureIndex {
                                 self.resolved_instance_owner(&receiver, name, access, model)
                                     .is_none_or(|owner| match owner {
                                         ResolvedType::Interface { identity, .. } => {
-                                            self.kinds.get(&identity) != Some(&TypeKind::Mixin)
+                                            self.type_kind(&identity) != Some(TypeKind::Mixin)
                                         }
                                         _ => true,
                                     })
@@ -542,7 +552,11 @@ impl SignatureIndex {
             {
                 return Truth::Yes;
             }
-            match self.supertypes.get(identity) {
+            match self
+                .type_facts
+                .get(identity)
+                .and_then(|facts| facts.supertypes.as_ref())
+            {
                 Some((_, supertypes)) => stack.extend(supertypes),
                 None => complete = false,
             }
@@ -571,43 +585,41 @@ impl SignatureIndex {
         if *identity == DeclarationIdentity::OBJECT {
             return Some(None);
         }
-        self.kinds.get(identity)?;
-        let declared = self.restrictions.get(identity).copied();
+        let facts = self.type_facts.get(identity)?;
+        facts.kind?;
+        let declared = facts.restriction;
         if declared != Some(Sealed) {
             return Some(declared);
         }
         if !visiting.insert(identity) {
             return None;
         }
-        let (_, supertypes) = self.supertypes.get(identity)?;
+        let (_, supertypes) = facts.supertypes.as_ref()?;
         let mut restriction_of = |ty: &'a ResolvedType| match ty {
             ResolvedType::Interface { identity, .. } => {
                 self.effective_restriction_inner(identity, visiting)
             }
             _ => None,
         };
-        let has_superclass = self.superclasses.contains_key(identity);
-        let mixins = self
-            .mixin_applications
-            .get(identity)
-            .cloned()
-            .unwrap_or_else(|| {
-                let start = usize::from(has_superclass);
-                start..start
-            });
         // The trailing implicit `Object` is no declared interface.
-        let interfaces = supertypes.get(mixins.end..supertypes.len().saturating_sub(1))?;
-        let superclass = match has_superclass {
-            true => restriction_of(supertypes.first()?)?,
-            false => None,
+        let mut interfaces = supertypes.iter();
+        interfaces.next_back();
+        for _ in 0..facts.superclass_edge_count() {
+            interfaces.next()?;
+        }
+        let superclass = match &facts.superclass {
+            Some(superclass) => restriction_of(superclass)?,
+            None => None,
         };
-        let mixins = supertypes
-            .get(mixins)?
+        let mixins = facts
+            .mixin_applications
             .iter()
-            .map(&mut restriction_of)
+            .map(|mixin| {
+                interfaces.next()?;
+                restriction_of(mixin)
+            })
             .collect::<Option<Vec<_>>>()?;
         let interfaces = interfaces
-            .iter()
             .map(&mut restriction_of)
             .collect::<Option<Vec<_>>>()?;
         let any = |types: &[Option<ClassRestriction>], wanted: &[ClassRestriction]| {
@@ -654,7 +666,11 @@ impl SignatureIndex {
             {
                 continue;
             }
-            match self.immutable.get(&current) {
+            match self
+                .type_facts
+                .get(&current)
+                .and_then(|facts| facts.immutable)
+            {
                 Some(Truth::Yes) => return Truth::Yes,
                 Some(Truth::No) => {}
                 Some(Truth::Unknown) => complete = false,
@@ -664,10 +680,11 @@ impl SignatureIndex {
                 }
             }
             let next: Vec<&ResolvedType> = if superclass_only {
-                self.superclasses.get(&current).into_iter().collect()
+                self.superclass(&current).into_iter().collect()
             } else {
-                self.supertypes
+                self.type_facts
                     .get(&current)
+                    .and_then(|facts| facts.supertypes.as_ref())
                     .map(|(_, supertypes)| supertypes.iter().collect())
                     .unwrap_or_default()
             };
@@ -711,7 +728,7 @@ impl SignatureIndex {
         if declares {
             return Some(true);
         }
-        for supertype in self.member_supertypes.get(identity)? {
+        for supertype in self.type_facts.get(identity)?.member_supertypes.as_ref()? {
             let ResolvedType::Interface { identity: next, .. } = supertype else {
                 return None;
             };
@@ -760,7 +777,7 @@ impl SignatureIndex {
         filter: impl Fn(&MemberFacts) -> bool + Copy,
         visited: &mut HashSet<DeclarationIdentity>,
     ) -> Option<Option<(&MemberFacts, &ResolvedType)>> {
-        for supertype in self.member_supertypes.get(identity)? {
+        for supertype in self.type_facts.get(identity)?.member_supertypes.as_ref()? {
             let ResolvedType::Interface { identity: next, .. } = supertype else {
                 return None;
             };
@@ -769,7 +786,7 @@ impl SignatureIndex {
             }
             // Curated SDK entries describe only some members; only SDK
             // declarations indexed from loaded sources are searched.
-            if matches!(next, DeclarationIdentity::Sdk { .. }) && !self.kinds.contains_key(next) {
+            if matches!(next, DeclarationIdentity::Sdk { .. }) && self.type_kind(next).is_none() {
                 return None;
             }
             if let Some(found) =
@@ -814,7 +831,7 @@ impl SignatureIndex {
         let is_object = *identity == DeclarationIdentity::OBJECT;
         if matches!(identity, DeclarationIdentity::Sdk { .. })
             && !is_object
-            && !self.kinds.contains_key(identity)
+            && self.type_kind(identity).is_none()
         {
             return None;
         }
@@ -826,7 +843,7 @@ impl SignatureIndex {
         if is_object {
             return Some(None);
         }
-        let (_, supertypes) = self.supertypes.get(identity)?;
+        let (_, supertypes) = self.type_facts.get(identity)?.supertypes.as_ref()?;
         for supertype in supertypes {
             let ResolvedType::Interface { identity: next, .. } = supertype else {
                 return None;
@@ -1162,8 +1179,9 @@ impl SignatureIndex {
         } = ty.as_ref()
             && arguments.is_empty()
             && self
-                .supertypes
+                .type_facts
                 .get(identity)
+                .and_then(|facts| facts.supertypes.as_ref())
                 .is_some_and(|(parameters, _)| !parameters.is_empty())
         {
             Cow::Owned(self.with_raw_arguments(ty.as_ref()))
@@ -1358,12 +1376,12 @@ impl SignatureIndex {
             {
                 return Some(receiver.clone());
             }
-            let (parameters, supertypes) = index.supertypes.get(identity)?;
+            let (parameters, supertypes) = index.type_facts.get(identity)?.supertypes.as_ref()?;
             let substitutions = index.owner_substitutions(parameters, arguments, Some(occurrence));
             let supertypes = if interfaces {
                 supertypes
             } else {
-                index.member_supertypes.get(identity)?
+                index.type_facts.get(identity)?.member_supertypes.as_ref()?
             };
             supertypes.iter().find_map(|supertype| {
                 let instantiated = model.substitute(supertype, &substitutions);
@@ -1429,9 +1447,10 @@ impl SignatureIndex {
             InstanceAccess::Read
         };
         if self.type_kind(identity) == Some(TypeKind::Mixin) {
-            let (_, constraints) = self.supertypes.get(identity)?;
-            let count = *self.mixin_constraint_counts.get(identity)?;
-            return constraints[..count]
+            let facts = self.type_facts.get(identity)?;
+            let (_, supertypes) = facts.supertypes.as_ref()?;
+            let constraints = facts.mixin_constraints.as_ref()?;
+            return constraints
                 .iter()
                 .find_map(|constraint| {
                     self.resolved_owner_through(constraint, name, access, false, model)
@@ -1441,7 +1460,7 @@ impl SignatureIndex {
                         .then(|| model.core_type("Object", false))
                 })
                 .or_else(|| {
-                    constraints.iter().find_map(|constraint| {
+                    supertypes.iter().find_map(|constraint| {
                         self.resolved_owner_through(constraint, name, access, true, model)
                     })
                 })
@@ -1450,8 +1469,10 @@ impl SignatureIndex {
                     _ => None,
                 });
         }
-        self.member_supertypes
+        self.type_facts
             .get(identity)?
+            .member_supertypes
+            .as_ref()?
             .iter()
             .find_map(|supertype| {
                 match self.resolved_owner_through(supertype, name, access, false, model)? {
@@ -1464,8 +1485,10 @@ impl SignatureIndex {
                     .then_some(DeclarationIdentity::OBJECT)
             })
             .or_else(|| {
-                self.supertypes
+                self.type_facts
                     .get(identity)?
+                    .supertypes
+                    .as_ref()?
                     .1
                     .iter()
                     .find_map(|supertype| {
@@ -1604,8 +1627,10 @@ impl SignatureIndex {
         {
             return Some(&entry.facts);
         }
-        self.supertypes
+        self.type_facts
             .get(identity)?
+            .supertypes
+            .as_ref()?
             .1
             .iter()
             .find_map(|supertype| self.interface_member_facts(supertype, name, model, visited))
@@ -1679,12 +1704,12 @@ impl SignatureIndex {
         else {
             return None;
         };
-        let (parameters, supertypes) = self.supertypes.get(identity)?;
+        let (parameters, supertypes) = self.type_facts.get(identity)?.supertypes.as_ref()?;
         let substitutions = self.owner_substitutions(parameters, arguments, Some(occurrence));
         let supertypes = if self.type_kind(identity) == Some(TypeKind::Mixin) {
             supertypes
         } else {
-            self.member_supertypes.get(identity)?
+            self.type_facts.get(identity)?.member_supertypes.as_ref()?
         };
         let supertypes: Vec<_> = supertypes
             .iter()
@@ -1874,7 +1899,7 @@ impl SignatureIndex {
             return None;
         };
         let field = self.member_entry(&identity, name)?.read.as_ref()?;
-        let (parameters, _) = self.supertypes.get(&identity)?;
+        let (parameters, _) = self.type_facts.get(&identity)?.supertypes.as_ref()?;
         let substitutions = self.owner_substitutions(parameters, &arguments, Some(&occurrence));
         Some((field.clone(), substitutions))
     }
@@ -1895,7 +1920,7 @@ impl SignatureIndex {
             return None;
         };
         let field = self.member_entry(&identity, name)?.write.as_ref()?;
-        let (parameters, _) = self.supertypes.get(&identity)?;
+        let (parameters, _) = self.type_facts.get(&identity)?.supertypes.as_ref()?;
         let substitutions = self.owner_substitutions(parameters, &arguments, Some(&occurrence));
         Some((field.clone(), substitutions))
     }

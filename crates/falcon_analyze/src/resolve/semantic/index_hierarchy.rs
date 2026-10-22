@@ -43,7 +43,10 @@ impl SignatureIndex {
 
     pub(super) fn cyclic_supertype_identities(&self) -> FxHashSet<DeclarationIdentity> {
         let (mut cyclic, mut acyclic) = (HashSet::new(), HashSet::new());
-        for identity in self.supertypes.local.keys() {
+        for (identity, facts) in &self.type_facts.local {
+            if facts.supertypes.is_none() {
+                continue;
+            }
             self.reaches_supertype_cycle(identity, &mut HashSet::new(), &mut cyclic, &mut acyclic);
         }
         cyclic.into_iter().cloned().collect()
@@ -59,7 +62,7 @@ impl SignatureIndex {
         cyclic: &mut HashSet<&'s DeclarationIdentity>,
         acyclic: &mut HashSet<&'s DeclarationIdentity>,
     ) -> bool {
-        if !self.supertypes.local.contains_key(identity)
+        if !self.type_facts.local.contains_key(identity)
             && let Some(base) = &self.external
         {
             return base.has_cyclic_supertypes(identity);
@@ -72,8 +75,9 @@ impl SignatureIndex {
         }
         visiting.insert(identity);
         let reaches = self
-            .supertypes
+            .type_facts
             .get(identity)
+            .and_then(|facts| facts.supertypes.as_ref())
             .is_some_and(|(_, supertypes)| {
                 supertypes.iter().any(|supertype| match supertype {
                     ResolvedType::Interface { identity, .. } => {
@@ -102,8 +106,9 @@ impl SignatureIndex {
         self.ancestor_matches(
             identity,
             |identity| {
-                self.supertypes
+                self.type_facts
                     .get(identity)
+                    .and_then(|facts| facts.supertypes.as_ref())
                     .map(|(_, supertypes)| supertypes.as_slice())
             },
             matches,
@@ -118,7 +123,11 @@ impl SignatureIndex {
     ) -> Truth {
         self.ancestor_matches(
             identity,
-            |identity| self.member_supertypes.get(identity).map(Vec::as_slice),
+            |identity| {
+                self.type_facts
+                    .get(identity)
+                    .and_then(|facts| facts.member_supertypes.as_deref())
+            },
             matches,
         )
     }
@@ -165,7 +174,11 @@ impl SignatureIndex {
                 arguments,
                 nullable,
                 extension_type,
-            } if arguments.is_empty() => match self.supertypes.get(identity) {
+            } if arguments.is_empty() => match self
+                .type_facts
+                .get(identity)
+                .and_then(|facts| facts.supertypes.as_ref())
+            {
                 Some((parameters, _)) if !parameters.is_empty() => ResolvedType::Interface {
                     occurrence: occurrence.clone(),
                     identity: identity.clone(),
@@ -309,7 +322,7 @@ impl SignatureIndex {
         if target(identity) {
             return Some(self.with_raw_arguments(ty));
         }
-        let (parameters, supertypes) = self.supertypes.get(identity)?;
+        let (parameters, supertypes) = self.type_facts.get(identity)?.supertypes.as_ref()?;
         let substitutions = self.owner_substitutions(parameters, arguments, Some(occurrence));
         supertypes.iter().find_map(|supertype| {
             let instantiated = model.substitute(supertype, &substitutions);
@@ -452,10 +465,11 @@ impl SignatureIndex {
                 continue;
             }
             if *identity != DeclarationIdentity::OBJECT {
-                match self.kinds.get(identity) {
+                match self.type_facts.get(identity).and_then(|facts| facts.kind) {
                     Some(kind) => {
-                        exact &= *kind != TypeKind::Enum;
-                        let (parameters, supertypes) = self.supertypes.get(identity)?;
+                        exact &= kind != TypeKind::Enum;
+                        let (parameters, supertypes) =
+                            self.type_facts.get(identity)?.supertypes.as_ref()?;
                         if parameters.len() != arguments.len() {
                             return None;
                         }
@@ -493,29 +507,30 @@ impl SignatureIndex {
         if let Some(&depth) = depths.get(identity) {
             return Some(depth);
         }
-        if !self.kinds.contains_key(identity) {
-            return None;
-        }
-        let (_, supertypes) = self.supertypes.get(identity)?;
+        let facts = self.type_facts.get(identity)?;
+        facts.kind?;
+        let (_, supertypes) = facts.supertypes.as_ref()?;
+        let mixin_count = facts.mixin_applications.len();
+        let superclass_count = if mixin_count == 0 {
+            0
+        } else {
+            facts.superclass_edge_count()
+        };
         let mut depth_of = |supertype: &ResolvedType| match supertype {
             ResolvedType::Interface { identity, .. } => self.superinterface_depth(identity, depths),
             _ => None,
         };
-        let mixins = self
-            .mixin_applications
-            .get(identity)
-            .cloned()
-            .unwrap_or(0..0);
         // `S with M1, M2` is `(S & M1) & M2`; an omitted superclass is `Object`.
-        let mut chain = match mixins.start {
-            0 => 0,
-            _ => depth_of(supertypes.first()?)?,
+        let mut chain = if superclass_count == 0 {
+            0
+        } else {
+            depth_of(supertypes.first()?)?
         };
-        for mixin in supertypes.get(mixins.clone())? {
+        for mixin in supertypes.iter().skip(superclass_count).take(mixin_count) {
             chain = chain.max(depth_of(mixin)?) + 1;
         }
         let mut depth = chain;
-        for supertype in supertypes.get(mixins.end..)? {
+        for supertype in supertypes.iter().skip(mixin_count + superclass_count) {
             depth = depth.max(depth_of(supertype)?);
         }
         depths.insert(identity.clone(), depth + 1);
@@ -591,7 +606,11 @@ impl SignatureIndex {
         if *identity == DeclarationIdentity::OBJECT || !visited.insert(identity.clone()) {
             return Truth::No;
         }
-        let Some((_, supertypes)) = self.supertypes.get(identity) else {
+        let Some((_, supertypes)) = self
+            .type_facts
+            .get(identity)
+            .and_then(|facts| facts.supertypes.as_ref())
+        else {
             return SDK_HIERARCHY
                 .iter()
                 .find(|(library, name, _, _)| identity.is_sdk(library, name))
@@ -626,5 +645,80 @@ impl SignatureIndex {
             }
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::resolve::IdentitySource;
+    use falcon_dart_parser::parse;
+    use std::path::PathBuf;
+
+    #[test]
+    fn mixin_depth_without_superclass_keeps_deeper_interfaces_separate() {
+        let path = PathBuf::from("/project/lib/main.dart");
+        let source = "class I0 {}
+                      class I1 extends I0 {}
+                      class I extends I1 {}
+                      mixin M {}
+                      class C with M implements I {}
+                      enum E with M implements I { value; }
+                      class Plain implements I {}
+                      class Base extends I {}
+                      class Explicit extends Base with M implements I {}";
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(crate::ParsedFile {
+            source: source.into(),
+            tree,
+        });
+        let identities = IdentityIndex::from_project_files(
+            &[IdentitySource {
+                path: &path,
+                parsed: &parsed,
+                has_parse_errors: false,
+            }],
+            &[],
+        );
+        let types = TypeIndex::from_program(parsed.program());
+        let index = SignatureIndex::from_project_files(
+            &[(path.clone(), Arc::clone(&parsed))],
+            &identities,
+            &types,
+        );
+        let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
+        let mut depths = HashMap::new();
+        for (name, expected) in [("C", 4), ("E", 4), ("Plain", 4), ("Explicit", 6)] {
+            let identity = model.resolve_name(name).unwrap();
+            assert_eq!(
+                index.superinterface_depth(&identity, &mut depths),
+                Some(expected),
+                "{name}",
+            );
+        }
+        for name in ["C", "E"] {
+            let identity = model.resolve_name(name).unwrap();
+            let facts = index.type_facts.get(&identity).unwrap();
+            assert_eq!(facts.superclass_edge_count(), 0, "{name}");
+            assert_eq!(facts.inherited_object, Some(true), "{name}");
+            let (_, supertypes) = facts.supertypes.as_ref().unwrap();
+            let edges: Vec<_> = supertypes
+                .iter()
+                .map(|ty| match ty {
+                    ResolvedType::Interface { identity, .. } => identity.clone(),
+                    _ => panic!("expected interface edge: {ty:?}"),
+                })
+                .collect();
+            assert_eq!(
+                edges,
+                [
+                    model.resolve_name("M").unwrap(),
+                    model.resolve_name("I").unwrap(),
+                    DeclarationIdentity::OBJECT,
+                ],
+                "{name}",
+            );
+        }
     }
 }

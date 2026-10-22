@@ -14,8 +14,7 @@ Batches 16 and 17 work in separate modules.
 
 Owns the semantic index, `type_index.rs`, `ResolvedType` and the rule sites that construct or match it. After batch 15.
 
-- [ ] **One `TypeFacts` record.** About 12 parallel per-type maps are kept in sync by hand and coupled by index arithmetic for enum/mixin supertypes (`semantic.rs:3962-4005,5815-5830`).
-- [ ] **Macro-generated fallback merge.** `add_fallback_signatures` copies 10 named tables by hand even though the `signature_index!` macro claims one-place wiring.
+- [ ] **Macro-generated fallback merge.** `add_fallback_signatures` copies 6 named tables by hand even though the `signature_index!` macro claims one-place wiring.
 - [ ] **One type hierarchy and SDK table.** `TypeIndex` and `SignatureIndex` each carry subtype logic and curated SDK tables.
 - [ ] **One relation API.** Seven overlapping subtype queries and three `unrelated` variants; `is_subtype_of` returns `Truth` but never `No`.
 - [ ] **Hide `ResolvedType` internals.** 7 rule sites build `Interface { occurrence: Default::default(), … }` and 328 match its variants. Add constructors and views, make metadata fields crate-private.

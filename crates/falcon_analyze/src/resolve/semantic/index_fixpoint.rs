@@ -715,7 +715,10 @@ impl SignatureIndex {
         }
         let mut inherited = None;
         if entry.facts.iter().any(|fact| !fact.is_static)
-            && let Some((_, supertypes)) = self.supertypes.get(identity)
+            && let Some((_, supertypes)) = self
+                .type_facts
+                .get(identity)
+                .and_then(|facts| facts.supertypes.as_ref())
         {
             for supertype in supertypes {
                 let Some((declared, substitutions)) = self.resolved_field(supertype, name, model)
@@ -816,8 +819,9 @@ impl SignatureIndex {
         {
             return false;
         }
-        self.supertypes
+        self.type_facts
             .get(identity)
+            .and_then(|facts| facts.supertypes.as_ref())
             .is_some_and(|(_, supertypes)| {
                 supertypes.iter().any(|supertype| {
                     let Some(ResolvedType::Interface { identity, .. }) =
@@ -1010,7 +1014,14 @@ impl SignatureIndex {
             return;
         }
         let mut blockers = HashSet::new();
-        for (identity, declaration) in self.declarations.local.iter() {
+        for (identity, declaration) in
+            self.type_facts
+                .local
+                .iter()
+                .filter_map(|(identity, facts)| {
+                    facts.declaration.as_ref().map(|facts| (identity, facts))
+                })
+        {
             if declaration.is_abstract {
                 continue;
             }
@@ -1109,7 +1120,11 @@ impl SignatureIndex {
                 }
             }
         }
-        if let Some((_, supertypes)) = self.supertypes.get(identity) {
+        if let Some((_, supertypes)) = self
+            .type_facts
+            .get(identity)
+            .and_then(|facts| facts.supertypes.as_ref())
+        {
             for supertype in supertypes {
                 if let ResolvedType::Interface { identity, .. } = supertype {
                     self.abstract_private_getters(identity, visited, getters);

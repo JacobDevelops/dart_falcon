@@ -3,18 +3,18 @@ use super::*;
 impl SignatureIndex {
     pub(super) fn add_sdk_signatures(&mut self) {
         for name in ["TestOn", "Timeout", "Tags", "OnPlatform"] {
-            self.declarations.insert(
-                DeclarationIdentity::package("test", name),
-                DeclarationFacts {
-                    annotations: Vec::new(),
-                    library_target: true,
-                    constructors: Vec::new(),
-                    static_consts: Vec::new(),
-                    extension_representation: None,
-                    is_abstract: false,
-                    has_subclass_in_library: false,
-                },
-            );
+            self.type_facts
+                .entry(DeclarationIdentity::package("test", name))
+                .or_default()
+                .declaration = Some(DeclarationFacts {
+                annotations: Vec::new(),
+                library_target: true,
+                constructors: Vec::new(),
+                static_consts: Vec::new(),
+                extension_representation: None,
+                is_abstract: false,
+                has_subclass_in_library: false,
+            });
         }
         let add = |index: &mut Self,
                    library: &'static str,
@@ -153,11 +153,14 @@ impl SignatureIndex {
                 nullable: false,
                 extension_type: false,
             };
-            self.supertypes.insert(
-                identity.clone(),
-                (vec![parameter_id], vec![supertype.clone()]),
-            );
-            self.member_supertypes.insert(identity, vec![supertype]);
+            self.type_facts
+                .entry(identity.clone())
+                .or_default()
+                .supertypes = Some((vec![parameter_id], vec![supertype.clone()]));
+            self.type_facts
+                .entry(identity)
+                .or_default()
+                .member_supertypes = Some(vec![supertype]);
         }
         let iterable = DeclarationIdentity::sdk("dart:core", "Iterable");
         let map_parameter = sdk_parameter("Iterable.map", 0);
@@ -210,32 +213,46 @@ impl SignatureIndex {
         ] {
             let identity = DeclarationIdentity::flutter(name);
             let supertype = ResolvedType::interface_identity(widget.clone());
-            self.supertypes
-                .insert(identity.clone(), (Vec::new(), vec![supertype.clone()]));
-            self.superclasses
-                .insert(identity.clone(), supertype.clone());
-            self.member_supertypes
-                .insert(identity.clone(), vec![supertype]);
-            self.constructors.entry(identity).or_default().insert(
+            self.type_facts
+                .entry(identity.clone())
+                .or_default()
+                .supertypes = Some((Vec::new(), vec![supertype.clone()]));
+            self.type_facts
+                .entry(identity.clone())
+                .or_default()
+                .superclass = Some(supertype.clone());
+            self.type_facts
+                .entry(identity.clone())
+                .or_default()
+                .member_supertypes = Some(vec![supertype]);
+            self.type_facts
+                .entry(identity)
+                .or_default()
+                .constructors
+                .insert(
+                    "new".to_string(),
+                    ResolvedSignature {
+                        named: HashMap::from([("key".to_string(), key.clone())]),
+                        ..ResolvedSignature::returning(ResolvedType::Unknown)
+                    },
+                );
+        }
+        self.type_facts
+            .entry(widget)
+            .or_default()
+            .constructors
+            .insert(
                 "new".to_string(),
                 ResolvedSignature {
-                    named: HashMap::from([("key".to_string(), key.clone())]),
+                    named: HashMap::from([("key".to_string(), key)]),
                     ..ResolvedSignature::returning(ResolvedType::Unknown)
                 },
             );
-        }
-        self.constructors.entry(widget).or_default().insert(
-            "new".to_string(),
-            ResolvedSignature {
-                named: HashMap::from([("key".to_string(), key)]),
-                ..ResolvedSignature::returning(ResolvedType::Unknown)
-            },
-        );
         self.add_sdk_hierarchy();
         for (identity, name, arity) in super::identity::fallback_types() {
-            if !self.supertypes.contains_key(&identity) {
-                self.fallback_type_parameters.insert(
-                    identity,
+            let facts = self.type_facts.entry(identity).or_default();
+            if facts.supertypes.is_none() {
+                facts.fallback_type_parameters = Some(
                     (0..arity)
                         .map(|ordinal| sdk_parameter(name, ordinal))
                         .collect(),
@@ -294,9 +311,11 @@ impl SignatureIndex {
                         .then(|| sdk("dart:core", "Object", Vec::new())),
                 )
                 .collect();
-            self.supertypes
+            self.type_facts
                 .entry(DeclarationIdentity::sdk(library, name))
-                .or_insert((parameters, resolved));
+                .or_default()
+                .supertypes
+                .get_or_insert((parameters, resolved));
         }
         let element = |owner: &'static str| ResolvedType::TypeParameter {
             id: sdk_parameter(owner, 0),

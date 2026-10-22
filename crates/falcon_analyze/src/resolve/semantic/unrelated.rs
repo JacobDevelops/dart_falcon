@@ -215,7 +215,10 @@ impl SignatureIndex {
         if [left_identity, right_identity].into_iter().any(|identity| {
             self.type_kind(identity).is_none()
                 && matches!(identity, DeclarationIdentity::Sdk { .. })
-                && self.supertypes.contains_key(identity)
+                && self
+                    .type_facts
+                    .get(identity)
+                    .is_some_and(|facts| facts.supertypes.is_some())
         }) {
             // Source-free SDK declarations retain the engine's existing
             // fallback relation; its supertype graph is not an extends table.
@@ -235,8 +238,9 @@ impl SignatureIndex {
             };
         }
         let member_supertypes = |identity| {
-            self.member_supertypes
+            self.type_facts
                 .get(identity)
+                .and_then(|facts| facts.member_supertypes.as_ref())
                 .map(|types| match types.as_slice() {
                     [types @ .., ResolvedType::Interface { identity, .. }]
                         if *identity == DeclarationIdentity::OBJECT =>
@@ -289,7 +293,10 @@ impl SignatureIndex {
         };
         match self.type_kind(identity) {
             None if matches!(identity, DeclarationIdentity::Sdk { .. })
-                && self.supertypes.contains_key(identity) =>
+                && self
+                    .type_facts
+                    .get(identity)
+                    .is_some_and(|facts| facts.supertypes.is_some()) =>
             {
                 Truth::Yes
             }
@@ -700,7 +707,7 @@ impl SignatureIndex {
                         .declaration(identity)?
                         .extension_representation
                         .as_ref()?;
-                    let (parameters, _) = self.supertypes.get(identity)?;
+                    let (parameters, _) = self.type_facts.get(identity)?.supertypes.as_ref()?;
                     let substitutions: HashMap<_, _> =
                         parameters.iter().cloned().zip(arguments).collect();
                     let representation = model.substitute(representation, &substitutions);

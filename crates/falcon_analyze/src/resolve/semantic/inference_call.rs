@@ -632,7 +632,12 @@ impl TypeEnvironment {
             else {
                 return ResolvedType::Unknown;
             };
-            let Some((class_parameters, _)) = context.signatures.supertypes.get(class) else {
+            let Some((class_parameters, _)) = context
+                .signatures
+                .type_facts
+                .get(class)
+                .and_then(|facts| facts.supertypes.as_ref())
+            else {
                 return aliased.with_nullable(false);
             };
             let class_substitutions =
@@ -681,7 +686,12 @@ impl TypeEnvironment {
         }
         let extension_type =
             context.signatures.type_kind(&identity) == Some(TypeKind::ExtensionType);
-        let Some((parameters, _)) = context.signatures.supertypes.get(&identity) else {
+        let Some((parameters, _)) = context
+            .signatures
+            .type_facts
+            .get(&identity)
+            .and_then(|facts| facts.supertypes.as_ref())
+        else {
             return ResolvedType::Interface {
                 occurrence: Default::default(),
                 identity,

@@ -7,7 +7,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::{Borrow, Cow};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use std::ops::{Deref, DerefMut, Range};
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

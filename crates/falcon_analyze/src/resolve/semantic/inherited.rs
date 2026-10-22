@@ -224,12 +224,11 @@ impl SignatureIndex {
             return None;
         };
         if self.type_kind(identity) == Some(TypeKind::Mixin) {
-            let (_, supertypes) = self.supertypes.get(identity)?;
-            let count = *self.mixin_constraint_counts.get(identity)?;
-            let mut candidates = Vec::with_capacity(count);
+            let constraints = self.type_facts.get(identity)?.mixin_constraints.as_ref()?;
+            let mut candidates = Vec::with_capacity(constraints.len());
             let mut visiting = FxHashSet::from_iter([identity.clone()]);
             let mut memo = FxHashMap::default();
-            for constraint in &supertypes[..count] {
+            for constraint in constraints {
                 candidates.extend(self.interface_candidates::<true>(
                     constraint,
                     name,
@@ -394,8 +393,9 @@ impl SignatureIndex {
     ) -> bool {
         lookup.visiting.clear();
         lookup.visiting.insert(identity.clone());
-        self.supertypes
+        self.type_facts
             .get(identity)
+            .and_then(|facts| facts.supertypes.as_ref())
             .is_some_and(|(_, supertypes)| {
                 supertypes.iter().any(|supertype| {
                     self.override_graph_unresolved(
@@ -450,7 +450,11 @@ impl SignatureIndex {
         {
             return true;
         }
-        let Some((_, supertypes)) = self.supertypes.get(identity) else {
+        let Some((_, supertypes)) = self
+            .type_facts
+            .get(identity)
+            .and_then(|facts| facts.supertypes.as_ref())
+        else {
             return !self.member_entries.contains_key(identity);
         };
         supertypes.iter().any(|supertype| {
@@ -619,7 +623,10 @@ impl SignatureIndex {
         visiting: &mut FxHashSet<DeclarationIdentity>,
         memo: &mut FxHashMap<DeclarationIdentity, Vec<InheritedMember>>,
     ) -> Vec<InheritedMember> {
-        let Some((_, supertypes)) = self.supertypes.get(identity) else {
+        let Some(facts) = self.type_facts.get(identity) else {
+            return Vec::new();
+        };
+        let Some((_, supertypes)) = facts.supertypes.as_ref() else {
             return Vec::new();
         };
         let mut candidates = Vec::new();
@@ -630,7 +637,7 @@ impl SignatureIndex {
         let supertypes = if identity != &DeclarationIdentity::OBJECT
             && self.type_kind(identity) != Some(TypeKind::ExtensionType)
         {
-            if let Some(&inherited_object) = self.inherited_object.get(identity) {
+            if let Some(inherited_object) = facts.inherited_object {
                 let (object, explicit) = supertypes.split_last().expect("implicit Object edge");
                 if inherited_object {
                     candidates.extend(self.interface_candidates::<CONTRACTS>(
@@ -644,16 +651,26 @@ impl SignatureIndex {
         } else {
             supertypes.as_slice()
         };
-        for (index, supertype) in supertypes.iter().enumerate() {
+        let base = facts.mixin_constraints.as_deref().unwrap_or_else(|| {
+            supertypes
+                .get(..facts.superclass_edge_count())
+                .unwrap_or(&[])
+        });
+        let mut interfaces = supertypes.iter();
+        for _ in base.iter().chain(&facts.mixin_applications) {
+            interfaces.next();
+        }
+        let edges = base
+            .iter()
+            .map(|ty| (ty, false))
+            .chain(facts.mixin_applications.iter().map(|ty| (ty, true)))
+            .chain(interfaces.map(|ty| (ty, false)));
+        for (supertype, is_mixin) in edges {
             let inherited = self
                 .interface_candidates::<CONTRACTS>(supertype, name, setter, model, visiting, memo);
             // A mixin declaration replaces the superclass signature. A member
             // inherited by the mixin instead combines with that signature before
             // the next mixin or any implemented interfaces are considered.
-            let is_mixin = self
-                .mixin_applications
-                .get(identity)
-                .is_some_and(|range| range.contains(&index));
             if is_mixin
                 && inherited.iter().any(|member| {
                     matches!(supertype, ResolvedType::Interface { identity, .. }
@@ -849,8 +866,9 @@ impl SignatureIndex {
             return members;
         }
         let substitutions = self
-            .supertypes
+            .type_facts
             .get(identity)
+            .and_then(|facts| facts.supertypes.as_ref())
             .map(|(params, _)| self.owner_substitutions(params, arguments, Some(occurrence)));
         if let Some(substitutions) = substitutions.filter(|substitutions| !substitutions.is_empty())
         {
@@ -1006,6 +1024,117 @@ mod tests {
     }
 
     #[test]
+    fn explicit_mixin_edges_preserve_order_and_snapshot_isolation() {
+        let path = PathBuf::from("/project/lib/main.dart");
+        let parsed = parsed(
+            "class Base { Object get value => 0; }
+             mixin First { int get value => 0; }
+             mixin Last { String get value => ''; }
+             mixin Constrained on Base, First {}
+             class Child extends Base with First, Last {}
+             class Named = Base with First, Last;
+             enum Choice with First, Last { item; }",
+        );
+        let identities = IdentityIndex::from_project_files(
+            &[IdentitySource {
+                path: &path,
+                parsed: &parsed,
+                has_parse_errors: false,
+            }],
+            &[],
+        );
+        let types = TypeIndex::from_program(parsed.program());
+        let mut index = SignatureIndex::from_project_files(
+            &[(path.clone(), Arc::clone(&parsed))],
+            &identities,
+            &types,
+        );
+        let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
+        let candidates = |index: &SignatureIndex, owner: &DeclarationIdentity| {
+            index.inherited_candidates::<false>(
+                owner,
+                "value",
+                false,
+                &model,
+                &mut FxHashSet::from_iter([owner.clone()]),
+                &mut FxHashMap::default(),
+            )
+        };
+        let last = model.resolve_name("Last").unwrap();
+        for name in ["Child", "Named", "Choice"] {
+            let members = candidates(&index, &model.resolve_name(name).unwrap());
+            assert_eq!(members.len(), 1, "{name}");
+            assert_eq!(members[0].declaring_type, last, "{name}");
+            assert!(members[0].return_type.interface("dart:core", "String"));
+        }
+        let constrained = model.resolve_name("Constrained").unwrap();
+        let members = candidates(&index, &constrained);
+        assert_eq!(members.len(), 2);
+        assert_eq!(
+            members[0].declaring_type,
+            model.resolve_name("Base").unwrap()
+        );
+        assert_eq!(
+            members[1].declaring_type,
+            model.resolve_name("First").unwrap()
+        );
+
+        // Exercise the SDK-backed enum prefix without changing superclass().
+        let choice = model.resolve_name("Choice").unwrap();
+        let facts = index.type_facts.get_mut(&choice).unwrap();
+        facts
+            .supertypes
+            .as_mut()
+            .unwrap()
+            .1
+            .insert(0, model.core_type("Enum", false));
+        facts.inherited_object = Some(false);
+        let members = candidates(&index, &choice);
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].declaring_type, last);
+
+        index.type_facts.get_mut(&constrained).unwrap().supertypes = Some((
+            Vec::new(),
+            vec![ResolvedType::interface_identity(constrained.clone())],
+        ));
+        index.cyclic_supertypes = None;
+        let snapshot = Arc::new(index);
+        let mut overlay = SignatureIndex::borrowing_external(Arc::clone(&snapshot));
+        let child = model.resolve_name("Child").unwrap();
+        let mut local = snapshot.type_facts[&child].clone();
+        local.mixin_applications.clear();
+        local.supertypes.as_mut().unwrap().1 = vec![
+            ResolvedType::interface_identity(model.resolve_name("Base").unwrap()),
+            model.core_type("Object", false),
+        ];
+        overlay.type_facts.insert(child.clone(), local);
+        let members = candidates(&overlay, &child);
+        assert_eq!(members.len(), 1);
+        assert_eq!(
+            members[0].declaring_type,
+            model.resolve_name("Base").unwrap()
+        );
+        assert_eq!(candidates(&snapshot, &child)[0].declaring_type, last);
+        assert_eq!(candidates(&overlay, &choice)[0].declaring_type, last);
+        assert_eq!(snapshot.type_facts[&child].mixin_applications.len(), 2);
+        overlay
+            .type_facts
+            .insert(child.clone(), TypeFacts::default());
+        assert!(candidates(&overlay, &child).is_empty());
+        assert_eq!(candidates(&snapshot, &child)[0].declaring_type, last);
+        let local = overlay.type_facts.get_mut(&child).unwrap();
+        local.superclass = Some(model.core_type("Object", false));
+        local.supertypes = Some((Vec::new(), vec![model.core_type("Object", false)]));
+        local.inherited_object = Some(false);
+        assert!(candidates(&overlay, &child).is_empty());
+        assert!(snapshot.has_cyclic_supertypes(&constrained));
+        overlay
+            .type_facts
+            .insert(constrained.clone(), TypeFacts::default());
+        assert!(!overlay.has_cyclic_supertypes(&constrained));
+    }
+
+    #[test]
     fn extension_type_inheritance_uses_only_explicit_superinterfaces() {
         let path = PathBuf::from("/project/lib/main.dart");
         let parsed = parsed(
@@ -1031,7 +1160,14 @@ mod tests {
         );
         let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
         let nullable = model.resolve_name("Nullable").unwrap();
-        assert!(index.supertypes[&nullable].1.is_empty());
+        assert!(
+            index.type_facts[&nullable]
+                .supertypes
+                .as_ref()
+                .unwrap()
+                .1
+                .is_empty()
+        );
         assert!(!index.has_combined_inherited_member(
             &nullable,
             "toString",
@@ -1289,19 +1425,20 @@ mod tests {
             model.core_type("String", false)
         );
         let sdk_child = model.resolve_name("SdkChild").unwrap();
-        index.supertypes.insert(
-            sdk_child.clone(),
-            (
-                Vec::new(),
-                vec![ResolvedType::Interface {
-                    identity: DeclarationIdentity::sdk("dart:collection", "Unindexed"),
-                    arguments: Vec::new().into(),
-                    occurrence: Default::default(),
-                    nullable: false,
-                    extension_type: false,
-                }],
-            ),
-        );
+        index
+            .type_facts
+            .entry(sdk_child.clone())
+            .or_default()
+            .supertypes = Some((
+            Vec::new(),
+            vec![ResolvedType::Interface {
+                identity: DeclarationIdentity::sdk("dart:collection", "Unindexed"),
+                arguments: Vec::new().into(),
+                occurrence: Default::default(),
+                nullable: false,
+                extension_type: false,
+            }],
+        ));
         index.infer_override_types(parsed.program(), &model);
         assert_eq!(
             index.member(&sdk_child, "helper").unwrap().positional[0],
