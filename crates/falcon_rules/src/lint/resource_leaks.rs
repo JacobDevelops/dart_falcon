@@ -972,10 +972,11 @@ impl<'a> Visitor<'a> for References<'a> {
         visitor::walk_switch_case(self, node);
     }
 
-    fn visit_collection_element(&mut self, node: CollectionElement<'a>) {
-        if let CollectionElement::For(element) = node {
-            self.scopes.push(element.span());
-            if let Some(ForInit::ForIn(initializer)) = element.header().init()
+    fn visit_element<E: Element<'a>>(&mut self, node: E) {
+        let kind = node.kind();
+        if let ElementKind::For { header, .. } = kind {
+            self.scopes.push(node.span());
+            if let Some(ForInit::ForIn(initializer)) = header.init()
                 && initializer.declares_variable()
             {
                 self.bind(
@@ -985,23 +986,7 @@ impl<'a> Visitor<'a> for References<'a> {
                 );
             }
         }
-        visitor::walk_collection_element(self, node);
-    }
-
-    fn visit_map_element(&mut self, node: MapElement<'a>) {
-        if let MapElement::For(element) = node {
-            self.scopes.push(element.span());
-            if let Some(ForInit::ForIn(initializer)) = element.header().init()
-                && initializer.declares_variable()
-            {
-                self.bind(
-                    initializer.name(),
-                    initializer.name().span(),
-                    BindingKind::Local,
-                );
-            }
-        }
-        visitor::walk_map_element(self, node);
+        visitor::walk_element(self, kind);
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {

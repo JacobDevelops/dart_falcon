@@ -4,8 +4,8 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_syntax::cst::visit::{
-    Visitor, walk_class_member, walk_collection_element, walk_expr, walk_expr_chain,
-    walk_function_decl, walk_map_element, walk_pattern, walk_stmt,
+    Visitor, walk_class_member, walk_element, walk_expr, walk_expr_chain, walk_function_decl,
+    walk_pattern, walk_stmt,
 };
 use falcon_syntax::cst::*;
 
@@ -367,49 +367,28 @@ impl<'a> Visitor<'a> for FlowWrites {
         }
     }
 
-    fn visit_collection_element(&mut self, element: CollectionElement<'a>) {
-        if let CollectionElement::If(condition) = element {
-            self.conditional(condition.condition(), |visitor| {
-                visitor.visit_collection_element(condition.then_elem())
-            });
-            if let Some(element) = condition.else_elem() {
-                self.scoped(|visitor| visitor.visit_collection_element(element));
+    fn visit_element<E: Element<'a>>(&mut self, element: E) {
+        match element.kind() {
+            ElementKind::If {
+                condition,
+                then_element,
+                else_element,
+            } => {
+                self.conditional(condition, |visitor| visitor.visit_element(then_element));
+                if let Some(element) = else_element {
+                    self.scoped(|visitor| visitor.visit_element(element));
+                }
             }
-            return;
-        }
-        if let CollectionElement::For(loop_element) = element {
-            self.scoped(|visitor| {
-                visitor.loop_init(loop_element.header());
-                visitor.region(loop_element.span().start, |visitor| {
-                    visitor.loop_header(loop_element.header());
-                    visitor.visit_collection_element(loop_element.element());
+            ElementKind::For { header, body, .. } => {
+                self.scoped(|visitor| {
+                    visitor.loop_init(header);
+                    visitor.region(element.span().start, |visitor| {
+                        visitor.loop_header(header);
+                        visitor.visit_element(body);
+                    });
                 });
-            });
-        } else {
-            walk_collection_element(self, element);
-        }
-    }
-
-    fn visit_map_element(&mut self, element: MapElement<'a>) {
-        if let MapElement::If(condition) = element {
-            self.conditional(condition.condition(), |visitor| {
-                visitor.visit_map_element(condition.then_entry())
-            });
-            if let Some(entry) = condition.else_entry() {
-                self.scoped(|visitor| visitor.visit_map_element(entry));
             }
-            return;
-        }
-        if let MapElement::For(loop_element) = element {
-            self.scoped(|visitor| {
-                visitor.loop_init(loop_element.header());
-                visitor.region(loop_element.span().start, |visitor| {
-                    visitor.loop_header(loop_element.header());
-                    visitor.visit_map_element(loop_element.entry());
-                });
-            });
-        } else {
-            walk_map_element(self, element);
+            kind => walk_element(self, kind),
         }
     }
 

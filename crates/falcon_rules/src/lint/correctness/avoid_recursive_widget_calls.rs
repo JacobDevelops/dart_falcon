@@ -45,6 +45,21 @@ struct Collector<'a> {
     locals: &'a std::collections::HashMap<usize, NodeId>,
     diagnostics: Vec<Diagnostic>,
 }
+impl<'a> Collector<'a> {
+    fn element<E: Element<'a>>(&mut self, node: E) -> StructuralTraversal {
+        if matches!(
+            node.syntax().kind(),
+            NodeKind::IfElement
+                | NodeKind::ForElement
+                | NodeKind::MapIfElement
+                | NodeKind::MapForElement
+        ) {
+            StructuralTraversal::SkipChildren
+        } else {
+            StructuralTraversal::Continue
+        }
+    }
+}
 falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diagnostics }
@@ -71,14 +86,10 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         } else { StructuralTraversal::Continue }
     }
     fn visit_collection_element(&mut self, node: CollectionElement<'a>) -> StructuralTraversal {
-        if matches!(node, CollectionElement::If(_) | CollectionElement::For(_)) {
-            StructuralTraversal::SkipChildren
-        } else { StructuralTraversal::Continue }
+        self.element(node)
     }
     fn visit_map_element(&mut self, node: MapElement<'a>) -> StructuralTraversal {
-        if matches!(node, MapElement::If(_) | MapElement::For(_)) {
-            StructuralTraversal::SkipChildren
-        } else { StructuralTraversal::Continue }
+        self.element(node)
     }
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         if matches!(node, Expr::FuncExpr(_) | Expr::Conditional(_)) {

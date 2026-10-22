@@ -826,7 +826,7 @@ impl TypeEnvironment {
                         && context.is_none(),
                 };
                 for element in elements {
-                    visitor.visit_collection_element(element);
+                    visitor.visit_element(element);
                 }
                 let CollectionTypes { mut components, .. } = visitor;
                 if let Some(map) = map_context {
@@ -934,7 +934,7 @@ impl TypeEnvironment {
                     infer_map_spreads: false,
                 };
                 for element in elements {
-                    visitor.visit_map_element(element);
+                    visitor.visit_element(element);
                 }
                 let CollectionTypes { mut components, .. } = visitor;
                 let arguments = contexts

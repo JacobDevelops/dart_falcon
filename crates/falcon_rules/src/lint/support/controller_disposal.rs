@@ -654,26 +654,19 @@ impl<'a> Visitor<'a> for EagerReleaseScope<'_> {
         }
     }
 
-    fn visit_collection_element(&mut self, element: CollectionElement<'a>) {
+    fn visit_element<E: Element<'a>>(&mut self, element: E) {
         if matches!(
-            element,
-            CollectionElement::If(_) | CollectionElement::For(_)
+            element.syntax().kind(),
+            NodeKind::IfElement
+                | NodeKind::ForElement
+                | NodeKind::MapIfElement
+                | NodeKind::MapForElement
         ) {
             let mut exits = EarlyExit(false);
-            exits.visit_collection_element(element);
+            exits.visit_element(element);
             self.stopped |= exits.0;
         } else {
-            falcon_syntax::cst::visit::walk_collection_element(self, element);
-        }
-    }
-
-    fn visit_map_element(&mut self, element: MapElement<'a>) {
-        if matches!(element, MapElement::If(_) | MapElement::For(_)) {
-            let mut exits = EarlyExit(false);
-            exits.visit_map_element(element);
-            self.stopped |= exits.0;
-        } else {
-            falcon_syntax::cst::visit::walk_map_element(self, element);
+            falcon_syntax::cst::visit::walk_element(self, element.kind());
         }
     }
 

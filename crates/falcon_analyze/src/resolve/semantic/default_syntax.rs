@@ -300,39 +300,34 @@ impl<'a> Visitor<'a> for SyntaxCollector {
         self.tokens.push(Token::End);
     }
 
-    fn visit_collection_element(&mut self, element: CollectionElement<'a>) {
-        self.tokens.push(Token::Element(match element {
-            CollectionElement::Expr(_) => NodeKind::Identifier,
-            _ => element.syntax().kind(),
-        }));
-        match element {
-            CollectionElement::Spread(value) => self.flag(value.is_null_aware()),
-            CollectionElement::If(value) => {
-                self.condition(value.condition());
-                self.flag(value.else_elem().is_some());
-            }
-            CollectionElement::For(_) => self.complete = false,
-            CollectionElement::Expr(_) | CollectionElement::NullAware(_) => {}
-        }
-        visitor::walk_collection_element(self, element);
-        self.tokens.push(Token::End);
-    }
-
-    fn visit_map_element(&mut self, element: MapElement<'a>) {
-        self.tokens.push(Token::MapElement(element.syntax().kind()));
-        match element {
-            MapElement::Entry(entry) => {
+    fn visit_element<E: Element<'a>>(&mut self, element: E) {
+        let kind = element.kind();
+        self.tokens.push(if E::IS_MAP {
+            Token::MapElement(element.syntax().kind())
+        } else {
+            Token::Element(match kind {
+                ElementKind::Expression(_) => NodeKind::Identifier,
+                _ => element.syntax().kind(),
+            })
+        });
+        match kind {
+            ElementKind::Entry(entry) => {
                 self.flag(entry.key_null_aware());
                 self.flag(entry.value_null_aware());
             }
-            MapElement::Spread(value) => self.flag(value.is_null_aware()),
-            MapElement::If(value) => {
-                self.condition(value.condition());
-                self.flag(value.else_entry().is_some());
+            ElementKind::Spread { .. } => self.flag(element.spread_is_null_aware()),
+            ElementKind::If {
+                condition,
+                else_element,
+                ..
+            } => {
+                self.condition(condition);
+                self.flag(else_element.is_some());
             }
-            MapElement::For(_) => self.complete = false,
+            ElementKind::For { .. } => self.complete = false,
+            ElementKind::Expression(_) | ElementKind::NullAware(_) => {}
         }
-        visitor::walk_map_element(self, element);
+        visitor::walk_element(self, kind);
         self.tokens.push(Token::End);
     }
 }

@@ -258,12 +258,8 @@ pub trait Visitor<'a>: Sized {
         }
     }
 
-    fn visit_collection_element(&mut self, node: CollectionElement<'a>) {
-        walk_collection_element(self, node);
-    }
-
-    fn visit_map_element(&mut self, node: MapElement<'a>) {
-        walk_map_element(self, node);
+    fn visit_element<E: Element<'a>>(&mut self, element: E) {
+        walk_element(self, element.kind());
     }
 
     fn visit_switch_expr_arm(&mut self, node: SwitchExprArm<'a>) {
@@ -1234,7 +1230,7 @@ pub fn walk_expr<'a, V: Visitor<'a>>(v: &mut V, node: Expr<'a>) {
                 v.visit_dart_type(t);
             }
             for elem in n.elements() {
-                v.visit_collection_element(elem);
+                v.visit_element(elem);
             }
         }
         Expr::Set(n) => {
@@ -1242,7 +1238,7 @@ pub fn walk_expr<'a, V: Visitor<'a>>(v: &mut V, node: Expr<'a>) {
                 v.visit_dart_type(t);
             }
             for elem in n.elements() {
-                v.visit_collection_element(elem);
+                v.visit_element(elem);
             }
         }
         Expr::Map(n) => {
@@ -1250,7 +1246,7 @@ pub fn walk_expr<'a, V: Visitor<'a>>(v: &mut V, node: Expr<'a>) {
                 v.visit_dart_type(t);
             }
             for element in n.elements() {
-                v.visit_map_element(element);
+                v.visit_element(element);
             }
         }
         Expr::Record(n) => {
@@ -1440,32 +1436,27 @@ pub fn walk_cascade_section<'a, V: Visitor<'a>>(v: &mut V, section: CascadeSecti
     }
 }
 
-pub fn walk_collection_element<'a, V: Visitor<'a>>(v: &mut V, elem: CollectionElement<'a>) {
-    match elem {
-        CollectionElement::Expr(e) => v.visit_expr(e),
-        CollectionElement::NullAware(n) => {
-            let expr = n.expr();
-            v.visit_expr(expr);
+pub fn walk_element<'a, V: Visitor<'a>, E: Element<'a>>(v: &mut V, kind: ElementKind<'a, E>) {
+    match kind {
+        ElementKind::Expression(expression) | ElementKind::Spread { expression, .. } => {
+            v.visit_expr(expression);
         }
-        CollectionElement::Spread(n) => {
-            let expr = n.expr();
-            v.visit_expr(expr);
-        }
-        CollectionElement::If(n) => {
-            let condition = n.condition();
-            let then_elem = n.then_elem();
-            let else_elem = n.else_elem();
+        ElementKind::NullAware(element) => v.visit_expr(element.expr()),
+        ElementKind::Entry(entry) => v.visit_map_entry(entry),
+        ElementKind::If {
+            condition,
+            then_element,
+            else_element,
+        } => {
             v.visit_if_condition(condition);
-            v.visit_collection_element(then_elem);
-            if let Some(else_e) = else_elem {
-                v.visit_collection_element(else_e);
+            v.visit_element(then_element);
+            if let Some(element) = else_element {
+                v.visit_element(element);
             }
         }
-        CollectionElement::For(n) => {
-            let header = n.header();
-            let element = n.element();
+        ElementKind::For { header, body, .. } => {
             v.visit_for_header(header);
-            v.visit_collection_element(element);
+            v.visit_element(body);
         }
     }
 }
@@ -1529,31 +1520,6 @@ pub fn walk_for_header<'a, V: Visitor<'a>>(v: &mut V, header: ForHeader<'a>) {
     }
 }
 
-pub fn walk_map_element<'a, V: Visitor<'a>>(v: &mut V, element: MapElement<'a>) {
-    match element {
-        MapElement::Entry(entry) => v.visit_map_entry(entry),
-        MapElement::Spread(n) => {
-            let expr = n.expr();
-            v.visit_expr(expr);
-        }
-        MapElement::If(n) => {
-            let condition = n.condition();
-            let then_entry = n.then_entry();
-            let else_entry = n.else_entry();
-            v.visit_if_condition(condition);
-            v.visit_map_element(then_entry);
-            if let Some(else_e) = else_entry {
-                v.visit_map_element(else_e);
-            }
-        }
-        MapElement::For(n) => {
-            let header = n.header();
-            let entry = n.entry();
-            v.visit_for_header(header);
-            v.visit_map_element(entry);
-        }
-    }
-}
 pub fn walk_enum_variant<'a, V: Visitor<'a>>(v: &mut V, node: EnumVariant<'a>) {
     for annotation in node.annotations() {
         v.visit_annotation(annotation);

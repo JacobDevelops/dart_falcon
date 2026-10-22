@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_syntax::cst::visit::{
-    Visitor, bound_names, walk_class_member, walk_collection_element, walk_expr,
-    walk_function_body, walk_map_element, walk_pattern,
+    Visitor, bound_names, walk_class_member, walk_element, walk_expr, walk_function_body,
+    walk_pattern,
 };
 use falcon_syntax::cst::*;
 
@@ -350,11 +350,16 @@ impl UsageCollector {
 }
 
 impl<'a> Visitor<'a> for UsageCollector {
-    fn visit_collection_element(&mut self, element: CollectionElement<'a>) {
-        match element {
-            CollectionElement::If(branch) => {
-                let IfCondition::Case(case) = branch.condition() else {
-                    walk_collection_element(self, element);
+    fn visit_element<E: Element<'a>>(&mut self, element: E) {
+        let kind = element.kind();
+        match kind {
+            ElementKind::If {
+                condition,
+                then_element,
+                else_element,
+            } => {
+                let IfCondition::Case(case) = condition else {
+                    walk_element(self, kind);
                     return;
                 };
                 let expression = case.expr();
@@ -367,52 +372,19 @@ impl<'a> Visitor<'a> for UsageCollector {
                 if let Some(guard) = guard {
                     self.visit_expr(guard);
                 }
-                self.visit_collection_element(branch.then_elem());
+                self.visit_element(then_element);
                 self.pop_scope();
-                if let Some(else_element) = branch.else_elem() {
-                    self.visit_collection_element(else_element);
+                if let Some(element) = else_element {
+                    self.visit_element(element);
                 }
             }
-            CollectionElement::For(element) => {
+            ElementKind::For { header, body, .. } => {
                 self.push_scope();
-                self.visit_for_header(element.header());
-                self.visit_collection_element(element.element());
+                self.visit_for_header(header);
+                self.visit_element(body);
                 self.pop_scope();
             }
-            _ => walk_collection_element(self, element),
-        }
-    }
-
-    fn visit_map_element(&mut self, element: MapElement<'a>) {
-        match element {
-            MapElement::If(branch) => {
-                let IfCondition::Case(case) = branch.condition() else {
-                    walk_map_element(self, element);
-                    return;
-                };
-                let expression = case.expr();
-                let pattern = case.pattern();
-                let guard = case.guard();
-                self.visit_expr(expression);
-                self.push_scope();
-                self.visit_pattern(pattern);
-                self.bind_pattern(pattern);
-                if let Some(guard) = guard {
-                    self.visit_expr(guard);
-                }
-                self.visit_map_element(branch.then_entry());
-                self.pop_scope();
-                if let Some(else_entry) = branch.else_entry() {
-                    self.visit_map_element(else_entry);
-                }
-            }
-            MapElement::For(element) => {
-                self.push_scope();
-                self.visit_for_header(element.header());
-                self.visit_map_element(element.entry());
-                self.pop_scope();
-            }
-            _ => walk_map_element(self, element),
+            kind => walk_element(self, kind),
         }
     }
 
@@ -642,17 +614,17 @@ impl<'a> Visitor<'a> for UsageCollector {
             }
             Expr::List(list) => {
                 for element in list.elements() {
-                    self.visit_collection_element(element);
+                    self.visit_element(element);
                 }
             }
             Expr::Set(set) => {
                 for element in set.elements() {
-                    self.visit_collection_element(element);
+                    self.visit_element(element);
                 }
             }
             Expr::Map(map) => {
                 for element in map.elements() {
-                    self.visit_map_element(element);
+                    self.visit_element(element);
                 }
             }
             Expr::Switch(switch) => {

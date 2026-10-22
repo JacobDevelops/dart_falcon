@@ -199,39 +199,23 @@ impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> Visitor<'a> for InitializerDepend
         });
     }
 
-    fn visit_collection_element(&mut self, element: falcon_syntax::cst::CollectionElement<'a>) {
-        use falcon_syntax::cst::CollectionElement;
-        match element {
-            CollectionElement::For(_) => self.scoped(|visitor| {
-                falcon_syntax::cst::visit::walk_collection_element(visitor, element)
-            }),
-            CollectionElement::If(branch) => {
-                self.condition(branch.condition(), |visitor| {
-                    visitor.visit_collection_element(branch.then_elem())
-                });
-                if let Some(element) = branch.else_elem() {
-                    self.visit_collection_element(element);
+    fn visit_element<E: falcon_syntax::cst::Element<'a>>(&mut self, element: E) {
+        use falcon_syntax::cst::ElementKind;
+        match element.kind() {
+            kind @ ElementKind::For { .. } => {
+                self.scoped(|visitor| falcon_syntax::cst::visit::walk_element(visitor, kind))
+            }
+            ElementKind::If {
+                condition,
+                then_element,
+                else_element,
+            } => {
+                self.condition(condition, |visitor| visitor.visit_element(then_element));
+                if let Some(element) = else_element {
+                    self.visit_element(element);
                 }
             }
-            _ => falcon_syntax::cst::visit::walk_collection_element(self, element),
-        }
-    }
-
-    fn visit_map_element(&mut self, element: falcon_syntax::cst::MapElement<'a>) {
-        use falcon_syntax::cst::MapElement;
-        match element {
-            MapElement::For(_) => {
-                self.scoped(|visitor| falcon_syntax::cst::visit::walk_map_element(visitor, element))
-            }
-            MapElement::If(branch) => {
-                self.condition(branch.condition(), |visitor| {
-                    visitor.visit_map_element(branch.then_entry())
-                });
-                if let Some(element) = branch.else_entry() {
-                    self.visit_map_element(element);
-                }
-            }
-            _ => falcon_syntax::cst::visit::walk_map_element(self, element),
+            kind => falcon_syntax::cst::visit::walk_element(self, kind),
         }
     }
 }

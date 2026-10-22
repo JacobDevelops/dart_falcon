@@ -1172,3 +1172,102 @@ expression_enum!(CollectionElement {
 expression_enum!(MapElement {
     Entry(MapEntry), Spread(MapSpreadElement), If(MapIfElement), For(MapForElement)
 } tuples { Entry });
+
+/// A collection or map element with its original syntax identity.
+pub trait Element<'a>: AstNode<'a> {
+    const IS_MAP: bool;
+
+    fn kind(self) -> ElementKind<'a, Self>;
+
+    fn view(self) -> ElementView<'a>;
+
+    fn is_await(self) -> bool {
+        let syntax = self.syntax();
+        matches!(
+            syntax.kind(),
+            NodeKind::ForElement | NodeKind::MapForElement
+        ) && has(syntax, TokenKind::Await)
+    }
+
+    fn spread_is_null_aware(self) -> bool {
+        has(self.syntax(), TokenKind::DotDotDotQmark)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ElementView<'a> {
+    Collection(CollectionElement<'a>),
+    Map(MapElement<'a>),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ElementKind<'a, E> {
+    Expression(Expr<'a>),
+    NullAware(NullAwareElement<'a>),
+    Entry(MapEntry<'a>),
+    Spread {
+        expression: Expr<'a>,
+    },
+    If {
+        condition: IfCondition<'a>,
+        then_element: E,
+        else_element: Option<E>,
+    },
+    For {
+        header: ForHeader<'a>,
+        body: E,
+    },
+}
+
+impl<'a> Element<'a> for CollectionElement<'a> {
+    const IS_MAP: bool = false;
+
+    fn view(self) -> ElementView<'a> {
+        ElementView::Collection(self)
+    }
+
+    fn kind(self) -> ElementKind<'a, Self> {
+        match self {
+            Self::Expr(expression) => ElementKind::Expression(expression),
+            Self::NullAware(element) => ElementKind::NullAware(element),
+            Self::Spread(element) => ElementKind::Spread {
+                expression: element.expr(),
+            },
+            Self::If(element) => ElementKind::If {
+                condition: element.condition(),
+                then_element: element.then_elem(),
+                else_element: element.else_elem(),
+            },
+            Self::For(element) => ElementKind::For {
+                header: element.header(),
+                body: element.element(),
+            },
+        }
+    }
+}
+
+impl<'a> Element<'a> for MapElement<'a> {
+    const IS_MAP: bool = true;
+
+    fn view(self) -> ElementView<'a> {
+        ElementView::Map(self)
+    }
+
+    fn kind(self) -> ElementKind<'a, Self> {
+        match self {
+            Self::Entry(entry) => ElementKind::Entry(entry),
+            Self::Spread(element) => ElementKind::Spread {
+                expression: element.expr(),
+            },
+            Self::If(element) => ElementKind::If {
+                condition: element.condition(),
+                then_element: element.then_entry(),
+                else_element: element.else_entry(),
+            },
+            Self::For(element) => ElementKind::For {
+                header: element.header(),
+                body: element.entry(),
+            },
+        }
+    }
+}

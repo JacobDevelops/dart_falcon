@@ -294,6 +294,14 @@ macro_rules! recording_visitor {
                 self.recorder().current_node = previous;
             })*
 
+            fn visit_element<E: Element<'a>>(&mut self, node: E) {
+                let kind = if E::IS_MAP { "MapElement" } else { "CollectionElement" };
+                self.recorder().record(kind, node.syntax().id(), node.span());
+                let previous = self.recorder().current_node.replace((node.syntax().id(), node.span()));
+                walk_element(self, node.kind());
+                self.recorder().current_node = previous;
+            }
+
             fn visit_identifier(&mut self, node: Identifier<'a>) {
                 self.recorder().record("Identifier", node.syntax().id(), node.span());
                 self.recorder().names.push(node.name().to_owned());
@@ -406,9 +414,7 @@ recording_visitor! {
     YieldStmt => visit_yield_stmt / walk_yield_stmt,
     ExprStmt => visit_expr_stmt / walk_expr_stmt,
     CascadeSection => visit_cascade_section / walk_cascade_section,
-    CollectionElement => visit_collection_element / walk_collection_element,
     MapEntry => visit_map_entry / walk_map_entry,
-    MapElement => visit_map_element / walk_map_element,
     RecordField => visit_record_field / walk_record_field,
     ArgList => visit_arg_list / walk_arg_list,
     NamedArg => visit_named_arg / walk_named_arg,

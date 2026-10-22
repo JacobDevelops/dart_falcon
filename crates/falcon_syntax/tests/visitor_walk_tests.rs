@@ -1037,3 +1037,193 @@ fn expression_chain_entries_preserve_preorder_and_pruning() {
         ],
     );
 }
+
+#[test]
+fn shared_elements_preserve_nested_order_and_leaf_metadata() {
+    #[derive(Default)]
+    struct Elements {
+        seen: std::collections::BTreeSet<(bool, NodeId)>,
+        ints: Vec<String>,
+        spreads: Vec<(bool, bool)>,
+        loops: Vec<(bool, bool)>,
+        entries: Vec<(bool, bool)>,
+        null_aware: usize,
+    }
+
+    impl<'a> Visitor<'a> for Elements {
+        fn visit_element<E: Element<'a>>(&mut self, element: E) {
+            assert!(self.seen.insert((E::IS_MAP, element.syntax().id())));
+            let syntax = match element.view() {
+                ElementView::Collection(original) => {
+                    assert!(!E::IS_MAP);
+                    assert_eq!(original.span(), element.span());
+                    original.syntax()
+                }
+                ElementView::Map(original) => {
+                    assert!(E::IS_MAP);
+                    assert_eq!(original.span(), element.span());
+                    original.syntax()
+                }
+            };
+            assert_eq!(syntax, element.syntax());
+            let kind = element.kind();
+            match kind {
+                ElementKind::Spread { .. } => {
+                    self.spreads
+                        .push((E::IS_MAP, element.spread_is_null_aware()));
+                }
+                ElementKind::For { .. } => {
+                    self.loops.push((E::IS_MAP, element.is_await()));
+                }
+                ElementKind::NullAware(_) => self.null_aware += 1,
+                ElementKind::Expression(_) => assert!(!element.is_await()),
+                ElementKind::Entry(_) | ElementKind::If { .. } => {}
+            }
+            walk_element(self, kind);
+        }
+
+        fn visit_map_entry(&mut self, entry: MapEntry<'a>) {
+            self.entries
+                .push((entry.key_null_aware(), entry.value_null_aware()));
+            walk_map_entry(self, entry);
+        }
+
+        fn visit_expr(&mut self, expression: Expr<'a>) {
+            if let Expr::IntLit(value) = expression {
+                self.ints.push(value.value().to_owned());
+            }
+            walk_expr(self, expression);
+        }
+    }
+
+    let source = r#"
+        void f() async {
+          var values = [
+            if (100)
+              for (var i = 101; 102; 103)
+                if (104) ?105 else ...?[106]
+            else ...[107],
+            await for (var item in [108]) item,
+            await future,
+          ];
+          var map = <int, int>{
+            if (200)
+              for (var j = 201; 202; 203)
+                if (204) ?205: ?206 else ...?{207: 208}
+            else ...{209: 210},
+            await for (var entry in [211]) 212: entry,
+          };
+        }
+    "#;
+    let parsed = parse(source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let mut elements = Elements::default();
+    elements.visit_program(parsed.tree.program(source));
+    assert_eq!(
+        elements.ints,
+        [
+            "100", "101", "102", "103", "104", "105", "106", "107", "108", "200", "201", "202",
+            "203", "204", "205", "206", "207", "208", "209", "210", "211", "212",
+        ],
+    );
+    assert_eq!(
+        elements.spreads,
+        [(false, true), (false, false), (true, true), (true, false)],
+    );
+    assert_eq!(
+        elements.loops,
+        [(false, false), (false, true), (true, false), (true, true)],
+    );
+    assert_eq!(
+        elements.entries,
+        [(true, true), (false, false), (false, false), (false, false)],
+    );
+    assert_eq!(elements.null_aware, 1);
+    assert_eq!(elements.seen.len(), 23);
+}
+
+#[test]
+fn shared_element_override_prunes_only_map_loops() {
+    #[derive(Default)]
+    struct Pruning {
+        seen: std::collections::BTreeSet<(bool, NodeId)>,
+        kinds: Vec<(bool, &'static str)>,
+        names: Vec<String>,
+    }
+
+    impl<'a> Visitor<'a> for Pruning {
+        fn visit_element<E: Element<'a>>(&mut self, element: E) {
+            assert!(self.seen.insert((E::IS_MAP, element.syntax().id())));
+            let shape = element.kind();
+            let kind = match shape {
+                ElementKind::Expression(_) => "expression",
+                ElementKind::NullAware(_) => "null-aware",
+                ElementKind::Entry(_) => "entry",
+                ElementKind::Spread { .. } => "spread",
+                ElementKind::If { .. } => "if",
+                ElementKind::For { .. } => "for",
+            };
+            self.kinds.push((E::IS_MAP, kind));
+            if E::IS_MAP && kind == "for" {
+                return;
+            }
+            walk_element(self, shape);
+        }
+
+        fn visit_identifier(&mut self, identifier: Identifier<'a>) {
+            self.names.push(identifier.name().to_owned());
+        }
+    }
+
+    let source = r#"
+        var values = [
+          if (listCondition)
+            for (var item in listItems)
+              if (innerCondition) item else ?listFallback
+          else ...listSpread,
+        ];
+        var map = {
+          if (mapCondition)
+            for (var hidden in hiddenItems) hiddenKey: hiddenValue
+          else visibleKey: visibleValue,
+          ...mapSpread,
+        };
+    "#;
+    let parsed = parse(source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let mut visitor = Pruning::default();
+    visitor.visit_program(parsed.tree.program(source));
+    assert_eq!(
+        visitor.names,
+        [
+            "values",
+            "listCondition",
+            "item",
+            "listItems",
+            "innerCondition",
+            "item",
+            "listFallback",
+            "listSpread",
+            "map",
+            "mapCondition",
+            "visibleKey",
+            "visibleValue",
+            "mapSpread",
+        ],
+    );
+    assert_eq!(
+        visitor.kinds,
+        [
+            (false, "if"),
+            (false, "for"),
+            (false, "if"),
+            (false, "expression"),
+            (false, "null-aware"),
+            (false, "spread"),
+            (true, "if"),
+            (true, "for"),
+            (true, "entry"),
+            (true, "spread"),
+        ],
+    );
+}

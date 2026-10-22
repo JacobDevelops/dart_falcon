@@ -68,9 +68,9 @@ impl<'a> Visitor<'a> for MapScan<'_, 'a> {
 
     fn visit_if_condition(&mut self, _condition: IfCondition<'a>) {}
 
-    fn visit_map_element(&mut self, element: MapElement<'a>) {
-        if !matches!(element, MapElement::For(_)) {
-            visit::walk_map_element(self, element);
+    fn visit_element<E: Element<'a>>(&mut self, element: E) {
+        if !E::IS_MAP || element.syntax().kind() != NodeKind::MapForElement {
+            visit::walk_element(self, element.kind());
         }
     }
 

@@ -59,6 +59,22 @@ impl Collector<'_> {
             self.diags.push(self.ctx.diagnostic("Prefer a positive condition and swap the branches.", condition.span()));
         }
     }
+
+    fn element<'a, E: Element<'a>>(&mut self, node: E) -> StructuralTraversal {
+        if let ElementKind::If {
+            condition: IfCondition::Expr(condition),
+            else_element: Some(other),
+            ..
+        } = node.kind()
+            && !matches!(
+                other.syntax().kind(),
+                NodeKind::IfElement | NodeKind::MapIfElement
+            )
+        {
+            self.check(condition);
+        }
+        StructuralTraversal::Continue
+    }
 }
 
 falcon_analyze::structural_visitor! {
@@ -77,25 +93,11 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn visit_collection_element(&mut self, node: CollectionElement<'a>) -> StructuralTraversal {
-        if let CollectionElement::If(element) = node
-            && element.else_elem().is_some()
-            && !matches!(element.else_elem(), Some(CollectionElement::If(_)))
-            && let IfCondition::Expr(condition) = element.condition()
-        {
-            self.check(condition);
-        }
-        StructuralTraversal::Continue
+        self.element(node)
     }
 
     fn visit_map_element(&mut self, node: MapElement<'a>) -> StructuralTraversal {
-        if let MapElement::If(element) = node
-            && element.else_entry().is_some()
-            && !matches!(element.else_entry(), Some(MapElement::If(_)))
-            && let IfCondition::Expr(condition) = element.condition()
-        {
-            self.check(condition);
-        }
-        StructuralTraversal::Continue
+        self.element(node)
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {

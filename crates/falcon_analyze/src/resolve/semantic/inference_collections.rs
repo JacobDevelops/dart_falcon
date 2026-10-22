@@ -161,47 +161,18 @@ impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
 }
 
 impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for CollectionTypes<'_, '_, L> {
-    fn visit_collection_element(&mut self, element: falcon_syntax::cst::CollectionElement<'tree>) {
-        use falcon_syntax::cst::CollectionElement;
-        match element {
-            CollectionElement::Expr(expression) => {
+    fn visit_element<E: falcon_syntax::cst::Element<'tree>>(&mut self, element: E) {
+        use falcon_syntax::cst::ElementKind;
+        match element.kind() {
+            ElementKind::Expression(expression) => {
                 self.components[0].push(self.lexical.infer(expression, self.contexts[0]))
             }
-            CollectionElement::NullAware(element) => self.components[0].push(
+            ElementKind::NullAware(element) => self.components[0].push(
                 self.lexical
                     .infer(element.expr(), self.contexts[0])
                     .non_null(),
             ),
-            CollectionElement::Spread(element) => self.spread(
-                element.expr(),
-                self.contexts[1].is_some(),
-                element.is_null_aware(),
-            ),
-            CollectionElement::If(element) => {
-                let condition = element.condition();
-                let then_elem = element.then_elem();
-                let else_elem = element.else_elem();
-                self.branch(condition, true, |visitor| {
-                    visitor.visit_collection_element(then_elem)
-                });
-                if let Some(element) = else_elem {
-                    self.branch(condition, false, |visitor| {
-                        visitor.visit_collection_element(element)
-                    });
-                }
-            }
-            CollectionElement::For(element) => {
-                self.loop_body(element.header(), element.is_await(), |visitor| {
-                    visitor.visit_collection_element(element.element())
-                })
-            }
-        }
-    }
-
-    fn visit_map_element(&mut self, element: falcon_syntax::cst::MapElement<'tree>) {
-        use falcon_syntax::cst::MapElement;
-        match element {
-            MapElement::Entry(entry) => {
+            ElementKind::Entry(entry) => {
                 let key = self.lexical.infer(entry.key(), self.contexts[0]);
                 let value = self.lexical.infer(entry.value(), self.contexts[1]);
                 self.components[0].push(if entry.key_null_aware() {
@@ -215,23 +186,26 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for CollectionTy
                     value
                 });
             }
-            MapElement::Spread(element) => {
-                self.spread(element.expr(), true, element.is_null_aware())
-            }
-            MapElement::If(element) => {
-                let condition = element.condition();
-                let then_entry = element.then_entry();
-                let else_entry = element.else_entry();
+            ElementKind::Spread { expression } => self.spread(
+                expression,
+                E::IS_MAP || self.contexts[1].is_some(),
+                element.spread_is_null_aware(),
+            ),
+            ElementKind::If {
+                condition,
+                then_element,
+                else_element,
+            } => {
                 self.branch(condition, true, |visitor| {
-                    visitor.visit_map_element(then_entry)
+                    visitor.visit_element(then_element)
                 });
-                if let Some(entry) = else_entry {
-                    self.branch(condition, false, |visitor| visitor.visit_map_element(entry));
+                if let Some(element) = else_element {
+                    self.branch(condition, false, |visitor| visitor.visit_element(element));
                 }
             }
-            MapElement::For(element) => {
-                self.loop_body(element.header(), element.is_await(), |visitor| {
-                    visitor.visit_map_element(element.entry())
+            ElementKind::For { header, body } => {
+                self.loop_body(header, element.is_await(), |visitor| {
+                    visitor.visit_element(body)
                 })
             }
         }

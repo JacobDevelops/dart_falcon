@@ -26,7 +26,6 @@ Owns the semantic index, `type_index.rs`, `ResolvedType` and the rule sites that
 Owns `lexical_usage.rs`, `flow.rs`, `flow_writes.rs`, `semantic_scope.rs` flow handling, the inference environment module, and the element trait in `falcon_syntax`. After batch 15.
 
 - [ ] **One lexical-scope resolver.** `lexical_usage`, `flow_writes`, `TypeEnvironment` and `semantic_scope` each reimplement Dart scoping by string.
-- [ ] **Shared collection/map element visiting.** Eleven visitors duplicate `visit_collection_element`/`visit_map_element`. Add an element trait in `falcon_syntax`.
 - [ ] **Terminating fixpoint.** `converge`/`infer_programs` (`semantic.rs:4641-4695`) rescan every program, SDK included, each round, and only end if every pass makes monotone progress, which nothing enforces. Add a worklist that requeues only declarations whose inputs changed. Enforce at the type-map writes that a step only fills an unknown type or tightens a partial one, never replaces a concrete type. Keep a round cap as a backstop; hitting it is an internal error naming the declarations still changing, not silently half-inferred types.
 
 #### 18. Analyze infrastructure

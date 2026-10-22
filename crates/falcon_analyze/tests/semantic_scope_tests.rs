@@ -106,6 +106,11 @@ void f() {
   objectContext([(objectElement) => objectElement.type]);
   unresolvedContext([(unresolvedElement) => unresolvedElement.type]);
 }
+void elementContexts(bool flag, Iterable<int> values, dynamic listLeaf,
+    dynamic listSpread, dynamic mapKey, dynamic mapValue, dynamic mapSpread) {
+  <int>[if (flag) for (int item in values) listLeaf, ...listSpread];
+  <String, int>{if (flag) for (int item in values) mapKey: mapValue, ...mapSpread};
+}
 class JSObject {}
 typedef PostMessage = void Function(JSObject? msg, List<JSObject>? transfer);
 extension on PostMessage {
@@ -164,9 +169,19 @@ class GenericLookup {
         explicit_call: Option<Vec<ResolvedType>>,
         shadowed: bool,
         static_generic: bool,
+        element_contexts: Vec<(String, Option<ResolvedType>)>,
     }
     impl<'a> SemanticRuleVisitor<'a> for Observed {
         fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            if let Expr::Ident(identifier) = node
+                && matches!(
+                    identifier.name(),
+                    "listLeaf" | "listSpread" | "mapKey" | "mapValue" | "mapSpread"
+                )
+            {
+                self.element_contexts
+                    .push((identifier.name().to_owned(), state.expected().cloned()));
+            }
             match node {
                 Expr::Call(call) if matches!(call.callee(), Expr::Ident(name) if name.name() == "maybeFind") =>
                 {
@@ -220,6 +235,30 @@ class GenericLookup {
             ResolvedType::Unknown,
         ]
     );
+    assert_eq!(
+        observed
+            .element_contexts
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        ["listLeaf", "listSpread", "mapKey", "mapValue", "mapSpread"]
+    );
+    let element_contexts: Vec<_> = observed
+        .element_contexts
+        .iter()
+        .map(|(_, ty)| ty.as_ref().expect("element context"))
+        .collect();
+    assert!(element_contexts[0].interface("dart:core", "int"));
+    assert!(element_contexts[1].interface("dart:core", "Iterable"));
+    assert!(
+        element_contexts[1]
+            .type_argument(0)
+            .unwrap()
+            .interface("dart:core", "int")
+    );
+    assert!(element_contexts[2].interface("dart:core", "String"));
+    assert!(element_contexts[3].interface("dart:core", "int"));
+    assert_eq!(observed.element_contexts[4].1, Some(ResolvedType::Unknown));
     let implicit = observed.implicit_call.unwrap();
     assert!(implicit.is_empty());
     let explicit = observed.explicit_call.unwrap();

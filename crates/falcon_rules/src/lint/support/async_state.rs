@@ -8,8 +8,8 @@ use super::async_semantics as semantics;
 use falcon_analyze::{AnalyzeContext, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{
-    Visitor, walk_block, walk_catch_clause, walk_collection_element, walk_expr, walk_function_body,
-    walk_map_element, walk_stmt, walk_switch_case, walk_switch_expr_arm,
+    Visitor, walk_block, walk_catch_clause, walk_element, walk_expr, walk_function_body, walk_stmt,
+    walk_switch_case, walk_switch_expr_arm,
 };
 use falcon_syntax::cst::*;
 use std::collections::{HashMap, HashSet};
@@ -139,11 +139,8 @@ fn stmt(node: Stmt<'_>) -> Key {
 fn block(node: Block<'_>) -> Key {
     Key(node.syntax().id(), 2)
 }
-fn collection(node: CollectionElement<'_>) -> Key {
-    Key(node.syntax().id(), 6)
-}
-fn map(node: MapElement<'_>) -> Key {
-    Key(node.syntax().id(), 7)
+fn element<'a, E: Element<'a>>(node: E) -> Key {
+    Key(node.syntax().id(), if E::IS_MAP { 7 } else { 6 })
 }
 
 #[derive(Clone)]
@@ -640,69 +637,44 @@ impl<'a> Visitor<'a> for Tree<'a> {
         walk_switch_expr_arm(self, node);
         self.leave();
     }
-    fn visit_collection_element(&mut self, node: CollectionElement<'a>) {
-        let kind = match node {
-            CollectionElement::If(_) | CollectionElement::For(_) if self.conservative => {
+    fn visit_element<E: Element<'a>>(&mut self, node: E) {
+        let element_kind = node.kind();
+        let kind = match element_kind {
+            ElementKind::If { .. } | ElementKind::For { .. } if self.conservative => {
                 Kind::Uncertain
             }
-            CollectionElement::Expr(_)
-            | CollectionElement::NullAware(_)
-            | CollectionElement::Spread(_) => Kind::Any,
-            CollectionElement::If(n) => {
-                let (condition, guard) = condition(n.condition());
+            ElementKind::Expression(_)
+            | ElementKind::NullAware(_)
+            | ElementKind::Entry(_)
+            | ElementKind::Spread { .. } => Kind::Any,
+            ElementKind::If {
+                condition: test,
+                then_element,
+                else_element,
+            } => {
+                let (condition, guard) = condition(test);
                 Kind::If {
                     condition,
                     guard,
-                    yes: collection(n.then_elem()),
-                    no: n.else_elem().map(collection),
+                    yes: element(then_element),
+                    no: else_element.map(element),
                 }
             }
-            CollectionElement::For(n) => Kind::For {
-                condition: n.header().condition().map(expr),
-                body: collection(n.element()),
+            ElementKind::For { header, body, .. } => Kind::For {
+                condition: header.condition().map(expr),
+                body: element(body),
             },
         };
-        self.enter(collection(node), kind, node.span());
-        walk_collection_element(self, node);
-        if let CollectionElement::For(n) = node {
+        self.enter(element(node), kind, node.span());
+        walk_element(self, element_kind);
+        if let ElementKind::For { header, body } = element_kind {
             self.group(
-                Key(n.header().syntax().id(), 10),
-                collection(node),
-                Some(collection(n.element())),
+                Key(header.syntax().id(), 10),
+                element(node),
+                Some(element(body)),
             );
-            let exits = self.for_exits(n.header(), collection(n.element()));
-            self.nodes.get_mut(&collection(node)).unwrap().exit_override = Some(exits);
-        }
-        self.leave();
-    }
-    fn visit_map_element(&mut self, node: MapElement<'a>) {
-        let kind = match node {
-            MapElement::If(_) | MapElement::For(_) if self.conservative => Kind::Uncertain,
-            MapElement::Entry(_) | MapElement::Spread(_) => Kind::Any,
-            MapElement::If(n) => {
-                let (condition, guard) = condition(n.condition());
-                Kind::If {
-                    condition,
-                    guard,
-                    yes: map(n.then_entry()),
-                    no: n.else_entry().map(map),
-                }
-            }
-            MapElement::For(n) => Kind::For {
-                condition: n.header().condition().map(expr),
-                body: map(n.entry()),
-            },
-        };
-        self.enter(map(node), kind, node.span());
-        walk_map_element(self, node);
-        if let MapElement::For(n) = node {
-            self.group(
-                Key(n.header().syntax().id(), 10),
-                map(node),
-                Some(map(n.entry())),
-            );
-            let exits = self.for_exits(n.header(), map(n.entry()));
-            self.nodes.get_mut(&map(node)).unwrap().exit_override = Some(exits);
+            let exits = self.for_exits(header, element(body));
+            self.nodes.get_mut(&element(node)).unwrap().exit_override = Some(exits);
         }
         self.leave();
     }

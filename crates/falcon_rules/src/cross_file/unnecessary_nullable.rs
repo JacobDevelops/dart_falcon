@@ -400,18 +400,12 @@ impl<'a> Visitor<'a> for ArgumentNullability {
         falcon_syntax::cst::visit::walk_stmt(self, statement);
     }
 
-    fn visit_collection_element(&mut self, element: CollectionElement<'a>) {
-        if let CollectionElement::For(element) = element {
-            self.record_loop(element.header(), element.is_await());
+    fn visit_element<E: Element<'a>>(&mut self, element: E) {
+        let kind = element.kind();
+        if let ElementKind::For { header, .. } = kind {
+            self.record_loop(header, element.is_await());
         }
-        falcon_syntax::cst::visit::walk_collection_element(self, element);
-    }
-
-    fn visit_map_element(&mut self, element: MapElement<'a>) {
-        if let MapElement::For(element) = element {
-            self.record_loop(element.header(), element.is_await());
-        }
-        falcon_syntax::cst::visit::walk_map_element(self, element);
+        falcon_syntax::cst::visit::walk_element(self, kind);
     }
 
     fn visit_formal_param(&mut self, parameter: FormalParam<'a>) {
@@ -636,18 +630,12 @@ impl<'a> Visitor<'a> for NullAssignFinder<'a, '_> {
         falcon_syntax::cst::visit::walk_stmt(self, statement);
     }
 
-    fn visit_collection_element(&mut self, element: CollectionElement<'a>) {
-        if let CollectionElement::For(element) = element {
-            self.record_loop(element.header());
+    fn visit_element<E: Element<'a>>(&mut self, element: E) {
+        let kind = element.kind();
+        if let ElementKind::For { header, .. } = kind {
+            self.record_loop(header);
         }
-        falcon_syntax::cst::visit::walk_collection_element(self, element);
-    }
-
-    fn visit_map_element(&mut self, element: MapElement<'a>) {
-        if let MapElement::For(element) = element {
-            self.record_loop(element.header());
-        }
-        falcon_syntax::cst::visit::walk_map_element(self, element);
+        falcon_syntax::cst::visit::walk_element(self, kind);
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {

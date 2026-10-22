@@ -15,6 +15,19 @@ pub enum StructuralTraversal {
 }
 
 macro_rules! structural_nodes {
+    (@visit visit_collection_element, $ty:ty) => {};
+    (@visit visit_map_element, $ty:ty) => {};
+    (@visit $visit:ident, $ty:ty) => {
+        fn $visit(&mut self, node: $ty) {
+            StructuralVisitors::$visit(self, node);
+        }
+    };
+    (@walk walk_element, $visitor:expr, $node:expr) => {
+        visitor::walk_element($visitor, $node.kind());
+    };
+    (@walk $walk:ident, $visitor:expr, $node:expr) => {
+        visitor::$walk($visitor, $node);
+    };
     ($lifetime:lifetime; $(
         $kind:ident, $visit:ident, $exit:ident, $ty:ty, [$($walk:ident)?];
     )*) => {
@@ -102,9 +115,12 @@ macro_rules! structural_nodes {
             let trait_body = trait_body.split_once("\n}").unwrap().0;
             let syntax_hooks: BTreeSet<_> = trait_body.lines().filter_map(|line| {
                 line.trim_start().strip_prefix("fn ")
-                    .map(|signature| signature.split('(').next().unwrap())
+                    .map(|signature| signature.split(['(', '<']).next().unwrap())
             }).collect();
-            let structural_hooks: BTreeSet<_> = [$(stringify!($visit),)*].into_iter().collect();
+            let mut structural_hooks: BTreeSet<_> = [$(stringify!($visit),)*].into_iter().collect();
+            structural_hooks.remove("visit_collection_element");
+            structural_hooks.remove("visit_map_element");
+            structural_hooks.insert("visit_element");
             assert_eq!(
                 structural_hooks, syntax_hooks,
                 "every syntax Visitor hook must have structural enter/exit, node and dispatch entries"
@@ -112,6 +128,17 @@ macro_rules! structural_nodes {
         }
 
         impl<$lifetime> Visitor<$lifetime> for StructuralVisitors<'_, $lifetime> {
+            $(structural_nodes!(@visit $visit, $ty);)*
+
+            fn visit_element<E: Element<$lifetime>>(&mut self, element: E) {
+                match element.view() {
+                    ElementView::Map(element) => self.visit_map_element(element),
+                    ElementView::Collection(element) => self.visit_collection_element(element),
+                }
+            }
+        }
+
+        impl<$lifetime> StructuralVisitors<'_, $lifetime> {
             $(
                 fn $visit(&mut self, node: $ty) {
                     let kind = StructuralKind::$kind;
@@ -141,7 +168,7 @@ macro_rules! structural_nodes {
                             parent: Some(child),
                             depth: self.depth + 1,
                         };
-                        visitor::$walk(&mut children, node.clone());
+                        structural_nodes!(@walk $walk, &mut children, node.clone());
                     )?
                     for &index in self.subscribers.for_kind(kind) {
                         let collector = &mut self.collectors[index];
@@ -192,8 +219,8 @@ structural_nodes! {
     LocalVar, visit_local_var, exit_local_var, LocalVarDecl<'n>, [walk_local_var];
     ForHeader, visit_for_header, exit_for_header, ForHeader<'n>, [walk_for_header];
     Expr, visit_expr, exit_expr, Expr<'n>, [walk_expr];
-    CollectionElement, visit_collection_element, exit_collection_element, CollectionElement<'n>, [walk_collection_element];
-    MapElement, visit_map_element, exit_map_element, MapElement<'n>, [walk_map_element];
+    CollectionElement, visit_collection_element, exit_collection_element, CollectionElement<'n>, [walk_element];
+    MapElement, visit_map_element, exit_map_element, MapElement<'n>, [walk_element];
     SwitchExprArm, visit_switch_expr_arm, exit_switch_expr_arm, SwitchExprArm<'n>, [walk_switch_expr_arm];
     Pattern, visit_pattern, exit_pattern, Pattern<'n>, [walk_pattern];
     Annotation, visit_annotation, exit_annotation, Annotation<'n>, [walk_annotation];

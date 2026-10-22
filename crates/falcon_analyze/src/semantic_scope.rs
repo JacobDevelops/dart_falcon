@@ -2495,86 +2495,60 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         }
     }
 
-    /// Visits a list or set element; expressions get the element context,
-    /// spreads an unresolved one.
-    fn visit_collection_element(
+    fn visit_element_with_context<E: Element<'a>>(
         &mut self,
-        element: CollectionElement<'a>,
-        context: &Option<ResolvedType>,
-    ) {
-        match element {
-            CollectionElement::Expr(expression) => {
-                self.with_context(context.clone(), |walker| walker.visit_expr(expression));
-            }
-            CollectionElement::NullAware(node) => {
-                self.with_context(context.clone(), |walker| walker.visit_expr(node.expr()));
-            }
-            CollectionElement::Spread(node) => {
-                let expected = context.as_ref().map(|element| ResolvedType::Interface {
-                    occurrence: Default::default(),
-                    identity: DeclarationIdentity::sdk("dart:core", "Iterable"),
-                    arguments: Arc::from([element.clone()]),
-                    nullable: false,
-                    extension_type: false,
-                });
-                self.with_context(expected, |walker| walker.visit_expr(node.expr()));
-            }
-            CollectionElement::If(node) => self.visit_if_condition(
-                node.condition(),
-                |walker| walker.visit_collection_element(node.then_elem(), context),
-                |walker| {
-                    if let Some(element) = node.else_elem() {
-                        walker.visit_collection_element(element, context);
-                    }
-                },
-                false,
-                false,
-            ),
-            CollectionElement::For(node) => self.with_scope(|walker| {
-                let header = node.header();
-                let exit = walker.visit_for_header(header, node.span().start, node.is_await());
-                walker.visit_collection_element(node.element(), context);
-                for update in header.updates() {
-                    walker.visit_expr(update);
-                }
-                walker.state.environment = exit;
-            }),
-        }
-    }
-
-    fn visit_map_element(
-        &mut self,
-        element: MapElement<'a>,
+        element: E,
         key_type: &Option<ResolvedType>,
         value_type: &Option<ResolvedType>,
     ) {
-        match element {
-            MapElement::Entry(entry) => {
+        match element.kind() {
+            ElementKind::Expression(expression) => {
+                self.with_context(key_type.clone(), |walker| walker.visit_expr(expression));
+            }
+            ElementKind::NullAware(node) => {
+                self.with_context(key_type.clone(), |walker| walker.visit_expr(node.expr()));
+            }
+            ElementKind::Entry(entry) => {
                 self.with_context(key_type.clone(), |walker| walker.visit_expr(entry.key()));
                 self.with_context(value_type.clone(), |walker| {
                     walker.visit_expr(entry.value())
                 });
             }
-            MapElement::Spread(node) => {
-                self.with_expected(ResolvedType::Unknown, |walker| {
-                    walker.visit_expr(node.expr())
-                });
+            ElementKind::Spread { expression, .. } => {
+                if E::IS_MAP {
+                    self.with_expected(ResolvedType::Unknown, |walker| {
+                        walker.visit_expr(expression)
+                    });
+                } else {
+                    let expected = key_type.as_ref().map(|element| ResolvedType::Interface {
+                        occurrence: Default::default(),
+                        identity: DeclarationIdentity::sdk("dart:core", "Iterable"),
+                        arguments: Arc::from([element.clone()]),
+                        nullable: false,
+                        extension_type: false,
+                    });
+                    self.with_context(expected, |walker| walker.visit_expr(expression));
+                }
             }
-            MapElement::If(node) => self.visit_if_condition(
-                node.condition(),
-                |walker| walker.visit_map_element(node.then_entry(), key_type, value_type),
+            ElementKind::If {
+                condition,
+                then_element,
+                else_element,
+            } => self.visit_if_condition(
+                condition,
+                |walker| walker.visit_element_with_context(then_element, key_type, value_type),
                 |walker| {
-                    if let Some(entry) = node.else_entry() {
-                        walker.visit_map_element(entry, key_type, value_type);
+                    if let Some(element) = else_element {
+                        walker.visit_element_with_context(element, key_type, value_type);
                     }
                 },
                 false,
                 false,
             ),
-            MapElement::For(node) => self.with_scope(|walker| {
-                let header = node.header();
-                let exit = walker.visit_for_header(header, node.span().start, node.is_await());
-                walker.visit_map_element(node.entry(), key_type, value_type);
+            ElementKind::For { header, body } => self.with_scope(|walker| {
+                let exit =
+                    walker.visit_for_header(header, element.span().start, element.is_await());
+                walker.visit_element_with_context(body, key_type, value_type);
                 for update in header.updates() {
                     walker.visit_expr(update);
                 }
@@ -3989,13 +3963,13 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
             Expr::List(n) => {
                 let context = self.element_context(n.type_arg());
                 for element in n.elements() {
-                    self.visit_collection_element(element, &context);
+                    self.visit_element_with_context(element, &context, &None);
                 }
             }
             Expr::Set(n) => {
                 let context = self.element_context(n.type_arg());
                 for element in n.elements() {
-                    self.visit_collection_element(element, &context);
+                    self.visit_element_with_context(element, &context, &None);
                 }
             }
             Expr::Map(n) => {
@@ -4025,7 +3999,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                 let key_type = component_type(0);
                 let value_type = component_type(1);
                 for element in elements {
-                    self.visit_map_element(element, &key_type, &value_type);
+                    self.visit_element_with_context(element, &key_type, &value_type);
                 }
             }
             // A record literal's fields take the context record's field types.

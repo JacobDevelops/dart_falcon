@@ -214,12 +214,20 @@ impl<'a> visit::Visitor<'a> for PropsFields<'_, 'a> {
         }
     }
 
-    fn visit_collection_element(&mut self, element: CollectionElement<'a>) {
+    fn visit_element<E: Element<'a>>(&mut self, element: E) {
+        if E::IS_MAP {
+            visit::walk_element(self, element.kind());
+            return;
+        }
         if !self.known {
             return;
         }
-        match element {
-            CollectionElement::Expr(expression) => match expression.unparenthesized() {
+        if element.syntax().kind() == NodeKind::SpreadElement {
+            visit::walk_element(self, element.kind());
+            return;
+        }
+        match element.kind() {
+            ElementKind::Expression(expression) => match expression.unparenthesized() {
                 Expr::Ident(name) => self.fields.push(name.name()),
                 Expr::Field(field) if matches!(field.object().unparenthesized(), Expr::This(_)) => {
                     self.fields.push(field.field().name());
@@ -227,7 +235,6 @@ impl<'a> visit::Visitor<'a> for PropsFields<'_, 'a> {
                 Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::NullLit(_) => {}
                 _ => self.known = false,
             },
-            CollectionElement::Spread(_) => visit::walk_collection_element(self, element),
             _ => self.known = false,
         }
     }

@@ -5,6 +5,7 @@ use std::path::Path;
 use falcon_analyze::{AnalyzeContext, IdentityIndex, IdentitySource, Rule, RuleAnalysis};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parse;
+use falcon_rules::lint::correctness::avoid_duplicate_map_keys::AvoidDuplicateMapKeys;
 use falcon_rules::lint::correctness::avoid_unused_parameters::AvoidUnusedParameters;
 use falcon_rules::lint::correctness::no_adjacent_strings_in_list::NoAdjacentStringsInList;
 use falcon_rules::lint::correctness::null_check_on_nullable_type_parameter::NullCheckOnNullableTypeParameter;
@@ -16,6 +17,7 @@ use falcon_rules::lint::style::prefer_trailing_comma::PreferTrailingComma;
 use falcon_rules::lint::style::unnecessary_await_in_return::UnnecessaryAwaitInReturn;
 use falcon_rules::lint::style::unnecessary_null_checks::UnnecessaryNullChecks;
 use falcon_rules::lint::style::unnecessary_parenthesis::UnnecessaryParenthesis;
+use falcon_rules::lint::suspicious::avoid_negated_conditions::AvoidNegatedConditions;
 use falcon_rules::lint::suspicious::no_equal_arguments::NoEqualArguments;
 
 fn reports(name: &'static str, rule: &dyn Rule, source: &str) -> Vec<String> {
@@ -215,6 +217,37 @@ fn grouped_positional_null_assertions_keep_their_type_parameter_context() {
             "void g<T>(T value) {} void f<T>(T? value) { g<T>(((value!))); }"
         ),
         ["!"]
+    );
+}
+
+#[test]
+fn collection_and_map_for_elements_reach_nested_conditions() {
+    assert_eq!(
+        reports(
+            "avoid-negated-conditions",
+            &AvoidNegatedConditions,
+            "void f(bool flag) {
+                final list = [for (final item in <int>[1]) if (!flag) item else 0];
+                final map = {for (final item in <int>[1]) if (!flag) item: 1 else 0: 2};
+                final mapChain = {if (!flag) 1: 1 else if (flag) 2: 2};
+                final listChain = [if (!flag) 1 else if (flag) 2];
+            }"
+        ),
+        ["!flag", "!flag"]
+    );
+}
+
+#[test]
+fn duplicate_map_key_scan_skips_for_element_entries() {
+    assert_eq!(
+        reports(
+            "avoid-duplicate-map-keys",
+            &AvoidDuplicateMapKeys,
+            "void f() {
+                final keys = {'a': 1, 'a': 2, for (final item in <int>[1, 2]) 'a': item};
+            }"
+        ),
+        ["'a'"]
     );
 }
 
