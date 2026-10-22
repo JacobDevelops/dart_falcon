@@ -347,7 +347,7 @@ impl SignatureIndex {
         &self,
         receiver: &ResolvedType,
         name: &str,
-    ) -> Option<(&ResolvedSignature, HashMap<TypeParameterId, ResolvedType>)> {
+    ) -> Option<(&ResolvedSignature, FxHashMap<TypeParameterId, ResolvedType>)> {
         let ResolvedType::Interface {
             identity,
             arguments,
@@ -986,7 +986,7 @@ impl SignatureIndex {
         name: &str,
         model: &SemanticModel<'_>,
         admit: impl Fn(&ExtensionFacts) -> bool,
-    ) -> Option<(&ExtensionFacts, HashMap<TypeParameterId, ResolvedType>)> {
+    ) -> Option<(&ExtensionFacts, FxHashMap<TypeParameterId, ResolvedType>)> {
         if matches!(receiver, ResolvedType::Dynamic | ResolvedType::Unknown) {
             return None;
         }
@@ -1160,9 +1160,10 @@ impl SignatureIndex {
         receiver: &ResolvedType,
         extension: &ExtensionFacts,
         model: &SemanticModel<'_>,
-    ) -> HashMap<TypeParameterId, ResolvedType> {
-        let mut inferred = HashMap::with_capacity(extension.parameters.len());
-        let mut upper = HashMap::new();
+    ) -> FxHashMap<TypeParameterId, ResolvedType> {
+        let mut inferred =
+            FxHashMap::with_capacity_and_hasher(extension.parameters.len(), Default::default());
+        let mut upper = FxHashMap::default();
         if extension.parameters.is_empty() {
             return inferred;
         }
@@ -1240,7 +1241,7 @@ impl SignatureIndex {
     ) -> (
         Cow<'e, ResolvedType>,
         Truth,
-        HashMap<TypeParameterId, ResolvedType>,
+        FxHashMap<TypeParameterId, ResolvedType>,
     ) {
         let substitutions = self.infer_extension_substitutions(receiver, extension, model);
         // A missing argument fits a universal top bound, unless another
@@ -1681,7 +1682,7 @@ impl SignatureIndex {
         parameters: &[TypeParameterId],
         arguments: &[ResolvedType],
         occurrence: Option<&FunctionTypeAlias>,
-    ) -> HashMap<TypeParameterId, ResolvedType> {
+    ) -> FxHashMap<TypeParameterId, ResolvedType> {
         parameters
             .iter()
             .enumerate()
@@ -1780,7 +1781,7 @@ impl SignatureIndex {
         receiver: &ResolvedType,
         name: &str,
         model: &SemanticModel<'_>,
-    ) -> Option<(&ResolvedSignature, HashMap<TypeParameterId, ResolvedType>)> {
+    ) -> Option<(&ResolvedSignature, FxHashMap<TypeParameterId, ResolvedType>)> {
         let Some(owner) =
             self.resolved_instance_owner(receiver, name, InstanceAccess::Invoke, model)
         else {
@@ -1810,7 +1811,7 @@ impl SignatureIndex {
         receiver: &ResolvedType,
         name: &str,
         model: &SemanticModel<'_>,
-    ) -> Option<(&ExtensionFacts, HashMap<TypeParameterId, ResolvedType>)> {
+    ) -> Option<(&ExtensionFacts, FxHashMap<TypeParameterId, ResolvedType>)> {
         let extension = self.most_specific_extension(receiver, name, model, |_| true)?;
         (self.resolved_instance_owner(receiver, name, InstanceAccess::Read, model).is_none()
             // An incompatible interface still declares an instance member;
@@ -1861,7 +1862,7 @@ impl SignatureIndex {
         receiver: &ResolvedType,
         name: &str,
         model: &SemanticModel<'_>,
-    ) -> Option<(&ResolvedSignature, HashMap<TypeParameterId, ResolvedType>)> {
+    ) -> Option<(&ResolvedSignature, FxHashMap<TypeParameterId, ResolvedType>)> {
         let (extension, substitutions) = self.applicable_extension(receiver, name, model)?;
         Some((extension.methods.get(name)?, substitutions))
     }
@@ -1875,7 +1876,7 @@ impl SignatureIndex {
         type_args: &[ResolvedType],
         name: &str,
         model: &SemanticModel<'_>,
-    ) -> Option<(&ResolvedSignature, HashMap<TypeParameterId, ResolvedType>)> {
+    ) -> Option<(&ResolvedSignature, FxHashMap<TypeParameterId, ResolvedType>)> {
         let extension = self
             .all_extensions()
             .find(|extension| extension.identity.as_ref() == Some(identity))?;
@@ -1902,7 +1903,7 @@ impl SignatureIndex {
         receiver: &ResolvedType,
         name: &str,
         model: &SemanticModel<'_>,
-    ) -> Option<(ResolvedType, HashMap<TypeParameterId, ResolvedType>)> {
+    ) -> Option<(ResolvedType, FxHashMap<TypeParameterId, ResolvedType>)> {
         let (extension, substitutions) = self.applicable_extension(receiver, name, model)?;
         Some((extension.getters.get(name)?.clone(), substitutions))
     }
@@ -1915,7 +1916,7 @@ impl SignatureIndex {
         model: &SemanticModel<'_>,
     ) -> Option<(
         &'a ResolvedSignature,
-        HashMap<TypeParameterId, ResolvedType>,
+        FxHashMap<TypeParameterId, ResolvedType>,
     )> {
         let substitutions = self.infer_extension_substitutions(receiver, extension, model);
         Some((extension.methods.get(name)?, substitutions))
@@ -1927,7 +1928,7 @@ impl SignatureIndex {
         receiver: &ResolvedType,
         name: &str,
         model: &SemanticModel<'_>,
-    ) -> Option<(ResolvedType, HashMap<TypeParameterId, ResolvedType>)> {
+    ) -> Option<(ResolvedType, FxHashMap<TypeParameterId, ResolvedType>)> {
         let owner = self.resolved_instance_owner(receiver, name, InstanceAccess::Read, model)?;
         let ResolvedType::Interface {
             occurrence,
@@ -1949,7 +1950,7 @@ impl SignatureIndex {
         receiver: &ResolvedType,
         name: &str,
         model: &SemanticModel<'_>,
-    ) -> Option<(ResolvedType, HashMap<TypeParameterId, ResolvedType>)> {
+    ) -> Option<(ResolvedType, FxHashMap<TypeParameterId, ResolvedType>)> {
         let ResolvedType::Interface {
             occurrence,
             identity,

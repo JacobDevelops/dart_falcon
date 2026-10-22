@@ -110,7 +110,7 @@ impl<'a> SubstitutionMemo<'a> {
     pub(super) fn is_relevant(
         &mut self,
         ty: &'a ResolvedType,
-        substitutions: &HashMap<TypeParameterId, ResolvedType>,
+        substitutions: &FxHashMap<TypeParameterId, ResolvedType>,
         cache_result: bool,
     ) -> bool {
         let key = SubstitutionSourceKey::of(ty);
@@ -165,7 +165,7 @@ impl<'a> SubstitutionMemo<'a> {
 
 pub(super) fn instantiate_parameter_bound(
     id: &TypeParameterId,
-    bounds: &HashMap<TypeParameterId, ResolvedType>,
+    bounds: &FxHashMap<TypeParameterId, ResolvedType>,
     visiting: &mut HashSet<TypeParameterId>,
     model: &SemanticModel<'_>,
 ) -> ResolvedType {
@@ -175,7 +175,7 @@ pub(super) fn instantiate_parameter_bound(
 
 fn instantiate_bound(
     id: &TypeParameterId,
-    bounds: &HashMap<TypeParameterId, ResolvedType>,
+    bounds: &FxHashMap<TypeParameterId, ResolvedType>,
     visiting: &mut HashSet<TypeParameterId>,
     covariant: bool,
 ) -> ResolvedType {
@@ -198,7 +198,7 @@ fn instantiate_bound(
 /// preserve it, as do Dart's covariant interface type arguments.
 fn instantiate_bound_type(
     ty: &ResolvedType,
-    bounds: &HashMap<TypeParameterId, ResolvedType>,
+    bounds: &FxHashMap<TypeParameterId, ResolvedType>,
     visiting: &mut HashSet<TypeParameterId>,
     covariant: bool,
 ) -> ResolvedType {
@@ -207,7 +207,7 @@ fn instantiate_bound_type(
 
 fn instantiate_bound_type_memoized<'a>(
     ty: &'a ResolvedType,
-    bounds: &HashMap<TypeParameterId, ResolvedType>,
+    bounds: &FxHashMap<TypeParameterId, ResolvedType>,
     visiting: &mut HashSet<TypeParameterId>,
     covariant: bool,
     memo: &mut FxHashMap<(BorrowedIdentity<'a, ResolvedType>, bool), ResolvedType>,
@@ -365,7 +365,7 @@ fn instantiate_bound_type_memoized<'a>(
 
 fn bound_reaches_visiting(
     id: &TypeParameterId,
-    bounds: &HashMap<TypeParameterId, ResolvedType>,
+    bounds: &FxHashMap<TypeParameterId, ResolvedType>,
     visiting: &HashSet<TypeParameterId>,
     seen: &mut HashSet<TypeParameterId>,
 ) -> bool {

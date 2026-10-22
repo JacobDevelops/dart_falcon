@@ -4,7 +4,9 @@
 //! Diagnostics underline the named constructor identifier, or the type name
 //! for unnamed constructors, rather than modifiers or the constructor body.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+
+use rustc_hash::FxHashMap;
 
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedSignature, ResolvedType, Rule, RulePreparation,
@@ -194,7 +196,7 @@ impl Collector<'_> {
     fn initializer_accepts_key(
         &self,
         signature: &ResolvedSignature,
-        substitutions: &HashMap<TypeParameterId, ResolvedType>,
+        substitutions: &FxHashMap<TypeParameterId, ResolvedType>,
         args: ArgList<'_>,
     ) -> bool {
         !target_defines_key(signature, substitutions, &self.model, self.signatures)
@@ -247,7 +249,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
 fn target_defines_key(
     signature: &ResolvedSignature,
-    substitutions: &HashMap<TypeParameterId, ResolvedType>,
+    substitutions: &FxHashMap<TypeParameterId, ResolvedType>,
     model: &SemanticModel<'_>,
     signatures: &SignatureIndex,
 ) -> bool {

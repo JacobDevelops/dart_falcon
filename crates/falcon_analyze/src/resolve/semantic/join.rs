@@ -315,7 +315,7 @@ fn inference_join_impl(
             }
             // Method tear-offs have declaration-local binders. Align those
             // binders before joining their covariant results and parameter meets.
-            let substitutions: HashMap<_, _> = right_shape
+            let substitutions: FxHashMap<_, _> = right_shape
                 .type_parameters
                 .iter()
                 .zip(left_shape.type_parameters.iter())

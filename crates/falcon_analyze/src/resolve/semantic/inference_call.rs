@@ -171,8 +171,8 @@ impl TypeEnvironment {
         type_args: AstChildren<'_, DartType<'_>>,
         context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
-        owner: &HashMap<TypeParameterId, ResolvedType>,
-    ) -> HashMap<TypeParameterId, ResolvedType> {
+        owner: &FxHashMap<TypeParameterId, ResolvedType>,
+    ) -> FxHashMap<TypeParameterId, ResolvedType> {
         self.infer_signature_substitutions_with_result(
             (
                 signature,
@@ -201,14 +201,14 @@ impl TypeEnvironment {
             &ResolvedSignature,
             &[TypeParameterId],
             &ResolvedType,
-            &HashMap<TypeParameterId, ResolvedType>,
+            &FxHashMap<TypeParameterId, ResolvedType>,
         ),
         args: impl Into<Option<falcon_syntax::cst::ArgList<'syntax>>>,
         type_args: AstChildren<'_, DartType<'_>>,
         context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
         mut argument_contexts: Option<&mut HashMap<usize, ResolvedType>>,
-    ) -> HashMap<TypeParameterId, ResolvedType> {
+    ) -> FxHashMap<TypeParameterId, ResolvedType> {
         let args = args.into();
         let (signature, call_parameters, return_type, owner) = signature;
         let mut substitutions = owner.clone();
@@ -229,9 +229,11 @@ impl TypeEnvironment {
             }));
             return substitutions;
         }
-        let mut inferred = HashMap::with_capacity(call_parameters.len());
-        let mut upper = HashMap::with_capacity(call_parameters.len());
-        let mut partial = HashMap::new();
+        let mut inferred =
+            FxHashMap::with_capacity_and_hasher(call_parameters.len(), Default::default());
+        let mut upper =
+            FxHashMap::with_capacity_and_hasher(call_parameters.len(), Default::default());
+        let mut partial = FxHashMap::default();
         // A dynamic result context supplies no downward type schema. Freezing
         // it here would discard upward constraints from ordinary arguments.
         if let Some(expected) = expected.filter(|ty| !matches!(ty, ResolvedType::Dynamic)) {
@@ -321,10 +323,10 @@ impl TypeEnvironment {
             .map(|(id, _)| id.clone())
             .collect::<HashSet<_>>();
         let update_substitutions =
-            |substitutions: &mut HashMap<TypeParameterId, ResolvedType>,
-             argument_context: &mut HashMap<TypeParameterId, ResolvedType>,
-             inferred: &HashMap<TypeParameterId, ResolvedType>,
-             upper: &HashMap<TypeParameterId, ResolvedType>,
+            |substitutions: &mut FxHashMap<TypeParameterId, ResolvedType>,
+             argument_context: &mut FxHashMap<TypeParameterId, ResolvedType>,
+             inferred: &FxHashMap<TypeParameterId, ResolvedType>,
+             upper: &FxHashMap<TypeParameterId, ResolvedType>,
              include_upper: bool| {
                 for id in call_parameters {
                     if fixed.contains(id) || (!include_upper && !inferred.contains_key(id)) {
@@ -368,8 +370,8 @@ impl TypeEnvironment {
             |parameter: &ResolvedType,
              argument: Expr<'_>,
              expected_argument: &ResolvedType,
-             inferred: &mut HashMap<TypeParameterId, ResolvedType>,
-             upper: &mut HashMap<TypeParameterId, ResolvedType>| {
+             inferred: &mut FxHashMap<TypeParameterId, ResolvedType>,
+             upper: &mut FxHashMap<TypeParameterId, ResolvedType>| {
                 let formal = context.model.substitute(parameter, owner);
                 // Preserve partial callable contexts without passing unresolved
                 // schemas to ordinary expressions.
@@ -403,7 +405,7 @@ impl TypeEnvironment {
         let has_unresolved_inputs =
             |parameter: &ResolvedType,
              argument: Expr<'_>,
-             substitutions: &HashMap<TypeParameterId, ResolvedType>| {
+             substitutions: &FxHashMap<TypeParameterId, ResolvedType>| {
                 if !call_parameters
                     .iter()
                     .any(|id| !substitutions.contains_key(id))
@@ -683,7 +685,7 @@ impl TypeEnvironment {
                 AstChildren::empty(),
                 context,
                 expected,
-                &HashMap::new(),
+                &FxHashMap::default(),
             );
             return context
                 .model
@@ -718,7 +720,7 @@ impl TypeEnvironment {
                 .signatures
                 .self_instantiation(identity, parameters, context.model);
         let substitutions = self.infer_signature_substitutions_with_result(
-            (signature, parameters, &return_type, &HashMap::new()),
+            (signature, parameters, &return_type, &FxHashMap::default()),
             args,
             type_args,
             context,
@@ -785,7 +787,7 @@ impl TypeEnvironment {
         signatures: &'a SignatureIndex,
     ) -> Option<(
         &'a ResolvedSignature,
-        HashMap<TypeParameterId, ResolvedType>,
+        FxHashMap<TypeParameterId, ResolvedType>,
     )> {
         let this = self.receiver();
         let mut bound = &this;
@@ -806,7 +808,7 @@ impl TypeEnvironment {
         if declared.iter().any(|facts| facts.is_static)
             && let Some(signature) = signatures.member(identity, name)
         {
-            return Some((signature, HashMap::new()));
+            return Some((signature, FxHashMap::default()));
         }
         signatures.resolved_member(&this, name, model)
     }
@@ -865,7 +867,7 @@ impl TypeEnvironment {
     pub(super) fn tearoff_type<F: Fn(&str) -> Option<ResolvedType>>(
         &self,
         signature: &ResolvedSignature,
-        owner: &HashMap<TypeParameterId, ResolvedType>,
+        owner: &FxHashMap<TypeParameterId, ResolvedType>,
         explicit: AstChildren<'_, DartType<'_>>,
         context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
@@ -890,9 +892,15 @@ impl TypeEnvironment {
                     }),
             );
         } else if let Some(expected @ ResolvedType::Function { .. }) = expected {
-            let mut lower = HashMap::with_capacity(signature.call_parameters.len());
-            let mut upper = HashMap::with_capacity(signature.call_parameters.len());
-            let mut partial = HashMap::new();
+            let mut lower = FxHashMap::with_capacity_and_hasher(
+                signature.call_parameters.len(),
+                Default::default(),
+            );
+            let mut upper = FxHashMap::with_capacity_and_hasher(
+                signature.call_parameters.len(),
+                Default::default(),
+            );
+            let mut partial = FxHashMap::default();
             infer_type_constraints(
                 &function,
                 expected,
@@ -985,7 +993,7 @@ impl TypeEnvironment {
                 context
                     .signatures
                     .self_instantiation(identity.clone(), &parameters, context.model);
-            (parameters, result, identity, HashMap::new())
+            (parameters, result, identity, FxHashMap::default())
         };
         let constructor = context.signatures.constructor(&class, name);
         if !context.signatures.has_constructor_tearoff(&class, name) {
@@ -1017,7 +1025,13 @@ impl TypeEnvironment {
             }),
             ..ResolvedSignature::returning(result)
         };
-        Some(self.tearoff_type(&signature, &HashMap::new(), explicit, context, expected))
+        Some(self.tearoff_type(
+            &signature,
+            &FxHashMap::default(),
+            explicit,
+            context,
+            expected,
+        ))
     }
 
     pub(super) fn callable_tearoff<F: Fn(&str) -> Option<ResolvedType>>(
@@ -1046,15 +1060,15 @@ impl TypeEnvironment {
 
 pub(super) struct TypeConstraintContext<'a, 'model> {
     pub(super) parameters: &'a [TypeParameterId],
-    pub(super) inferred: &'a mut HashMap<TypeParameterId, ResolvedType>,
-    pub(super) upper: &'a mut HashMap<TypeParameterId, ResolvedType>,
+    pub(super) inferred: &'a mut FxHashMap<TypeParameterId, ResolvedType>,
+    pub(super) upper: &'a mut FxHashMap<TypeParameterId, ResolvedType>,
     pub(super) signatures: &'a SignatureIndex,
     pub(super) model: &'a SemanticModel<'model>,
     /// Unknown argument evidence survives joins; Unknown downward schema slots
     /// instead mean that no constraint has been supplied yet.
     pub(super) poison_unknown: bool,
     /// Partial contextual schemas are fallbacks, not upward constraints.
-    pub(super) partial: Option<&'a mut HashMap<TypeParameterId, ResolvedType>>,
+    pub(super) partial: Option<&'a mut FxHashMap<TypeParameterId, ResolvedType>>,
 }
 
 pub(super) fn infer_type_constraints(

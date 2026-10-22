@@ -122,7 +122,7 @@ impl ResolvedSignature {
     pub fn substituted_shape(
         &self,
         model: &SemanticModel<'_>,
-        substitutions: &HashMap<TypeParameterId, ResolvedType>,
+        substitutions: &FxHashMap<TypeParameterId, ResolvedType>,
     ) -> Option<Arc<FunctionTypeShape>> {
         self.shape.as_ref().map(|shape| {
             shape.substitute(substitutions, |bound| {
@@ -292,7 +292,7 @@ pub(super) struct ExtensionFacts {
     pub(super) on_type: ResolvedType,
     /// The extension's own type parameters.
     pub(super) parameters: Vec<TypeParameterId>,
-    pub(super) parameter_bounds: HashMap<TypeParameterId, ResolvedType>,
+    pub(super) parameter_bounds: FxHashMap<TypeParameterId, ResolvedType>,
     /// Signatures of the instance methods and operators, over
     /// [`Self::parameters`].
     pub(super) methods: FxHashMap<String, ResolvedSignature>,

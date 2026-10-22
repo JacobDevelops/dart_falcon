@@ -460,6 +460,7 @@ dependencies = [
  "marked-yaml",
  "regex",
  "regress",
+ "rustc-hash",
  "schemars",
  "serde",
  "serde_json",

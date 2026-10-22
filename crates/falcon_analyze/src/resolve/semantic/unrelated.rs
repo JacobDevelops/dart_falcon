@@ -13,7 +13,6 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
-use std::collections::HashMap;
 
 use super::{
     BorrowedIdentity, DeclarationIdentity, MemberFacts, ResolvedType, SemanticModel,
@@ -562,7 +561,7 @@ impl SignatureIndex {
 
         // Generic functions are compared after alpha-renaming the target's
         // binders to the source's binders; their bounds must then be equivalent.
-        let mut substitutions = HashMap::new();
+        let mut substitutions = FxHashMap::default();
         for (sub, sup) in sub_shape
             .type_parameters
             .iter()
@@ -709,7 +708,7 @@ impl SignatureIndex {
                         .extension_representation
                         .as_ref()?;
                     let (parameters, _) = self.type_facts.get(identity)?.supertypes.as_ref()?;
-                    let substitutions: HashMap<_, _> =
+                    let substitutions: FxHashMap<_, _> =
                         parameters.iter().cloned().zip(arguments).collect();
                     let representation = model.substitute(representation, &substitutions);
                     // This substituted graph is temporary: do not retain its

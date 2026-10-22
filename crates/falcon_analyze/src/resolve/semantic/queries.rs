@@ -6,7 +6,7 @@ use super::*;
 /// remain borrowed; only function-typed values need a synthesized signature.
 pub struct ResolvedInvocation<'signature, 'tree> {
     pub signature: Cow<'signature, ResolvedSignature>,
-    pub owner: HashMap<TypeParameterId, ResolvedType>,
+    pub owner: FxHashMap<TypeParameterId, ResolvedType>,
     pub type_args: AstChildren<'tree, DartType<'tree>>,
     pub constructor_result: Option<ResolvedType>,
 }
@@ -20,7 +20,7 @@ impl ResolvedInvocation<'_, '_> {
         &ResolvedSignature,
         &[TypeParameterId],
         &ResolvedType,
-        &HashMap<TypeParameterId, ResolvedType>,
+        &FxHashMap<TypeParameterId, ResolvedType>,
     ) {
         let signature = self.signature.as_ref();
         match &self.constructor_result {
@@ -118,7 +118,7 @@ impl TypeEnvironment {
         include_override: bool,
     ) -> Option<(
         &'a ResolvedSignature,
-        HashMap<TypeParameterId, ResolvedType>,
+        FxHashMap<TypeParameterId, ResolvedType>,
     )> {
         let model = context.model;
         let signatures = context.signatures;
@@ -132,7 +132,7 @@ impl TypeEnvironment {
                         model
                             .resolve_value(identifier.name())
                             .and_then(|identity| signatures.function(&identity))
-                            .map(|signature| (signature, HashMap::new()))
+                            .map(|signature| (signature, FxHashMap::default()))
                     })
             }
             Expr::Field(access) => {
@@ -183,7 +183,7 @@ impl TypeEnvironment {
                             model.resolve_value(QualifiedName::prefixed(prefix, field.name()))
                         && let Some(signature) = signatures.function(&identity)
                     {
-                        return Some((signature, HashMap::new()));
+                        return Some((signature, FxHashMap::default()));
                     }
                     let receiver = reached_receiver.get_or_insert_with(|| {
                         self.receiver_type(
@@ -213,7 +213,10 @@ impl TypeEnvironment {
                             let identity = model.resolve_dotted(&segments).or_else(|| {
                                 model.resolve_extension(QualifiedName::from_segments(&segments)?)
                             })?;
-                            Some((signatures.member(&identity, field.name())?, HashMap::new()))
+                            Some((
+                                signatures.member(&identity, field.name())?,
+                                FxHashMap::default(),
+                            ))
                         })
                 })
             }
@@ -291,7 +294,10 @@ impl TypeEnvironment {
         .filter(|(identity, name)| signatures.constructor(identity, name).is_some());
         let resolved = resolved.or_else(|| {
             let (identity, name) = constructor.as_ref()?;
-            Some((signatures.constructor(identity, name)?, HashMap::new()))
+            Some((
+                signatures.constructor(identity, name)?,
+                FxHashMap::default(),
+            ))
         });
         let (signature, owner) = if let Some((signature, owner)) = resolved {
             (Cow::Borrowed(signature), owner)
@@ -331,7 +337,7 @@ impl TypeEnvironment {
                 if local_generic || shape.is_some() {
                     signature.bind_local_type_parameters(context.type_parameters);
                 }
-                (Cow::Owned(signature), HashMap::new())
+                (Cow::Owned(signature), FxHashMap::default())
             } else {
                 let (signature, owner) = signatures
                     .resolved_member(&receiver, "call", model)

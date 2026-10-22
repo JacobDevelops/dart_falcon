@@ -387,7 +387,7 @@ impl FunctionTypeShape {
     /// identities while substitutions apply to their bounds.
     pub(super) fn substitute<'a>(
         self: &'a Arc<Self>,
-        substitutions: &HashMap<TypeParameterId, ResolvedType>,
+        substitutions: &FxHashMap<TypeParameterId, ResolvedType>,
         map: impl FnMut(&'a ResolvedType) -> ResolvedType,
     ) -> Arc<Self> {
         let mapped = self.map_bounds(map);

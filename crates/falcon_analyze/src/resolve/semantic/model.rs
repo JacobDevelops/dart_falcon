@@ -801,7 +801,7 @@ impl<'a> SemanticModel<'a> {
         let mut expanded = if parameters.is_empty() {
             aliased.clone()
         } else {
-            let substitutions: HashMap<_, _> = parameters
+            let substitutions: FxHashMap<_, _> = parameters
                 .iter()
                 .map(|(ordinal, id, default)| {
                     (
@@ -926,7 +926,7 @@ impl<'a> SemanticModel<'a> {
     pub fn substitute(
         &self,
         ty: &ResolvedType,
-        substitutions: &HashMap<TypeParameterId, ResolvedType>,
+        substitutions: &FxHashMap<TypeParameterId, ResolvedType>,
     ) -> ResolvedType {
         if substitutions.is_empty() {
             return ty.clone();
@@ -937,7 +937,7 @@ impl<'a> SemanticModel<'a> {
     pub(super) fn substitute_memoized<'t>(
         &self,
         ty: &'t ResolvedType,
-        substitutions: &HashMap<TypeParameterId, ResolvedType>,
+        substitutions: &FxHashMap<TypeParameterId, ResolvedType>,
         records: &mut SubstitutionMemo<'t>,
     ) -> ResolvedType {
         self.substitute_memoized_inner(ty, substitutions, records, false)
@@ -946,7 +946,7 @@ impl<'a> SemanticModel<'a> {
     fn substitute_memoized_inner<'t>(
         &self,
         ty: &'t ResolvedType,
-        substitutions: &HashMap<TypeParameterId, ResolvedType>,
+        substitutions: &FxHashMap<TypeParameterId, ResolvedType>,
         records: &mut SubstitutionMemo<'t>,
         cache_relevance: bool,
     ) -> ResolvedType {

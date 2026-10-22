@@ -1494,7 +1494,7 @@ impl SignatureIndex {
         scope.push(type_parameters.clone(), model);
         let owner_parameters = parameter_ids(&scope, type_parameters.clone());
         record_bound_declarations(&mut self.bound_declared, &scope, type_parameters.clone());
-        let bounds: HashMap<_, _> = owner_parameters
+        let bounds: FxHashMap<_, _> = owner_parameters
             .iter()
             .zip(type_parameters)
             .map(|(id, parameter)| {

@@ -14,12 +14,6 @@ Owns the semantic index, `type_index.rs`, `ResolvedType` and the rule sites that
 
 - [ ] **Hide `ResolvedType` internals.** 7 rule sites build `Interface { occurrence: Default::default(), … }` and 328 match its variants. Add constructors and views, make metadata fields crate-private.
 
-#### 18. Analyze infrastructure
-
-Owns `parallel.rs`, `environment/`, `registry.rs` threading and `lib.rs` exports. Any time after batch 15.
-
-- [ ] **Analysis cleanups.** Fx hashing for substitution maps.
-
 ### Stage 6: editor and CI workflows
 
 #### 19. Shared pipeline and incremental LSP

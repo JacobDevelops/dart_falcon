@@ -2342,7 +2342,7 @@ fn substitution_removes_instantiated_function_binders_and_maps_retained_bounds()
             let ResolvedType::TypeParameter { id, .. } = &shape.type_parameters[0] else {
                 panic!("expected binder")
             };
-            let substitutions = HashMap::from([(id.clone(), ResolvedType::Void)]);
+            let substitutions = FxHashMap::from_iter([(id.clone(), ResolvedType::Void)]);
             let signatures = SignatureIndex::from_program(program, model);
             let source = signatures
                 .function(&model.resolve_value("f").unwrap())
@@ -2367,7 +2367,7 @@ fn substitution_removes_instantiated_function_binders_and_maps_retained_bounds()
             };
             assert_eq!(id.name.as_ref(), "U");
             assert_eq!(**bound, ResolvedType::Void);
-            let substitutions = HashMap::from([(id.clone(), ResolvedType::Dynamic)]);
+            let substitutions = FxHashMap::from_iter([(id.clone(), ResolvedType::Dynamic)]);
             // An unused binder still changes the generic arity when supplied.
             let ResolvedType::Function {
                 shape: Some(shape), ..
@@ -5768,7 +5768,7 @@ fn signature_shapes_preserve_required_names_and_unused_declared_binders() {
             local.call_parameters.clear();
             local.bind_local_type_parameters(&TypeParameterScope::default());
             assert_eq!(local.call_parameters, signature.call_parameters);
-            let substitutions = HashMap::from([(id.clone(), model.core_type("int", false))]);
+            let substitutions = FxHashMap::from_iter([(id.clone(), model.core_type("int", false))]);
             let instantiated = signature.substituted_shape(model, &substitutions).unwrap();
             assert_eq!(instantiated.required_named, shape.required_named);
             assert!(matches!(
@@ -6016,7 +6016,7 @@ fn signatures_preserve_type_parameters_for_void_substitution() {
             .unwrap();
         assert!(contains_parameter(&signature.positional[0]));
         let substitutions =
-            HashMap::from([(signature.call_parameters[0].clone(), ResolvedType::Void)]);
+            FxHashMap::from_iter([(signature.call_parameters[0].clone(), ResolvedType::Void)]);
         let expected = model.substitute(&signature.positional[0], &substitutions);
         assert_eq!(expected, ResolvedType::Void);
         assert_eq!(

@@ -182,7 +182,7 @@ fn substitution_interns_independently_allocated_equal_siblings() {
         named: empty_named_types(),
         nullable: false,
     };
-    let substitutions = HashMap::from([(id, ResolvedType::Void)]);
+    let substitutions = FxHashMap::from_iter([(id, ResolvedType::Void)]);
     let result = model.substitute(&source, &substitutions);
     let ResolvedType::Record { positional, .. } = result else {
         unreachable!()
@@ -210,7 +210,7 @@ fn substitution_memos_shared_sources_and_skips_irrelevant_subgraphs() {
         ordinal: 0,
         name: "T".into(),
     };
-    let substitutions = HashMap::from([(id.clone(), ResolvedType::Void)]);
+    let substitutions = FxHashMap::from_iter([(id.clone(), ResolvedType::Void)]);
     let parameter = ResolvedType::TypeParameter {
         id,
         bound: Arc::new(ResolvedType::Dynamic),
@@ -251,7 +251,7 @@ fn substitution_memos_shared_sources_and_skips_irrelevant_subgraphs() {
 fn flat_irrelevant_substitution_roots_do_not_allocate_memos() {
     let identities = IdentityIndex::default();
     let model = SemanticModel::new(Path::new("graph.dart"), parsed(), &identities, None);
-    let substitutions = HashMap::from([(
+    let substitutions = FxHashMap::from_iter([(
         TypeParameterId {
             owner: ParameterOwner::Sdk("irrelevant-root"),
             ordinal: 0,
@@ -298,7 +298,7 @@ fn substitution_memoizes_shared_irrelevant_children_after_relevant_siblings() {
         ordinal: 0,
         name: "T".into(),
     };
-    let substitutions = HashMap::from([(id.clone(), ResolvedType::Void)]);
+    let substitutions = FxHashMap::from_iter([(id.clone(), ResolvedType::Void)]);
     let record = |positional: Vec<ResolvedType>| ResolvedType::Record {
         occurrence: Default::default(),
         positional: positional.into(),
@@ -458,7 +458,7 @@ fn substitution_source_keys_preserve_scalar_context_and_alias_origins() {
     ];
     let keys: FxHashSet<_> = cases.iter().filter_map(SubstitutionSourceKey::of).collect();
     assert_eq!(keys.len(), cases.len());
-    let substitutions = HashMap::from([(id, ResolvedType::Void)]);
+    let substitutions = FxHashMap::from_iter([(id, ResolvedType::Void)]);
     let expected: Vec<_> = cases
         .iter()
         .map(|ty| model.substitute(ty, &substitutions))
@@ -683,7 +683,7 @@ fn separate_member_substitution_joins_drop_function_alias_annotations() {
         named: empty_named_types(),
         nullable: false,
     };
-    let substitutions = HashMap::from([(id, ResolvedType::Void)]);
+    let substitutions = FxHashMap::from_iter([(id, ResolvedType::Void)]);
     // Independent member reads substitute the same cached signature, but
     // their instantiated alias annotations are not one shared type use.
     let first = model.substitute(&source, &substitutions);

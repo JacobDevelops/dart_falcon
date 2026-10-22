@@ -10,6 +10,7 @@
 //! Constructor type tests and casts resolve instantiated owner type parameters.
 //! Indexed initializers and constructors retain parsed sources through the signature index.
 
+use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
@@ -1413,7 +1414,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 AstChildren::empty(),
                 &context,
                 None,
-                &HashMap::new(),
+                &FxHashMap::default(),
             );
             type_args = inference
                 .owner_parameters
@@ -1508,7 +1509,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         &mut self,
         args: ArgList<'_>,
         signature: Option<&ResolvedSignature>,
-        substitutions: Option<&HashMap<TypeParameterId, ResolvedType>>,
+        substitutions: Option<&FxHashMap<TypeParameterId, ResolvedType>>,
     ) -> (
         Vec<Option<ConstantValue>>,
         Vec<(String, Option<ConstantValue>)>,
@@ -1760,7 +1761,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                     AstChildren::empty(),
                     &context,
                     Some(&expected),
-                    &HashMap::new(),
+                    &FxHashMap::default(),
                 );
                 let defaults = std::cell::OnceCell::new();
                 target_arguments = inference

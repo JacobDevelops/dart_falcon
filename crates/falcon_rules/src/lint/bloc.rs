@@ -550,7 +550,7 @@ impl ModelCollector<'_> {
     // Follow only the superclass chain: implementing Bloc does not establish a
     // Bloc's event/state contract. Substitute each generic intermediate owner.
     fn suffix_root(&self, mut ty: ResolvedType) -> Option<DeclarationIdentity> {
-        let mut substitutions = std::collections::HashMap::new();
+        let mut substitutions = rustc_hash::FxHashMap::default();
         for _ in 0..64 {
             let ResolvedType::Interface {
                 identity,

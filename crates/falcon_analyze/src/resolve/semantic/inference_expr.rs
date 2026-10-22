@@ -155,7 +155,7 @@ impl TypeEnvironment {
                             return model
                                 .resolve_value(QualifiedName::prefixed(prefix, field))
                                 .and_then(|identity| signatures.function(&identity))
-                                .map(|signature| (signature, HashMap::new()));
+                                .map(|signature| (signature, FxHashMap::default()));
                         }
                     }
                     None
@@ -171,7 +171,7 @@ impl TypeEnvironment {
                         let identity = model.resolve_dotted(owner).or_else(|| {
                             model.resolve_extension(QualifiedName::from_segments(owner)?)
                         })?;
-                        Some((signatures.member(&identity, field)?, HashMap::new()))
+                        Some((signatures.member(&identity, field)?, FxHashMap::default()))
                     })
                 };
                 constructor
@@ -358,7 +358,7 @@ impl TypeEnvironment {
                         explicit,
                         &context,
                         expected,
-                        &HashMap::new(),
+                        &FxHashMap::default(),
                     );
                     return model.substitute(&signature.return_type, &substitutions);
                 }

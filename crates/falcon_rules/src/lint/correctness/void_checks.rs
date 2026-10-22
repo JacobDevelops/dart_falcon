@@ -360,7 +360,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         )
                         .cloned()
                 {
-                    let substitutions: std::collections::HashMap<_, _> = signature
+                    let substitutions: rustc_hash::FxHashMap<_, _> = signature
                         .owner_parameters
                         .iter()
                         .cloned()

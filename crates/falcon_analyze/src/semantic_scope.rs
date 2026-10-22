@@ -1,3 +1,4 @@
+use rustc_hash::FxHashMap;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -1142,11 +1143,11 @@ impl<'a> SemanticState<'a> {
     pub fn signature_substitutions(
         &self,
         signature: &ResolvedSignature,
-        owner: &HashMap<TypeParameterId, ResolvedType>,
+        owner: &FxHashMap<TypeParameterId, ResolvedType>,
         type_args: AstChildren<'a, DartType<'a>>,
         args: ArgList<'a>,
         expected: Option<&ResolvedType>,
-    ) -> HashMap<TypeParameterId, ResolvedType> {
+    ) -> FxHashMap<TypeParameterId, ResolvedType> {
         self.signature_substitutions_with_result(
             (
                 signature,
@@ -1167,13 +1168,13 @@ impl<'a> SemanticState<'a> {
             &ResolvedSignature,
             &[TypeParameterId],
             &ResolvedType,
-            &HashMap<TypeParameterId, ResolvedType>,
+            &FxHashMap<TypeParameterId, ResolvedType>,
         ),
         type_args: AstChildren<'a, DartType<'a>>,
         args: ArgList<'a>,
         expected: Option<&ResolvedType>,
         argument_contexts: Option<&mut HashMap<usize, ResolvedType>>,
-    ) -> HashMap<TypeParameterId, ResolvedType> {
+    ) -> FxHashMap<TypeParameterId, ResolvedType> {
         let context = InferenceContext {
             model: &self.model,
             signatures: &self.signatures,
@@ -1194,7 +1195,7 @@ impl<'a> SemanticState<'a> {
     fn instantiate_return_type(
         &self,
         signature: &ResolvedSignature,
-        owner: &HashMap<TypeParameterId, ResolvedType>,
+        owner: &FxHashMap<TypeParameterId, ResolvedType>,
         type_args: AstChildren<'a, DartType<'a>>,
         args: ArgList<'a>,
         expected: Option<&ResolvedType>,
@@ -1208,7 +1209,7 @@ impl<'a> SemanticState<'a> {
     pub fn substituted_parameters(
         &self,
         signature: &ResolvedSignature,
-        substitutions: &HashMap<TypeParameterId, ResolvedType>,
+        substitutions: &FxHashMap<TypeParameterId, ResolvedType>,
     ) -> (Vec<ResolvedType>, HashMap<String, ResolvedType>) {
         let positional = signature
             .positional
@@ -1727,10 +1728,10 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         let contextual_substitutions = contextual
             .then(|| {
                 let Some(contextual_parameters) = contextual_parameters.as_ref() else {
-                    return Some(HashMap::new());
+                    return Some(FxHashMap::default());
                 };
                 if contextual_parameters.is_empty() {
-                    return Some(HashMap::new());
+                    return Some(FxHashMap::default());
                 }
                 let expected = self.state.expected()?;
                 if !matches!(expected, ResolvedType::Function { .. }) {
@@ -1861,7 +1862,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
 
     fn contextual_closure_type(
         &self,
-        substitutions: Option<&HashMap<TypeParameterId, ResolvedType>>,
+        substitutions: Option<&FxHashMap<TypeParameterId, ResolvedType>>,
         parameter: Option<(&str, ParamKind, usize)>,
     ) -> Option<ResolvedType> {
         let substitutions = substitutions?;
@@ -1904,7 +1905,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         params: FormalParamList<'a>,
         super_constructor: Option<&str>,
         contextual: bool,
-        contextual_substitutions: Option<&HashMap<TypeParameterId, ResolvedType>>,
+        contextual_substitutions: Option<&FxHashMap<TypeParameterId, ResolvedType>>,
     ) {
         let mut positional_ordinal = 0;
         for param in params.params() {
@@ -2652,7 +2653,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                 signature,
                 &signature.owner_parameters,
                 &signature.return_type,
-                &HashMap::new(),
+                &FxHashMap::default(),
             ),
             type_args,
             args,

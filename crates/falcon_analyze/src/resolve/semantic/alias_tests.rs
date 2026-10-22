@@ -175,7 +175,7 @@ fn function_shape_bounds_substitute_without_replacing_declared_binders() {
         let binder = TypeParameterId {
             owner: ParameterOwner::Sdk("shape-inner"),
             ordinal: 0,
-            name: "T".into(),
+            name: "X".into(),
         };
         let shape = FunctionTypeShape::new(
             vec!["item".into()],
@@ -190,16 +190,31 @@ fn function_shape_bounds_substitute_without_replacing_declared_binders() {
             }],
         );
         assert!(Arc::ptr_eq(&shape, &shape.map_bounds(Clone::clone)));
+        let origin = Arc::new(AliasProvenance::Source {
+            identity: DeclarationIdentity::OBJECT,
+            origin: Some((None, 1)),
+        });
         let function = ResolvedType::Function {
             shape: Some(shape),
-            alias: Default::default(),
+            alias: FunctionTypeAlias(Some(Arc::clone(&origin))),
             optional_positional: 0,
             return_type: Arc::new(ResolvedType::Void),
             positional: empty_type_arguments(),
             named: empty_named_types(),
             nullable: false,
         };
-        let result = model.substitute(&function, &HashMap::from([(outer, ResolvedType::Void)]));
+        let substitutions = FxHashMap::from_iter([(outer.clone(), ResolvedType::Void)]);
+        assert_eq!(substitutions.get(&outer), Some(&ResolvedType::Void));
+        assert!(!substitutions.contains_key(&binder));
+        let result = model.substitute(&function, &substitutions);
+        let repeated = model.substitute(&function, &substitutions);
+        assert!(SubstitutionKey(&result) == SubstitutionKey(&repeated));
+        let ResolvedType::Function { alias, .. } = &result else {
+            panic!("lost substituted function")
+        };
+        assert_eq!(alias.identity(), Some(&DeclarationIdentity::OBJECT));
+        assert!(matches!(alias.0.as_deref(),
+            Some(AliasProvenance::Substituted { source }) if Arc::ptr_eq(source, &origin)));
         let ResolvedType::Function {
             shape: Some(shape), ..
         } = &result
@@ -536,7 +551,7 @@ fn recursive_bounds_reverse_variance_in_function_parameters() {
             named: vec![("value".to_owned(), parameter)].into(),
             nullable: false,
         };
-        let bounds = HashMap::from([(id.clone(), bound)]);
+        let bounds = FxHashMap::from_iter([(id.clone(), bound)]);
         let result = instantiate_parameter_bound(&id, &bounds, &mut HashSet::new(), model);
         let ResolvedType::Function {
             return_type,
@@ -762,7 +777,7 @@ fn mutually_recursive_bounds_replace_the_entire_component_by_variance() {
             bound: Arc::new(ResolvedType::Dynamic),
             nullable: false,
         };
-        let bounds = HashMap::from([
+        let bounds = FxHashMap::from_iter([
             (
                 a.clone(),
                 ResolvedType::Interface {
@@ -837,7 +852,7 @@ fn external_parameter_bounds_are_instantiated_in_their_own_variance() {
             bound: Arc::new(ResolvedType::Dynamic),
             nullable: false,
         };
-        let bounds = HashMap::from([
+        let bounds = FxHashMap::from_iter([
             (
                 a.clone(),
                 ResolvedType::Interface {
@@ -940,7 +955,7 @@ fn substitution_source_keys_preserve_live_storage_and_scalar_context() {
             assert!(keys.insert(SubstitutionSourceKey::of(ty).unwrap()));
         }
 
-        let substitutions = HashMap::from([(parameter_id, ResolvedType::Void)]);
+        let substitutions = FxHashMap::from_iter([(parameter_id, ResolvedType::Void)]);
         let mut memo = SubstitutionMemo::default();
         for (index, ty) in sources.iter().enumerate() {
             let result = model.substitute_memoized(ty, &substitutions, &mut memo);
