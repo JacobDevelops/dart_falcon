@@ -81,3 +81,12 @@ class CollectionOwner {
   bool unrelated() =>
       this.items.where((x) => x > 0).length == this.others.length;
 }
+
+bool noEmptySet(Set<String> values) =>
+    values.where((value) => value.isEmpty).isEmpty; /* expect: prefer-iterable-every */
+
+bool noEvenIterable(Iterable<int> values) =>
+    values.where((value) => value.isEven).isEmpty; /* expect: prefer-iterable-every */
+
+bool noneMatch(List<int> values, bool Function(int) predicate) =>
+    values.where(predicate).isEmpty; /* expect: prefer-iterable-every */

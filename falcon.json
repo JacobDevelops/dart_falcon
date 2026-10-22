@@ -266,7 +266,6 @@
         "prefer-correct-error-name": "warn",
         "prefer-correct-handler-name": "warn",
         "prefer-correct-callback-field-name": "warn",
-        "prefer-any-or-every": "warn",
         "prefer-match-file-name": "warn",
         "prefer-commenting-analyzer-ignores": "warn",
         "sort-child-properties-last": "warn",

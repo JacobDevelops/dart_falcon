@@ -365,6 +365,7 @@ pub const RULE_ALIASES: &[(&str, &str)] = &[
         "avoid-bool-literals-in-conditional-expressions",
     ),
     ("avoid-self-compare", "no-self-comparisons"),
+    ("prefer-any-or-every", "prefer-iterable-every"),
 ];
 
 /// Resolve a possibly-legacy rule id to its canonical id. Returns the input

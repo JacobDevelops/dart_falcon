@@ -228,7 +228,6 @@ crate::declare_rules! {
     use_existing_variable::UseExistingVariable => ("use-existing-variable", resolved, None, false, RuleSource::Falcon);
     use_existing_destructuring::UseExistingDestructuring => ("use-existing-destructuring", resolved, None, false, RuleSource::Falcon);
     avoid_unnecessary_overrides_in_state::AvoidUnnecessaryOverridesInState => ("avoid-unnecessary-overrides-in-state", resolved, Some(Domain::Flutter), false, RuleSource::Falcon);
-    prefer_any_or_every::PreferAnyOrEvery => ("prefer-any-or-every", resolved, None, false, RuleSource::Falcon);
     prefer_match_file_name::PreferMatchFileName => ("prefer-match-file-name", file, None, false, RuleSource::Falcon);
     prefer_commenting_analyzer_ignores::PreferCommentingAnalyzerIgnores => ("prefer-commenting-analyzer-ignores", file, None, false, RuleSource::Falcon, options = prefer_commenting_analyzer_ignores::Options);
     prefer_named_parameters::PreferNamedParameters => ("prefer-named-parameters", file, None, false, RuleSource::Falcon, options = prefer_named_parameters::Options);

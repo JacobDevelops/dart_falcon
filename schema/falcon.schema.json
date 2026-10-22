@@ -1475,9 +1475,6 @@
                 "avoid-unnecessary-overrides-in-state": {
                   "$ref": "#/definitions/ruleWithoutOptions"
                 },
-                "prefer-any-or-every": {
-                  "$ref": "#/definitions/ruleWithoutOptions"
-                },
                 "prefer-match-file-name": {
                   "$ref": "#/definitions/ruleWithoutOptions"
                 },
@@ -3213,9 +3210,6 @@
                   "$ref": "#/definitions/ruleWithoutOptions"
                 },
                 "avoid-unnecessary-overrides-in-state": {
-                  "$ref": "#/definitions/ruleWithoutOptions"
-                },
-                "prefer-any-or-every": {
                   "$ref": "#/definitions/ruleWithoutOptions"
                 },
                 "prefer-match-file-name": {

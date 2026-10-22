@@ -79,3 +79,12 @@ void nullableChains(List<int>? items, List<int> values) {
   final nullableOriginal =
       values.where((x) => x > 0).length == values?.length;
 }
+
+bool unresolved(dynamic values) => values.where((value) => true).isEmpty;
+
+class Lookalike {
+  Lookalike where(bool Function(int) predicate) => this;
+  bool get isEmpty => true;
+}
+
+bool lookalike(Lookalike values) => values.where((value) => true).isEmpty;
