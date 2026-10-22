@@ -654,3 +654,78 @@ fn unresolved_external_types_do_not_poison_alias_templates() {
         );
     });
 }
+
+#[test]
+fn substitution_source_keys_preserve_live_storage_and_scalar_context() {
+    with_model("", |model| {
+        let parameter_id = TypeParameterId {
+            owner: ParameterOwner::Sdk("memo-source"),
+            ordinal: 0,
+            name: "T".into(),
+        };
+        let parameter = ResolvedType::TypeParameter {
+            id: parameter_id.clone(),
+            bound: Arc::new(ResolvedType::Dynamic),
+            nullable: false,
+        };
+        let source = ResolvedType::Function {
+            return_type: Arc::new(parameter.clone()),
+            positional: vec![parameter.clone()].into(),
+            named: empty_named_types(),
+            optional_positional: 0,
+            nullable: false,
+            alias: Default::default(),
+            shape: None,
+        };
+        let mut optional = source.clone();
+        let ResolvedType::Function {
+            optional_positional,
+            ..
+        } = &mut optional
+        else {
+            unreachable!()
+        };
+        *optional_positional = 1;
+        let distinct = ResolvedType::Function {
+            return_type: Arc::new(parameter.clone()),
+            positional: vec![parameter].into(),
+            named: empty_named_types(),
+            optional_positional: 0,
+            nullable: false,
+            alias: Default::default(),
+            shape: None,
+        };
+        let sources = [
+            source.clone(),
+            source.with_nullable(true),
+            optional,
+            distinct,
+        ];
+        let mut keys = FxHashSet::default();
+        assert!(keys.insert(SubstitutionSourceKey::of(&source).unwrap()));
+        assert!(!keys.insert(SubstitutionSourceKey::of(&sources[0]).unwrap()));
+        for ty in &sources[1..] {
+            assert!(keys.insert(SubstitutionSourceKey::of(ty).unwrap()));
+        }
+
+        let substitutions = HashMap::from([(parameter_id, ResolvedType::Void)]);
+        let mut memo = SubstitutionMemo::default();
+        for (index, ty) in sources.iter().enumerate() {
+            let result = model.substitute_memoized(ty, &substitutions, &mut memo);
+            let ResolvedType::Function {
+                return_type,
+                positional,
+                nullable,
+                optional_positional,
+                ..
+            } = result
+            else {
+                panic!("lost substituted function")
+            };
+            assert_eq!(*return_type, ResolvedType::Void);
+            assert_eq!(positional.as_ref(), &[ResolvedType::Void]);
+            assert_eq!(nullable, index == 1);
+            assert_eq!(optional_positional, usize::from(index == 2));
+        }
+    });
+}

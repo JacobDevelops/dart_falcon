@@ -24,30 +24,25 @@ impl Eq for SubstitutionKey<'_> {}
 pub(super) enum SubstitutionSourceKey<'a> {
     Interface(
         &'a DeclarationIdentity,
-        *const ResolvedType,
-        usize,
+        BorrowedIdentity<'a, [ResolvedType]>,
         bool,
         bool,
-        Option<*const AliasProvenance>,
+        Option<BorrowedIdentity<'a, AliasProvenance>>,
     ),
     Function(
-        *const ResolvedType,
-        *const ResolvedType,
-        usize,
-        *const (String, ResolvedType),
-        usize,
+        BorrowedIdentity<'a, ResolvedType>,
+        BorrowedIdentity<'a, [ResolvedType]>,
+        BorrowedIdentity<'a, [(String, ResolvedType)]>,
         usize,
         bool,
-        Option<*const AliasProvenance>,
-        Option<*const FunctionTypeShape>,
+        Option<BorrowedIdentity<'a, AliasProvenance>>,
+        Option<BorrowedIdentity<'a, FunctionTypeShape>>,
     ),
     Record(
-        *const ResolvedType,
-        usize,
-        *const (String, ResolvedType),
-        usize,
+        BorrowedIdentity<'a, [ResolvedType]>,
+        BorrowedIdentity<'a, [(String, ResolvedType)]>,
         bool,
-        Option<*const AliasProvenance>,
+        Option<BorrowedIdentity<'a, AliasProvenance>>,
     ),
 }
 
@@ -62,11 +57,10 @@ impl<'a> SubstitutionSourceKey<'a> {
                 extension_type,
             } if !arguments.is_empty() => Some(Self::Interface(
                 identity,
-                arguments.as_ptr(),
-                arguments.len(),
+                BorrowedIdentity::new(arguments.as_ref()),
                 *nullable,
                 *extension_type,
-                occurrence.0.as_ref().map(Arc::as_ptr),
+                occurrence.0.as_deref().map(BorrowedIdentity::new),
             )),
             ResolvedType::Function {
                 return_type,
@@ -77,15 +71,13 @@ impl<'a> SubstitutionSourceKey<'a> {
                 alias,
                 shape,
             } => Some(Self::Function(
-                Arc::as_ptr(return_type),
-                positional.as_ptr(),
-                positional.len(),
-                named.as_ptr(),
-                named.len(),
+                BorrowedIdentity::new(return_type.as_ref()),
+                BorrowedIdentity::new(positional.as_ref()),
+                BorrowedIdentity::new(named.as_ref()),
                 *optional_positional,
                 *nullable,
-                alias.0.as_ref().map(Arc::as_ptr),
-                shape.as_ref().map(Arc::as_ptr),
+                alias.0.as_deref().map(BorrowedIdentity::new),
+                shape.as_deref().map(BorrowedIdentity::new),
             )),
             ResolvedType::Record {
                 occurrence,
@@ -93,12 +85,10 @@ impl<'a> SubstitutionSourceKey<'a> {
                 named,
                 nullable,
             } => Some(Self::Record(
-                positional.as_ptr(),
-                positional.len(),
-                named.as_ptr(),
-                named.len(),
+                BorrowedIdentity::new(positional.as_ref()),
+                BorrowedIdentity::new(named.as_ref()),
                 *nullable,
-                occurrence.0.as_ref().map(Arc::as_ptr),
+                occurrence.0.as_deref().map(BorrowedIdentity::new),
             )),
             _ => None,
         }
@@ -112,7 +102,7 @@ impl<'a> SubstitutionSourceKey<'a> {
 pub(super) struct SubstitutionMemo<'a> {
     pub(super) relevant: FxHashMap<SubstitutionSourceKey<'a>, bool>,
     pub(super) sources: FxHashMap<SubstitutionSourceKey<'a>, ResolvedType>,
-    pub(super) hashes: FxHashMap<*const ResolvedType, u64>,
+    pub(super) hashes: FxHashMap<BorrowedHashKey<'a>, u64>,
     pub(super) structural: FxHashMap<u64, Vec<(SubstitutionKey<'a>, ResolvedType)>>,
 }
 
@@ -215,14 +205,14 @@ fn instantiate_bound_type(
     instantiate_bound_type_memoized(ty, bounds, visiting, covariant, &mut FxHashMap::default())
 }
 
-fn instantiate_bound_type_memoized(
-    ty: &ResolvedType,
+fn instantiate_bound_type_memoized<'a>(
+    ty: &'a ResolvedType,
     bounds: &HashMap<TypeParameterId, ResolvedType>,
     visiting: &mut HashSet<TypeParameterId>,
     covariant: bool,
-    memo: &mut FxHashMap<(*const ResolvedType, bool), ResolvedType>,
+    memo: &mut FxHashMap<(BorrowedIdentity<'a, ResolvedType>, bool), ResolvedType>,
 ) -> ResolvedType {
-    let key = (ty as *const ResolvedType, covariant);
+    let key = (BorrowedIdentity::new(ty), covariant);
     if let Some(result) = memo.get(&key) {
         return result.clone();
     }

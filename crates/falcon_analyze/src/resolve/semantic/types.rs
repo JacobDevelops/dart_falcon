@@ -1,5 +1,139 @@
 use super::*;
 
+/// Address identity whose referent must remain live for the cache's lifetime.
+pub(super) struct BorrowedIdentity<'a, T: ?Sized>(&'a T);
+
+impl<'a, T: ?Sized> BorrowedIdentity<'a, T> {
+    pub(super) fn new(value: &'a T) -> Self {
+        Self(value)
+    }
+}
+
+impl<T: ?Sized> Copy for BorrowedIdentity<'_, T> {}
+
+impl<T: ?Sized> Clone for BorrowedIdentity<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: ?Sized> PartialEq for BorrowedIdentity<'_, T> {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.0, other.0)
+    }
+}
+
+impl<T: ?Sized> Eq for BorrowedIdentity<'_, T> {}
+
+impl<T: ?Sized> Hash for BorrowedIdentity<'_, T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::ptr::hash(self.0, state);
+    }
+}
+
+/// Persistent address identity owns only the existing shared storage.
+pub(super) struct SharedIdentity<T: ?Sized>(Arc<T>);
+
+impl<T: ?Sized> SharedIdentity<T> {
+    pub(super) fn new(value: &Arc<T>) -> Self {
+        Self(Arc::clone(value))
+    }
+}
+
+impl<T: ?Sized> Clone for SharedIdentity<T> {
+    fn clone(&self) -> Self {
+        Self::new(&self.0)
+    }
+}
+
+impl<T: ?Sized> PartialEq for SharedIdentity<T> {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl<T: ?Sized> Eq for SharedIdentity<T> {}
+
+impl<T: ?Sized> Hash for SharedIdentity<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::ptr::hash(Arc::as_ptr(&self.0), state);
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum BorrowedHashKey<'a> {
+    Type(BorrowedIdentity<'a, ResolvedType>),
+    Positional(BorrowedIdentity<'a, [ResolvedType]>),
+    Named(BorrowedIdentity<'a, [(String, ResolvedType)]>),
+    Shape(BorrowedIdentity<'a, FunctionTypeShape>),
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(super) enum SharedHashKey {
+    Type(SharedIdentity<ResolvedType>),
+    Positional(SharedIdentity<[ResolvedType]>),
+    Named(SharedIdentity<[(String, ResolvedType)]>),
+    Shape(SharedIdentity<FunctionTypeShape>),
+}
+
+trait StructuralHashKey<'a>: Clone + Eq + Hash {
+    fn ty(value: &'a Arc<ResolvedType>) -> Self;
+    fn positional(value: &'a Arc<[ResolvedType]>) -> Self;
+    fn named(value: &'a Arc<[(String, ResolvedType)]>) -> Self;
+    fn shape(value: &'a Arc<FunctionTypeShape>) -> Self;
+}
+
+impl<'a> StructuralHashKey<'a> for BorrowedHashKey<'a> {
+    fn ty(value: &'a Arc<ResolvedType>) -> Self {
+        Self::Type(BorrowedIdentity::new(value.as_ref()))
+    }
+    fn positional(value: &'a Arc<[ResolvedType]>) -> Self {
+        Self::Positional(BorrowedIdentity::new(value.as_ref()))
+    }
+    fn named(value: &'a Arc<[(String, ResolvedType)]>) -> Self {
+        Self::Named(BorrowedIdentity::new(value.as_ref()))
+    }
+    fn shape(value: &'a Arc<FunctionTypeShape>) -> Self {
+        Self::Shape(BorrowedIdentity::new(value.as_ref()))
+    }
+}
+
+impl<'a> StructuralHashKey<'a> for SharedHashKey {
+    fn ty(value: &'a Arc<ResolvedType>) -> Self {
+        Self::Type(SharedIdentity::new(value))
+    }
+    fn positional(value: &'a Arc<[ResolvedType]>) -> Self {
+        Self::Positional(SharedIdentity::new(value))
+    }
+    fn named(value: &'a Arc<[(String, ResolvedType)]>) -> Self {
+        Self::Named(SharedIdentity::new(value))
+    }
+    fn shape(value: &'a Arc<FunctionTypeShape>) -> Self {
+        Self::Shape(SharedIdentity::new(value))
+    }
+}
+
+struct StructuralHashMemo<'a, K> {
+    hashes: &'a mut FxHashMap<K, u64>,
+    inserted: Option<&'a mut Vec<K>>,
+}
+
+fn memoized_hash<K: Clone + Eq + Hash>(
+    key: K,
+    memo: &mut StructuralHashMemo<'_, K>,
+    compute: impl FnOnce(&mut StructuralHashMemo<'_, K>) -> u64,
+) -> u64 {
+    if let Some(hash) = memo.hashes.get(&key) {
+        return *hash;
+    }
+    let hash = compute(memo);
+    if let Some(inserted) = &mut memo.inserted {
+        inserted.push(key.clone());
+    }
+    memo.hashes.insert(key, hash);
+    hash
+}
+
 type AliasParameter = (usize, TypeParameterId, ResolvedType);
 
 pub(super) type AliasTemplate = (Vec<AliasParameter>, ResolvedType);
@@ -73,10 +207,10 @@ impl AliasProvenance {
         Self::same_origin_memoized(left, right, &mut FxHashSet::default())
     }
 
-    pub(super) fn same_origin_memoized(
-        left: &Arc<Self>,
-        right: &Arc<Self>,
-        seen: &mut FxHashSet<(*const Self, *const Self)>,
+    pub(super) fn same_origin_memoized<'a>(
+        left: &'a Arc<Self>,
+        right: &'a Arc<Self>,
+        seen: &mut FxHashSet<(BorrowedIdentity<'a, Self>, BorrowedIdentity<'a, Self>)>,
     ) -> bool {
         if Arc::ptr_eq(left, right) {
             return true;
@@ -96,7 +230,10 @@ impl AliasProvenance {
                     owner: right_owner,
                 },
             ) => {
-                if !seen.insert((Arc::as_ptr(left), Arc::as_ptr(right))) {
+                if !seen.insert((
+                    BorrowedIdentity::new(left.as_ref()),
+                    BorrowedIdentity::new(right.as_ref()),
+                )) {
                     return true;
                 }
                 Self::same_origin_memoized(left_source, right_source, seen)
@@ -340,18 +477,18 @@ pub(super) enum AliasComparison {
 }
 
 impl ResolvedType {
-    pub(super) fn eq_memoized(
-        &self,
-        other: &Self,
-        seen: &mut FxHashSet<(*const Self, *const Self)>,
+    pub(super) fn eq_memoized<'a>(
+        &'a self,
+        other: &'a Self,
+        seen: &mut FxHashSet<(BorrowedIdentity<'a, Self>, BorrowedIdentity<'a, Self>)>,
     ) -> bool {
         self.eq_memoized_with_aliases(other, seen, AliasComparison::Ignore)
     }
 
-    pub(super) fn eq_memoized_with_aliases(
-        &self,
-        other: &Self,
-        seen: &mut FxHashSet<(*const Self, *const Self)>,
+    pub(super) fn eq_memoized_with_aliases<'a>(
+        &'a self,
+        other: &'a Self,
+        seen: &mut FxHashSet<(BorrowedIdentity<'a, Self>, BorrowedIdentity<'a, Self>)>,
         compare_aliases: AliasComparison,
     ) -> bool {
         if std::ptr::eq(self, other) {
@@ -495,7 +632,7 @@ impl ResolvedType {
             }
             _ => return false,
         }
-        if !seen.insert((self, other)) {
+        if !seen.insert((BorrowedIdentity::new(self), BorrowedIdentity::new(other))) {
             return true;
         }
         match (self, other) {
@@ -544,10 +681,10 @@ impl ResolvedType {
         }
     }
 
-    fn eq_types(
-        left: &[Self],
-        right: &[Self],
-        seen: &mut FxHashSet<(*const Self, *const Self)>,
+    fn eq_types<'a>(
+        left: &'a [Self],
+        right: &'a [Self],
+        seen: &mut FxHashSet<(BorrowedIdentity<'a, Self>, BorrowedIdentity<'a, Self>)>,
         compare_aliases: AliasComparison,
     ) -> bool {
         std::ptr::eq(left, right)
@@ -558,10 +695,10 @@ impl ResolvedType {
                     .all(|(a, b)| a.eq_memoized_with_aliases(b, seen, compare_aliases)))
     }
 
-    fn eq_named(
-        left: &[(String, Self)],
-        right: &[(String, Self)],
-        seen: &mut FxHashSet<(*const Self, *const Self)>,
+    fn eq_named<'a>(
+        left: &'a [(String, Self)],
+        right: &'a [(String, Self)],
+        seen: &mut FxHashSet<(BorrowedIdentity<'a, Self>, BorrowedIdentity<'a, Self>)>,
         compare_aliases: AliasComparison,
     ) -> bool {
         std::ptr::eq(left, right)
@@ -571,10 +708,39 @@ impl ResolvedType {
                 }))
     }
 
-    pub(super) fn structural_hash(&self, memo: &mut FxHashMap<*const Self, u64>) -> u64 {
-        if let Some(hash) = memo.get(&(self as *const Self)) {
-            return *hash;
-        }
+    pub(super) fn structural_hash<'a>(
+        &'a self,
+        memo: &mut FxHashMap<BorrowedHashKey<'a>, u64>,
+    ) -> u64 {
+        self.structural_hash_inner(&mut StructuralHashMemo {
+            hashes: memo,
+            inserted: None,
+        })
+    }
+
+    #[cfg(test)]
+    pub(super) fn structural_hash_shared(&self, memo: &mut FxHashMap<SharedHashKey, u64>) -> u64 {
+        self.structural_hash_inner(&mut StructuralHashMemo {
+            hashes: memo,
+            inserted: None,
+        })
+    }
+
+    pub(super) fn structural_hash_shared_tracked(
+        &self,
+        memo: &mut FxHashMap<SharedHashKey, u64>,
+        inserted: &mut Vec<SharedHashKey>,
+    ) -> u64 {
+        self.structural_hash_inner(&mut StructuralHashMemo {
+            hashes: memo,
+            inserted: Some(inserted),
+        })
+    }
+
+    fn structural_hash_inner<'a, K: StructuralHashKey<'a>>(
+        &'a self,
+        memo: &mut StructuralHashMemo<'_, K>,
+    ) -> u64 {
         let mut state = rustc_hash::FxHasher::default();
         std::mem::discriminant(self).hash(&mut state);
         match self {
@@ -589,9 +755,6 @@ impl ResolvedType {
                 nullable.hash(&mut state);
                 extension_type.hash(&mut state);
                 Self::hash_types(arguments, memo, &mut state);
-                if arguments.is_empty() {
-                    return state.finish();
-                }
             }
             Self::TypeParameter {
                 id,
@@ -600,11 +763,11 @@ impl ResolvedType {
             } => {
                 id.hash(&mut state);
                 nullable.hash(&mut state);
-                bound.structural_hash(memo).hash(&mut state);
+                Self::hash_shared_type(bound, memo).hash(&mut state);
             }
             Self::NonNullTypeParameter { id, bound } => {
                 id.hash(&mut state);
-                bound.structural_hash(memo).hash(&mut state);
+                Self::hash_shared_type(bound, memo).hash(&mut state);
             }
             Self::Function {
                 optional_positional,
@@ -619,10 +782,14 @@ impl ResolvedType {
                 nullable.hash(&mut state);
                 shape.is_some().hash(&mut state);
                 if let Some(shape) = shape {
-                    shape.required_named.hash(&mut state);
-                    Self::hash_types(&shape.type_parameters, memo, &mut state);
+                    let hash = if shape.type_parameters.is_empty() {
+                        Self::hash_shape(shape, memo)
+                    } else {
+                        memoized_hash(K::shape(shape), memo, |memo| Self::hash_shape(shape, memo))
+                    };
+                    hash.hash(&mut state);
                 }
-                return_type.structural_hash(memo).hash(&mut state);
+                Self::hash_shared_type(return_type, memo).hash(&mut state);
                 Self::hash_types(positional, memo, &mut state);
                 Self::hash_named(named, memo, &mut state);
             }
@@ -635,35 +802,82 @@ impl ResolvedType {
                 nullable.hash(&mut state);
                 Self::hash_types(positional, memo, &mut state);
                 Self::hash_named(named, memo, &mut state);
-                if positional.is_empty() && named.is_empty() {
-                    return state.finish();
-                }
             }
             _ => return state.finish(),
         }
-        let hash = state.finish();
-        // Cache values, not visitation markers: sharing must not affect the hash.
-        memo.insert(self, hash);
-        hash
+        state.finish()
     }
 
-    fn hash_types(types: &[Self], memo: &mut FxHashMap<*const Self, u64>, state: &mut impl Hasher) {
-        types.len().hash(state);
-        for ty in types {
-            ty.structural_hash(memo).hash(state);
+    fn hash_shape<'a, K: StructuralHashKey<'a>>(
+        shape: &'a FunctionTypeShape,
+        memo: &mut StructuralHashMemo<'_, K>,
+    ) -> u64 {
+        let mut state = rustc_hash::FxHasher::default();
+        shape.required_named.hash(&mut state);
+        Self::hash_types(&shape.type_parameters, memo, &mut state);
+        state.finish()
+    }
+
+    fn hash_shared_type<'a, K: StructuralHashKey<'a>>(
+        ty: &'a Arc<Self>,
+        memo: &mut StructuralHashMemo<'_, K>,
+    ) -> u64 {
+        match ty.as_ref() {
+            Self::Interface { arguments, .. } if arguments.is_empty() => {
+                ty.structural_hash_inner(memo)
+            }
+            Self::Interface { .. }
+            | Self::TypeParameter { .. }
+            | Self::NonNullTypeParameter { .. }
+            | Self::Function { .. }
+            | Self::Record { .. } => {
+                memoized_hash(K::ty(ty), memo, |memo| ty.structural_hash_inner(memo))
+            }
+            _ => ty.structural_hash_inner(memo),
         }
     }
 
-    fn hash_named(
-        types: &[(String, Self)],
-        memo: &mut FxHashMap<*const Self, u64>,
+    fn hash_types<'a, K: StructuralHashKey<'a>>(
+        types: &'a Arc<[Self]>,
+        memo: &mut StructuralHashMemo<'_, K>,
         state: &mut impl Hasher,
     ) {
-        types.len().hash(state);
-        for (name, ty) in types {
-            name.hash(state);
-            ty.structural_hash(memo).hash(state);
-        }
+        let compute = |memo: &mut StructuralHashMemo<'_, K>| {
+            let mut state = rustc_hash::FxHasher::default();
+            types.len().hash(&mut state);
+            for ty in types.iter() {
+                ty.structural_hash_inner(memo).hash(&mut state);
+            }
+            state.finish()
+        };
+        let hash = if types.is_empty() {
+            compute(memo)
+        } else {
+            memoized_hash(K::positional(types), memo, compute)
+        };
+        hash.hash(state);
+    }
+
+    fn hash_named<'a, K: StructuralHashKey<'a>>(
+        types: &'a Arc<[(String, Self)]>,
+        memo: &mut StructuralHashMemo<'_, K>,
+        state: &mut impl Hasher,
+    ) {
+        let compute = |memo: &mut StructuralHashMemo<'_, K>| {
+            let mut state = rustc_hash::FxHasher::default();
+            types.len().hash(&mut state);
+            for (name, ty) in types.iter() {
+                name.hash(&mut state);
+                ty.structural_hash_inner(memo).hash(&mut state);
+            }
+            state.finish()
+        };
+        let hash = if types.is_empty() {
+            compute(memo)
+        } else {
+            memoized_hash(K::named(types), memo, compute)
+        };
+        hash.hash(state);
     }
 }
 
@@ -678,7 +892,7 @@ impl Hash for ResolvedType {
 fn find_type<'a>(
     ty: &'a ResolvedType,
     predicate: &mut impl FnMut(&ResolvedType) -> bool,
-    seen: &mut FxHashSet<*const ResolvedType>,
+    seen: &mut FxHashSet<BorrowedIdentity<'a, ResolvedType>>,
 ) -> Option<&'a ResolvedType> {
     find_type_including_bounds(ty, predicate, seen, false)
 }
@@ -686,7 +900,7 @@ fn find_type<'a>(
 pub(super) fn find_type_including_bounds<'a>(
     ty: &'a ResolvedType,
     predicate: &mut impl FnMut(&ResolvedType) -> bool,
-    seen: &mut FxHashSet<*const ResolvedType>,
+    seen: &mut FxHashSet<BorrowedIdentity<'a, ResolvedType>>,
     include_bounds: bool,
 ) -> Option<&'a ResolvedType> {
     if predicate(ty) {
@@ -700,7 +914,7 @@ pub(super) fn find_type_including_bounds<'a>(
         ResolvedType::Interface { .. }
         | ResolvedType::Function { .. }
         | ResolvedType::Record { .. } => {
-            if !seen.insert(ty) {
+            if !seen.insert(BorrowedIdentity::new(ty)) {
                 return None;
             }
         }
@@ -713,7 +927,7 @@ pub(super) fn find_type_including_bounds<'a>(
         | ResolvedType::NonNullTypeParameter { bound, .. }
             if include_bounds =>
         {
-            if !seen.insert(ty) {
+            if !seen.insert(BorrowedIdentity::new(ty)) {
                 return None;
             }
             find_type_including_bounds(bound, predicate, seen, true)
@@ -809,21 +1023,17 @@ pub(super) fn parameter_bound<'a>(
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub(super) enum AliasPresenceKey {
     Function(
-        *const ResolvedType,
-        *const ResolvedType,
-        usize,
-        *const (String, ResolvedType),
-        usize,
+        SharedIdentity<ResolvedType>,
+        SharedIdentity<[ResolvedType]>,
+        SharedIdentity<[(String, ResolvedType)]>,
     ),
-    Interface(*const ResolvedType, usize),
+    Interface(SharedIdentity<[ResolvedType]>),
     Record(
-        *const ResolvedType,
-        usize,
-        *const (String, ResolvedType),
-        usize,
+        SharedIdentity<[ResolvedType]>,
+        SharedIdentity<[(String, ResolvedType)]>,
     ),
 }
 
@@ -836,33 +1046,32 @@ impl ResolvedType {
                 named,
                 ..
             } => Some(AliasPresenceKey::Function(
-                Arc::as_ptr(return_type),
-                positional.as_ptr(),
-                positional.len(),
-                named.as_ptr(),
-                named.len(),
+                SharedIdentity::new(return_type),
+                SharedIdentity::new(positional),
+                SharedIdentity::new(named),
             )),
-            Self::Interface { arguments, .. } => Some(AliasPresenceKey::Interface(
-                arguments.as_ptr(),
-                arguments.len(),
-            )),
+            Self::Interface { arguments, .. } => {
+                Some(AliasPresenceKey::Interface(SharedIdentity::new(arguments)))
+            }
             Self::Record {
                 positional, named, ..
             } => Some(AliasPresenceKey::Record(
-                positional.as_ptr(),
-                positional.len(),
-                named.as_ptr(),
-                named.len(),
+                SharedIdentity::new(positional),
+                SharedIdentity::new(named),
             )),
             _ => None,
         }
     }
 
     pub(super) fn has_alias_provenance(&self) -> bool {
-        self.has_alias_provenance_memoized(&mut FxHashMap::default())
+        self.has_alias_provenance_memoized(&mut FxHashMap::default(), &mut None)
     }
 
-    fn has_alias_provenance_memoized(&self, memo: &mut FxHashMap<AliasPresenceKey, bool>) -> bool {
+    fn has_alias_provenance_memoized(
+        &self,
+        memo: &mut FxHashMap<AliasPresenceKey, bool>,
+        inserted: &mut Option<&mut Vec<AliasPresenceKey>>,
+    ) -> bool {
         match self {
             Self::Function { alias, .. } if alias.0.is_some() => return true,
             Self::Interface { occurrence, .. } | Self::Record { occurrence, .. }
@@ -885,42 +1094,46 @@ impl ResolvedType {
                 named,
                 ..
             } => {
-                return_type.has_alias_provenance_memoized(memo)
+                return_type.has_alias_provenance_memoized(memo, inserted)
                     || positional
                         .iter()
-                        .any(|ty| ty.has_alias_provenance_memoized(memo))
+                        .any(|ty| ty.has_alias_provenance_memoized(memo, inserted))
                     || named
                         .iter()
-                        .any(|(_, ty)| ty.has_alias_provenance_memoized(memo))
+                        .any(|(_, ty)| ty.has_alias_provenance_memoized(memo, inserted))
             }
             Self::Interface { arguments, .. } => arguments
                 .iter()
-                .any(|ty| ty.has_alias_provenance_memoized(memo)),
+                .any(|ty| ty.has_alias_provenance_memoized(memo, inserted)),
             Self::Record {
                 positional, named, ..
             } => {
                 positional
                     .iter()
-                    .any(|ty| ty.has_alias_provenance_memoized(memo))
+                    .any(|ty| ty.has_alias_provenance_memoized(memo, inserted))
                     || named
                         .iter()
-                        .any(|(_, ty)| ty.has_alias_provenance_memoized(memo))
+                        .any(|(_, ty)| ty.has_alias_provenance_memoized(memo, inserted))
             }
             _ => false,
         };
+        if let Some(inserted) = inserted {
+            inserted.push(key.clone());
+        }
         memo.insert(key, present);
         present
     }
 
     /// Select a descendant lazily without copying its shared type graph.
     pub(super) fn projected_from(self, owner: &FunctionTypeAlias) -> Self {
-        self.projected_from_memoized(owner, &mut FxHashMap::default())
+        self.projected_from_memoized(owner, &mut FxHashMap::default(), None)
     }
 
     pub(super) fn projected_from_memoized(
         mut self,
         owner: &FunctionTypeAlias,
         memo: &mut FxHashMap<AliasPresenceKey, bool>,
+        mut inserted: Option<&mut Vec<AliasPresenceKey>>,
     ) -> Self {
         if owner.0.is_none() {
             return self;
@@ -937,7 +1150,7 @@ impl ResolvedType {
                 occurrence: FunctionTypeAlias(None),
                 ..
             }
-        ) && !self.has_alias_provenance_memoized(memo)
+        ) && !self.has_alias_provenance_memoized(memo, &mut inserted)
         {
             return self;
         }

@@ -48,13 +48,15 @@ fn flat_interfaces_and_shared_children_do_not_allocate_memos() {
     let mut pairs = FxHashSet::default();
     assert!(left.eq_memoized(&right, &mut pairs));
     assert_eq!(pairs.capacity(), 0);
-    assert!(!left.eq_memoized(&right.with_nullable(true), &mut pairs));
+    let nullable_right = right.with_nullable(true);
+    assert!(!left.eq_memoized(&nullable_right, &mut pairs));
     assert_eq!(pairs.capacity(), 0);
     let mut hashes = FxHashMap::default();
     left.structural_hash(&mut hashes);
     assert_eq!(hashes.capacity(), 0);
     let shared = fanout(17, ResolvedType::Dynamic);
-    assert!(shared.eq_memoized(&shared.clone(), &mut pairs));
+    let shared_clone = shared.clone();
+    assert!(shared.eq_memoized(&shared_clone, &mut pairs));
     assert_eq!(pairs.capacity(), 0);
 }
 
@@ -719,4 +721,281 @@ fn graph_equality_preserves_leaf_nullability_and_named_fields() {
         nullable: false,
     };
     assert!(named("left") != named("right"));
+}
+
+#[test]
+fn address_identity_keys_distinguish_equal_allocations_and_retain_only_shared_storage() {
+    let first: Arc<[ResolvedType]> = vec![ResolvedType::Void].into();
+    let second: Arc<[ResolvedType]> = vec![ResolvedType::Void].into();
+    let borrowed = BorrowedIdentity::new(first.as_ref());
+    let copied = borrowed;
+    let mut borrowed_keys = FxHashSet::default();
+    assert!(borrowed_keys.insert(borrowed));
+    assert!(!borrowed_keys.insert(copied));
+    assert!(borrowed_keys.insert(BorrowedIdentity::new(second.as_ref())));
+    assert_eq!(Arc::strong_count(&first), 1);
+
+    let weak = Arc::downgrade(&first);
+    let mut shared_keys = FxHashSet::default();
+    let shared = SharedIdentity::new(&first);
+    assert!(shared_keys.insert(shared.clone()));
+    assert!(!shared_keys.insert(SharedIdentity::new(&first)));
+    assert!(shared_keys.insert(SharedIdentity::new(&second)));
+    assert_eq!(Arc::strong_count(&first), 3);
+    drop(borrowed_keys);
+    drop(first);
+    assert!(weak.upgrade().is_some());
+    drop(shared);
+    assert!(weak.upgrade().is_some());
+    drop(shared_keys);
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn persistent_hashes_keep_child_addresses_live_without_retaining_stack_roots() {
+    let mut hashes = FxHashMap::default();
+    let source = fanout(24, ResolvedType::Void);
+    let ResolvedType::Record { positional, .. } = &source else {
+        unreachable!()
+    };
+    let weak = Arc::downgrade(positional);
+    let expected = source.structural_hash(&mut FxHashMap::default());
+    assert_eq!(source.structural_hash_shared(&mut hashes), expected);
+    assert_eq!(hashes.len(), 24);
+    drop(source);
+    assert!(weak.upgrade().is_some());
+
+    // A new, structurally different source must miss the persistent memo.
+    // Its children cannot reuse old addresses while the memo owns them.
+    let source = fanout(24, ResolvedType::Dynamic);
+    let actual = source.structural_hash_shared(&mut hashes);
+    assert_ne!(actual, expected);
+    assert_eq!(actual, source.structural_hash(&mut FxHashMap::default()));
+    assert_eq!(hashes.len(), 48);
+    drop(hashes);
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn persistent_hashes_preserve_sharing_independent_container_hashes() {
+    let shared = fanout(4, ResolvedType::Dynamic);
+    let expanded = |ty: &ResolvedType| ResolvedType::Record {
+        occurrence: Default::default(),
+        positional: vec![ty.clone()].into(),
+        named: vec![("value".to_owned(), ty.clone())].into(),
+        nullable: false,
+    };
+    let left = expanded(&shared);
+    let right = expanded(&unshared(4));
+    let mut hashes = FxHashMap::default();
+    assert_eq!(
+        left.structural_hash_shared(&mut hashes),
+        right.structural_hash_shared(&mut hashes)
+    );
+    assert_eq!(
+        left.structural_hash_shared(&mut hashes),
+        left.structural_hash(&mut FxHashMap::default())
+    );
+    let count = hashes.len();
+    left.structural_hash_shared(&mut hashes);
+    assert_eq!(hashes.len(), count);
+}
+
+#[test]
+fn persistent_provenance_memo_misses_after_source_roots_drop() {
+    let owner = FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
+        identity: DeclarationIdentity::OBJECT,
+        origin: Some((None, 1)),
+    })));
+    let record = |child| ResolvedType::Record {
+        occurrence: Default::default(),
+        positional: vec![child].into(),
+        named: empty_named_types(),
+        nullable: false,
+    };
+    let mut memo = FxHashMap::default();
+    let source = record(ResolvedType::Void);
+    let ResolvedType::Record { positional, .. } = &source else {
+        unreachable!()
+    };
+    let weak = Arc::downgrade(positional);
+    let projected = source.projected_from_memoized(&owner, &mut memo, None);
+    let ResolvedType::Record { occurrence, .. } = &projected else {
+        unreachable!()
+    };
+    assert!(occurrence.0.is_none());
+    drop(projected);
+    assert!(weak.upgrade().is_some());
+
+    let source = record(ResolvedType::Function {
+        shape: Some(FunctionTypeShape::empty()),
+        alias: owner.clone(),
+        optional_positional: 0,
+        return_type: Arc::new(ResolvedType::Void),
+        positional: empty_type_arguments(),
+        named: empty_named_types(),
+        nullable: false,
+    });
+    let projected = source.projected_from_memoized(&owner, &mut memo, None);
+    let ResolvedType::Record { occurrence, .. } = projected else {
+        unreachable!()
+    };
+    assert!(occurrence.same_origin(&owner));
+    assert_eq!(memo.len(), 2);
+    drop(memo);
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn inference_join_cache_hits_release_independently_allocated_equal_sources() {
+    let identities = IdentityIndex::default();
+    let model = SemanticModel::new(Path::new("graph.dart"), parsed(), &identities, None);
+    let signatures = SignatureIndex::default();
+    let mut memo = InferenceJoinMemo::default();
+    let left = fanout(17, ResolvedType::Void);
+    let right = fanout(17, ResolvedType::Dynamic);
+    let expected = inference_join_memoized(&left, &right, &signatures, &model, &mut memo);
+    let hashes = memo.hashes.len();
+    let shapes = memo.shapes.values().map(Vec::len).sum::<usize>();
+
+    let left = fanout(17, ResolvedType::Void);
+    let right = fanout(17, ResolvedType::Dynamic);
+    let ResolvedType::Record { positional, .. } = &left else {
+        unreachable!()
+    };
+    let left_storage = Arc::downgrade(positional);
+    let ResolvedType::Record { positional, .. } = &right else {
+        unreachable!()
+    };
+    let right_storage = Arc::downgrade(positional);
+    let result = inference_join_memoized(&left, &right, &signatures, &model, &mut memo);
+    assert_eq!(result, expected);
+    assert_eq!(memo.hashes.len(), hashes);
+    assert_eq!(memo.shapes.values().map(Vec::len).sum::<usize>(), shapes);
+    drop(left);
+    drop(right);
+    drop(result);
+    assert!(left_storage.upgrade().is_none());
+    assert!(right_storage.upgrade().is_none());
+}
+
+#[test]
+fn persistent_hashes_cache_function_shapes_and_shared_bounds() {
+    let bound = Arc::new(fanout(17, ResolvedType::Dynamic));
+    let parameter = ResolvedType::TypeParameter {
+        id: TypeParameterId {
+            owner: ParameterOwner::Sdk("hash-identity"),
+            ordinal: 0,
+            name: "T".into(),
+        },
+        bound: Arc::clone(&bound),
+        nullable: false,
+    };
+    let ty = ResolvedType::Function {
+        alias: Default::default(),
+        return_type: Arc::clone(&bound),
+        positional: vec![parameter.clone()].into(),
+        named: vec![("value".to_owned(), parameter.clone())].into(),
+        shape: Some(FunctionTypeShape::new(
+            vec!["value".to_owned()],
+            vec![parameter],
+        )),
+        optional_positional: 0,
+        nullable: false,
+    };
+    let mut hashes = FxHashMap::default();
+    assert_eq!(
+        ty.structural_hash_shared(&mut hashes),
+        ty.structural_hash(&mut FxHashMap::default())
+    );
+    assert_eq!(
+        hashes
+            .keys()
+            .filter(|key| matches!(key, SharedHashKey::Type(_)))
+            .count(),
+        1
+    );
+    assert_eq!(
+        hashes
+            .keys()
+            .filter(|key| matches!(key, SharedHashKey::Shape(_)))
+            .count(),
+        1
+    );
+    assert_eq!(hashes.len(), 17 + 5);
+    let count = hashes.len();
+    ty.structural_hash_shared(&mut hashes);
+    assert_eq!(hashes.len(), count);
+}
+
+#[test]
+fn nested_raw_joins_share_provenance_queries_but_standalone_roots_release_storage() {
+    let identities = IdentityIndex::default();
+    let model = SemanticModel::new(Path::new("graph.dart"), parsed(), &identities, None);
+    let list = DeclarationIdentity::sdk("dart:core", "List");
+    let mut signatures = SignatureIndex::default();
+    signatures.type_facts.insert(
+        list.clone(),
+        TypeFacts {
+            supertypes: Some((
+                vec![TypeParameterId {
+                    owner: ParameterOwner::Sdk("raw-join-retention"),
+                    ordinal: 0,
+                    name: "T".into(),
+                }],
+                Vec::new(),
+            )),
+            ..Default::default()
+        },
+    );
+    let raw = ResolvedType::interface_identity(list.clone());
+    let owner = FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
+        identity: DeclarationIdentity::OBJECT,
+        origin: Some((None, 1)),
+    })));
+    let instantiated = |big| ResolvedType::Interface {
+        occurrence: owner.clone(),
+        identity: list.clone(),
+        arguments: vec![big].into(),
+        nullable: false,
+        extension_type: false,
+    };
+    let outer = |name: &'static str, child| ResolvedType::Interface {
+        occurrence: Default::default(),
+        identity: DeclarationIdentity::sdk("test:raw-join", name),
+        arguments: vec![child].into(),
+        nullable: false,
+        extension_type: false,
+    };
+
+    let big = fanout(17, ResolvedType::Void);
+    let right = instantiated(big);
+    let mut memo = InferenceJoinMemo::default();
+    for name in ["A", "B", "C", "D", "E", "F", "G", "H"] {
+        let result = inference_join_memoized(
+            &outer(name, raw.clone()),
+            &outer(name, right.clone()),
+            &signatures,
+            &model,
+            &mut memo,
+        );
+        assert!(!matches!(result, ResolvedType::Unknown));
+        // Each raw List frame is non-cacheable, but its enclosing Outer
+        // operand anchors Big and keeps the same presence-query keys reusable.
+        assert_eq!(memo.provenance.len(), 17);
+    }
+
+    let big = fanout(17, ResolvedType::Void);
+    let ResolvedType::Record { positional, .. } = &big else {
+        unreachable!()
+    };
+    let storage = Arc::downgrade(positional);
+    let right = instantiated(big);
+    let mut standalone = InferenceJoinMemo::default();
+    let result = inference_join_memoized(&raw, &right, &signatures, &model, &mut standalone);
+    assert!(!matches!(result, ResolvedType::Unknown));
+    assert!(standalone.provenance.is_empty());
+    drop(right);
+    drop(result);
+    assert!(storage.upgrade().is_none());
 }

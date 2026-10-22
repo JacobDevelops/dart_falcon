@@ -15,7 +15,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use super::{DeclarationIdentity, MemberFacts, ResolvedType, SemanticModel, SignatureIndex, Truth};
+use super::{
+    BorrowedIdentity, DeclarationIdentity, MemberFacts, ResolvedType, SemanticModel,
+    SignatureIndex, Truth,
+};
 use crate::resolve::{MemberKind, TypeKind};
 
 const PROTOBUF_ENUM_URI: &str = "package:protobuf/src/protobuf/protobuf_enum.dart";
@@ -671,14 +674,14 @@ impl SignatureIndex {
         )
     }
 
-    fn erase_memoized(
+    fn erase_memoized<'a>(
         &self,
-        ty: &ResolvedType,
+        ty: &'a ResolvedType,
         model: &SemanticModel<'_>,
-        memo: &mut FxHashMap<*const ResolvedType, Option<ResolvedType>>,
+        memo: &mut FxHashMap<BorrowedIdentity<'a, ResolvedType>, Option<ResolvedType>>,
         active: &mut FxHashSet<DeclarationIdentity>,
     ) -> Option<ResolvedType> {
-        let key = ty as *const ResolvedType;
+        let key = BorrowedIdentity::new(ty);
         if let Some(result) = memo.get(&key) {
             return result.clone();
         }

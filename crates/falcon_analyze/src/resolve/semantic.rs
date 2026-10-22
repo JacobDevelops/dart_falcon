@@ -85,6 +85,8 @@ pub(super) use join::operator_result;
 use join::*;
 
 #[cfg(test)]
+mod fixpoint_bench;
+#[cfg(test)]
 mod relation_tests;
 #[cfg(test)]
 mod tests;

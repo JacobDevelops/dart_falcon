@@ -21,23 +21,34 @@ type InferenceJoinEntry = (ResolvedType, ResolvedType, ResolvedType);
 #[derive(Default)]
 pub(super) struct InferenceJoinMemo {
     pub(super) shapes: FxHashMap<(u64, u64), Vec<InferenceJoinEntry>>,
-    pub(super) hashes: FxHashMap<*const ResolvedType, u64>,
+    pub(super) hashes: FxHashMap<SharedHashKey, u64>,
     pub(super) provenance: FxHashMap<AliasPresenceKey, bool>,
+    hash_insertions: Vec<SharedHashKey>,
+    provenance_insertions: Vec<AliasPresenceKey>,
+    depth: usize,
 }
 
 impl InferenceJoinMemo {
     fn hash(&mut self, ty: &ResolvedType) -> u64 {
-        // Roots may be projected stack temporaries. Retain only hashes of their
-        // immutable Arc children, which are kept alive by the cached operands.
-        self.hashes.remove(&(ty as *const ResolvedType));
-        let hash = ty.structural_hash(&mut self.hashes);
-        self.hashes.remove(&(ty as *const ResolvedType));
-        hash
+        // Cache only owned shared storage, never projected stack roots.
+        ty.structural_hash_shared_tracked(&mut self.hashes, &mut self.hash_insertions)
     }
 
     fn project(&mut self, ty: &ResolvedType, owner: &FunctionTypeAlias) -> ResolvedType {
-        ty.clone()
-            .projected_from_memoized(owner, &mut self.provenance)
+        ty.clone().projected_from_memoized(
+            owner,
+            &mut self.provenance,
+            Some(&mut self.provenance_insertions),
+        )
+    }
+
+    fn discard_unanchored(&mut self, hash_checkpoint: usize, provenance_checkpoint: usize) {
+        for key in self.hash_insertions.drain(hash_checkpoint..) {
+            self.hashes.remove(&key);
+        }
+        for key in self.provenance_insertions.drain(provenance_checkpoint..) {
+            self.provenance.remove(&key);
+        }
     }
 }
 
@@ -48,6 +59,9 @@ pub(super) fn inference_join_memoized(
     model: &SemanticModel<'_>,
     memo: &mut InferenceJoinMemo,
 ) -> ResolvedType {
+    let hash_checkpoint = memo.hash_insertions.len();
+    let provenance_checkpoint = memo.provenance_insertions.len();
+    memo.depth += 1;
     let cacheable = matches!(
         left,
         ResolvedType::Function { .. } | ResolvedType::Record { .. }
@@ -66,15 +80,26 @@ pub(super) fn inference_join_memoized(
             )
         })
     {
-        return result.clone();
+        let result = result.clone();
+        memo.discard_unanchored(hash_checkpoint, provenance_checkpoint);
+        memo.depth -= 1;
+        return result;
     }
     let result = inference_join_impl(left, right, signatures, model, memo);
+    // Nested non-cacheable frames leave their suffix for an enclosing
+    // frame to anchor or discard; otherwise repeated projections rewalk DAGs.
     if let Some(key) = key {
         memo.shapes
             .entry(key)
             .or_default()
             .push((left.clone(), right.clone(), result.clone()));
+        // The stored operands/result now anchor every committed child identity.
+        memo.hash_insertions.truncate(hash_checkpoint);
+        memo.provenance_insertions.truncate(provenance_checkpoint);
+    } else if memo.depth == 1 {
+        memo.discard_unanchored(hash_checkpoint, provenance_checkpoint);
     }
+    memo.depth -= 1;
     result
 }
 
