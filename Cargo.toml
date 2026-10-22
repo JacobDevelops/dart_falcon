@@ -78,6 +78,7 @@ falcon_config       = { path = "crates/falcon_config" }
 falcon_dart_parser  = { path = "crates/falcon_dart_parser" }
 falcon_diagnostics  = { path = "crates/falcon_diagnostics" }
 falcon_rules        = { path = "crates/falcon_rules" }
+tempfile.workspace  = true
 
 [[bin]]
 name = "falcon"

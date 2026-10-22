@@ -302,6 +302,7 @@ dependencies = [
  "falcon_dart_parser",
  "falcon_diagnostics",
  "falcon_rules",
+ "tempfile",
  "tikv-jemallocator",
 ]
 

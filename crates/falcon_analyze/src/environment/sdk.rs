@@ -26,7 +26,10 @@ impl DartSdk {
     /// `<flutterRoot>/bin/cache/dart-sdk`, then `$DART_SDK`, then
     /// `$FLUTTER_ROOT/bin/cache/dart-sdk`, then the SDK containing a `dart`
     /// executable on `PATH` (shims that are not inside an SDK are skipped).
-    pub fn locate(config: Option<&PackageConfig>) -> Option<Self> {
+    pub(super) fn locate_with_warnings(
+        config: Option<&PackageConfig>,
+        environment: &super::AnalysisEnvironment,
+    ) -> Option<Self> {
         let flutter_sdk = |root: &Path| root.join("bin").join("cache").join("dart-sdk");
         config
             .and_then(|config| config.flutter_root.as_deref())
@@ -35,21 +38,34 @@ impl DartSdk {
             .chain(std::env::var_os("DART_SDK").map(PathBuf::from))
             .chain(std::env::var_os("FLUTTER_ROOT").map(|root| flutter_sdk(Path::new(&root))))
             .chain(path_sdk_candidates())
-            .find_map(|root| Self::load(&root))
+            .find_map(|root| Self::load_with_warnings(&root, environment))
     }
 
     /// Load the SDK at `root`; `None` unless `root/lib/libraries.json` maps
     /// `dart:core`.
     pub fn load(root: &Path) -> Option<Self> {
-        let root = std::fs::canonicalize(root).ok()?;
+        Self::load_with_warnings(root, &super::AnalysisEnvironment::default())
+    }
+
+    fn load_with_warnings(root: &Path, environment: &super::AnalysisEnvironment) -> Option<Self> {
+        let manifest = root.join("lib/libraries.json");
+        let text = environment.read_optional(&manifest)?;
+        let json: Value = match serde_json::from_str(&text) {
+            Ok(json) => json,
+            Err(error) => {
+                environment.warn(&manifest, error);
+                return None;
+            }
+        };
+        let root = canonical_or_lexical(root);
         let lib = root.join("lib");
-        let text = std::fs::read_to_string(lib.join("libraries.json")).ok()?;
-        let json: Value = serde_json::from_str(&text).ok()?;
+        environment.read_optional(&root.join("version"));
         let mut libraries = HashMap::new();
         for target in TARGETS {
             collect_target(&json, target, &lib, &mut libraries, 0);
         }
         if !libraries.contains_key("dart:core") {
+            environment.warn(&manifest, "SDK library mapping does not declare dart:core");
             return None;
         }
         let uris = libraries
@@ -94,12 +110,18 @@ pub struct Embedder {
 }
 
 impl Embedder {
-    /// The embedder declared by the packages of `config`, if any.
-    pub fn from_config(config: &PackageConfig) -> Option<Self> {
+    pub(super) fn from_config_with_warnings(
+        config: &PackageConfig,
+        environment: &super::AnalysisEnvironment,
+    ) -> Option<Self> {
         config.packages.iter().find_map(|package| {
             let file = package.lib_root.join("_embedder.yaml");
-            let text = std::fs::read_to_string(&file).ok()?;
-            Self::parse(&package.lib_root, &text)
+            let text = environment.read_optional(&file)?;
+            let embedder = Self::parse(&package.lib_root, &text);
+            if embedder.is_none() {
+                environment.warn(&file, "invalid embedded Dart library mapping");
+            }
+            embedder
         })
     }
 
@@ -199,6 +221,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sdk_manifest_failures_warn_but_missing_optional_inputs_do_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let environment = super::super::AnalysisEnvironment::default();
+        assert!(DartSdk::load_with_warnings(dir.path(), &environment).is_none());
+        assert!(environment.take_warnings().is_empty());
+        let manifest = dir.path().join("lib/libraries.json");
+        std::fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+        for source in ["{", "{}"] {
+            std::fs::write(&manifest, source).unwrap();
+            assert!(DartSdk::load_with_warnings(dir.path(), &environment).is_none());
+            let warnings = environment.take_warnings();
+            assert_eq!(warnings.len(), 1);
+            assert!(warnings[0].contains("libraries.json"));
+        }
+        std::fs::remove_file(&manifest).unwrap();
+        std::fs::create_dir(&manifest).unwrap();
+        assert!(DartSdk::load_with_warnings(dir.path(), &environment).is_none());
+        assert!(environment.take_warnings()[0].contains("libraries.json"));
+    }
+
+    #[test]
+    fn unreadable_sdk_version_warns_without_disabling_sdk_resolution() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("lib")).unwrap();
+        std::fs::write(
+            dir.path().join("lib/libraries.json"),
+            r#"{"vm":{"libraries":{"core":{"uri":"core/core.dart"}}}}"#,
+        )
+        .unwrap();
+        let environment = super::super::AnalysisEnvironment::default();
+        assert!(DartSdk::load_with_warnings(dir.path(), &environment).is_some());
+        assert!(environment.take_warnings().is_empty());
+        std::fs::create_dir(dir.path().join("version")).unwrap();
+        let sdk = DartSdk::load_with_warnings(dir.path(), &environment).unwrap();
+        assert!(sdk.library("dart:core").is_some());
+        let warnings = environment.take_warnings();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("version"));
+    }
+
+    #[test]
     fn maps_vm_libraries_then_web_only_libraries() {
         let dir = tempfile::tempdir().unwrap();
         let lib = dir.path().join("lib");
@@ -232,6 +295,27 @@ mod tests {
     fn rejects_directories_without_core() {
         let dir = tempfile::tempdir().unwrap();
         assert!(DartSdk::load(dir.path()).is_none());
+    }
+
+    #[test]
+    fn embedder_failures_warn_but_absence_is_silent() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = PackageConfig::parse(
+            &dir.path().join("package_config.json"),
+            r#"{"configVersion":2,"packages":[{"name":"sky","rootUri":"."}]}"#,
+        )
+        .unwrap();
+        let environment = super::super::AnalysisEnvironment::default();
+        assert!(Embedder::from_config_with_warnings(&config, &environment).is_none());
+        assert!(environment.take_warnings().is_empty());
+        let manifest = dir.path().join("_embedder.yaml");
+        std::fs::write(&manifest, "embedded_libs: [").unwrap();
+        assert!(Embedder::from_config_with_warnings(&config, &environment).is_none());
+        assert!(environment.take_warnings()[0].contains("_embedder.yaml"));
+        std::fs::remove_file(&manifest).unwrap();
+        std::fs::create_dir(&manifest).unwrap();
+        assert!(Embedder::from_config_with_warnings(&config, &environment).is_none());
+        assert!(environment.take_warnings()[0].contains("_embedder.yaml"));
     }
 
     #[test]

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use tracing::info;
 
 use clap::{Args, ValueEnum};
-use falcon_analyze::environment::{DartSdk, PackageConfig};
+use falcon_analyze::environment::{DartSdk, PackageConfig, SdkLocator};
 use falcon_analyze::package_identities;
 use falcon_analyze::{
     AnalysisEnvironment, ParsedFile, ProjectFile, Workspace, analyze_parallel_collecting_resolving,
@@ -96,7 +96,7 @@ pub struct CheckOutput {
 /// Returns an error message if configuration, directory traversal, or source
 /// reading fails (including files exceeding the compact source-size limit).
 pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
-    collect_check_with_sdk_locator(options, DartSdk::locate)
+    collect_check_impl(options, None)
 }
 
 /// Collect analysis with an explicit SDK discovery policy.
@@ -107,6 +107,13 @@ pub fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
 pub fn collect_check_with_sdk_locator(
     options: &CheckOptions,
     sdk_locator: fn(Option<&PackageConfig>) -> Option<DartSdk>,
+) -> Result<CheckOutput, String> {
+    collect_check_impl(options, Some(sdk_locator))
+}
+
+fn collect_check_impl(
+    options: &CheckOptions,
+    sdk_locator: Option<SdkLocator>,
 ) -> Result<CheckOutput, String> {
     let loaded = match &options.config_path {
         Some(path) => load_config(path).map_err(|e| e.to_string())?,
@@ -209,10 +216,11 @@ pub fn collect_check_with_sdk_locator(
     );
     // Package configurations give every file its language version; resolving
     // runs also load the SDK and dependency libraries project files import.
-    let environment = AnalysisEnvironment::discover_with_sdk_locator(
-        files.iter().map(|(path, _)| path.as_path()),
-        sdk_locator,
-    );
+    let mut environment = match sdk_locator {
+        Some(locator) => AnalysisEnvironment::with_sdk_locator(locator),
+        None => AnalysisEnvironment::default(),
+    };
+    environment.extend(files.iter().map(|(path, _)| path.as_path()));
     let workspace = Workspace {
         packages: &packages,
         environment: Some(&environment),
@@ -266,6 +274,9 @@ pub fn collect_check_with_sdk_locator(
                 );
             }
         }
+    }
+    for warning in environment.take_warnings() {
+        eprintln!("warning: {warning}");
     }
 
     diagnostics.retain(|diagnostic| {
@@ -335,7 +346,7 @@ pub fn collect_check_with_sdk_locator(
 /// Run the check pipeline and print diagnostics. Returns 0 if no diagnostics,
 /// `error_exit_code` if any found, 1 on pipeline errors.
 pub fn run_check(options: CheckOptions) -> i32 {
-    run_check_with_sdk_locator(options, DartSdk::locate)
+    run_check_impl(options, None)
 }
 
 /// Run the check pipeline with an explicit SDK discovery policy.
@@ -343,7 +354,11 @@ pub fn run_check_with_sdk_locator(
     options: CheckOptions,
     sdk_locator: fn(Option<&PackageConfig>) -> Option<DartSdk>,
 ) -> i32 {
-    let result = match collect_check_with_sdk_locator(&options, sdk_locator) {
+    run_check_impl(options, Some(sdk_locator))
+}
+
+fn run_check_impl(options: CheckOptions, sdk_locator: Option<SdkLocator>) -> i32 {
+    let result = match collect_check_impl(&options, sdk_locator) {
         Ok(output) => output,
         Err(e) => {
             eprintln!("error: {}", e);

@@ -9,7 +9,6 @@ use falcon_syntax::cst::visit::{Visitor, walk_top_level_decl};
 use falcon_syntax::cst::{ClassMember, FunctionDecl, Program, Span, TopLevelDecl};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use tracing::warn;
 
 use super::{AnalysisEnvironment, LanguageVersion};
 use crate::intern::{InternedString, StringInterner};
@@ -273,7 +272,10 @@ impl ExternalLibraries {
     ) -> Option<&CompanionDependencies> {
         let source = match crate::source::read_source(path) {
             Ok(source) => source,
-            Err(_) => {
+            Err(error) => {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    environment.warn(path, error);
+                }
                 self.companion_dependencies.remove(path);
                 return None;
             }
@@ -286,9 +288,13 @@ impl ExternalLibraries {
             let package_version = environment
                 .package_config(path)
                 .and_then(|config| config.language_version_canonical(path));
-            let Ok(file) = read_source(path, &source, package_version) else {
-                self.companion_dependencies.remove(path);
-                return None;
+            let file = match read_source(environment, path, &source, package_version) {
+                Ok(file) => file,
+                Err(error) => {
+                    environment.warn(path, error);
+                    self.companion_dependencies.remove(path);
+                    return None;
+                }
             };
             let mut dependencies = dependencies(
                 environment,
@@ -486,10 +492,7 @@ impl ExternalLibraries {
                 let loaded = match loaded {
                     Ok(loaded) => loaded,
                     Err(error) => {
-                        warn!(
-                            "could not start parser thread for {}: {error}",
-                            path.display()
-                        );
+                        environment.warn(&path, format!("parser worker failed: {error}"));
                         self.states[id as usize].attempted = false;
                         self.retry.push((id, path, context));
                         continue;
@@ -1125,7 +1128,7 @@ fn load_library(
                 .config
                 .language_version_canonical(path)
         });
-        read(path, package_version)
+        read(environment, path, package_version)
     };
     let Some(defining) = read(path)? else {
         return Ok(None);
@@ -1189,18 +1192,26 @@ fn load_library(
     )))
 }
 
-/// `None` when the source is unreadable; `Err` when the parser thread cannot start.
+/// `None` when the source is unreadable; `Err` when the parser worker fails.
 fn read(
+    environment: &AnalysisEnvironment,
     path: &Path,
     package_version: Option<LanguageVersion>,
 ) -> std::io::Result<Option<ExternalFile>> {
-    let Ok(source) = crate::source::read_source(path) else {
-        return Ok(None);
+    let source = match crate::source::read_source(path) {
+        Ok(source) => source,
+        Err(error) => {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                environment.warn(path, error);
+            }
+            return Ok(None);
+        }
     };
-    read_source(path, &source, package_version).map(Some)
+    read_source(environment, path, &source, package_version).map(Some)
 }
 
 fn read_source(
+    environment: &AnalysisEnvironment,
     path: &Path,
     source: &str,
     package_version: Option<LanguageVersion>,
@@ -1209,6 +1220,12 @@ fn read_source(
         try_parse_for_package(source, package_version)?;
     let program = tree.program(source);
     let has_parse_errors = !declarations_intact(program, &errors);
+    if has_parse_errors && let Some(error) = errors.first() {
+        environment.warn(
+            path,
+            format!("failed to parse external source: {}", error.message),
+        );
+    }
     let doc_imports = crate::resolve::doc_imports(program, source)
         .map(str::to_owned)
         .collect();
@@ -1389,7 +1406,8 @@ mod tests {
             .unwrap()
             .set_len(u64::from(u32::MAX) + 1)
             .unwrap();
-        assert!(read(&imported, None).unwrap().is_none());
+        let environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+        assert!(read(&environment, &imported, None).unwrap().is_none());
         let error = crate::source::read_source(&imported).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         assert!(error.to_string().contains("maximum supported source size"));
@@ -1541,7 +1559,13 @@ mod tests {
         let source = "class const C(final int x) { final int y = 1; }\n\
                       enum E { first; final int y = 2; }\n\
                       class Ordinary { final int y = 3; }";
-        let file = read_source(Path::new("external.dart"), source, None).unwrap();
+        let file = read_source(
+            &AnalysisEnvironment::with_sdk_locator(|_| None),
+            Path::new("external.dart"),
+            source,
+            None,
+        )
+        .unwrap();
         assert!(!file.has_parse_errors);
         for declaration in file.program().declarations() {
             let mut members = match declaration {
@@ -1570,7 +1594,13 @@ mod tests {
                         final int value = 1;\n\
                         int operator *(B other) { return value; }\n\
                       }";
-        let file = read_source(Path::new("external.dart"), source, None).unwrap();
+        let file = read_source(
+            &AnalysisEnvironment::with_sdk_locator(|_| None),
+            Path::new("external.dart"),
+            source,
+            None,
+        )
+        .unwrap();
         assert!(!file.has_parse_errors);
         let TopLevelDecl::Class(class) = file.program().declarations().next().unwrap() else {
             panic!("expected class");

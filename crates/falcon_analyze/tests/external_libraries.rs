@@ -87,6 +87,164 @@ fn workspace() -> (tempfile::TempDir, PathBuf) {
 }
 
 #[test]
+fn environment_reports_malformed_and_unreadable_package_inputs() {
+    for name in [".dart_tool/package_config.json", "pubspec.lock"] {
+        for unreadable in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let app = write(root.path(), "lib/main.dart", "void main() {}");
+            write(
+                root.path(),
+                ".dart_tool/package_config.json",
+                r#"{"configVersion":2,"packages":[]}"#,
+            );
+            let input = root.path().join(name);
+            if unreadable {
+                if input.exists() {
+                    fs::remove_file(&input).unwrap();
+                }
+                fs::create_dir_all(&input).unwrap();
+            } else {
+                fs::write(&input, "[").unwrap();
+            }
+            let environment =
+                AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
+            let warnings = environment.take_warnings();
+            assert_eq!(warnings.len(), 1, "{warnings:?}");
+            assert!(warnings[0].contains(name), "{warnings:?}");
+            assert!(environment.take_warnings().is_empty());
+        }
+    }
+}
+
+#[test]
+fn absent_optional_environment_inputs_are_silent() {
+    let root = tempfile::tempdir().unwrap();
+    let app = write(root.path(), "lib/main.dart", "void main() {}");
+    let mut environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
+    assert!(environment.take_warnings().is_empty());
+    write(
+        root.path(),
+        ".dart_tool/package_config.json",
+        r#"{"configVersion":2,"packages":[]}"#,
+    );
+    environment.reset();
+    environment.extend([app.as_path()]);
+    assert!(environment.take_warnings().is_empty());
+}
+
+#[test]
+fn external_source_read_and_parse_failures_warn_once() {
+    for unreadable in [false, true] {
+        let (root, app) = workspace();
+        let dependency = root.path().join("cache/dep/lib/dep.dart");
+        if unreadable {
+            fs::remove_file(&dependency).unwrap();
+            fs::create_dir(&dependency).unwrap();
+        } else {
+            fs::write(&dependency, "class Broken {").unwrap();
+        }
+        let environment =
+            AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
+        let source = fs::read_to_string(&app).unwrap();
+        let parsed = parse(&source);
+        let mut external = ExternalLibraries::load(
+            &environment,
+            &[(&app, parsed.tree.program(&source), &source)],
+            |path| path == app,
+        );
+        let warnings = environment.take_warnings();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("dep.dart"), "{warnings:?}");
+        if !unreadable {
+            assert!(warnings[0].contains("failed to parse external source"));
+        }
+        external.extend(
+            &environment,
+            &[(&app, parsed.tree.program(&source), &source)],
+            |path| path == app,
+        );
+        assert!(environment.take_warnings().is_empty());
+    }
+}
+
+#[test]
+fn package_entry_failures_keep_valid_packages_and_report_details() {
+    let root = tempfile::tempdir().unwrap();
+    let app = write(root.path(), "lib/main.dart", "void main() {}");
+    write(
+        root.path(),
+        ".dart_tool/package_config.json",
+        r#"{
+        "configVersion":2,"packages":[
+            {"name":"app","rootUri":"../","packageUri":"lib/"},
+            {"name":"broken"},
+            {"name":"versioned","rootUri":"../versioned","languageVersion":"invalid"}
+        ]}"#,
+    );
+    let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
+    assert!(
+        environment
+            .package_config(&app)
+            .unwrap()
+            .package("app")
+            .is_some()
+    );
+    let warnings = environment.take_warnings();
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.contains("package entry 1"))
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.contains("languageVersion"))
+    );
+}
+
+#[test]
+fn pending_warnings_and_deduplication_survive_reset_in_sorted_order() {
+    let root = tempfile::tempdir().unwrap();
+    let app = write(root.path(), "lib/main.dart", "void main() {}");
+    write(
+        root.path(),
+        ".dart_tool/package_config.json",
+        r#"{"configVersion":2,"packages":[{"name":"bad"}]}"#,
+    );
+    write(root.path(), "pubspec.lock", "[");
+    let mut environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
+    environment.reset();
+    environment.extend([app.as_path()]);
+    let warnings = environment.take_warnings();
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(warnings.windows(2).all(|pair| pair[0] <= pair[1]));
+    environment.reset();
+    environment.extend([app.as_path()]);
+    assert!(environment.take_warnings().is_empty());
+}
+
+#[test]
+fn missing_external_imports_parts_and_harmless_body_errors_are_silent() {
+    let (root, app) = workspace();
+    write(
+        root.path(),
+        "cache/dep/lib/dep.dart",
+        "import 'missing.dart'; export 'absent.dart'; part 'generated.g.dart'; class Good { void f() { var = ; } }",
+    );
+    let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
+    let source = fs::read_to_string(&app).unwrap();
+    let parsed = parse(&source);
+    let external = ExternalLibraries::load(
+        &environment,
+        &[(&app, parsed.tree.program(&source), &source)],
+        |path| path == app,
+    );
+    assert!(!external.libraries().is_empty());
+    assert!(environment.take_warnings().is_empty());
+}
+
+#[test]
 fn absent_sdk_parts_do_not_hide_missing_doc_names() {
     for (part, unreadable) in [
         ("missing.dart", false),

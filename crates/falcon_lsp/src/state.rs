@@ -42,7 +42,7 @@ pub struct DocumentState {
     has_parse_errors: bool,
     /// Rejected buffers keep no text or syntax; only their size diagnostic survives.
     source_rejected: bool,
-    /// `syntax-error` diagnostics from the last parse, kept so `analyze` can
+    /// Syntax-error diagnostics from the last parse, kept so `analyze` can
     /// publish them alongside lints without re-parsing (parity with the CLI).
     syntax_diagnostics: Vec<Diagnostic>,
     /// Most recent published output (byte spans) — read by hover. May include
@@ -260,7 +260,8 @@ impl LspState {
     /// current directory when `None` (same order as the CLI: cwd → git root →
     /// `$HOME/.falcon.json` → defaults).
     pub fn new(config_path: Option<PathBuf>) -> Self {
-        Self::new_with_sdk_locator(config_path, falcon_analyze::environment::DartSdk::locate)
+        let start_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        Self::new_from_environment(config_path, AnalysisEnvironment::default(), start_dir)
     }
 
     /// Create state with explicit SDK discovery, allowing hermetic fixtures.
@@ -279,6 +280,18 @@ impl LspState {
         locator: fn(
             Option<&falcon_analyze::environment::PackageConfig>,
         ) -> Option<falcon_analyze::environment::DartSdk>,
+        config_start_dir: PathBuf,
+    ) -> Self {
+        Self::new_from_environment(
+            config_path,
+            AnalysisEnvironment::with_sdk_locator(locator),
+            config_start_dir,
+        )
+    }
+
+    fn new_from_environment(
+        config_path: Option<PathBuf>,
+        environment: AnalysisEnvironment,
         config_start_dir: PathBuf,
     ) -> Self {
         let (config, workspace_root, pending_config_messages) =
@@ -314,7 +327,7 @@ impl LspState {
             pending_semantic_affected: HashMap::new(),
             semantic_snapshot_build_count: 0,
             semantic_topology_build_count: 0,
-            environment: AnalysisEnvironment::with_sdk_locator(locator),
+            environment,
             environment_stamps: None,
             external_libraries: ExternalLibraries::default(),
             external_reset_count: 0,
@@ -331,6 +344,13 @@ impl LspState {
 
     /// Configuration warnings and errors awaiting delivery to the editor.
     pub fn take_config_messages(&mut self) -> Vec<ShowMessageParams> {
+        self.pending_config_messages
+            .extend(self.environment.take_warnings().into_iter().map(|message| {
+                ShowMessageParams {
+                    typ: MessageType::WARNING,
+                    message,
+                }
+            }));
         std::mem::take(&mut self.pending_config_messages)
     }
 
@@ -614,7 +634,7 @@ impl LspState {
             tree,
             errors: parse_errors,
         } = parse_for_package(&text, package_version);
-        doc.syntax_diagnostics = syntax_error_diagnostics(&doc.path, &parse_errors);
+        doc.syntax_diagnostics = syntax_error_diagnostics(&path, &parse_errors);
         doc.source_rejected = source_error.is_some();
         doc.syntax_diagnostics.extend(source_error);
         doc.parsed = Arc::new(ParsedFile {
@@ -3178,6 +3198,36 @@ mod environment_regressions {
         let mut state = LspState::new(Some(config));
         state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
         state
+    }
+
+    #[test]
+    fn environment_failures_use_show_message_warning_queue_once() {
+        for name in [
+            ".dart_tool/package_config.json",
+            "pubspec.lock",
+            "../dep/lib/api.dart",
+        ] {
+            let (directory, mut state, uri, _) = dependency_fixture(false);
+            assert!(state.take_config_messages().is_empty());
+            let path = directory.path().join("app").join(name);
+            std::fs::write(&path, "[").unwrap();
+            state.watched_files_changed(&[path]);
+            state.change(
+                &uri,
+                "import 'package:dep/api.dart'; void main() {}".into(),
+                Some(2),
+            );
+            state.ensure_semantic_snapshot();
+            let messages = state.take_config_messages();
+            assert_eq!(messages.len(), 1, "{name}: {messages:?}");
+            assert_eq!(messages[0].typ, MessageType::WARNING);
+            assert!(
+                messages[0]
+                    .message
+                    .contains(Path::new(name).file_name().unwrap().to_str().unwrap())
+            );
+            assert!(state.take_config_messages().is_empty());
+        }
     }
 
     #[test]

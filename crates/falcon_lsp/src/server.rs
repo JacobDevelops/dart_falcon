@@ -440,6 +440,7 @@ fn run_with_state(
                 publish(&connection, &state, &affected_uri, &diagnostics)?;
             }
             cross_file_pass_and_publish(&connection, &mut state, &mut debounce)?;
+            publish_config_messages(&connection, &mut state)?;
             continue;
         };
 
@@ -553,6 +554,7 @@ fn run_with_state(
             },
             Message::Response(response) => watching.response(response),
         }
+        publish_config_messages(&connection, &mut state)?;
         watching.refresh(&connection, &state)?;
     }
 }
@@ -685,7 +687,7 @@ fn cross_file_pass_and_publish(
     debounce: &mut Debounce,
 ) -> Result<(), ServerError> {
     if !state.cross_file_rules_enabled() {
-        return Ok(());
+        return publish_config_messages(connection, state);
     }
     let uris = debounce.drain();
     for (uri, diagnostics) in state.analyze_affected_many(&uris) {
@@ -694,7 +696,7 @@ fn cross_file_pass_and_publish(
     for (uri, diagnostics) in state.cross_file_pass() {
         publish(connection, state, &uri, &diagnostics)?;
     }
-    Ok(())
+    publish_config_messages(connection, state)
 }
 
 /// Publish the already-computed result for `uri`, then re-analyze and publish
@@ -932,6 +934,59 @@ mod file_watching_tests {
             assert_eq!(response.id, 100.into());
             self.notify("exit", Value::Null);
             self.worker.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn first_open_delivers_environment_failures_to_client_once() {
+        for input in [
+            ".dart_tool/package_config.json",
+            "pubspec.lock",
+            "../dep [one]/lib/api.dart",
+        ] {
+            let client = Client::start(false, false);
+            let path = client.workspace.join(input);
+            let source = if input.ends_with(".dart") {
+                "class Broken {"
+            } else {
+                "["
+            };
+            std::fs::write(&path, source).unwrap();
+            client.open();
+            let opened = client.drain();
+            let warnings: Vec<_> = opened
+                .iter()
+                .filter_map(|message| match message {
+                    Message::Notification(notification)
+                        if notification.method == ShowMessage::METHOD =>
+                    {
+                        Some(
+                            serde_json::from_value::<lsp_types::ShowMessageParams>(
+                                notification.params.clone(),
+                            )
+                            .unwrap(),
+                        )
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(warnings.len(), 1, "{input}: {opened:?}");
+            assert_eq!(warnings[0].typ, lsp_types::MessageType::WARNING);
+            assert!(
+                warnings[0]
+                    .message
+                    .contains(Path::new(input).file_name().unwrap().to_str().unwrap())
+            );
+            client.notify(
+                "workspace/didChangeWatchedFiles",
+                json!({"changes":[{
+                    "uri":file_uri(&path).unwrap(), "type":2
+                }]}),
+            );
+            assert!(client.drain().iter().all(|message| !matches!(message,
+                Message::Notification(notification) if notification.method == ShowMessage::METHOD
+            )));
+            client.finish();
         }
     }
 

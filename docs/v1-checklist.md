@@ -37,7 +37,6 @@ Owns `lexical_usage.rs`, `flow.rs`, `flow_writes.rs`, `semantic_scope.rs` flow h
 
 Owns `parallel.rs`, `environment/`, `registry.rs` threading and `lib.rs` exports. Any time after batch 15.
 
-- [ ] **Log swallowed IO errors.** Package config, lockfile, `libraries.json`, SDK version and external sources fail silently with `.ok()`.
 - [ ] **One stack-sized thread pool.** Each parse and rules pass spawns its own 256 MB-stack thread, with retry machinery for spawn failures and inconsistent panic handling.
 - [ ] **Narrow analyze entry points.** 11 `evaluate_*` variants, 6 `parallel` entry points (4 test-only), triplicated oversize filtering, every module `pub` plus ~80 re-exports.
 - [ ] **Analysis cleanups.** Typed receiver slot instead of `"this"`; `dyn` lookup closures; Fx hashing for substitution maps; per-alias cache without a mutex; stable keys in `group_instances`; bounded external caches; suppressions reuse `LineIndex`.

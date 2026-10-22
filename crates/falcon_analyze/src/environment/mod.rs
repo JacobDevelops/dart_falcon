@@ -20,6 +20,9 @@ pub use falcon_syntax::language_version::{Feature, LanguageVersion};
 pub use package_config::{ConfiguredPackage, PackageConfig, percent_decode, percent_encode};
 pub use sdk::{DartSdk, Embedder};
 
+/// SDK discovery policy used by callers that supply their own environment.
+pub type SdkLocator = fn(Option<&PackageConfig>) -> Option<DartSdk>;
+
 /// One package configuration and the SDK its packages are analyzed against.
 #[derive(Debug, Clone)]
 struct Context {
@@ -57,6 +60,12 @@ struct PackageDiscovery {
     manifests: HashMap<PathBuf, Arc<PackageMetadata>>,
 }
 
+#[derive(Debug, Default)]
+struct EnvironmentWarnings {
+    seen: std::collections::BTreeSet<String>,
+    pending: Vec<String>,
+}
+
 /// Package configurations, SDKs and language versions for a set of files.
 ///
 /// Built once per run (or per LSP workspace state) from the analyzed paths;
@@ -70,24 +79,29 @@ pub struct AnalysisEnvironment {
     directories: HashMap<PathBuf, Option<usize>>,
     /// The SDK for files outside any package configuration, once located.
     default_sdk: Option<Option<DartSdk>>,
-    sdk_locator: fn(Option<&PackageConfig>) -> Option<DartSdk>,
+    sdk_locator: Option<SdkLocator>,
     config_candidates: std::collections::BTreeSet<PathBuf>,
     /// Uncanonicalized package/SDK roots, so retargeted symlinks rediscover contexts.
     root_candidates: std::collections::BTreeSet<PathBuf>,
     mutable_roots: std::collections::BTreeSet<PathBuf>,
     directory_packages: HashMap<PathBuf, Option<Arc<PackageMetadata>>>,
     package_discovery: Arc<Mutex<PackageDiscovery>>,
+    warnings: Arc<Mutex<EnvironmentWarnings>>,
 }
 
 impl Default for AnalysisEnvironment {
     fn default() -> Self {
-        Self::with_sdk_locator(DartSdk::locate)
+        Self::new(None)
     }
 }
 
 impl AnalysisEnvironment {
     /// Use an explicit SDK discovery policy, including SDK-free test fixtures.
-    pub fn with_sdk_locator(locator: fn(Option<&PackageConfig>) -> Option<DartSdk>) -> Self {
+    pub fn with_sdk_locator(locator: SdkLocator) -> Self {
+        Self::new(Some(locator))
+    }
+
+    fn new(locator: Option<SdkLocator>) -> Self {
         Self {
             contexts: Vec::new(),
             directories: HashMap::new(),
@@ -98,12 +112,52 @@ impl AnalysisEnvironment {
             mutable_roots: std::collections::BTreeSet::new(),
             directory_packages: HashMap::new(),
             package_discovery: Arc::default(),
+            warnings: Arc::default(),
         }
     }
 
     /// Clear discovered contexts while retaining the SDK discovery policy.
     pub fn reset(&mut self) {
-        *self = Self::with_sdk_locator(self.sdk_locator);
+        let warnings = Arc::clone(&self.warnings);
+        *self = Self::new(self.sdk_locator);
+        self.warnings = warnings;
+    }
+
+    /// Newly encountered environment failures, deduplicated for this environment.
+    pub fn take_warnings(&self) -> Vec<String> {
+        let mut pending = std::mem::take(&mut self.warnings.lock().unwrap().pending);
+        pending.sort_unstable();
+        pending
+    }
+
+    pub(super) fn warn(&self, path: &Path, error: impl std::fmt::Display) {
+        let message = format!("{}: {error}", path.display());
+        let mut warnings = self.warnings.lock().unwrap();
+        if warnings.seen.insert(message.clone()) {
+            warnings.pending.push(message);
+        }
+    }
+
+    fn read_optional(&self, path: &Path) -> Option<String> {
+        match std::fs::read_to_string(path) {
+            Ok(source) => Some(source),
+            Err(error) => {
+                if !matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) {
+                    self.warn(path, error);
+                }
+                None
+            }
+        }
+    }
+
+    fn locate_sdk(&self, config: Option<&PackageConfig>) -> Option<DartSdk> {
+        match self.sdk_locator {
+            Some(locator) => locator(config),
+            None => DartSdk::locate_with_warnings(config, self),
+        }
     }
 
     /// Discover the nearest `package_config.json` of every path and the SDK
@@ -165,17 +219,39 @@ impl AnalysisEnvironment {
                 {
                     return Some(index);
                 }
-                if let Some(raw) = std::fs::read_to_string(&config_path)
-                    .ok()
-                    .and_then(|text| PackageConfig::parse(&config_path, &text))
-                {
-                    let lock = config_path
+                let source = self.read_optional(&config_path);
+                let raw = source.as_deref().and_then(|source| {
+                    let mut reported = false;
+                    let config =
+                        PackageConfig::parse_with_report(&config_path, source, |message| {
+                            reported = true;
+                            self.warn(&config_path, message);
+                        });
+                    if config.is_none() && !reported {
+                        self.warn(
+                            &config_path,
+                            "failed to parse version-2 package configuration",
+                        );
+                    }
+                    config
+                });
+                if let Some(raw) = &raw {
+                    let lock_path = config_path
                         .parent()
                         .and_then(Path::parent)
-                        .and_then(|root| std::fs::read_to_string(root.join("pubspec.lock")).ok())
-                        .and_then(|source| serde_yaml::from_str::<serde_yaml::Value>(&source).ok());
+                        .map(|root| root.join("pubspec.lock"));
+                    let lock = lock_path.as_deref().and_then(|path| {
+                        let source = self.read_optional(path)?;
+                        match serde_yaml::from_str::<serde_yaml::Value>(&source) {
+                            Ok(lock) => Some(lock),
+                            Err(error) => {
+                                self.warn(path, format!("failed to parse lockfile: {error}"));
+                                None
+                            }
+                        }
+                    });
                     let project_root = config_path.parent().and_then(Path::parent);
-                    for package in raw.packages {
+                    for package in &raw.packages {
                         let hosted = lock
                             .as_ref()
                             .and_then(|lock| lock.get("packages"))
@@ -190,21 +266,24 @@ impl AnalysisEnvironment {
                             })
                         {
                             self.mutable_roots.insert(resolved);
-                            self.mutable_roots.insert(package.root);
+                            self.mutable_roots.insert(package.root.clone());
                         }
                     }
-                    if let Some(flutter) = raw.flutter_root {
+                    if let Some(flutter) = &raw.flutter_root {
                         let sdk_root = flutter.join("bin/cache/dart-sdk");
                         self.config_candidates
                             .insert(sdk_root.join("lib/libraries.json"));
                         self.config_candidates.insert(sdk_root.join("version"));
                         self.root_candidates.insert(sdk_root);
-                        self.root_candidates.insert(flutter);
+                        self.root_candidates.insert(flutter.clone());
                     }
                 }
-                let config = PackageConfig::load(&config_path)?;
-                let mut sdk = (self.sdk_locator)(Some(&config));
-                if let (Some(sdk), Some(embedder)) = (&mut sdk, Embedder::from_config(&config)) {
+                let mut config = raw?;
+                config.canonicalize_roots();
+                let mut sdk = self.locate_sdk(Some(&config));
+                if let (Some(sdk), Some(embedder)) =
+                    (&mut sdk, Embedder::from_config_with_warnings(&config, self))
+                {
                     sdk.apply_embedder(&embedder);
                 }
                 if let Some(sdk) = &sdk {
@@ -217,7 +296,7 @@ impl AnalysisEnvironment {
                 Some(self.contexts.len() - 1)
             });
             if context.is_none() && self.default_sdk.is_none() {
-                self.default_sdk = Some((self.sdk_locator)(None));
+                self.default_sdk = Some(self.locate_sdk(None));
                 if let Some(Some(sdk)) = &self.default_sdk {
                     self.config_candidates
                         .insert(sdk.root.join("lib/libraries.json"));
@@ -263,6 +342,7 @@ impl AnalysisEnvironment {
             files: files
                 .into_iter()
                 .map(|path| {
+                    // Fingerprints include synthetic probes; real loads report read failures.
                     let contents = std::fs::read(&path).ok();
                     (path, contents)
                 })

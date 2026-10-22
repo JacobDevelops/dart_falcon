@@ -36,7 +36,13 @@ impl PackageConfig {
         directory
             .ancestors()
             .map(|ancestor| ancestor.join(".dart_tool").join("package_config.json"))
-            .find(|candidate| candidate.is_file())
+            .find(|candidate| match candidate.try_exists() {
+                Ok(exists) => exists,
+                Err(error) => !matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ),
+            })
     }
 
     /// Read and parse the configuration at `path`; `None` when unreadable or
@@ -45,17 +51,35 @@ impl PackageConfig {
     pub fn load(path: &Path) -> Option<Self> {
         let text = std::fs::read_to_string(path).ok()?;
         let mut config = Self::parse(path, &text)?;
-        for package in &mut config.packages {
+        config.canonicalize_roots();
+        Some(config)
+    }
+
+    pub(super) fn canonicalize_roots(&mut self) {
+        for package in &mut self.packages {
             package.root = canonical_or_lexical(&package.root);
             package.lib_root = canonical_or_lexical(&package.lib_root);
         }
-        Some(config)
     }
 
     /// Parse configuration `text` read from `path`. Relative URIs resolve
     /// against the directory containing `path`.
     pub fn parse(path: &Path, text: &str) -> Option<Self> {
-        let json: Value = serde_json::from_str(text).ok()?;
+        Self::parse_with_report(path, text, |_| {})
+    }
+
+    pub(super) fn parse_with_report(
+        path: &Path,
+        text: &str,
+        mut report: impl FnMut(String),
+    ) -> Option<Self> {
+        let json: Value = match serde_json::from_str(text) {
+            Ok(json) => json,
+            Err(error) => {
+                report(format!("failed to parse package configuration: {error}"));
+                return None;
+            }
+        };
         if json.get("configVersion")?.as_u64()? != 2 {
             return None;
         }
@@ -64,23 +88,36 @@ impl PackageConfig {
             .get("packages")?
             .as_array()?
             .iter()
-            .filter_map(|package| {
+            .enumerate()
+            .filter_map(|(index, package)| {
+                let parsed = (|| {
                 let name = package.get("name")?.as_str()?.to_string();
                 let root = resolve_directory_uri(&base, package.get("rootUri")?.as_str()?)?;
-                let lib_root = match package.get("packageUri").and_then(Value::as_str) {
-                    Some(uri) => resolve_directory_uri(&root, uri)?,
+                let lib_root = match package.get("packageUri") {
+                    Some(uri) => resolve_directory_uri(&root, uri.as_str()?)?,
                     None => root.clone(),
                 };
-                let language_version = package
-                    .get("languageVersion")
-                    .and_then(Value::as_str)
-                    .and_then(LanguageVersion::parse);
+                let language_version = match package.get("languageVersion") {
+                    Some(value) => {
+                        let version = value.as_str().and_then(LanguageVersion::parse);
+                        if version.is_none() {
+                            report(format!("invalid languageVersion in package entry {index}"));
+                        }
+                        version
+                    }
+                    None => None,
+                };
                 Some(ConfiguredPackage {
                     name,
                     root,
                     lib_root,
                     language_version,
                 })
+                })();
+                if parsed.is_none() {
+                    report(format!("invalid package entry {index}: expected name and resolvable rootUri/packageUri"));
+                }
+                parsed
             })
             .collect();
         let flutter_root = json
@@ -250,6 +287,19 @@ mod tests {
             CONFIG,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn discovery_skips_non_directory_probes_to_resolve_ancestor_config() {
+        let directory = tempfile::tempdir().unwrap();
+        let tool = directory.path().join(".dart_tool");
+        std::fs::create_dir(&tool).unwrap();
+        let configuration = tool.join("package_config.json");
+        std::fs::write(&configuration, r#"{"configVersion": 2, "packages": []}"#).unwrap();
+        let child = directory.path().join("nested");
+        std::fs::create_dir(&child).unwrap();
+        std::fs::write(child.join(".dart_tool"), "").unwrap();
+        assert_eq!(PackageConfig::discover(&child), Some(configuration));
     }
 
     #[test]
