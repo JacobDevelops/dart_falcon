@@ -185,28 +185,6 @@ impl SignatureIndex {
         index
     }
 
-    /// Seed the curated SDK/package tables for every declaration no indexed
-    /// source supplies: without loaded sources they are the fallback; with
-    /// them, a declaration's real facts always win as a whole.
-    pub(super) fn add_fallback_signatures(&mut self) {
-        let mut fallback = Self::default();
-        fallback.add_sdk_signatures();
-        fn fill<V>(
-            target: &mut FxHashMap<DeclarationIdentity, V>,
-            source: SignatureMap<DeclarationIdentity, V>,
-        ) {
-            for (identity, value) in source.local {
-                target.entry(identity).or_insert(value);
-            }
-        }
-        fill(&mut self.functions, fallback.functions);
-        fill(&mut self.value_types, fallback.value_types);
-        fill(&mut self.member_entries, fallback.member_entries);
-        fill(&mut self.type_facts, fallback.type_facts);
-        fill(&mut self.constants, fallback.constants);
-        fill(&mut self.constant_types, fallback.constant_types);
-    }
-
     pub(super) fn add_declarations(
         &mut self,
         program: Program<'_>,

@@ -109,6 +109,115 @@ fn fallback_arities_do_not_invent_supertype_facts() {
 }
 
 #[test]
+fn fallback_sdk_records_fill_gaps_without_merging_overrides() {
+    let mut signatures = SignatureIndex::default();
+    let object = DeclarationIdentity::sdk("dart:core", "Object");
+    let string = DeclarationIdentity::sdk("dart:core", "String");
+    signatures.member_entries.insert(
+        object.clone(),
+        FxHashMap::from_iter([(
+            "custom".to_string(),
+            MemberEntry {
+                read: Some(ResolvedType::Void),
+                ..MemberEntry::default()
+            },
+        )]),
+    );
+    signatures
+        .type_facts
+        .insert(string.clone(), TypeFacts::default());
+
+    signatures.add_fallback_signatures();
+
+    let members = signatures.member_entries.get(&object).unwrap();
+    assert_eq!(members.len(), 1);
+    assert_eq!(members["custom"].read, Some(ResolvedType::Void));
+    let facts = signatures.type_facts.get(&string).unwrap();
+    assert!(facts.fallback_type_parameters.is_none());
+    assert!(facts.supertypes.is_none());
+    let list = DeclarationIdentity::sdk("dart:core", "List");
+    assert_eq!(
+        signatures.member_entries.get(&list).unwrap()["add"]
+            .signature
+            .as_ref()
+            .unwrap()
+            .return_type,
+        ResolvedType::Void,
+    );
+    assert_eq!(
+        signatures.implements_sdk(
+            &ResolvedType::interface_identity(DeclarationIdentity::sdk("dart:core", "int")),
+            "dart:core",
+            "num",
+        ),
+        Truth::Yes,
+    );
+}
+
+#[test]
+fn fallback_merge_covers_shared_maps_with_each_key_type() {
+    with_model("", |_, model| {
+        let mut signatures = SignatureIndex::default();
+        let mut fallback = SignatureIndex::default();
+        let print = DeclarationIdentity::sdk("dart:core", "print");
+        let identical = DeclarationIdentity::sdk("dart:core", "identical");
+        signatures.functions.insert(
+            print.clone(),
+            ResolvedSignature::returning(ResolvedType::Unknown),
+        );
+        for identity in [print.clone(), identical.clone()] {
+            fallback
+                .functions
+                .insert(identity, ResolvedSignature::returning(ResolvedType::Void));
+        }
+        let library = model.library.unwrap();
+        fallback
+            .blocked_field_promotions
+            .insert(library, FxHashSet::from_iter(["_field".to_string()]));
+        let existing = sdk_parameter("List", 0);
+        let missing = sdk_parameter("Map", 0);
+        signatures
+            .owner_defaults
+            .insert(existing.clone(), ResolvedType::Unknown);
+        signatures.bound_declared.insert(existing.clone(), false);
+        for parameter in [existing.clone(), missing.clone()] {
+            fallback
+                .owner_defaults
+                .insert(parameter.clone(), ResolvedType::Dynamic);
+            fallback.bound_declared.insert(parameter, true);
+        }
+
+        signatures.merge_fallback_signatures(fallback);
+
+        assert_eq!(
+            signatures.functions.get(&print).unwrap().return_type,
+            ResolvedType::Unknown,
+        );
+        assert_eq!(
+            signatures.functions.get(&identical).unwrap().return_type,
+            ResolvedType::Void,
+        );
+        assert!(
+            signatures
+                .blocked_field_promotions
+                .get(&library)
+                .unwrap()
+                .contains("_field"),
+        );
+        assert_eq!(
+            signatures.owner_defaults.get(&existing),
+            Some(&ResolvedType::Unknown),
+        );
+        assert_eq!(
+            signatures.owner_defaults.get(&missing),
+            Some(&ResolvedType::Dynamic),
+        );
+        assert_eq!(signatures.bound_declared.get(&existing), Some(&false));
+        assert_eq!(signatures.bound_declared.get(&missing), Some(&true));
+    });
+}
+
+#[test]
 fn sdk_identities_remain_canonical_across_plain_and_embedded_contexts() {
     let directory = tempfile::tempdir().unwrap();
     let root = &directory.path().canonicalize().unwrap();

@@ -425,7 +425,7 @@ impl<K: Eq + Hash, V> SignatureMap<K, V> {
     }
 }
 
-// Declare shared maps once so adding a table also wires its external overlay.
+// Declare shared maps once so adding a table wires its overlay and fallback merge.
 macro_rules! signature_index {
     (
         local { $($(#[$local_doc:meta])* $local:ident: $local_type:ty,)* }
@@ -453,6 +453,26 @@ macro_rules! signature_index {
                     external: Some(external),
                     ..Self::default()
                 }
+            }
+
+            /// Seed curated SDK/package defaults without replacing indexed records.
+            pub(super) fn add_fallback_signatures(&mut self) {
+                let mut fallback = Self::default();
+                fallback.add_sdk_signatures();
+                self.merge_fallback_signatures(fallback);
+            }
+
+            /// Existing entries win whole, including member tables and type facts.
+            pub(super) fn merge_fallback_signatures(&mut self, fallback: Self) {
+                fn fill<K: Eq + Hash, V>(
+                    target: &mut FxHashMap<K, V>,
+                    source: SignatureMap<K, V>,
+                ) {
+                    for (key, value) in source.local {
+                        target.entry(key).or_insert(value);
+                    }
+                }
+                $(fill(&mut self.$shared, fallback.$shared);)*
             }
         }
     };
