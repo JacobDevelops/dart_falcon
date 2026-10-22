@@ -47,6 +47,31 @@ pub enum ConstantValue {
     TearOff(DeclarationIdentity, String, ConstantType),
 }
 
+/// Exact argument types borrowed from values already evaluated for a call.
+pub struct ArgumentTypeFallback<'a> {
+    args: ArgList<'a>,
+    positional: &'a [Option<ConstantValue>],
+    named: &'a [(String, Option<ConstantValue>)],
+}
+
+impl ArgumentTypeFallback<'_> {
+    pub(crate) fn lookup(&self, argument: Expr<'_>) -> Option<ResolvedType> {
+        self.args
+            .positional()
+            .zip(self.positional)
+            .chain(
+                self.args
+                    .named()
+                    .map(|argument| argument.value())
+                    .zip(self.named.iter().map(|(_, value)| value)),
+            )
+            .find(|(expression, _)| expression.syntax().id() == argument.syntax().id())
+            .and_then(|(_, value)| value.as_ref())
+            .and_then(value_type)
+            .map(|ty| resolved_constant_type(&ty))
+    }
+}
+
 /// Resolved type identity retained in explicitly typed constants.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ConstantType {
@@ -1370,18 +1395,10 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             let scope = TypeParameterScope::default();
             let evaluator = std::cell::RefCell::new(&mut *self);
             let lookup = |name: &str| evaluator.borrow_mut().inference_name(name);
-            let argument_fallback = |argument: Expr<'_>| {
-                args.positional()
-                    .zip(&positional)
-                    .chain(
-                        args.named()
-                            .map(|argument| argument.value())
-                            .zip(named.iter().map(|(_, value)| value)),
-                    )
-                    .find(|(expression, _)| expression.syntax().id() == argument.syntax().id())
-                    .and_then(|(_, value)| value.as_ref())
-                    .and_then(value_type)
-                    .map(|ty| resolved_constant_type(&ty))
+            let argument_fallback = ArgumentTypeFallback {
+                args,
+                positional: &positional,
+                named: &named,
             };
             let context = crate::InferenceContext {
                 model: &model,
@@ -2481,6 +2498,59 @@ mod tests {
 
     use super::*;
     use crate::{IdentityIndex, IdentitySource, ParsedFile, QualifiedName, TypeIndex};
+
+    #[test]
+    fn argument_type_fallback_matches_source_nodes_to_borrowed_values() {
+        let source =
+            "const result = make(value, value, first: value, missing: value, inexact: value);";
+        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let program = tree.program(source);
+        let TopLevelDecl::Variable(declaration) = program.declarations().next().unwrap() else {
+            panic!("expected a variable declaration");
+        };
+        let Some(Expr::Call(call)) = declaration.declarators().next().unwrap().initializer() else {
+            panic!("expected a call initializer");
+        };
+        let positional = [Some(ConstantValue::Null), None];
+        let named = [
+            ("first".to_owned(), Some(ConstantValue::Bool(true))),
+            ("missing".to_owned(), None),
+            (
+                "inexact".to_owned(),
+                Some(ConstantValue::Record(Vec::new())),
+            ),
+        ];
+        let fallback = ArgumentTypeFallback {
+            args: call.args(),
+            positional: &positional,
+            named: &named,
+        };
+        let mut positional_arguments = call.args().positional();
+        assert_eq!(
+            fallback.lookup(positional_arguments.next().unwrap()),
+            Some(ResolvedType::Null)
+        );
+        assert_eq!(fallback.lookup(positional_arguments.next().unwrap()), None);
+        let mut named_arguments = call.args().named();
+        assert_eq!(
+            fallback.lookup(named_arguments.next().unwrap().value()),
+            Some(resolved_constant_type(&ConstantType::Interface(
+                DeclarationIdentity::sdk("dart:core", "bool"),
+                Vec::new(),
+                false,
+            )))
+        );
+        assert_eq!(
+            fallback.lookup(named_arguments.next().unwrap().value()),
+            None
+        );
+        assert_eq!(
+            fallback.lookup(named_arguments.next().unwrap().value()),
+            None
+        );
+        assert_eq!(fallback.lookup(call.callee()), None);
+    }
 
     #[test]
     fn resolved_constant_type_preserves_interned_library_names() {

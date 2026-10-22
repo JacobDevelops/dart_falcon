@@ -41,8 +41,6 @@ pub fn null_shorted(expression: Expr<'_>) -> bool {
     }
 }
 
-type ArgumentTypeFallback<'a> = dyn Fn(Expr<'_>) -> Option<ResolvedType> + 'a;
-
 /// Shared immutable inputs for generic call inference.
 pub struct InferenceContext<'a, 'model, 'lookup, F: Fn(&str) -> Option<ResolvedType>> {
     /// Semantic model for type resolution and substitution.
@@ -55,7 +53,7 @@ pub struct InferenceContext<'a, 'model, 'lookup, F: Fn(&str) -> Option<ResolvedT
     pub lookup: &'lookup F,
     /// Optional exact argument type when ordinary static inference has no
     /// information. Known types, including dynamic, never use this fallback.
-    pub argument_fallback: Option<&'lookup ArgumentTypeFallback<'lookup>>,
+    pub argument_fallback: Option<&'lookup crate::constant_value::ArgumentTypeFallback<'lookup>>,
 }
 
 pub(super) fn constructed_identity(
@@ -382,7 +380,7 @@ impl TypeEnvironment {
                 );
                 if actual == ResolvedType::Unknown
                     && let Some(fallback) = context.argument_fallback
-                    && let Some(ty) = fallback(argument)
+                    && let Some(ty) = fallback.lookup(argument)
                 {
                     actual = ty;
                 }
