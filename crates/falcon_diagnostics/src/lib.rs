@@ -159,11 +159,17 @@ impl<'a> LineIndex<'a> {
         }
     }
 
+    /// The 0-based line containing a byte offset, clamped to the source length.
+    pub fn line_for_offset(&self, offset: usize) -> u32 {
+        let clamped = offset.min(self.source.len());
+        // Line 0 starts at 0 <= clamped, so the partition point is at least 1.
+        (self.line_starts.partition_point(|&start| start <= clamped) - 1) as u32
+    }
+
     /// The same position as [`byte_to_lsp_position`] for this source.
     pub fn lsp_position(&self, offset: usize) -> Position {
         let clamped = offset.min(self.source.len());
-        // Line 0 starts at 0 <= clamped, so the partition point is at least 1.
-        let line = self.line_starts.partition_point(|&start| start <= clamped) - 1;
+        let line = self.line_for_offset(clamped) as usize;
         let start = self.line_starts[line];
         let character = self.source[start..]
             .char_indices()

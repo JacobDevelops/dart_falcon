@@ -21,7 +21,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_diagnostics::{Diagnostic, MALFORMED_SUPPRESSION_DIAGNOSTIC_ID, Severity, Span};
+use falcon_diagnostics::{
+    Diagnostic, LineIndex, MALFORMED_SUPPRESSION_DIAGNOSTIC_ID, Severity, Span,
+};
 use falcon_syntax::cst::{NodeKind, SyntaxToken, SyntaxTree};
 use falcon_syntax::token::TokenKind;
 
@@ -33,26 +35,26 @@ use falcon_syntax::token::TokenKind;
 pub type RuleLookup = fn(&str) -> Option<(&'static str, &'static str, bool)>;
 
 /// Parsed suppression directives for a single source file.
-pub struct FileSuppressions {
+pub struct FileSuppressions<'a> {
     /// Rule names suppressed everywhere in the file (`falcon-ignore-all`).
     all_file: HashSet<String>,
     /// Rule names suppressed on a specific 0-based line (`falcon-ignore`).
     by_line: HashMap<u32, HashSet<String>>,
-    /// Byte offset of the start of each 0-based line, for offset→line lookup.
-    line_starts: Vec<usize>,
+    /// Shared byte-offset line lookup for directives and diagnostic spans.
+    lines: LineIndex<'a>,
     /// `malformed-suppression` diagnostics collected while parsing.
     diagnostics: Vec<Diagnostic>,
 }
 
-impl FileSuppressions {
+impl<'a> FileSuppressions<'a> {
     /// Collect directives from the retained tokens outside interpolation bodies,
     /// validating each path against `lookup`. `file_path` is used only to stamp
     /// malformed suppression diagnostics.
-    pub fn parse(source: &str, file_path: &str, lookup: RuleLookup, tree: &SyntaxTree) -> Self {
+    pub fn parse(source: &'a str, file_path: &str, lookup: RuleLookup, tree: &SyntaxTree) -> Self {
         let mut me = Self {
             all_file: HashSet::new(),
             by_line: HashMap::new(),
-            line_starts: compute_line_starts(source),
+            lines: LineIndex::new(source),
             diagnostics: Vec::new(),
         };
 
@@ -81,7 +83,7 @@ impl FileSuppressions {
             } else {
                 token.offset()
             };
-            let line = line_for_offset(&me.line_starts, offset);
+            let line = me.line_for_offset(offset);
 
             if token.is_trivia() {
                 // Only line-form comments carry directives: `//`/`///`. Block
@@ -127,7 +129,7 @@ impl FileSuppressions {
     /// The 0-based line a byte offset falls on (used for a diagnostic's span
     /// start). Shared here so callers don't recompute a line table.
     pub fn line_for_offset(&self, offset: usize) -> u32 {
-        line_for_offset(&self.line_starts, offset)
+        self.lines.line_for_offset(offset)
     }
 
     /// Whether `rule` is suppressed on the given 0-based `line`.
@@ -247,23 +249,6 @@ fn malformed_diag(token: SyntaxToken<'_>, file_path: &str, message: String) -> D
     )
 }
 
-fn compute_line_starts(source: &str) -> Vec<usize> {
-    let mut starts = vec![0];
-    for (i, b) in source.bytes().enumerate() {
-        if b == b'\n' {
-            starts.push(i + 1);
-        }
-    }
-    starts
-}
-
-fn line_for_offset(line_starts: &[usize], offset: usize) -> u32 {
-    match line_starts.binary_search(&offset) {
-        Ok(i) => i as u32,
-        Err(i) => (i - 1) as u32,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,12 +268,12 @@ mod tests {
         }
     }
 
-    fn parse(source: &str) -> FileSuppressions {
+    fn parse(source: &str) -> FileSuppressions<'_> {
         let tree = falcon_dart_parser::parse(source).tree;
         FileSuppressions::parse(source, "test.dart", lookup, &tree)
     }
 
-    fn diag_rules(s: &FileSuppressions) -> Vec<&str> {
+    fn diag_rules(s: &FileSuppressions<'_>) -> Vec<&'static str> {
         s.diagnostics().iter().map(|d| d.rule).collect()
     }
 
@@ -480,6 +465,26 @@ mod tests {
         let suppressions = parse(source);
         assert!(!suppressions.is_suppressed("avoid-dynamic", 1));
         assert!(suppressions.is_suppressed("avoid-dynamic", 2));
+        assert!(suppressions.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn unicode_crlf_directives_target_only_their_code_lines() {
+        let source = "var text = '😀é'; // falcon-ignore lint/suspicious/avoid-dynamic: résumé\r\n\
+                      // falcon-ignore lint/suspicious/avoid-dynamic: 次\r\n\
+                      \r\n\
+                      dynamic suppressed;\r\n\
+                      dynamic reported;\r\n";
+        let suppressions = parse(source);
+        for (text, expected) in [
+            ("var text", true),
+            ("dynamic suppressed", true),
+            ("dynamic reported", false),
+        ] {
+            let line = suppressions.line_for_offset(source.find(text).unwrap());
+            assert_eq!(suppressions.is_suppressed("avoid-dynamic", line), expected);
+        }
+        assert_eq!(suppressions.line_for_offset(source.len()), 5);
         assert!(suppressions.diagnostics().is_empty());
     }
 

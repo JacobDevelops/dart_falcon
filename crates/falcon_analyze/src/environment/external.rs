@@ -728,6 +728,7 @@ impl ExternalLibraries {
                     self.libraries[primary].copy_context = state.context;
                 }
             }
+            // Path/node IDs survive alias removal and sorting, unlike library indices.
             let mut groups: FxHashMap<u32, Vec<(usize, usize)>> = FxHashMap::default();
             for (node_index, &(id, context)) in graph.nodes.iter().enumerate() {
                 let Some(primary) = self.states[id as usize].primary else {
