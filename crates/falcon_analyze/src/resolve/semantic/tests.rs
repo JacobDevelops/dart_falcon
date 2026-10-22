@@ -3633,6 +3633,51 @@ fn generic_calls_infer_from_inherited_method_tearoffs() {
 }
 
 #[test]
+fn long_binary_chain_infers_on_the_normal_test_stack() {
+    let source = format!("int sum(int a) => {}a;", "a + ".repeat(99_999));
+    with_model(&source, |program, model| {
+        let signatures = SignatureIndex::from_program(program, model);
+        let scope = TypeParameterScope::default();
+        let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {
+            panic!()
+        };
+        let Some(FunctionBody::Arrow(body)) = function.body() else {
+            panic!()
+        };
+        let mut environment = TypeEnvironment::new();
+        environment.bind_params(function.params().unwrap(), model, &scope);
+        assert_eq!(
+            environment.infer_with_signatures(body.expr(), model, &signatures, &scope),
+            model.core_type("int", false),
+        );
+    });
+}
+
+#[test]
+fn binary_chain_preserves_each_operator_parameter_context() {
+    with_parsed_core(
+        "T empty<T>() => throw 0; int sum(int a) => a + empty() + empty();",
+        "library dart.core; class Object {} abstract class num {} \
+         abstract class int extends num { int operator +(int other); }",
+        |program, model, signatures| {
+            let scope = TypeParameterScope::default();
+            let TopLevelDecl::Function(function) = program.declarations().nth(1).unwrap() else {
+                panic!()
+            };
+            let Some(FunctionBody::Arrow(body)) = function.body() else {
+                panic!()
+            };
+            let mut environment = TypeEnvironment::new();
+            environment.bind_params(function.params().unwrap(), model, &scope);
+            assert_eq!(
+                environment.infer_with_signatures(body.expr(), model, signatures, &scope),
+                model.core_type("int", false),
+            );
+        },
+    );
+}
+
+#[test]
 fn generic_calls_infer_from_arguments_and_result_context() {
     with_model(
         concat!(

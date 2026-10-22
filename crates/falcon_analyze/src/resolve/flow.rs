@@ -853,6 +853,25 @@ impl<'tree> Visitor<'tree> for CompletedPromotions<'_, '_, '_> {
             {
                 self.visit_expr(binary.left())
             }
+            Expr::Binary(binary) => {
+                let mut pending = Vec::new();
+                let mut operand = binary.left();
+                while let Expr::Binary(next) = operand {
+                    if matches!(
+                        next.op(),
+                        BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce
+                    ) {
+                        break;
+                    }
+                    pending.push(next.right());
+                    operand = next.left();
+                }
+                self.visit_expr(operand);
+                for right in pending.into_iter().rev() {
+                    self.visit_expr(right);
+                }
+                self.visit_expr(binary.right());
+            }
             Expr::Conditional(conditional) => self.visit_expr(conditional.condition()),
             Expr::Switch(switch) => self.visit_expr(switch.subject()),
             Expr::Call(call) if matches!(call.callee(), Expr::Field(field) if field.is_null_safe()) => {

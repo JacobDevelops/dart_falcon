@@ -130,6 +130,7 @@ pub struct SemanticState<'a> {
     private_field_promotion: bool,
     inference_depth: std::cell::Cell<usize>,
     inference_cache: std::cell::RefCell<HashMap<NodeId, ResolvedType>>,
+    inference_environment: std::cell::RefCell<Option<TypeEnvironment>>,
     pub inside_cascade: bool,
 }
 
@@ -162,6 +163,7 @@ impl<'a> SemanticState<'a> {
             private_field_promotion,
             inference_depth: std::cell::Cell::new(0),
             inference_cache: std::cell::RefCell::new(HashMap::new()),
+            inference_environment: std::cell::RefCell::new(None),
             inside_cascade: false,
         })
     }
@@ -512,11 +514,46 @@ impl<'a> SemanticState<'a> {
             return self.enclosing_type.clone().unwrap_or(ResolvedType::Unknown);
         }
         self.inference_query(|| {
+            if !self
+                .inference_environment
+                .borrow()
+                .as_ref()
+                .is_some_and(|environment| self.environment.same_flow_state(environment))
+            {
+                self.inference_cache.borrow_mut().clear();
+                *self.inference_environment.borrow_mut() = Some(self.environment.clone());
+            }
             let key = expression.syntax().id();
             if let Some(ty) = self.inference_cache.borrow().get(&key).cloned() {
                 return ty;
             }
-            let ty = self.infer_with_context(expression, None);
+            let ty = if let Expr::Binary(binary) = expression {
+                self.environment
+                    .infer_binary_chain(
+                        binary,
+                        &InferenceContext {
+                            model: &self.model,
+                            signatures: &self.signatures,
+                            type_parameters: &self.type_parameters,
+                            lookup: &|name| self.implicit_member_type(name),
+                            argument_fallback: None,
+                        },
+                        |prefix| {
+                            self.inference_cache
+                                .borrow()
+                                .get(&prefix.syntax().id())
+                                .cloned()
+                        },
+                        |prefix, ty| {
+                            self.inference_cache
+                                .borrow_mut()
+                                .insert(prefix.syntax().id(), ty.clone());
+                        },
+                    )
+                    .unwrap_or_else(|| self.infer_with_context(expression, None))
+            } else {
+                self.infer_with_context(expression, None)
+            };
             self.inference_cache.borrow_mut().insert(key, ty.clone());
             ty
         })
@@ -529,6 +566,7 @@ impl<'a> SemanticState<'a> {
         self.inference_depth.set(depth);
         if depth == 0 {
             self.inference_cache.borrow_mut().clear();
+            self.inference_environment.borrow_mut().take();
         }
         result
     }
@@ -1288,6 +1326,47 @@ enum CallableParams<'a> {
 }
 
 impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
+    fn visit_binary_chain(&mut self, root: BinaryExpr<'a>) {
+        let mut parents = Vec::new();
+        let mut expression = Expr::Binary(root);
+        while let Expr::Binary(binary) = expression {
+            if binary.op().operator_name().is_none() {
+                break;
+            }
+            self.visitor.visit_expr(expression, &self.state);
+            parents.push(binary);
+            self.state.expected.push(None);
+            expression = binary.left();
+        }
+        self.visit_expr(expression);
+        while let Some(binary) = parents.pop() {
+            self.state.expected.pop();
+            let expected = self
+                .state
+                .signatures
+                .resolved_member(
+                    &self.state.infer(binary.left()),
+                    binary.op().operator_name().expect("operator chain"),
+                    &self.state.model,
+                )
+                .and_then(|(signature, owner)| {
+                    signature
+                        .positional
+                        .first()
+                        .map(|ty| self.state.model.substitute(ty, &owner))
+                })
+                .unwrap_or(ResolvedType::Unknown);
+            self.with_expected(expected, |walker| walker.visit_expr(binary.right()));
+            FlowContext {
+                model: &self.state.model,
+                signatures: &self.state.signatures,
+                type_parameters: &self.state.type_parameters,
+                field_promotions: self.state.private_field_promotion,
+            }
+            .finish_expression(&mut self.state.environment, Expr::Binary(binary), None);
+        }
+    }
+
     fn with_fresh_environment(&mut self, f: impl FnOnce(&mut Self)) {
         let saved = std::mem::replace(
             &mut self.state.environment,
@@ -3490,6 +3569,19 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
+        if let Expr::Binary(binary) = node
+            && binary.op().operator_name().is_some()
+        {
+            let depth = self.state.inference_depth.get();
+            self.state.inference_depth.set(depth + 1);
+            self.visit_binary_chain(binary);
+            self.state.inference_depth.set(depth);
+            if depth == 0 {
+                self.state.inference_cache.borrow_mut().clear();
+                self.state.inference_environment.borrow_mut().take();
+            }
+            return;
+        }
         self.visitor.visit_expr(node, &self.state);
         let enclosing_cascade = self.state.inside_cascade;
         if matches!(node, Expr::Cascade(_)) {
@@ -3654,29 +3746,6 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                     .unwrap_or_else(|| self.state.infer(left));
                 self.with_expected(expected, |walker| walker.visit_expr(right));
                 self.state.environment = before.join(&self.state.environment);
-            }
-            Expr::Binary(n) => {
-                let op = n.op();
-                let left = n.left();
-                let right = n.right();
-                // A binary expression's result context does not flow into
-                // its receiver; the right operand uses the operator parameter.
-                self.without_expected(|walker| walker.visit_expr(left));
-                let name = op
-                    .operator_name()
-                    .expect("logical and coalescing operators are visited separately");
-                let expected = self
-                    .state
-                    .signatures
-                    .resolved_member(&self.state.infer(left), name, &self.state.model)
-                    .and_then(|(signature, owner)| {
-                        signature
-                            .positional
-                            .first()
-                            .map(|ty| self.state.model.substitute(ty, &owner))
-                    })
-                    .unwrap_or(ResolvedType::Unknown);
-                self.with_expected(expected, |walker| walker.visit_expr(right));
             }
             Expr::Assign(n) if matches!(n.op(), AssignOp::NullCoalesceEq) => {
                 let target = n.target();

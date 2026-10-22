@@ -54,6 +54,18 @@ impl TypeEnvironment {
         }
     }
 
+    /// Whether a shared snapshot still has exactly this environment's flow state.
+    pub(crate) fn same_flow_state(&self, other: &Self) -> bool {
+        self.field_promotions == other.field_promotions
+            && self.callable_boundaries == other.callable_boundaries
+            && self.scopes.len() == other.scopes.len()
+            && self
+                .scopes
+                .iter()
+                .zip(&other.scopes)
+                .all(|(left, right)| Arc::ptr_eq(left, right))
+    }
+
     /// The flow analysis promoting within expressions this environment infers.
     pub(super) fn flow<'a, 'model>(
         &self,

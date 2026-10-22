@@ -131,10 +131,12 @@ pub fn for_each_stmt_list<'a>(
         }
 
         fn visit_expr(&mut self, node: Expr<'a>) {
-            if let Expr::FuncExpr(node) = node {
-                body_list(Some(node.body()), self.0);
-            }
-            walk_expr(self, node);
+            walk_expr_chain(self, node, |visitor, node| {
+                if let Expr::FuncExpr(node) = node {
+                    body_list(Some(node.body()), visitor.0);
+                }
+                true
+            });
         }
     }
     Lists(f).visit_program(program);
@@ -1004,9 +1006,29 @@ enum Work<'a> {
     Cascade(CascadeExpr<'a>),
 }
 
+/// Walks expression chains iteratively, calling `enter` before each expression.
+/// Returning `false` prunes that expression's children; scoped overrides can
+/// instead visit those children synchronously before returning `false`.
+pub fn walk_expr_chain<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    node: Expr<'a>,
+    enter: impl FnMut(&mut V, Expr<'a>) -> bool,
+) {
+    walk_chain(visitor, Work::Expr(node), enter);
+}
+
 // Default hooks flatten chains; explicit walkers retain synchronous overrides.
 #[inline(never)]
-fn walk_default_chain<'a, V: Visitor<'a>>(v: &mut V, mut work: Work<'a>) {
+fn walk_default_chain<'a, V: Visitor<'a>>(v: &mut V, work: Work<'a>) {
+    walk_chain(v, work, |_, _| true);
+}
+
+#[inline(never)]
+fn walk_chain<'a, V: Visitor<'a>>(
+    v: &mut V,
+    mut work: Work<'a>,
+    mut enter: impl FnMut(&mut V, Expr<'a>) -> bool,
+) {
     struct WorkStack<'a> {
         inline: [Option<Work<'a>>; 4],
         len: usize,
@@ -1039,7 +1061,7 @@ fn walk_default_chain<'a, V: Visitor<'a>>(v: &mut V, mut work: Work<'a>) {
     };
     loop {
         match work {
-            Work::Expr(node) => {
+            Work::Expr(node) if enter(v, node) => {
                 let child = match node {
                     Expr::Binary(n) => {
                         pending.push(Work::Expr(n.right()));
@@ -1094,6 +1116,7 @@ fn walk_default_chain<'a, V: Visitor<'a>>(v: &mut V, mut work: Work<'a>) {
                     continue;
                 }
             }
+            Work::Expr(_) => {}
             Work::Pattern(node) => {
                 let child = match node {
                     Pattern::LogicalOr(n) => {

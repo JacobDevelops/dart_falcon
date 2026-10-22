@@ -4,8 +4,8 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_syntax::cst::visit::{
-    Visitor, walk_class_member, walk_collection_element, walk_expr, walk_function_decl,
-    walk_map_element, walk_pattern, walk_stmt,
+    Visitor, walk_class_member, walk_collection_element, walk_expr, walk_expr_chain,
+    walk_function_decl, walk_map_element, walk_pattern, walk_stmt,
 };
 use falcon_syntax::cst::*;
 
@@ -414,39 +414,46 @@ impl<'a> Visitor<'a> for FlowWrites {
     }
 
     fn visit_expr(&mut self, expression: Expr<'a>) {
-        let target = match expression {
-            Expr::Assign(assignment) => Some(assignment.target()),
-            Expr::Unary(unary) if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) => {
-                Some(unary.operand())
-            }
-            Expr::PostfixIncDec(postfix) => Some(postfix.operand()),
-            _ => None,
-        };
-        if let Some(Expr::Ident(name)) = target.map(Expr::unparenthesized) {
-            self.record(name);
-        }
-        match expression {
-            Expr::FuncExpr(function) => {
-                self.callable_bindings
-                    .insert(function.span().start, self.bindings());
-                self.callable(Some(function.span().start), |visitor| {
-                    walk_expr(visitor, expression)
-                });
-            }
-            Expr::Switch(switch) => {
-                self.visit_expr(switch.subject());
-                for arm in switch.arms() {
-                    self.scoped(|visitor| {
-                        visitor.visit_pattern(arm.pattern());
-                        if let Some(guard) = arm.guard() {
-                            visitor.visit_expr(guard);
-                        }
-                        visitor.visit_expr(arm.body());
-                    });
+        walk_expr_chain(self, expression, |visitor, expression| {
+            let target = match expression {
+                Expr::Assign(assignment) => Some(assignment.target()),
+                Expr::Unary(unary)
+                    if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) =>
+                {
+                    Some(unary.operand())
                 }
+                Expr::PostfixIncDec(postfix) => Some(postfix.operand()),
+                _ => None,
+            };
+            if let Some(Expr::Ident(name)) = target.map(Expr::unparenthesized) {
+                visitor.record(name);
             }
-            _ => walk_expr(self, expression),
-        }
+            match expression {
+                Expr::FuncExpr(function) => {
+                    visitor
+                        .callable_bindings
+                        .insert(function.span().start, visitor.bindings());
+                    visitor.callable(Some(function.span().start), |visitor| {
+                        walk_expr(visitor, expression)
+                    });
+                    false
+                }
+                Expr::Switch(switch) => {
+                    visitor.visit_expr(switch.subject());
+                    for arm in switch.arms() {
+                        visitor.scoped(|visitor| {
+                            visitor.visit_pattern(arm.pattern());
+                            if let Some(guard) = arm.guard() {
+                                visitor.visit_expr(guard);
+                            }
+                            visitor.visit_expr(arm.body());
+                        });
+                    }
+                    false
+                }
+                _ => true,
+            }
+        });
     }
 
     fn visit_pattern(&mut self, pattern: Pattern<'a>) {
@@ -471,6 +478,32 @@ mod tests {
     use falcon_dart_parser::parse;
 
     use super::FlowWrites;
+
+    #[test]
+    fn long_binary_chains_preserve_writes_and_closure_scopes() {
+        let mut source = String::from("void f(int a, int b, int c) { while (true) { ");
+        source.push_str("(a = 1)");
+        for _ in 1..99_999 {
+            source.push_str(" + a");
+        }
+        source.push_str(" + (() { b = 2; return c++; })(); } }");
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let writes = FlowWrites::program(parsed.tree.program(&source));
+        let region = source.find("while").unwrap();
+        assert_eq!(
+            writes.region_writes[&region],
+            HashSet::from(["a".to_owned()])
+        );
+        assert_eq!(
+            writes.captured_region_writes[&region],
+            HashSet::from(["b".to_owned(), "c".to_owned()])
+        );
+        assert_eq!(
+            writes.callable_captured_writes[&source.find("() {").unwrap()],
+            HashSet::from(["b".to_owned(), "c".to_owned()])
+        );
+    }
 
     #[test]
     fn regions_record_direct_writes_of_enclosing_bindings() {

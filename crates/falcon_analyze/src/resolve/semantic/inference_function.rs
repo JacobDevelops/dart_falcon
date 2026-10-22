@@ -644,6 +644,25 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                 self.visit_expr(right);
                 self.environment = before.join(&self.environment);
             }
+            Expr::Binary(binary) => {
+                let mut pending = Vec::new();
+                let mut operand = binary.left();
+                while let Expr::Binary(next) = operand {
+                    if matches!(
+                        next.op(),
+                        BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce
+                    ) {
+                        break;
+                    }
+                    pending.push(next.right());
+                    operand = next.left();
+                }
+                self.visit_expr(operand);
+                for right in pending.into_iter().rev() {
+                    self.visit_expr(right);
+                }
+                self.visit_expr(binary.right());
+            }
             _ => walk_expr(self, expression),
         }
         if self.conservative_writes {
@@ -685,3 +704,7 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
         self.conservative_writes = conservative_before;
     }
 }
+
+#[cfg(test)]
+#[path = "inference_function_tests.rs"]
+mod tests;

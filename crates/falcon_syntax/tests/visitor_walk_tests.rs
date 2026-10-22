@@ -974,3 +974,66 @@ fn default_pattern_chains_preserve_leaf_and_cast_order() {
     order.visit_pattern(pattern);
     assert_eq!(order.0, ["a", "A", "b", "c", "C", "D"]);
 }
+
+#[test]
+fn statement_lists_walk_long_binary_chains_and_nested_closures() {
+    let mut source = String::from("void f(int a) { ");
+    for _ in 0..99_999 {
+        source.push_str("a + ");
+    }
+    source.push_str("(() { marker(); return 1; })(); }");
+    let parsed = parse(&source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let mut lists = Vec::new();
+    for_each_stmt_list(parsed.tree.program(&source), &mut |statements, kind| {
+        lists.push((
+            kind,
+            statements
+                .map(|statement| statement.span().start)
+                .collect::<Vec<_>>(),
+        ));
+    });
+    assert_eq!(
+        lists,
+        [
+            (StatementListKind::Block, vec![source.find("a + ").unwrap()]),
+            (
+                StatementListKind::Block,
+                vec![
+                    source.find("marker").unwrap(),
+                    source.find("return").unwrap()
+                ],
+            ),
+        ]
+    );
+}
+
+#[test]
+fn expression_chain_entries_preserve_preorder_and_pruning() {
+    struct Entries(Vec<String>);
+    impl<'a> Visitor<'a> for Entries {
+        fn visit_expr(&mut self, node: Expr<'a>) {
+            walk_expr_chain(self, node, |visitor, node| {
+                let text = node.syntax().text();
+                visitor.0.push(text.to_owned());
+                text != "skip.hidden"
+            });
+        }
+    }
+    let source = "var result = target.field + skip.hidden + tail;";
+    let parsed = parse(source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let mut visitor = Entries(Vec::new());
+    visitor.visit_program(parsed.tree.program(source));
+    assert_eq!(
+        visitor.0,
+        [
+            "target.field + skip.hidden + tail",
+            "target.field + skip.hidden",
+            "target.field",
+            "target",
+            "skip.hidden",
+            "tail",
+        ],
+    );
+}

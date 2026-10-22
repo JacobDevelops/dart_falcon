@@ -1299,3 +1299,79 @@ extension on Base {
     );
     assert_eq!(references.observed, 13);
 }
+
+#[test]
+fn binary_chain_visits_on_the_normal_stack() {
+    use falcon_analyze::{IdentityIndex, IdentitySource};
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    let operands = 100_000;
+    let source = format!(
+        "class A {{ A operator +(A other) => this; }} class B {{}} \
+         void f(int a) {{ {}; }} \
+         void h(dynamic a) {{ if (a is A) {{ a + (a = B()) + a; }} }}",
+        vec!["a"; operands].join(" + ")
+    );
+    let result = parse(&source);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let parsed = Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: result.tree,
+    });
+    let path = Path::new("/project/main.dart");
+    let identities = IdentityIndex::from_project_files(
+        &[IdentitySource {
+            path,
+            parsed: &parsed,
+            has_parse_errors: false,
+        }],
+        &[],
+    );
+    let config = FalconConfig::default();
+    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
+    #[derive(Default)]
+    struct Count<'a> {
+        binaries: usize,
+        lefts: HashMap<Span, Expr<'a>>,
+        preorder: HashMap<Span, ResolvedType>,
+        changed: usize,
+    }
+    impl<'a> SemanticRuleVisitor<'a> for Count<'a> {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            if let Some(left) = self.lefts.remove(&node.span()) {
+                let cached = state.infer(left);
+                assert_eq!(cached, state.infer_with_context(left, None));
+                if self
+                    .preorder
+                    .get(&left.span())
+                    .is_some_and(|before| *before != cached)
+                {
+                    self.changed += 1;
+                }
+            }
+            if let Expr::Binary(binary) = node {
+                self.binaries += 1;
+                let inferred = state.infer(node);
+                if node.span().end - node.span().start < 64 {
+                    assert_eq!(inferred, state.infer_with_context(node, None));
+                    self.lefts.insert(binary.right().span(), binary.left());
+                    self.preorder.insert(node.span(), inferred);
+                }
+            }
+            if matches!(node, Expr::Ident(_)) {
+                assert_eq!(state.infer(node), state.infer_with_context(node, None));
+            }
+        }
+    }
+    let program = parsed.program();
+    let mut count = Count::default();
+    visit_program(
+        &mut count,
+        program,
+        SemanticState::new(program, &context).unwrap(),
+    );
+    assert_eq!(count.binaries, operands + 1);
+    assert_eq!(count.changed, 1, "the fixture must observe a flow change");
+}

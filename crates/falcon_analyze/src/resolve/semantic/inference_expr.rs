@@ -1,4 +1,5 @@
 use super::*;
+use falcon_syntax::cst::BinaryExpr;
 
 impl TypeEnvironment {
     /// Infers an expression with a downward result context and lexical lookup.
@@ -19,6 +20,75 @@ impl TypeEnvironment {
             argument_fallback: None,
         };
         self.infer_in_context(expr, context, expected, None)
+    }
+
+    /// Cached prefixes must come from the same flow state and lexical context.
+    pub(crate) fn infer_binary_chain<'a>(
+        &self,
+        binary: BinaryExpr<'a>,
+        context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
+        cached: impl Fn(Expr<'a>) -> Option<ResolvedType>,
+        mut publish: impl FnMut(Expr<'a>, &ResolvedType),
+    ) -> Option<ResolvedType> {
+        let ordinary = |binary: BinaryExpr<'_>| {
+            !matches!(
+                binary.op(),
+                BinaryOp::EqEq
+                    | BinaryOp::NotEq
+                    | BinaryOp::Lt
+                    | BinaryOp::Gt
+                    | BinaryOp::LtEq
+                    | BinaryOp::GtEq
+                    | BinaryOp::And
+                    | BinaryOp::Or
+                    | BinaryOp::NullCoalesce
+            )
+        };
+        if !ordinary(binary) {
+            return None;
+        }
+        let mut pending = Vec::new();
+        let mut operand = binary.left();
+        let mut left = None;
+        loop {
+            if let Some(ty) = cached(operand) {
+                left = Some(ty);
+                break;
+            }
+            let Expr::Binary(next) = operand else {
+                break;
+            };
+            if !ordinary(next) {
+                break;
+            }
+            pending.push(next);
+            operand = next.left();
+        }
+        let mut left = left.unwrap_or_else(|| {
+            self.infer_with_signatures_using_lookup(
+                operand,
+                context.model,
+                context.signatures,
+                context.type_parameters,
+                context.lookup,
+            )
+        });
+        for binary in pending.into_iter().rev().chain(std::iter::once(binary)) {
+            let op = binary.op();
+            let right_context =
+                operator_parameter_type(&left, op, context.signatures, context.model);
+            let right = self.infer_with_context(
+                binary.right(),
+                context.model,
+                context.signatures,
+                context.type_parameters,
+                right_context.as_ref(),
+                context.lookup,
+            );
+            left = binary_result(op, &left, &right, context.signatures, context.model);
+            publish(Expr::Binary(binary), &left);
+        }
+        Some(left)
     }
 
     pub fn infer_constant_name(
@@ -925,19 +995,9 @@ impl TypeEnvironment {
                         );
                         contextual_join(&[left, right], expected, signatures, model)
                     }
-                    _ => {
-                        let left = infer(left);
-                        let right_context = operator_parameter_type(&left, op, signatures, model);
-                        let right = self.infer_with_context(
-                            right,
-                            model,
-                            signatures,
-                            type_parameters,
-                            right_context.as_ref(),
-                            lookup,
-                        );
-                        binary_result(op, &left, &right, signatures, model)
-                    }
+                    _ => self
+                        .infer_binary_chain(binary, &context, |_| None, |_, _| {})
+                        .expect("ordinary binary operator"),
                 }
             }
             Expr::Conditional(conditional) => {
