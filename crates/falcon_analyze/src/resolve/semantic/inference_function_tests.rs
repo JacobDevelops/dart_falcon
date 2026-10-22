@@ -135,6 +135,13 @@ fn completion_preserves_never_calls_assignments_and_fallthrough() {
         "Never fail() => throw 0; \
          int Function(bool) call() => (bool flag) { if (flag) return 1; fail(); }; \
          int Function(bool) assign() => (bool flag) { dynamic b; if (flag) return 1; b = fail(); }; \
+         int Function(bool) blockScoped() => (bool c) { \
+           if (c) return 1; { final Never Function() h = fail; h(); } \
+         }; \
+         int Function(bool) demoted() => (bool c) { \
+           if (c) return 1; Object o = fail; \
+           if (o is! Never Function()) return 2; o(); o = 3; \
+         }; \
          int? Function(bool) partial() => (bool flag) { if (flag) return 1; 0; };",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
