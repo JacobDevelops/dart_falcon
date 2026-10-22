@@ -37,11 +37,17 @@ pub struct EnvironmentCacheKey {
 impl EnvironmentCacheKey {
     /// File events also represent replacement or deletion of an input's parent.
     pub fn affected_by(&self, path: &Path) -> bool {
-        self.files.iter().any(|(input, _)| input.starts_with(path))
+        let canonical = packages::canonical_comparison_path(path);
+        let affected = |input: &Path| {
+            input.starts_with(path)
+                || input.starts_with(&canonical)
+                || packages::canonical_comparison_path(input).starts_with(&canonical)
+        };
+        self.files.iter().any(|(input, _)| affected(input))
             || self
                 .roots
                 .iter()
-                .any(|(raw, resolved)| raw.starts_with(path) || resolved.starts_with(path))
+                .any(|(raw, resolved)| affected(raw) || affected(resolved))
     }
 }
 
@@ -264,7 +270,7 @@ impl AnalysisEnvironment {
             roots: roots
                 .into_iter()
                 .map(|path| {
-                    let resolved = crate::resolve::canonical_or_lexical(&path);
+                    let resolved = packages::canonical_comparison_path(&path);
                     (path, resolved)
                 })
                 .collect(),

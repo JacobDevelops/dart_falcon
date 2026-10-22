@@ -145,7 +145,7 @@ impl CrossFileRule for NoImportCycles {
                 .map(|&(_, span)| span)
                 .unwrap();
             let root = packages[start].metadata()
-                .and_then(|package| package.manifest.parent().map(Path::to_path_buf));
+                .and_then(|package| package.manifest.parent().map(canonical_package_path));
             let mut message = String::from("Remove a dependency to break this import/export cycle: `");
             for (index, &node) in cycle.iter().enumerate() {
                 if index > 0 {

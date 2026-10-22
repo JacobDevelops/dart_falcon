@@ -171,11 +171,22 @@ pub(super) fn enclosing_pubspec_normalized(path: &Path) -> Option<PathBuf> {
         .find(|manifest| manifest.is_file())
 }
 
+/// Resolve existing prefixes so saved and missing paths share one comparison form.
+pub(crate) fn canonical_comparison_path(path: &Path) -> PathBuf {
+    let path = super::package_config::absolute(path);
+    for ancestor in path.ancestors() {
+        if let Ok(canonical) = std::fs::canonicalize(ancestor) {
+            return canonical.join(path.strip_prefix(ancestor).unwrap());
+        }
+    }
+    path
+}
+
 pub fn canonical_package_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| {
         let path = canonical_or_lexical(path);
         let Some(manifest) = enclosing_pubspec(&path) else {
-            return path;
+            return canonical_comparison_path(&path);
         };
         let root = manifest.parent().unwrap();
         let Ok(relative) = path.strip_prefix(root) else {
@@ -427,6 +438,26 @@ mod tests {
                     .name,
                 "outer"
             );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_config_inputs_match_events_through_directory_aliases() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("directory");
+        let alias = root.path().join("alias");
+        std::fs::create_dir(&directory).unwrap();
+        std::os::unix::fs::symlink(&directory, &alias).unwrap();
+        for (input, event) in [(&directory, &alias), (&alias, &directory)] {
+            let stamps = super::super::EnvironmentCacheKey {
+                files: vec![(input.join("missing/pubspec.yaml"), None)],
+                roots: Vec::new(),
+                sdk_environment: Default::default(),
+            };
+            assert!(stamps.affected_by(&event.join("missing")));
+            assert!(stamps.affected_by(&event.join("missing/pubspec.yaml")));
+            assert!(!stamps.affected_by(&event.join("unrelated")));
         }
     }
 

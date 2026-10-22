@@ -186,13 +186,14 @@ impl<'a> AnalyzeContext<'a> {
         if let Some(&same_package) = self.cache.same_package.lock().unwrap().get(path) {
             return same_package;
         }
+        let canonical = crate::environment::packages::canonical_comparison_path(path);
         let same_package = if let Some(environment) = self.environment {
             environment
-                .file_package(path)
+                .file_package(&canonical)
                 .identity()
                 .is_some_and(|package| package.lib_root == own.lib_root)
         } else {
-            crate::environment::packages::FilePackage::discover(path)
+            crate::environment::packages::FilePackage::discover(&canonical)
                 .identity()
                 .is_some_and(|package| package.lib_root == own.lib_root)
         };
