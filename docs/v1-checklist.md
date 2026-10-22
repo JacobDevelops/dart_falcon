@@ -18,7 +18,7 @@ Owns the semantic index, `type_index.rs`, `ResolvedType` and the rule sites that
 
 Owns `parallel.rs`, `environment/`, `registry.rs` threading and `lib.rs` exports. Any time after batch 15.
 
-- [ ] **Analysis cleanups.** Fx hashing for substitution maps; per-alias cache without a mutex.
+- [ ] **Analysis cleanups.** Fx hashing for substitution maps.
 
 ### Stage 6: editor and CI workflows
 

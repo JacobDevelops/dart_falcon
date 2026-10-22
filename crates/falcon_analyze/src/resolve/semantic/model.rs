@@ -1,11 +1,29 @@
 use super::*;
 
-/// In-progress entries detect cycles by alias identity, without a depth cap.
+/// Templates are shared across threads, with separate typed and untyped slots.
 /// Clones of an identity index do not retain its derived templates.
-#[derive(Debug, Default)]
-pub(crate) struct AliasTemplates(
-    std::sync::Mutex<FxHashMap<(std::thread::ThreadId, bool), AliasTemplateState>>,
-);
+#[derive(Debug)]
+pub(crate) struct AliasTemplates {
+    id: u64,
+    slots: [std::sync::OnceLock<Option<Arc<AliasTemplate>>>; 2],
+}
+
+impl Default for AliasTemplates {
+    fn default() -> Self {
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let id = NEXT_ID
+            .try_update(
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+                |id| id.checked_add(1),
+            )
+            .expect("alias template cache identifiers exhausted");
+        Self {
+            id,
+            slots: Default::default(),
+        }
+    }
+}
 
 impl Clone for AliasTemplates {
     fn clone(&self) -> Self {
@@ -13,14 +31,49 @@ impl Clone for AliasTemplates {
     }
 }
 
-#[derive(Debug)]
-enum AliasTemplateState {
-    Resolving,
-    Invalid,
-    Ready(Arc<AliasTemplate>),
+impl AliasTemplates {
+    pub(super) fn resolve(
+        &self,
+        typed: bool,
+        build: impl FnOnce() -> Arc<AliasTemplate>,
+    ) -> Option<Arc<AliasTemplate>> {
+        let slot = &self.slots[usize::from(typed)];
+        let template = if let Some(template) = slot.get() {
+            template
+        } else {
+            let key = (self.id, typed);
+            if !ACTIVE_ALIAS_TEMPLATES.with(|active| active.borrow_mut().insert(key)) {
+                mark_alias_cycle();
+                return None;
+            }
+            let _active = ActiveAliasTemplate(key);
+            let generation = ALIAS_CYCLE_GENERATION.with(std::cell::Cell::get);
+            // Compute without holding a slot's initialization lock: opposing
+            // alias roots on different threads must never wait for each other.
+            let template = build();
+            let invalid = ALIAS_CYCLE_GENERATION.with(std::cell::Cell::get) != generation;
+            let _ = slot.set((!invalid).then_some(template));
+            // Another thread may have published first; all callers share it.
+            slot.get().expect("alias template published")
+        };
+        if template.is_none() {
+            mark_alias_cycle();
+        }
+        template.clone()
+    }
+}
+
+struct ActiveAliasTemplate((u64, bool));
+
+impl Drop for ActiveAliasTemplate {
+    fn drop(&mut self) {
+        ACTIVE_ALIAS_TEMPLATES.with(|active| active.borrow_mut().remove(&self.0));
+    }
 }
 
 thread_local! {
+    static ACTIVE_ALIAS_TEMPLATES: std::cell::RefCell<FxHashSet<(u64, bool)>> =
+        std::cell::RefCell::new(FxHashSet::default());
     /// A cycle invalidates every alias currently expanding on this thread.
     /// Ordinary unresolved source types do not change this generation.
     static ALIAS_CYCLE_GENERATION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -790,66 +843,43 @@ impl<'a> SemanticModel<'a> {
     /// alias's library, with each parameter's ordinal, id, and the argument an
     /// omitted use instantiates it to. `None` for alias cycles (invalid Dart).
     pub(super) fn alias_template(&self, alias: &TypeAlias) -> Option<Arc<AliasTemplate>> {
-        let key = (std::thread::current().id(), self.types.is_some());
-        {
-            let mut templates = alias.templates.0.lock().expect("alias templates");
-            if let Some(template) = templates.get(&key) {
-                return match template {
-                    AliasTemplateState::Ready(template) => Some(Arc::clone(template)),
-                    AliasTemplateState::Resolving | AliasTemplateState::Invalid => {
-                        mark_alias_cycle();
-                        None
-                    }
-                };
+        alias.templates.resolve(self.types.is_some(), || {
+            let model = SemanticModel {
+                file: Some(alias.file),
+                library: Some(alias.library),
+                parsed: Some(self.identities.parsed_file(alias.file)),
+                identities: self.identities,
+                types: self.types,
+            };
+            let mut scope = TypeParameterScope::default();
+            scope.push(alias.type_params(), &model);
+            let aliased = model.resolve_type_in(alias.aliased(), &scope);
+            let mut parameters: Vec<_> = alias
+                .type_params()
+                .enumerate()
+                .filter_map(|(ordinal, parameter)| {
+                    let ResolvedType::TypeParameter { id, bound, .. } =
+                        scope.lookup(parameter.name().name())?
+                    else {
+                        return None;
+                    };
+                    let default = if parameter.bound().is_some() {
+                        bound.as_ref().clone()
+                    } else {
+                        ResolvedType::Dynamic
+                    };
+                    Some((ordinal, id, default))
+                })
+                .collect();
+            let bounds = parameters
+                .iter()
+                .map(|(_, id, bound)| (id.clone(), bound.clone()))
+                .collect();
+            for (_, id, default) in &mut parameters {
+                *default = instantiate_parameter_bound(id, &bounds, &mut HashSet::new(), &model);
             }
-            templates.insert(key, AliasTemplateState::Resolving);
-        }
-        let generation = ALIAS_CYCLE_GENERATION.with(std::cell::Cell::get);
-        let model = SemanticModel {
-            file: Some(alias.file),
-            library: Some(alias.library),
-            parsed: Some(self.identities.parsed_file(alias.file)),
-            identities: self.identities,
-            types: self.types,
-        };
-        let mut scope = TypeParameterScope::default();
-        scope.push(alias.type_params(), &model);
-        let aliased = model.resolve_type_in(alias.aliased(), &scope);
-        let mut parameters: Vec<_> = alias
-            .type_params()
-            .enumerate()
-            .filter_map(|(ordinal, parameter)| {
-                let ResolvedType::TypeParameter { id, bound, .. } =
-                    scope.lookup(parameter.name().name())?
-                else {
-                    return None;
-                };
-                let default = if parameter.bound().is_some() {
-                    bound.as_ref().clone()
-                } else {
-                    ResolvedType::Dynamic
-                };
-                Some((ordinal, id, default))
-            })
-            .collect();
-        let bounds = parameters
-            .iter()
-            .map(|(_, id, bound)| (id.clone(), bound.clone()))
-            .collect();
-        for (_, id, default) in &mut parameters {
-            *default = instantiate_parameter_bound(id, &bounds, &mut HashSet::new(), &model);
-        }
-        let invalid = ALIAS_CYCLE_GENERATION.with(std::cell::Cell::get) != generation;
-        let template = (!invalid).then(|| Arc::new((parameters, aliased)));
-        alias.templates.0.lock().expect("alias templates").insert(
-            key,
-            template
-                .as_ref()
-                .map_or(AliasTemplateState::Invalid, |template| {
-                    AliasTemplateState::Ready(Arc::clone(template))
-                }),
-        );
-        template
+            Arc::new((parameters, aliased))
+        })
     }
 
     pub fn core_type(&self, name: &'static str, nullable: bool) -> ResolvedType {

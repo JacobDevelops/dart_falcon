@@ -283,6 +283,238 @@ fn cyclic_aliases_terminate_and_do_not_poison_unrelated_aliases() {
 }
 
 #[test]
+fn alias_template_panic_leaves_the_same_cache_resolvable() {
+    with_model("typedef Good = int;", |model| {
+        let identity = model.resolve_name("Good").unwrap();
+        let alias = model.identities.type_alias(&identity).unwrap();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            alias.templates.resolve(false, || {
+                panic!("interrupted alias expansion");
+            })
+        }));
+        assert!(result.is_err());
+        let first = model.alias_template(alias).unwrap();
+        let second = model.alias_template(alias).unwrap();
+        assert!(first.1.interface("dart:core", "int"));
+        assert!(Arc::ptr_eq(&first, &second));
+        assert!(
+            model
+                .resolve_type_name(&["Good"])
+                .unwrap()
+                .interface("dart:core", "int")
+        );
+    });
+}
+
+#[test]
+fn cloned_identities_rebuild_alias_templates() {
+    with_model("typedef Good = int;", |model| {
+        let identity = model.resolve_name("Good").unwrap();
+        let alias = model.identities.type_alias(&identity).unwrap();
+        let original = model.alias_template(alias).unwrap();
+        let identities = model.identities.clone();
+        let cloned_model = SemanticModel::new(
+            Path::new("/project/aliases.dart"),
+            identities.parsed_file(alias.file),
+            &identities,
+            None,
+        );
+        let cloned_alias = identities.type_alias(&identity).unwrap();
+        let cloned = cloned_model.alias_template(cloned_alias).unwrap();
+        assert!(!Arc::ptr_eq(&original, &cloned));
+        assert_eq!(original, cloned);
+        assert!(Arc::ptr_eq(
+            &cloned,
+            &cloned_model.alias_template(cloned_alias).unwrap()
+        ));
+    });
+}
+
+#[test]
+fn concurrent_alias_roots_share_the_published_template() {
+    with_model(
+        "typedef Root<T> = List<Leaf<T>>; typedef Leaf<T> = T;",
+        |model| {
+            let identity = model.resolve_name("Root").unwrap();
+            let alias = model.identities.type_alias(&identity).unwrap();
+            let barrier = std::sync::Barrier::new(2);
+            let templates = std::thread::scope(|scope| {
+                let spawn = || {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        model.alias_template(alias).unwrap()
+                    })
+                };
+                let first = spawn();
+                let second = spawn();
+                (first.join().unwrap(), second.join().unwrap())
+            });
+            assert!(Arc::ptr_eq(&templates.0, &templates.1));
+            assert!(templates.0.1.interface("dart:core", "List"));
+            assert!(Arc::ptr_eq(
+                &templates.0,
+                &model.alias_template(alias).unwrap()
+            ));
+        },
+    );
+}
+
+#[test]
+fn competing_cold_alias_computations_return_the_installed_winner() {
+    let templates = AliasTemplates::default();
+    let barrier = std::sync::Barrier::new(2);
+    let results = std::thread::scope(|scope| {
+        let spawn = || {
+            scope.spawn(|| {
+                templates
+                    .resolve(false, || {
+                        barrier.wait();
+                        Arc::new((Vec::new(), ResolvedType::Dynamic))
+                    })
+                    .unwrap()
+            })
+        };
+        let first = spawn();
+        let second = spawn();
+        (first.join().unwrap(), second.join().unwrap())
+    });
+    assert!(Arc::ptr_eq(&results.0, &results.1));
+    let typed = templates
+        .resolve(true, || Arc::new((Vec::new(), ResolvedType::Void)))
+        .unwrap();
+    assert_eq!(typed.1, ResolvedType::Void);
+    assert!(!Arc::ptr_eq(&results.0, &typed));
+}
+
+#[test]
+fn invalid_publication_wins_over_a_competing_candidate_and_invalidates_its_parent() {
+    let root = Arc::new(AliasTemplates::default());
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let thread_root = Arc::clone(&root);
+    let thread_barrier = Arc::clone(&barrier);
+    let thread = std::thread::spawn(move || {
+        assert!(
+            thread_root
+                .resolve(false, || {
+                    thread_barrier.wait();
+                    assert!(
+                        thread_root
+                            .resolve(false, || panic!("recursive build"))
+                            .is_none()
+                    );
+                    Arc::new((Vec::new(), ResolvedType::Unknown))
+                })
+                .is_none()
+        );
+        sender.send(()).unwrap();
+    });
+    let parent = AliasTemplates::default();
+    assert!(
+        parent
+            .resolve(false, || {
+                assert!(
+                    root.resolve(false, || {
+                        barrier.wait();
+                        receiver
+                            .recv_timeout(std::time::Duration::from_secs(5))
+                            .expect("invalid template must publish without waiting");
+                        Arc::new((Vec::new(), ResolvedType::Dynamic))
+                    })
+                    .is_none()
+                );
+                Arc::new((Vec::new(), ResolvedType::Dynamic))
+            })
+            .is_none()
+    );
+    thread.join().unwrap();
+    assert!(
+        parent
+            .resolve(false, || panic!("cached invalid parent"))
+            .is_none()
+    );
+}
+
+#[test]
+fn opposing_alias_roots_do_not_wait_and_invalidate_cached_parents() {
+    let roots = [
+        Arc::new(AliasTemplates::default()),
+        Arc::new(AliasTemplates::default()),
+    ];
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let threads: Vec<_> = (0..2)
+        .map(|index| {
+            let root = Arc::clone(&roots[index]);
+            let other = Arc::clone(&roots[1 - index]);
+            let barrier = Arc::clone(&barrier);
+            let sender = sender.clone();
+            std::thread::spawn(move || {
+                let result = root.resolve(false, || {
+                    barrier.wait();
+                    assert!(
+                        other
+                            .resolve(false, || {
+                                assert!(
+                                    root.resolve(false, || panic!("recursive build")).is_none()
+                                );
+                                Arc::new((Vec::new(), ResolvedType::Unknown))
+                            })
+                            .is_none()
+                    );
+                    Arc::new((Vec::new(), ResolvedType::Unknown))
+                });
+                sender.send(result.is_none()).unwrap();
+            })
+        })
+        .collect();
+    drop(sender);
+    for _ in 0..2 {
+        assert!(
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("opposing alias roots must finish without waiting")
+        );
+    }
+    for thread in threads {
+        thread.join().unwrap();
+    }
+    for root in roots {
+        let parent = AliasTemplates::default();
+        assert!(
+            parent
+                .resolve(false, || {
+                    assert!(root.resolve(false, || panic!("cached cycle")).is_none());
+                    Arc::new((Vec::new(), ResolvedType::Unknown))
+                })
+                .is_none()
+        );
+        assert!(
+            parent
+                .resolve(false, || panic!("cached invalid parent"))
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn cached_alias_cycles_invalidate_enclosing_model_templates() {
+    with_model(
+        "typedef A = B; typedef B = A; typedef Parent = List<A>;",
+        |model| {
+            assert_eq!(model.resolve_type_name(&["A"]), Some(ResolvedType::Unknown));
+            assert_eq!(
+                model.resolve_type_name(&["Parent"]),
+                Some(ResolvedType::Unknown)
+            );
+            let identity = model.resolve_name("Parent").unwrap();
+            let alias = model.identities.type_alias(&identity).unwrap();
+            assert!(model.alias_template(alias).is_none());
+        },
+    );
+}
+
+#[test]
 fn recursive_bounds_reverse_variance_in_function_parameters() {
     with_model("", |model| {
         let id = TypeParameterId {
