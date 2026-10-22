@@ -425,6 +425,12 @@ impl LspState {
         if paths.is_empty() {
             return Vec::new();
         }
+        // Discovery can capture new disk bytes while retaining a known context.
+        // Check original link locations before watcher normalization follows them.
+        let inputs_changed = paths.iter().any(|path| {
+            self.environment
+                .inputs_affected_by(self.environment_stamps.as_ref(), path)
+        });
         let paths: Vec<_> = paths.iter().map(|path| watched_path(path)).collect();
         let rules_changed = paths.iter().any(|path| {
             matches!(
@@ -432,12 +438,8 @@ impl LspState {
                 Some("falcon.json" | ".falcon.json")
             )
         });
-        // Discovery can capture new disk bytes while retaining a known context.
-        // A delivered input event must therefore invalidate even an equal key.
-        let inputs_changed = self
-            .environment_stamps
-            .as_ref()
-            .is_some_and(|key| paths.iter().any(|path| key.affected_by(path)))
+        // A delivered input event must invalidate even an equal key.
+        let inputs_changed = inputs_changed
             || paths
                 .iter()
                 .any(|path| self.environment.package_inputs_affected_by(path));
@@ -3631,6 +3633,107 @@ mod environment_regressions {
         assert!(normalized.is_file());
         std::fs::remove_file(&file).unwrap();
         assert_eq!(watched_path(&file).as_os_str(), expected.as_os_str());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn watched_lazily_discovered_package_lib_alias_retargeting_resets_environment() {
+        for canonical_parent in [false, true] {
+            let (dir, mut state, _, _) = dependency_fixture(false);
+            let home = dir.path().join("home");
+            std::os::unix::fs::symlink(dir.path(), &home).unwrap();
+            let package = home.join("lazy");
+            let first = dir.path().join("first");
+            let second = dir.path().join("second");
+            for directory in [&package, &first, &second] {
+                std::fs::create_dir(directory).unwrap();
+            }
+            std::fs::write(package.join("pubspec.yaml"), "name: lazy\n").unwrap();
+            let lib = package.join("lib");
+            std::os::unix::fs::symlink(&first, &lib).unwrap();
+            let source = package.join("source.dart");
+            assert_eq!(
+                state
+                    .environment
+                    .file_package(&source)
+                    .identity()
+                    .unwrap()
+                    .lib_root,
+                std::fs::canonicalize(&first).unwrap()
+            );
+            let event = if canonical_parent {
+                std::fs::canonicalize(&package).unwrap().join("lib")
+            } else {
+                lib.clone()
+            };
+            assert!(
+                !state
+                    .environment_stamps
+                    .as_ref()
+                    .unwrap()
+                    .affected_by(&event)
+            );
+            let resets = state.external_reset_count;
+            std::fs::remove_file(&lib).unwrap();
+            std::os::unix::fs::symlink(&second, &lib).unwrap();
+            state.watched_files_changed(&[event]);
+            assert_eq!(state.external_reset_count, resets + 1);
+            assert_eq!(
+                state
+                    .environment
+                    .file_package(&source)
+                    .identity()
+                    .unwrap()
+                    .lib_root,
+                std::fs::canonicalize(&second).unwrap()
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn watched_package_alias_retargeting_and_deletion_reset_external_facts() {
+        for canonical_parent in [false, true] {
+            let (dir, mut state, uri, _) = dependency_fixture(false);
+            let alias = dir.path().join("alias");
+            std::os::unix::fs::symlink(dir.path().join("dep"), &alias).unwrap();
+            let config = dir.path().join("app/.dart_tool/package_config.json");
+            std::fs::write(&config,
+                r#"{"configVersion":2,"packages":[{"name":"app","rootUri":"../","packageUri":""},{"name":"dep","rootUri":"../../alias","packageUri":"lib/"}]}"#).unwrap();
+            state.watched_files_changed(&[config]);
+            assert!(has_external_class(&state, "Original"));
+            let replacement = dir.path().join("replacement");
+            std::fs::create_dir_all(replacement.join("lib")).unwrap();
+            std::fs::write(replacement.join("lib/api.dart"), "class Replacement {}").unwrap();
+            std::fs::remove_file(&alias).unwrap();
+            std::os::unix::fs::symlink(&replacement, &alias).unwrap();
+            let event = if canonical_parent {
+                std::fs::canonicalize(dir.path()).unwrap().join("alias")
+            } else {
+                alias.clone()
+            };
+            let resets = state.external_reset_count;
+            assert!(
+                state
+                    .watched_files_changed(&[dir.path().join("unrelated")])
+                    .is_empty()
+            );
+            assert_eq!(state.external_reset_count, resets);
+            assert!(has_external_class(&state, "Original"));
+            let published = state.watched_files_changed(std::slice::from_ref(&event));
+            assert!(
+                published
+                    .iter()
+                    .any(|(published_uri, _)| published_uri == &uri)
+            );
+            assert_eq!(state.external_reset_count, resets + 1);
+            assert!(has_external_class(&state, "Replacement"));
+            assert!(!has_external_class(&state, "Original"));
+            std::fs::remove_file(&alias).unwrap();
+            state.watched_files_changed(&[event]);
+            assert_eq!(state.external_reset_count, resets + 2);
+            assert!(!has_external_class(&state, "Replacement"));
+        }
     }
 
     #[test]

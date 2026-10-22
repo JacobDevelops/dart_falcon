@@ -10,7 +10,7 @@ use crate::{PackageIdentity, canonical_or_lexical};
 pub struct PackageMetadata {
     pub manifest: PathBuf,
     pub identity: PackageIdentity,
-    root: PathBuf,
+    pub(super) root: PathBuf,
     yaml: Option<serde_yaml::Value>,
 }
 
@@ -450,14 +450,84 @@ mod tests {
         std::fs::create_dir(&directory).unwrap();
         std::os::unix::fs::symlink(&directory, &alias).unwrap();
         for (input, event) in [(&directory, &alias), (&alias, &directory)] {
-            let stamps = super::super::EnvironmentCacheKey {
-                files: vec![(input.join("missing/pubspec.yaml"), None)],
-                roots: Vec::new(),
-                sdk_environment: Default::default(),
-            };
+            let mut environment = AnalysisEnvironment::default();
+            environment
+                .config_candidates
+                .insert(input.join("missing/pubspec.yaml"));
+            let stamps = environment.config_stamps();
             assert!(stamps.affected_by(&event.join("missing")));
             assert!(stamps.affected_by(&event.join("missing/pubspec.yaml")));
             assert!(!stamps.affected_by(&event.join("unrelated")));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_events_retain_the_captured_symlink_target() {
+        let root = tempfile::tempdir().unwrap();
+        let first = root.path().join("first");
+        let second = root.path().join("second");
+        let alias = root.path().join("alias");
+        let bridge = root.path().join("bridge");
+        let home = root.path().join("home");
+        for directory in [&first, &second] {
+            std::fs::create_dir(directory).unwrap();
+            std::fs::write(directory.join("pubspec.yaml"), "name: dependency\n").unwrap();
+        }
+        std::os::unix::fs::symlink(&first, &bridge).unwrap();
+        std::os::unix::fs::symlink(&bridge, &alias).unwrap();
+        std::os::unix::fs::symlink(root.path(), &home).unwrap();
+        let mut environment = AnalysisEnvironment::default();
+        environment
+            .config_candidates
+            .insert(home.join("alias/pubspec.yaml"));
+        let captured = environment.config_stamps();
+        std::fs::remove_file(&bridge).unwrap();
+        std::os::unix::fs::symlink(&second, &bridge).unwrap();
+        assert!(captured.affected_by(&first.join("pubspec.yaml")));
+        assert!(captured.affected_by(&home.join("alias/pubspec.yaml")));
+        let canonical_parent = std::fs::canonicalize(root.path()).unwrap();
+        assert!(captured.affected_by(&canonical_parent.join("bridge")));
+        assert!(!captured.affected_by(&root.path().join("unrelated")));
+        let refreshed = environment.config_stamps();
+        assert_ne!(captured, refreshed);
+        assert!(refreshed.affected_by(&second.join("pubspec.yaml")));
+        assert!(!refreshed.affected_by(&first.join("pubspec.yaml")));
+        std::fs::remove_file(&alias).unwrap();
+        assert!(refreshed.affected_by(&canonical_parent.join("alias")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_events_capture_links_after_physical_parent_traversal() {
+        let root = tempfile::tempdir().unwrap();
+        let first = root.path().join("first");
+        let second = root.path().join("second");
+        let nested = root.path().join("x/y");
+        let bridge = root.path().join("x/b");
+        for directory in [&first, &second, &nested] {
+            std::fs::create_dir_all(directory).unwrap();
+        }
+        for directory in [&first, &second] {
+            std::fs::write(directory.join("pubspec.yaml"), "name: dependency\n").unwrap();
+        }
+        std::os::unix::fs::symlink("x/y", root.path().join("a")).unwrap();
+        std::os::unix::fs::symlink("../b", nested.join("link")).unwrap();
+        std::os::unix::fs::symlink("a/../b", root.path().join("c")).unwrap();
+        let canonical_root = std::fs::canonicalize(root.path()).unwrap();
+        for input in ["a/link/pubspec.yaml", "c/pubspec.yaml"] {
+            std::os::unix::fs::symlink(&first, &bridge).unwrap();
+            let mut environment = AnalysisEnvironment::default();
+            environment
+                .config_candidates
+                .insert(root.path().join(input));
+            let captured = environment.config_stamps();
+            std::fs::remove_file(&bridge).unwrap();
+            std::os::unix::fs::symlink(&second, &bridge).unwrap();
+            assert!(captured.affected_by(&canonical_root.join("x/b")), "{input}");
+            assert!(captured.affected_by(&first.join("pubspec.yaml")));
+            assert_ne!(captured, environment.config_stamps());
+            std::fs::remove_file(&bridge).unwrap();
         }
     }
 

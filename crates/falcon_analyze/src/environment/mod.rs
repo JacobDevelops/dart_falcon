@@ -30,25 +30,37 @@ struct Context {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnvironmentCacheKey {
-    files: Vec<(PathBuf, Option<Vec<u8>>)>,
+    files: Vec<(PathBuf, PathBuf, Option<Vec<u8>>)>,
     roots: Vec<(PathBuf, PathBuf)>,
+    aliases: Vec<PathBuf>,
     sdk_environment: [Option<std::ffi::OsString>; 3],
 }
 
 impl EnvironmentCacheKey {
     /// File events also represent replacement or deletion of an input's parent.
     pub fn affected_by(&self, path: &Path) -> bool {
-        let canonical = packages::canonical_comparison_path(path);
-        let affected = |input: &Path| {
-            input.starts_with(path)
-                || input.starts_with(&canonical)
-                || packages::canonical_comparison_path(input).starts_with(&canonical)
-        };
-        self.files.iter().any(|(input, _)| affected(input))
+        self.affected_by_lexical(path) || {
+            let canonical = canonical_event_path(path);
+            canonical != path && self.affected_by_lexical(&canonical)
+        }
+    }
+
+    fn affected_by_lexical(&self, path: &Path) -> bool {
+        self.files
+            .iter()
+            .any(|(input, resolved, _)| input.starts_with(path) || resolved.starts_with(path))
             || self
                 .roots
                 .iter()
-                .any(|(raw, resolved)| affected(raw) || affected(resolved))
+                .any(|(raw, resolved)| raw.starts_with(path) || resolved.starts_with(path))
+            || self.aliases.iter().any(|alias| alias.starts_with(path))
+    }
+}
+
+fn canonical_event_path(path: &Path) -> PathBuf {
+    match path.parent().zip(path.file_name()) {
+        Some((parent, name)) => packages::canonical_comparison_path(parent).join(name),
+        None => packages::canonical_comparison_path(path),
     }
 }
 
@@ -336,13 +348,36 @@ impl AnalysisEnvironment {
             files.insert(root.join("version"));
             files.insert(root.join("lib/libraries.json"));
         }
+        // Watch links at their own locations, not only their captured targets.
+        let mut aliases = std::collections::BTreeSet::new();
+        let mut inspected = std::collections::BTreeSet::new();
+        let mut pending: std::collections::BTreeSet<_> = files
+            .iter()
+            .chain(&roots)
+            .flat_map(|path| path.ancestors().map(Path::to_path_buf))
+            .collect();
+        while let Some(path) = pending.pop_first() {
+            if inspected.contains(&path) {
+                continue;
+            }
+            if let Ok(target) = std::fs::read_link(&path)
+                && let Some((parent, name)) = path.parent().zip(path.file_name())
+                && let Ok(parent) = std::fs::canonicalize(parent)
+                && aliases.insert(parent.join(name))
+            {
+                let target = parent.join(target);
+                pending.extend(target.ancestors().map(Path::to_path_buf));
+            }
+            inspected.insert(path);
+        }
         EnvironmentCacheKey {
             files: files
                 .into_iter()
                 .map(|path| {
                     // Fingerprints include synthetic probes; real loads report read failures.
                     let contents = std::fs::read(&path).ok();
-                    (path, contents)
+                    let resolved = packages::canonical_comparison_path(&path);
+                    (path, resolved, contents)
                 })
                 .collect(),
             roots: roots
@@ -352,7 +387,20 @@ impl AnalysisEnvironment {
                     (path, resolved)
                 })
                 .collect(),
+            aliases: aliases.into_iter().collect(),
             sdk_environment: ["DART_SDK", "FLUTTER_ROOT", "PATH"].map(std::env::var_os),
+        }
+    }
+
+    /// Match captured and lazily discovered inputs, preserving link event locations.
+    pub fn inputs_affected_by(&self, stamps: Option<&EnvironmentCacheKey>, path: &Path) -> bool {
+        let affected = |event: &Path| {
+            stamps.is_some_and(|key| key.affected_by_lexical(event))
+                || self.package_inputs_affected_by(event)
+        };
+        affected(path) || {
+            let canonical = canonical_event_path(path);
+            canonical != path && affected(&canonical)
         }
     }
 
@@ -371,6 +419,8 @@ impl AnalysisEnvironment {
                     .unwrap()
                     .join("lib")
                     .starts_with(path)
+                || package.root.join("pubspec.yaml").starts_with(path)
+                || package.root.join("lib").starts_with(path)
                 || package.identity.lib_root.starts_with(path)
         })
     }
