@@ -55,7 +55,7 @@ Owns a new `cargo xtask e2e` and its CI jobs. Independent of the engine; can sta
 
 #### 26. Clippy pedantic
 
-Touches every crate, so it runs alone after the refactors above; earlier it would conflict with every parallel batch, and its `too_many_lines` hits overlap batches 15-17.
+Touches every crate, so it runs alone after the refactors above; earlier it would conflict with every parallel batch.
 
 - [ ] **Clippy pedantic.** Enable `pedantic` in `[workspace.lints.clippy]`, inherited by every crate, under the existing `-D warnings` gate. A trial run reported 4,546 warnings, 3,492 with machine-applicable suggestions.
 - [ ] **Decompose long functions.** Clippy's `too_many_lines` flags 242 functions over 100 lines (`infer_non_call` 649, `semantic_scope::visit_expr` 568, `add_declarations` 532). Moving files doesn't fix these.
