@@ -1218,6 +1218,10 @@ class Child extends Base {
     final shared = 3;
     print(shared);
     print(libraryValue);
+    {
+      final Base = base;
+      print(Base.value);
+    }
   }
 }
 extension Extra on Base {
@@ -1279,7 +1283,9 @@ extension on Base {
             let span = node.span();
             let text = &self.source[span.start..span.end];
             let (owner, kind, is_static, name) = match text {
-                "base.value" | "super.value" => ("Base", MemberSelectorKind::Read, false, "value"),
+                "base.value" | "super.value" | "Base.value" => {
+                    ("Base", MemberSelectorKind::Read, false, "value")
+                }
                 "Base.shared" => ("Base", MemberSelectorKind::Field, true, "shared"),
                 "Base.named" => ("Base", MemberSelectorKind::Constructor, false, "named"),
                 "base.extra" => ("Extra", MemberSelectorKind::Read, false, "extra"),
@@ -1336,7 +1342,7 @@ extension on Base {
         program,
         SemanticState::new(program, &context).unwrap(),
     );
-    assert_eq!(references.observed, 13);
+    assert_eq!(references.observed, 14);
 }
 
 #[test]
@@ -1498,4 +1504,145 @@ void optional(bool flag) {
         SemanticState::new(program, &context).unwrap(),
     );
     assert_eq!(observed.0, 7);
+}
+
+#[test]
+fn lexical_shadowing_restores_declarations_constants_and_root_members() {
+    use falcon_analyze::{IdentityIndex, IdentitySource, TypeIndex};
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    let source = r#"
+class Owner {
+  int value = 0;
+  void probe(Object input) {
+    expectRoot(value);
+    {
+      const value = 1;
+      expectOuter(value);
+      {
+        const value = 2;
+        expectInner(value);
+        () { expectInner(value); };
+      }
+      expectOuter(value);
+      {
+        int value = 3;
+        expectMutable(value);
+        () { expectMutable(value); };
+      }
+      if (input case int value when expectPattern(value)) {
+        expectPattern(value);
+      } else {
+        expectOuter(value);
+      }
+      expectOuter(value);
+      for (int value = 4; value < 5; value++) {
+        expectLoop(value);
+        () { expectLoop(value); };
+      }
+      expectOuter(value);
+      try {} catch (value) {
+        expectCatch(value);
+        () { expectCatch(value); };
+      }
+      expectOuter(value);
+    }
+    expectRoot(value);
+  }
+}
+"#;
+    let result = parse(source);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let parsed = Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: result.tree,
+    });
+    let path = Path::new("/project/main.dart");
+    let program = parsed.program();
+    let identities = IdentityIndex::from_project_files(
+        &[IdentitySource {
+            path,
+            parsed: &parsed,
+            has_parse_errors: false,
+        }],
+        &[],
+    );
+    let types = TypeIndex::from_resolved_files(
+        [(
+            path,
+            falcon_analyze::LibrarySource {
+                program,
+                has_parse_errors: false,
+                has_unresolved_parts: false,
+            },
+        )],
+        &identities,
+    );
+    let signatures = SignatureIndex::from_project_files(
+        &[(path.to_path_buf(), Arc::clone(&parsed))],
+        &identities,
+        &types,
+    );
+    let config = FalconConfig::default();
+    let context = AnalyzeContext::new(path, &config, &parsed)
+        .with_identities(&identities)
+        .with_types(&types)
+        .with_signatures(&signatures);
+    struct Observed<'s> {
+        source: &'s str,
+        calls: usize,
+    }
+    impl<'a> SemanticRuleVisitor<'a> for Observed<'_> {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            let Expr::Call(call) = node else {
+                return;
+            };
+            let Expr::Ident(name) = call.callee() else {
+                return;
+            };
+            let (declaration, constant, ty) = match name.name() {
+                "expectRoot" => (None, None, "int"),
+                "expectOuter" => (Some("value = 1"), Some("1"), "int"),
+                "expectInner" => (Some("value = 2"), Some("2"), "int"),
+                "expectMutable" => (Some("value = 3"), None, "int"),
+                "expectPattern" => (Some("value when"), None, "int"),
+                "expectLoop" => (Some("value = 4"), None, "int"),
+                "expectCatch" => (Some("value) {"), None, "Object"),
+                _ => return,
+            };
+            let argument = call.args().positional().next().unwrap();
+            assert_eq!(state.infer(argument), state.model.core_type(ty, false));
+            assert_eq!(state.is_own_field("value"), declaration.is_none());
+            if let Some(declaration) = declaration {
+                let span = state.environment.binding_declaration("value").unwrap();
+                assert_eq!(span.start, self.source.find(declaration).unwrap());
+                assert_eq!(&self.source[span.start..span.end], "value");
+                assert!(state.implicit_member_type("value").is_none());
+                assert!(state.referenced_declaration(argument, false).is_none());
+            } else {
+                assert!(state.referenced_declaration(argument, false).is_some());
+            }
+            assert_eq!(
+                state.local_constant("value").map(|value| {
+                    let span = value.span();
+                    &self.source[span.start..span.end]
+                }),
+                constant,
+            );
+            assert_eq!(
+                state.visible_local_constants().contains_key("value"),
+                constant.is_some(),
+            );
+            self.calls += 1;
+        }
+    }
+    let mut observed = Observed { source, calls: 0 };
+    visit_program(
+        &mut observed,
+        program,
+        SemanticState::new(program, &context).unwrap(),
+    );
+    assert_eq!(observed.calls, 18);
 }

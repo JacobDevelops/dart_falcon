@@ -1,4 +1,5 @@
 use super::*;
+use crate::resolve::lexical_scope::LexicalScopes;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct FlowBinding {
@@ -30,7 +31,7 @@ impl FlowBinding {
 #[derive(Debug, Clone, Default)]
 pub struct TypeEnvironment {
     // Branch snapshots share scopes until a write touches that scope.
-    pub(super) scopes: Vec<Arc<FxHashMap<String, FlowBinding>>>,
+    pub(super) scopes: LexicalScopes<Arc<FxHashMap<String, FlowBinding>>>,
     callable_boundaries: Vec<usize>,
     /// Whether the library's language version promotes private fields.
     pub(super) field_promotions: bool,
@@ -39,7 +40,7 @@ pub struct TypeEnvironment {
 impl TypeEnvironment {
     pub fn new() -> Self {
         Self {
-            scopes: vec![Arc::new(FxHashMap::default())],
+            scopes: LexicalScopes::new(),
             callable_boundaries: Vec::new(),
             field_promotions: false,
         }
@@ -62,7 +63,7 @@ impl TypeEnvironment {
             && self
                 .scopes
                 .iter()
-                .zip(&other.scopes)
+                .zip(other.scopes.iter())
                 .all(|(left, right)| Arc::ptr_eq(left, right))
     }
 
@@ -82,13 +83,11 @@ impl TypeEnvironment {
     }
 
     pub fn push_scope(&mut self) {
-        self.scopes.push(Arc::new(FxHashMap::default()));
+        self.scopes.push_scope();
     }
 
     pub fn pop_scope(&mut self) {
-        if self.scopes.len() > 1 {
-            self.scopes.pop();
-        }
+        self.scopes.pop_scope();
     }
 
     pub fn declare(&mut self, name: impl Into<String>, ty: ResolvedType) {
@@ -129,9 +128,9 @@ impl TypeEnvironment {
         ty: ResolvedType,
         promotable: bool,
     ) -> &mut FlowBinding {
-        Arc::make_mut(self.scopes.last_mut().expect("root scope"))
-            .entry(name)
-            .insert_entry(FlowBinding {
+        self.scopes.declare(
+            name,
+            FlowBinding {
                 declared: ty,
                 declaration: None,
                 promoted: Vec::new(),
@@ -140,8 +139,8 @@ impl TypeEnvironment {
                 captured: false,
                 local_function: false,
                 fields: HashMap::new(),
-            })
-            .into_mut()
+            },
+        )
     }
 
     pub fn declare_local_function(&mut self, name: impl Into<String>, ty: ResolvedType) {
@@ -181,24 +180,17 @@ impl TypeEnvironment {
     }
 
     pub fn promoted_this_field(&self, field: &str) -> Option<ResolvedType> {
-        let scope = self
-            .scopes
-            .iter()
-            .rev()
-            .find(|scope| scope.contains_key("this"))?;
+        let (index, receiver) = self.scopes.lookup("this")?;
+        let scope = &self.scopes[index];
         if let Some(binding) = scope.get(field) {
             return binding.promoted.last().cloned();
         }
-        scope.get("this")?.fields.get(field).cloned()
+        receiver.fields.get(field).cloned()
     }
 
     pub fn promote_this_field(&mut self, field: &str, ty: ResolvedType) {
-        if let Some(scope) = self
-            .scopes
-            .iter_mut()
-            .rev()
-            .find(|scope| scope.contains_key("this"))
-        {
+        if let Some((index, _)) = self.scopes.lookup("this") {
+            let scope = &mut self.scopes[index];
             if let Some(binding) = scope.get(field) {
                 if !binding.promotable
                     || binding.captured
@@ -224,16 +216,11 @@ impl TypeEnvironment {
     }
 
     pub(super) fn binding(&self, name: &str) -> Option<&FlowBinding> {
-        self.scopes.iter().rev().find_map(|scope| scope.get(name))
+        self.scopes.lookup(name).map(|(_, binding)| binding)
     }
 
     fn binding_mut(&mut self, name: &str) -> Option<&mut FlowBinding> {
-        let scope = self
-            .scopes
-            .iter_mut()
-            .rev()
-            .find(|scope| scope.contains_key(name))?;
-        Arc::make_mut(scope).get_mut(name)
+        self.scopes.lookup_mut(name)
     }
 
     pub fn declared_type(&self, name: &str) -> ResolvedType {
@@ -361,11 +348,9 @@ impl TypeEnvironment {
 
     pub(super) fn record_write(&mut self, name: &str) {
         if let Some(boundary) = self.callable_boundaries.last()
-            && let Some(index) = self.binding_depth(name)
+            && let Some((index, binding)) = self.scopes.lookup(name)
             && index < *boundary
-            && self.scopes[index]
-                .get(name)
-                .is_some_and(|binding| !binding.captured)
+            && !binding.captured
             && let Some(binding) = Arc::make_mut(&mut self.scopes[index]).get_mut(name)
         {
             binding.captured = true;
@@ -373,7 +358,7 @@ impl TypeEnvironment {
     }
 
     pub fn demote_captured(&mut self) {
-        for scope in &mut self.scopes {
+        for scope in self.scopes.iter_mut() {
             if !scope.values().any(|binding| {
                 binding.captured && (!binding.promoted.is_empty() || !binding.fields.is_empty())
             }) {
@@ -481,9 +466,7 @@ impl TypeEnvironment {
 
     /// The index of the innermost open scope binding `name`.
     pub fn binding_depth(&self, name: &str) -> Option<usize> {
-        self.scopes
-            .iter()
-            .rposition(|scope| scope.contains_key(name))
+        self.scopes.lookup(name).map(|(index, _)| index)
     }
 
     pub fn is_bound(&self, name: &str) -> bool {

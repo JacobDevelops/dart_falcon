@@ -6,6 +6,8 @@ use falcon_syntax::cst::visit::{
 };
 use falcon_syntax::cst::*;
 
+use super::lexical_scope::LexicalScopes;
+
 #[derive(Clone, Copy)]
 enum Binding {
     Parameter(usize),
@@ -44,9 +46,9 @@ pub fn used_primary_constructor_parameters<'a>(
             ClassMember::PrimaryConstructorBody(body) => {
                 collector.visit_initializers(body.initializers());
                 if let Some(body) = body.body() {
-                    collector.push_scope();
+                    collector.scopes.push_scope();
                     walk_function_body(&mut collector, body);
-                    collector.pop_scope();
+                    collector.scopes.pop_scope();
                 }
             }
             ClassMember::Field(field) if !field.is_static() && !field.is_late() => {
@@ -95,7 +97,7 @@ pub struct LocalWrite {
 /// binding (fields, top-level variables) are not reported.
 pub fn local_writes(program: Program<'_>) -> Vec<LocalWrite> {
     let mut collector = UsageCollector {
-        scopes: vec![HashMap::new()],
+        scopes: LexicalScopes::new(),
         used: HashSet::new(),
         writes: Some(Vec::new()),
         bound_uses: None,
@@ -110,7 +112,7 @@ pub fn local_writes(program: Program<'_>) -> Vec<LocalWrite> {
 /// top-level declaration.
 pub fn locally_bound_identifiers(program: Program<'_>) -> HashSet<usize> {
     let mut collector = UsageCollector {
-        scopes: vec![HashMap::new()],
+        scopes: LexicalScopes::new(),
         used: HashSet::new(),
         writes: None,
         bound_uses: Some(HashMap::new()),
@@ -129,7 +131,7 @@ pub fn locally_bound_identifiers(program: Program<'_>) -> HashSet<usize> {
 /// the map name members or top-level declarations.
 pub fn local_declarations(program: Program<'_>) -> HashMap<usize, NodeId> {
     let mut collector = UsageCollector {
-        scopes: vec![HashMap::new()],
+        scopes: LexicalScopes::new(),
         used: HashSet::new(),
         writes: Some(Vec::new()),
         bound_uses: Some(HashMap::new()),
@@ -144,7 +146,7 @@ pub fn local_declarations(program: Program<'_>) -> HashMap<usize, NodeId> {
 }
 
 struct UsageCollector {
-    scopes: Vec<HashMap<String, Binding>>,
+    scopes: LexicalScopes<HashMap<String, Binding>>,
     used: HashSet<usize>,
     /// `Some` when every local binding is tracked and writes are recorded.
     writes: Option<Vec<LocalWrite>>,
@@ -156,54 +158,32 @@ struct UsageCollector {
 impl UsageCollector {
     fn new(params: FormalParamList<'_>) -> Self {
         let mut collector = Self {
-            scopes: vec![HashMap::new()],
+            scopes: LexicalScopes::new(),
             used: HashSet::new(),
             writes: None,
             bound_uses: None,
         };
         for param in params.params() {
-            collector.declare(
-                param.name().name(),
+            collector.scopes.declare(
+                param.name().name().to_owned(),
                 Binding::Parameter(param.name().span().start),
             );
         }
         collector
     }
 
-    fn push_scope(&mut self) {
-        self.scopes.push(HashMap::new());
-    }
-
-    fn pop_scope(&mut self) {
-        self.scopes.pop();
-    }
-
-    fn declare(&mut self, name: &str, binding: Binding) {
-        self.scopes
-            .last_mut()
-            .expect("lexical scope")
-            .insert(name.to_string(), binding);
-    }
-
-    fn lookup(&self, name: &str) -> Option<Binding> {
-        self.scopes
-            .iter()
-            .rev()
-            .find_map(|scope| scope.get(name).copied())
-    }
-
     fn use_name(&mut self, name: &str) {
-        if let Some(Binding::Parameter(span_start)) = self.lookup(name) {
-            self.used.insert(span_start);
+        if let Some((_, Binding::Parameter(span_start))) = self.scopes.lookup(name) {
+            self.used.insert(*span_start);
         }
     }
 
     fn use_identifier(&mut self, identifier: Identifier<'_>) {
-        if let Some(binding) = self.lookup(identifier.name())
+        if let Some((_, binding)) = self.scopes.lookup(identifier.name())
             && let Some(bound) = self.bound_uses.as_mut()
         {
             let declaration = match binding {
-                Binding::Declaration(declaration) => Some(declaration),
+                Binding::Declaration(declaration) => Some(*declaration),
                 Binding::Parameter(_) | Binding::Other => None,
             };
             bound.insert(identifier.span().start, declaration);
@@ -218,18 +198,18 @@ impl UsageCollector {
         } else {
             Binding::Other
         };
-        self.declare(name.name(), binding);
+        self.scopes.declare(name.name().to_owned(), binding);
     }
 
     fn record_write(&mut self, name: &str, kind: LocalWriteKind, span: Span) {
         if self.writes.is_none() {
             return;
         }
-        if let Some(Binding::Declaration(declaration)) = self.lookup(name)
+        if let Some((_, Binding::Declaration(declaration))) = self.scopes.lookup(name)
             && let Some(writes) = self.writes.as_mut()
         {
             writes.push(LocalWrite {
-                declaration,
+                declaration: *declaration,
                 kind,
                 span,
             });
@@ -278,27 +258,27 @@ impl UsageCollector {
         params: Option<FormalParamList<'a>>,
         body: Option<FunctionBody<'a>>,
     ) {
-        self.push_scope();
+        self.scopes.push_scope();
         if let Some(params) = params {
             self.bind_params(params);
         }
         if let Some(body) = body {
             walk_function_body(self, body);
         }
-        self.pop_scope();
+        self.scopes.pop_scope();
     }
 
     fn visit_nested_function<'a>(&mut self, params: FormalParamList<'a>, body: FunctionBody<'a>) {
-        self.push_scope();
+        self.scopes.push_scope();
         self.bind_params(params);
         walk_function_body(self, body);
-        self.pop_scope();
+        self.scopes.pop_scope();
     }
 
     fn visit_scoped_stmt(&mut self, statement: Stmt<'_>) {
-        self.push_scope();
+        self.scopes.push_scope();
         self.visit_stmt(statement);
-        self.pop_scope();
+        self.scopes.pop_scope();
     }
 
     fn visit_local_declaration(&mut self, declaration: LocalVarDecl<'_>) {
@@ -366,23 +346,23 @@ impl<'a> Visitor<'a> for UsageCollector {
                 let pattern = case.pattern();
                 let guard = case.guard();
                 self.visit_expr(expression);
-                self.push_scope();
+                self.scopes.push_scope();
                 self.visit_pattern(pattern);
                 self.bind_pattern(pattern);
                 if let Some(guard) = guard {
                     self.visit_expr(guard);
                 }
                 self.visit_element(then_element);
-                self.pop_scope();
+                self.scopes.pop_scope();
                 if let Some(element) = else_element {
                     self.visit_element(element);
                 }
             }
             ElementKind::For { header, body, .. } => {
-                self.push_scope();
+                self.scopes.push_scope();
                 self.visit_for_header(header);
                 self.visit_element(body);
-                self.pop_scope();
+                self.scopes.pop_scope();
             }
             kind => walk_element(self, kind),
         }
@@ -401,12 +381,12 @@ impl<'a> Visitor<'a> for UsageCollector {
     }
 
     fn visit_setter_decl(&mut self, node: SetterDecl<'a>) {
-        self.push_scope();
+        self.scopes.push_scope();
         self.bind(node.param());
         if let Some(body) = node.body() {
             walk_function_body(self, body);
         }
-        self.pop_scope();
+        self.scopes.pop_scope();
     }
 
     fn visit_class_member(&mut self, node: ClassMember<'a>) {
@@ -421,7 +401,7 @@ impl<'a> Visitor<'a> for UsageCollector {
     fn visit_constructor_decl(&mut self, node: ConstructorDecl<'a>) {
         // Initializing formals are in scope only in the initializer list; in the
         // body `x` names the field again.
-        self.push_scope();
+        self.scopes.push_scope();
         for param in node
             .params()
             .params()
@@ -429,7 +409,7 @@ impl<'a> Visitor<'a> for UsageCollector {
         {
             self.bind(param.name());
         }
-        self.push_scope();
+        self.scopes.push_scope();
         for param in node
             .params()
             .params()
@@ -438,21 +418,21 @@ impl<'a> Visitor<'a> for UsageCollector {
             self.bind(param.name());
         }
         self.visit_initializers(node.initializers());
-        self.pop_scope();
+        self.scopes.pop_scope();
         if let Some(body) = node.body() {
             walk_function_body(self, body);
         }
-        self.pop_scope();
+        self.scopes.pop_scope();
     }
 
     fn visit_stmt(&mut self, node: Stmt<'a>) {
         match node {
             Stmt::Block(block) => {
-                self.push_scope();
+                self.scopes.push_scope();
                 for statement in block.stmts() {
                     self.visit_stmt(statement);
                 }
-                self.pop_scope();
+                self.scopes.pop_scope();
             }
             Stmt::LocalVar(declaration) => self.visit_local_declaration(declaration),
             Stmt::PatternDecl(declaration) => {
@@ -486,21 +466,21 @@ impl<'a> Visitor<'a> for UsageCollector {
                     self.visit_expr(case.expr());
                     let pattern = case.pattern();
                     let guard = case.guard();
-                    self.push_scope();
+                    self.scopes.push_scope();
                     self.visit_pattern(pattern);
                     self.bind_pattern(pattern);
                     if let Some(guard) = guard {
                         self.visit_expr(guard);
                     }
                     self.visit_scoped_stmt(statement.then_branch());
-                    self.pop_scope();
+                    self.scopes.pop_scope();
                     if let Some(else_branch) = statement.else_branch() {
                         self.visit_scoped_stmt(else_branch);
                     }
                 }
             },
             Stmt::For(statement) => {
-                self.push_scope();
+                self.scopes.push_scope();
                 if let Some(init) = statement.header().init() {
                     self.visit_for_init(init);
                 }
@@ -511,12 +491,12 @@ impl<'a> Visitor<'a> for UsageCollector {
                     self.visit_expr(update);
                 }
                 self.visit_scoped_stmt(statement.body());
-                self.pop_scope();
+                self.scopes.pop_scope();
             }
             Stmt::Switch(statement) => {
                 self.visit_expr(statement.subject());
                 for case in statement.cases() {
-                    self.push_scope();
+                    self.scopes.push_scope();
                     for kind in case.cases() {
                         if let SwitchCaseKind::Pattern(label) = kind {
                             self.visit_pattern(label.pattern());
@@ -531,17 +511,17 @@ impl<'a> Visitor<'a> for UsageCollector {
                     for statement in case.body() {
                         self.visit_stmt(statement);
                     }
-                    self.pop_scope();
+                    self.scopes.pop_scope();
                 }
             }
             Stmt::TryCatch(statement) => {
-                self.push_scope();
+                self.scopes.push_scope();
                 for statement in statement.body().stmts() {
                     self.visit_stmt(statement);
                 }
-                self.pop_scope();
+                self.scopes.pop_scope();
                 for catch in statement.catches() {
-                    self.push_scope();
+                    self.scopes.push_scope();
                     if let Some(name) = catch.exception_var() {
                         self.bind(name);
                     }
@@ -551,14 +531,14 @@ impl<'a> Visitor<'a> for UsageCollector {
                     for statement in catch.body().stmts() {
                         self.visit_stmt(statement);
                     }
-                    self.pop_scope();
+                    self.scopes.pop_scope();
                 }
                 if let Some(finally) = statement.finally() {
-                    self.push_scope();
+                    self.scopes.push_scope();
                     for statement in finally.stmts() {
                         self.visit_stmt(statement);
                     }
-                    self.pop_scope();
+                    self.scopes.pop_scope();
                 }
             }
             Stmt::LocalFunc(function) => {
@@ -630,14 +610,14 @@ impl<'a> Visitor<'a> for UsageCollector {
             Expr::Switch(switch) => {
                 self.visit_expr(switch.subject());
                 for arm in switch.arms() {
-                    self.push_scope();
+                    self.scopes.push_scope();
                     self.visit_pattern(arm.pattern());
                     self.bind_pattern(arm.pattern());
                     if let Some(guard) = arm.guard() {
                         self.visit_expr(guard);
                     }
                     self.visit_expr(arm.body());
-                    self.pop_scope();
+                    self.scopes.pop_scope();
                 }
             }
             Expr::Assign(assignment) => {
@@ -819,6 +799,39 @@ mod tests {
         assert!(!bound.contains(&offsets[0]));
         assert!(!bound.contains(&offsets[2]));
         assert!(local_writes(program).is_empty());
+    }
+
+    #[test]
+    fn nested_local_binding_restores_outer_parameter() {
+        let source = "void f(int x) { { var x = 0; print(x); } print(x); }";
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let program = parsed.tree.program(source);
+        let offsets: Vec<_> = source
+            .match_indices('x')
+            .map(|(offset, _)| offset)
+            .collect();
+        let declarations = local_declarations(program);
+        for (usage, declaration) in [(2, 1), (3, 0)] {
+            assert_eq!(
+                declarations.get(&offsets[usage]),
+                Some(
+                    &parsed
+                        .tree
+                        .token_at(source, offsets[declaration])
+                        .unwrap()
+                        .parent()
+                        .id()
+                )
+            );
+        }
+        let TopLevelDecl::Function(function) = program.declarations().first().unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            used_parameters(function.params().unwrap(), function.body().unwrap()),
+            HashSet::from([offsets[0]])
+        );
     }
 
     #[test]

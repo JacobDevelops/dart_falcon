@@ -3,6 +3,7 @@
 pub mod flow;
 pub mod flow_writes;
 mod identity;
+pub(crate) mod lexical_scope;
 pub mod lexical_usage;
 mod library;
 mod semantic;

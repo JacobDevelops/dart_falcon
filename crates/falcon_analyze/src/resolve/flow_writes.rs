@@ -9,6 +9,8 @@ use falcon_syntax::cst::visit::{
 };
 use falcon_syntax::cst::*;
 
+use super::lexical_scope::LexicalScopes;
+
 #[derive(Debug, Default)]
 pub struct FlowWrites {
     /// Direct writes of bindings enclosing each loop, switch, or try/catch region.
@@ -24,7 +26,7 @@ pub struct FlowWrites {
     /// Enclosing bindings each nested callable itself writes, directly or in
     /// deeper closures: the captures its declaration actually performs.
     pub callable_captured_writes: HashMap<usize, HashSet<String>>,
-    scopes: Vec<HashMap<String, usize>>,
+    scopes: LexicalScopes<HashMap<String, usize>>,
     callable_scopes: Vec<usize>,
     callable_ids: Vec<Option<usize>>,
     callable_captures: HashMap<usize, HashSet<usize>>,
@@ -38,7 +40,7 @@ pub struct FlowWrites {
 impl FlowWrites {
     pub fn program(program: Program<'_>) -> Self {
         let mut visitor = Self {
-            scopes: vec![HashMap::new()],
+            scopes: LexicalScopes::new(),
             ..Self::default()
         };
         visitor.visit_program(program);
@@ -75,19 +77,12 @@ impl FlowWrites {
 
     fn bind(&mut self, identifier: Identifier<'_>) {
         self.scopes
-            .last_mut()
-            .expect("lexical scope")
-            .insert(identifier.name().to_owned(), identifier.span().start);
+            .declare(identifier.name().to_owned(), identifier.span().start);
     }
 
     fn record(&mut self, identifier: Identifier<'_>) {
         let name = identifier.name();
-        let binding = self
-            .scopes
-            .iter()
-            .enumerate()
-            .rev()
-            .find_map(|(scope, bindings)| bindings.get(name).map(|id| (scope, *id)));
+        let binding = self.scopes.lookup(name).map(|(scope, id)| (scope, *id));
         if let Some((scope, id)) = binding {
             self.written_bindings.insert(id);
             if self
@@ -142,9 +137,9 @@ impl FlowWrites {
     }
 
     fn scoped(&mut self, visit: impl FnOnce(&mut Self)) {
-        self.scopes.push(HashMap::new());
+        self.scopes.push_scope();
         visit(self);
-        self.scopes.pop();
+        self.scopes.pop_scope();
     }
 
     /// Visits a callable body; `id` keys nested callables' facts.

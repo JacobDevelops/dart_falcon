@@ -825,6 +825,91 @@ fn flow_snapshots_copy_only_written_scopes() {
 }
 
 #[test]
+fn nearest_flow_binding_preserves_declaration_identity_and_snapshots() {
+    let root = Span::new(1, 6);
+    let inner = Span::new(10, 15);
+    let mut environment = TypeEnvironment::new();
+    environment.declare_at("value", ResolvedType::Dynamic, root);
+    assert!(environment.is_bound_in_root_scope("value"));
+    environment.push_scope();
+    environment.declare_at("value", ResolvedType::Dynamic, inner);
+    assert_eq!(environment.binding_depth("value"), Some(1));
+    assert_eq!(environment.binding_declaration("value"), Some(inner));
+    assert!(!environment.is_bound_in_root_scope("value"));
+    let snapshot = environment.clone();
+
+    environment.promote("value", ResolvedType::Null);
+    assert!(Arc::ptr_eq(&environment.scopes[0], &snapshot.scopes[0]));
+    assert!(!Arc::ptr_eq(&environment.scopes[1], &snapshot.scopes[1]));
+    assert_eq!(snapshot.lookup("value"), ResolvedType::Dynamic);
+    assert_eq!(snapshot.binding_declaration("value"), Some(inner));
+    let joined = environment.join(&snapshot);
+    assert_eq!(joined.lookup("value"), ResolvedType::Dynamic);
+    assert_eq!(joined.binding_declaration("value"), Some(inner));
+    assert!(!joined.is_bound_in_root_scope("value"));
+
+    let mut target = snapshot.clone();
+    target.attach_finally(&snapshot, &environment);
+    assert_eq!(target.lookup("value"), ResolvedType::Null);
+    assert_eq!(target.binding_declaration("value"), Some(inner));
+    assert!(Arc::ptr_eq(&target.scopes[0], &snapshot.scopes[0]));
+    target.pop_scope();
+    assert_eq!(target.lookup("value"), ResolvedType::Dynamic);
+    assert_eq!(target.binding_declaration("value"), Some(root));
+    assert!(target.is_bound_in_root_scope("value"));
+}
+
+#[test]
+fn missing_flow_mutations_preserve_every_shared_scope() {
+    let mut environment = TypeEnvironment::new();
+    environment.declare("outer", ResolvedType::Dynamic);
+    environment.enter_callable();
+    environment.push_scope();
+    environment.declare("inner", ResolvedType::Dynamic);
+    let snapshot = environment.clone();
+
+    environment.assign("missing", Vec::new());
+    environment.promote("missing", ResolvedType::Null);
+    environment.forget("missing");
+    environment.mark_captured("missing");
+    environment.record_write("missing");
+    environment.promote_this_field("missing", ResolvedType::Null);
+    assert!(environment.same_flow_state(&snapshot));
+    for (scope, original) in environment.scopes.iter().zip(snapshot.scopes.iter()) {
+        assert!(Arc::ptr_eq(scope, original));
+    }
+}
+
+#[test]
+fn synthetic_this_promotions_copy_only_the_nearest_receiver_scope() {
+    let mut environment = TypeEnvironment::new();
+    environment.declare("this", ResolvedType::Dynamic);
+    environment.promote_this_field("field", ResolvedType::Dynamic);
+    environment.push_scope();
+    environment.declare("this", ResolvedType::Dynamic);
+    environment.push_scope();
+    environment.declare("field", ResolvedType::Dynamic);
+    let snapshot = environment.clone();
+
+    environment.promote_this_field("field", ResolvedType::Null);
+    assert_eq!(
+        environment.promoted_this_field("field"),
+        Some(ResolvedType::Null)
+    );
+    assert_eq!(snapshot.promoted_this_field("field"), None);
+    assert_eq!(environment.lookup("field"), ResolvedType::Dynamic);
+    assert!(Arc::ptr_eq(&environment.scopes[0], &snapshot.scopes[0]));
+    assert!(!Arc::ptr_eq(&environment.scopes[1], &snapshot.scopes[1]));
+    assert!(Arc::ptr_eq(&environment.scopes[2], &snapshot.scopes[2]));
+    environment.pop_scope();
+    environment.pop_scope();
+    assert_eq!(
+        environment.promoted_this_field("field"),
+        Some(ResolvedType::Dynamic)
+    );
+}
+
+#[test]
 fn shared_flow_joins_preserve_capture_demotion() {
     let mut environment = TypeEnvironment::new();
     environment.declare("value", ResolvedType::Dynamic);
