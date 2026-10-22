@@ -248,7 +248,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && self
                 .decoded_patterns
                 .iter()
-                .any(|span| span.start <= cast.span().start && cast.span().end <= span.end)
+                .any(|span| span.contains(cast.span()))
         {
             self.check(cast.cast_type(), state);
         }

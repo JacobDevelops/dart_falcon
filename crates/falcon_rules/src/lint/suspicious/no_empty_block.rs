@@ -21,13 +21,7 @@ impl Rule for NoEmptyBlock {
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> {
-        let collector = Collector {
-            diags: Vec::new(),
-            ctx,
-        };
-        RulePreparation::Structural(Box::new(collector))
-    }
+    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags) }
 }
 
 struct Collector<'a, 'ctx> {
@@ -115,24 +109,7 @@ fn flag_if_empty(block: Block<'_>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeCon
     diags.push(ctx.diagnostic("Avoid empty blocks — add a comment explaining the intent or remove the block.", span));
 }
 
-/// Closing brace of an empty block without an explanatory comment.
-pub(super) fn empty_block_end(block: Block<'_>) -> Option<Span> {
-    if !block.stmts().is_empty() {
-        return None;
-    }
-    let mut tokens = block.syntax().tokens();
-    let open = tokens.next()?;
-    let close = tokens.next_back()?;
-    if open.kind() != falcon_syntax::TokenKind::LBrace
-        || close.kind() != falcon_syntax::TokenKind::RBrace
-    {
-        return None;
-    }
-    if tokens.any(|token| token.kind().is_comment()) {
-        return None;
-    }
-    Some(Span::new(close.offset(), close.offset() + close.len()))
-}
+use crate::lint::support::empty_blocks::empty_block_end;
 
 #[cfg(test)]
 mod tests {

@@ -6,7 +6,7 @@ use falcon_syntax::cst::visit::{StatementListKind, body_list, member_list, stmt_
 use falcon_syntax::cst::*;
 
 #[derive(Clone, Copy)]
-pub(super) enum Target {
+pub(crate) enum Target {
     Method,
     Case,
     Throw,
@@ -15,7 +15,7 @@ pub(super) enum Target {
     Constructor,
 }
 
-pub(super) fn prepare<'a>(ctx: &'a AnalyzeContext<'a>, target: Target) -> RulePreparation<'a> {
+pub(crate) fn prepare<'a>(ctx: &'a AnalyzeContext<'a>, target: Target) -> RulePreparation<'a> {
     RulePreparation::Structural(Box::new(Collector {
         ctx,
         target,
@@ -23,7 +23,7 @@ pub(super) fn prepare<'a>(ctx: &'a AnalyzeContext<'a>, target: Target) -> RulePr
     }))
 }
 
-pub(super) fn has_blank_line_before(node: SyntaxNode<'_>) -> bool {
+pub(crate) fn has_blank_line_before(node: SyntaxNode<'_>) -> bool {
     let Some(first) = node.significant_tokens().next() else {
         return false;
     };

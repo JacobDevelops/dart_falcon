@@ -12,7 +12,7 @@ use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 
-use super::depend_on_referenced_packages::{imported_package, is_library_file, read_manifest};
+use crate::lint::support::package_manifests::{imported_package, is_library_file, read_manifest};
 use super::enclosing_pubspec;
 
 #[derive(Default)]

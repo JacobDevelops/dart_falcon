@@ -47,7 +47,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && self
                 .children
                 .iter()
-                .any(|parent| contains(*parent, function.span()))
+                .any(|parent| parent.contains(function.span()))
         {
             self.functions.push(function.span());
         }
@@ -65,9 +65,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         let is_list = index.is_package_declaration(&identity, "flutter", "ListView");
         if is_list
             && self.children.iter().any(|parent| {
-                contains(*parent, node.span())
+                parent.contains(node.span())
                     && !self.functions.iter().any(|function| {
-                        contains(*parent, *function) && contains(*function, node.span())
+                        parent.contains(*function) && function.contains(node.span())
                     })
             })
             && let Some(argument) = args.named().find(|arg| arg.name().name() == "shrinkWrap")
@@ -88,6 +88,3 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     }
 }
 
-fn contains(outer: Span, inner: Span) -> bool {
-    outer.start <= inner.start && inner.end <= outer.end
-}

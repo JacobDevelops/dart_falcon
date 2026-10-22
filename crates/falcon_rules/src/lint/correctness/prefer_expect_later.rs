@@ -1,6 +1,6 @@
 //! Requires expectLater when a canonical expect call receives an unawaited Future.
 
-use crate::lint::correctness::test_assertions;
+use crate::lint::support::test_assertions;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
@@ -18,10 +18,7 @@ impl Rule for PreferExpectLater {
         if !test_assertions::enabled(program, ctx) {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        RulePreparation::Semantic(Box::new(Collector {
-            ctx,
-            diags: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diags)
     }
 }
 

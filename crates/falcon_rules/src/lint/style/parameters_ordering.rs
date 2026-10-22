@@ -8,7 +8,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::ordering::Order;
+use crate::lint::support::ordering::Order;
 
 
 #[derive(Default)]

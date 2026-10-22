@@ -7,7 +7,7 @@
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 
-use super::function_always_returns_same_value::{ReturnKind, prepare};
+use crate::lint::support::constant_returns::{ReturnKind, prepare};
 
 #[derive(Default)]
 pub struct FunctionAlwaysReturnsNull;

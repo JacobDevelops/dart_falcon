@@ -1,7 +1,7 @@
 //! Shared package identity and build-body queries for Riverpod rules.
 
 use crate::lint::flutter::scoped_constructor_invocation;
-use crate::lint::function_bodies::{BodyOwner, FunctionBodies, contains};
+use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
@@ -166,7 +166,7 @@ impl<'a> BuildCollector<'a> {
             .is_some_and(|body| {
                 self.consumer_builds.contains(&body.span)
                     || body.owner == BodyOwner::Method
-                        && self.builds.iter().any(|span| contains(span, &body.span))
+                        && self.builds.iter().any(|span| span.contains(body.span))
                         && state.enclosing_type.as_ref().is_some_and(|ty| {
                             is_type(
                                 self.ctx,

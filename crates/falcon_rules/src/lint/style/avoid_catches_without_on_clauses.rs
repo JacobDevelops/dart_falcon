@@ -17,13 +17,14 @@
 //!
 //! Adopted from the official `avoid_catches_without_on_clauses` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth};
+use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth, expression_segments};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::TokenKind;
 use falcon_syntax::cst::visit::{Visitor, for_each_expr, walk_expr, walk_stmt};
 use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
+use crate::lint::flutter::value_name_is_shadowed;
 
 #[derive(Default)]
 pub struct AvoidCatchesWithoutOnClauses;
@@ -34,10 +35,7 @@ impl Rule for AvoidCatchesWithoutOnClauses {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(Box::new(Collector {
-            diagnostics: Vec::new(),
-            ctx,
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diagnostics)
     }
 }
 
@@ -129,15 +127,29 @@ impl<'s, 'a> ValidUse<'s, 'a> {
                 Expr::GenericInstantiation(instantiation) => instantiation.target(),
                 other => other,
             };
-            if let Expr::Ident(target) = class.unparenthesized() {
-                let is_class = |name: &str, library: &str| {
-                    target.name() == name && self.is_sdk_name(name, library)
+            if let Some(segments) = expression_segments(class, false)
+                && !value_name_is_shadowed(segments[0], self.state)
+            {
+                let identity = self
+                    .state
+                    .model
+                    .resolve_dotted(&segments)
+                    .map(|identity| self.state.model.unaliased(identity));
+                // Missing imports or parts cannot prove that this is a
+                // lookalike rather than the error-forwarding declaration.
+                let forwards = match field.field().name() {
+                    "error" => identity
+                        .as_ref()
+                        .is_none_or(|identity| identity.is_sdk("dart:async", "Future")),
+                    "reportError" => identity
+                        .as_ref()
+                        .is_none_or(|identity| identity.is_package("flutter", "FlutterError")),
+                    "throwWithStackTrace" => identity
+                        .as_ref()
+                        .is_none_or(|identity| identity.is_sdk("dart:core", "Error")),
+                    _ => false,
                 };
-                if (field.field().name() == "error" && is_class("Future", "dart:async"))
-                    || (field.field().name() == "reportError" && target.name() == "FlutterError")
-                    || (field.field().name() == "throwWithStackTrace"
-                        && is_class("Error", "dart:core"))
-                {
+                if forwards {
                     return true;
                 }
             }
@@ -159,14 +171,6 @@ impl<'s, 'a> ValidUse<'s, 'a> {
             .is_some_and(|return_type| matches!(return_type, ResolvedType::Never))
     }
 
-    fn is_sdk_name(&self, name: &str, library: &str) -> bool {
-        !self.state.environment.is_bound(name)
-            && self
-                .state
-                .model
-                .resolve_name(name)
-                .is_none_or(|identity| identity.is_sdk(library, name))
-    }
 }
 
 impl<'a> Visitor<'a> for ValidUse<'_, 'a> {
@@ -199,6 +203,18 @@ impl<'a> Visitor<'a> for ValidUse<'_, 'a> {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
+        let future_error = match node {
+            Expr::New(new) => {
+                (new.constructor_name().is_some_and(|name| name.name() == "error")
+                    && self.state.model.resolve_type_in(new.dart_type(), &self.state.type_parameters)
+                        .interface("dart:async", "Future"))
+                    .then_some(new.args())
+            }
+            _ => None,
+        };
+        if let Some(args) = future_error {
+            self.check_arguments(args);
+        }
         match node {
             Expr::Throw(throw) if self.mentions_exception(throw.expr()) => {
                 self.has_valid_use = true;
@@ -207,14 +223,6 @@ impl<'a> Visitor<'a> for ValidUse<'_, 'a> {
                 if self.forwards_error(call.callee(), call.type_args(), call.args()) =>
             {
                 self.check_arguments(call.args());
-            }
-            Expr::New(new)
-                if matches!(new.constructor_name(), Some(constructor) if constructor.name() == "error")
-                    && matches!(new.dart_type(), DartType::Named(named)
-                        if matches!(named.segments().last(), Some(name) if name.name() == "Future"))
-                    && self.is_sdk_name("Future", "dart:async") =>
-            {
-                self.check_arguments(new.args());
             }
             _ => {}
         }

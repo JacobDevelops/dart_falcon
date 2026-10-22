@@ -23,13 +23,7 @@ impl Rule for EmptyCatches {
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> {
-        let collector = Collector {
-            diags: Vec::new(),
-            ctx,
-        };
-        RulePreparation::Structural(Box::new(collector))
-    }
+    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags) }
 }
 
 fn check_catch(catch: CatchClause<'_>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
@@ -37,7 +31,7 @@ fn check_catch(catch: CatchClause<'_>, diags: &mut Vec<Diagnostic>, ctx: &Analyz
     if catch.exception_var().is_some_and(|v| v.name() == "_") {
         return;
     }
-    let Some(span) = super::no_empty_block::empty_block_end(catch.body()) else {
+    let Some(span) = crate::lint::support::empty_blocks::empty_block_end(catch.body()) else {
         return;
     };
     diags.push(ctx.diagnostic("Handle the exception, add a comment, or name it `_` instead of leaving this catch block empty.", span));

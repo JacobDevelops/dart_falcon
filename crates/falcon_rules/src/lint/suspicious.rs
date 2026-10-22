@@ -1,13 +1,11 @@
 //! Suspicious lint rules.
 
-mod bloc_passing;
-
 use crate::meta::{Domain, RuleSource};
 
 crate::declare_rules! {
     Suspicious;
     avoid_accessing_other_classes_private_members::AvoidAccessingOtherClassesPrivateMembers => ("avoid-accessing-other-classes-private-members", resolved, None, false, RuleSource::Falcon);
-    avoid_banned_names::AvoidBannedNames => ("avoid-banned-names", file, None, false, RuleSource::Falcon, options = avoid_banned_names::Options);
+    avoid_banned_names::AvoidBannedNames => ("avoid-banned-names", resolved, None, false, RuleSource::Falcon, options = avoid_banned_names::Options);
     avoid_banned_types::AvoidBannedTypes => ("avoid-banned-types", resolved, None, false, RuleSource::Falcon, options = avoid_banned_types::Options);
     avoid_banned_annotations::AvoidBannedAnnotations => ("avoid-banned-annotations", file, None, false, RuleSource::Falcon, options = avoid_banned_annotations::Options);
     avoid_banned_exports::AvoidBannedExports => ("avoid-banned-exports", file, None, false, RuleSource::Falcon, options = avoid_banned_exports::Options);
@@ -38,7 +36,7 @@ crate::declare_rules! {
     avoid_shadowing_type_parameters::AvoidShadowingTypeParameters => ("avoid-shadowing-type-parameters", file, None, true, RuleSource::Lints("avoid_shadowing_type_parameters"));
     empty_catches::EmptyCatches => ("empty-catches", file, None, true, RuleSource::Lints("empty_catches"));
     no_wildcard_variable_uses::NoWildcardVariableUses => ("no-wildcard-variable-uses", file, None, true, RuleSource::Lints("no_wildcard_variable_uses"));
-    avoid_returning_null_for_void::AvoidReturningNullForVoid => ("avoid-returning-null-for-void", file, None, true, RuleSource::Lints("avoid_returning_null_for_void"));
+    avoid_returning_null_for_void::AvoidReturningNullForVoid => ("avoid-returning-null-for-void", resolved, None, true, RuleSource::Lints("avoid_returning_null_for_void"));
     control_flow_in_finally::ControlFlowInFinally => ("control-flow-in-finally", file, None, true, RuleSource::Lints("control_flow_in_finally"));
     empty_statements::EmptyStatements => ("empty-statements", file, None, true, RuleSource::Lints("empty_statements"));
     recursive_getters::RecursiveGetters => ("recursive-getters", file, None, true, RuleSource::Lints("recursive_getters"));

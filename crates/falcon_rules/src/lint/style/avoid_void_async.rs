@@ -29,13 +29,7 @@ impl Rule for AvoidVoidAsync {
         &self,
         _program: cst::Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> {
-        let collector = Collector {
-            diagnostics: Vec::new(),
-            ctx,
-        };
-        RulePreparation::Structural(Box::new(collector))
-    }
+    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diagnostics) }
 }
 
 struct Collector<'a> {

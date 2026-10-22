@@ -1,6 +1,6 @@
 //! Requires snake_case file names ending in _provider.dart for resolved Riverpod provider declarations, including annotated generator functions.
 
-use super::prefer_riverpod_notifier_suffix::{Naming, prepare};
+use crate::lint::support::riverpod_naming::{Naming, prepare};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 

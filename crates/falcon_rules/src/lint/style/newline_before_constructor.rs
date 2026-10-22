@@ -7,7 +7,7 @@
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 
-use super::newline_spacing::{self, Target};
+use crate::lint::support::newline_spacing::{self, Target};
 
 #[derive(Default)]
 pub struct NewlineBeforeConstructor;

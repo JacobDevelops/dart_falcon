@@ -1716,53 +1716,6 @@ impl<'t, 'a> RefWalker<'t, 'a> {
     }
 }
 
-/// The overloadable operator a binary expression invokes.
-fn binary_operator(op: BinaryOp) -> Option<&'static str> {
-    Some(match op {
-        BinaryOp::Add => "+",
-        BinaryOp::Sub => "-",
-        BinaryOp::Mul => "*",
-        BinaryOp::Div => "/",
-        BinaryOp::Mod => "%",
-        BinaryOp::IntDiv => "~/",
-        BinaryOp::Lt => "<",
-        BinaryOp::Gt => ">",
-        BinaryOp::LtEq => "<=",
-        BinaryOp::GtEq => ">=",
-        BinaryOp::BitAnd => "&",
-        BinaryOp::BitOr => "|",
-        BinaryOp::BitXor => "^",
-        BinaryOp::Shl => "<<",
-        BinaryOp::Shr => ">>",
-        BinaryOp::UShr => ">>>",
-        BinaryOp::EqEq
-        | BinaryOp::NotEq
-        | BinaryOp::And
-        | BinaryOp::Or
-        | BinaryOp::NullCoalesce => {
-            return None;
-        }
-    })
-}
-
-/// The overloadable operator a compound assignment invokes.
-fn assignment_operator(op: AssignOp) -> Option<&'static str> {
-    Some(match op {
-        AssignOp::PlusEq => "+",
-        AssignOp::MinusEq => "-",
-        AssignOp::MulEq => "*",
-        AssignOp::DivEq => "/",
-        AssignOp::ModEq => "%",
-        AssignOp::IntDivEq => "~/",
-        AssignOp::AndEq => "&",
-        AssignOp::OrEq => "|",
-        AssignOp::XorEq => "^",
-        AssignOp::ShlEq => "<<",
-        AssignOp::ShrEq => ">>",
-        AssignOp::UShrEq => ">>>",
-        AssignOp::Eq | AssignOp::NullCoalesceEq => return None,
-    })
-}
 
 fn relational_operator(op: RelationalPatternOp) -> Option<&'static str> {
     match op {
@@ -1785,18 +1738,7 @@ impl<'a> Visitor<'a> for RefWalker<'_, 'a> {
             );
             return;
         }
-        let parameters = match node {
-            TopLevelDecl::Class(x) => x.type_params(),
-            TopLevelDecl::ClassTypeAlias(x) => x.type_params(),
-            TopLevelDecl::Mixin(x) => x.type_params(),
-            TopLevelDecl::MixinClass(x) => x.type_params(),
-            TopLevelDecl::Enum(x) => x.type_params(),
-            TopLevelDecl::Extension(x) => x.type_params(),
-            TopLevelDecl::ExtensionType(x) => x.type_params(),
-            TopLevelDecl::Function(x) => x.type_params(),
-            TopLevelDecl::TypeAlias(x) => x.type_params(),
-            TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => AstChildren::empty(),
-        };
+        let parameters = node.type_params();
         let parameter_depth = self.push_type_parameters(parameters);
         let start = node.span().start;
         let id = self.id_at(start);
@@ -1960,7 +1902,7 @@ impl<'a> Visitor<'a> for RefWalker<'_, 'a> {
                 }
             }
             Expr::Binary(binary) => {
-                if let Some(operator) = binary_operator(binary.op()) {
+                if let Some(operator) = binary.op().operator_name().filter(|_| !matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq)) {
                     self.instance_member(binary.left(), operator);
                 }
             }
@@ -1984,7 +1926,7 @@ impl<'a> Visitor<'a> for RefWalker<'_, 'a> {
                 },
             ),
             Expr::Assign(assign) => {
-                if let Some(operator) = assignment_operator(assign.op()) {
+                if let Some(operator) = assign.op().operator_name() {
                     self.instance_member(assign.target(), operator);
                 }
                 if let Expr::Index(index) = assign.target().unparenthesized() {
@@ -2013,7 +1955,7 @@ impl<'a> Visitor<'a> for RefWalker<'_, 'a> {
                             if let Expr::Ident(name) = assign.target().unparenthesized() {
                                 self.instance_member(object, name.name());
                             }
-                            if let Some(operator) = assignment_operator(assign.op()) {
+                            if let Some(operator) = assign.op().operator_name() {
                                 self.mark_any_member(operator);
                             }
                         }
@@ -2022,7 +1964,7 @@ impl<'a> Visitor<'a> for RefWalker<'_, 'a> {
                             if assign.op() != AssignOp::Eq {
                                 self.instance_member(object, "[]");
                             }
-                            if let Some(operator) = assignment_operator(assign.op()) {
+                            if let Some(operator) = assign.op().operator_name() {
                                 self.mark_any_member(operator);
                             }
                         }

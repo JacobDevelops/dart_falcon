@@ -26,13 +26,7 @@ impl Rule for AvoidMultipleDeclarationsPerLine {
         &self,
         _program: cst::Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> {
-        let collector = Collector {
-            ctx,
-            diags: Vec::new(),
-        };
-        RulePreparation::Structural(Box::new(collector))
-    }
+    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags) }
 }
 
 struct Collector<'a, 'ctx> {

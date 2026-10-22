@@ -111,7 +111,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.events.iter().filter(|(span, access)| {
             access.is_none_or(|name| !self.bindings.get(name).is_some_and(|scopes| {
-                scopes.iter().any(|scope| scope.start <= span.start && span.start < scope.end)
+                scopes.iter().any(|scope| scope.contains_offset(span.start))
             }))
         }).map(|(span, _)| self.ctx.diagnostic(
             "Avoid using non-const top-level members.",

@@ -14,10 +14,7 @@ impl Rule for AvoidSensitiveQueryParams {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(Box::new(Collector {
-            ctx,
-            diags: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diags)
     }
 }
 
@@ -122,7 +119,7 @@ fn has_sensitive_query(literal: StringLitNode<'_>, query_only: bool) -> bool {
         let mut interpolations = literal
             .interpolations()
             .map(|node| node.syntax().span())
-            .filter(|interpolation| interpolation.start >= offset && interpolation.end <= span.end)
+            .filter(|interpolation| Span::new(offset, span.end).contains(*interpolation))
             .peekable();
         let mut query = query_only;
         let mut key_start = (query_only && at_key_start).then_some(0);

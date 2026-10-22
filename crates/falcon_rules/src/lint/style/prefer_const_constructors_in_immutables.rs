@@ -44,7 +44,7 @@ pub struct PreferConstConstructorsInImmutables;
 impl Rule for PreferConstConstructorsInImmutables {
     fn prepare<'a>(
         &self,
-        program: Program<'a>,
+        _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
@@ -53,7 +53,6 @@ impl Rule for PreferConstConstructorsInImmutables {
         let model = SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types());
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            declarations: program.declarations(),
             scope: None,
             model,
             signatures,
@@ -64,7 +63,6 @@ impl Rule for PreferConstConstructorsInImmutables {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    declarations: AstChildren<'a, TopLevelDecl<'a>>,
     scope: Option<ClassScope<'a>>,
     model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
@@ -102,10 +100,8 @@ impl<'a> ClassScope<'a> {
 falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_top_level_decl(&mut self, declaration: TopLevelDecl<'a>) -> StructuralTraversal {
-        let decl = self.declarations.next().expect("shared declaration order");
-        debug_assert_eq!(decl.syntax().id(), declaration.syntax().id());
         self.scope = None;
-        let (name, type_params, members, extends) = match decl {
+        let (name, type_params, members, extends) = match declaration {
             TopLevelDecl::Class(class) if class.with_clause().is_empty() => (
                 class.name(),
                 class.type_params(),

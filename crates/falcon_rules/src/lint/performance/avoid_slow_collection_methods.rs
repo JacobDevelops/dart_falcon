@@ -28,10 +28,7 @@ impl Rule for AvoidSlowCollectionMethods {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(Box::new(Collector {
-            ctx,
-            diagnostics: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diagnostics)
     }
 }
 
@@ -45,11 +42,10 @@ fn is_type_filter(predicate: Expr<'_>) -> bool {
     let Expr::FuncExpr(function) = predicate.unparenthesized() else {
         return false;
     };
-    let parameters = function.params().params();
-    if parameters.len() != 1 {
+    let mut parameters = function.params().params();
+    let (Some(parameter), None) = (parameters.next(), parameters.next()) else {
         return false;
-    }
-    let parameter = parameters.first().unwrap();
+    };
     parameter.kind() == ParamKind::Positional
         && matches!(function.body(), FunctionBody::Arrow(body)
             if matches!(body.expr().unparenthesized(), Expr::Is(test)
@@ -94,13 +90,16 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         };
         if inner.field().name() != "where"
-            || call.args().positional().len() != 1
             || !call.args().named().is_empty()
             || !sdk_iterable_member(inner, state)
         {
             return;
         }
-        if is_type_filter(call.args().positional().first().unwrap()) {
+        let mut arguments = call.args().positional();
+        let (Some(predicate), None) = (arguments.next(), arguments.next()) else {
+            return;
+        };
+        if is_type_filter(predicate) {
             return;
         }
         self.diagnostics.push(self.ctx.diagnostic(message, field.field().span()));

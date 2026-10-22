@@ -10,14 +10,14 @@ pub(crate) enum Order {
 }
 
 impl Order {
-    pub(super) fn is_out_of_order(self, previous: &str, current: &str) -> bool {
+    pub(crate) fn is_out_of_order(self, previous: &str, current: &str) -> bool {
         match self {
             Self::Ascending => previous > current,
             Self::Descending => previous < current,
         }
     }
 
-    pub(super) fn check_names<'a>(
+    pub(crate) fn check_names<'a>(
         self,
         ctx: &AnalyzeContext<'_>,
         names: impl Iterator<Item = Option<Identifier<'a>>>,

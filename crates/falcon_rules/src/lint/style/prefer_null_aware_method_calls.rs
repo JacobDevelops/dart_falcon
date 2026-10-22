@@ -27,13 +27,7 @@ impl Rule for PreferNullAwareMethodCalls {
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> {
-        let collector = Collector {
-            diags: Vec::new(),
-            ctx,
-        };
-        RulePreparation::Structural(Box::new(collector))
-    }
+    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags) }
 }
 
 struct Collector<'a> {
@@ -86,7 +80,13 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && let Some(tested) = self.not_null_operand(condition)
         {
             let then = match statement.then_branch() {
-                Stmt::Block(block) if block.stmts().len() == 1 => block.stmts().first().unwrap(),
+                Stmt::Block(block) => {
+                    let mut statements = block.stmts();
+                    match (statements.next(), statements.next()) {
+                        (Some(only), None) => only,
+                        _ => return StructuralTraversal::Continue,
+                    }
+                }
                 other => other,
             };
             if let Stmt::Expr(statement) = then {

@@ -145,7 +145,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                             .regions
                             .iter()
                             .flatten()
-                            .any(|region| region.start <= **offset && **offset < region.end)
+                            .any(|region| region.contains_offset(**offset))
                     });
                 (references.next() == Some(&candidate.reference) && references.next().is_none())
                     .then(|| {

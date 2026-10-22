@@ -34,7 +34,7 @@ use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::cst::*;
 
-use crate::lint::declarations::declaration_initializers as all_declaration_initializers;
+
 use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
 use falcon_analyze::resolve::lexical_usage::locally_bound_identifiers;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
@@ -60,15 +60,7 @@ impl Rule for UnnecessaryNullChecks {
     }
 }
 
-/// Null assertions directly initializing top-level variables and fields; the
-/// walker supplies their declared type as the expected type. Return the inner
-/// assertion span when the initializer is parenthesized.
-pub(crate) fn declaration_initializers(program: Program<'_>) -> Vec<Span> {
-    all_declaration_initializers(program)
-        .filter(|initializer| matches!(initializer.unparenthesized(), Expr::NullAssert(_)))
-        .map(|initializer| initializer.unparenthesized().span())
-        .collect()
-}
+use crate::lint::support::null_assert_initializers::declaration_initializers;
 
 fn null_assert_initializers<'a>(
     declarators: AstChildren<'a, VarDeclarator<'a>>,
@@ -459,7 +451,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     ) {
         if let Pattern::NullAssert(assertion) = node
             && self.pattern_assignments.iter().any(|assignment| {
-                assignment.start <= assertion.span().start && assertion.span().end <= assignment.end
+                assignment.contains(assertion.span())
             })
             && matched.is_some_and(explicitly_nullable)
         {

@@ -10,7 +10,7 @@ use falcon_analyze::semantic_scope::SemanticState;
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::*;
 
-use super::widget_replacements::{only_property, prepare};
+use crate::lint::support::widget_replacements::{only_property, prepare};
 
 #[derive(Default)]
 pub struct PreferConstrainedBoxOverContainer;

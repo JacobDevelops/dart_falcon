@@ -16,9 +16,8 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
 use crate::lint::flutter_hooks::HookCalls;
-use crate::lint::function_bodies::contains;
 
-use super::avoid_hooks_outside_build::HookContexts;
+use crate::lint::support::hook_contexts::HookContexts;
 
 #[derive(Default)]
 pub struct AvoidConditionalHooks;
@@ -85,27 +84,27 @@ fn conditional(expression: Expr<'_>) -> bool {
         let in_branch = match ancestor.kind() {
             NodeKind::IfStmt => {
                 let branch = IfStmt::cast(ancestor).unwrap();
-                contains(&branch.then_branch().span(), &span)
+                branch.then_branch().span().contains(span)
                     || branch
                         .else_branch()
-                        .is_some_and(|branch| contains(&branch.span(), &span))
+                        .is_some_and(|branch| branch.span().contains(span))
             }
             NodeKind::ConditionalExpr => {
                 let branch = ConditionalExpr::cast(ancestor).unwrap();
-                contains(&branch.then_expr().span(), &span)
-                    || contains(&branch.else_expr().span(), &span)
+                branch.then_expr().span().contains(span)
+                    || branch.else_expr().span().contains(span)
             }
             NodeKind::BinaryExpr => {
                 let binary = BinaryExpr::cast(ancestor).unwrap();
                 matches!(
                     binary.op(),
                     BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce
-                ) && contains(&binary.right().span(), &span)
+                ) && binary.right().span().contains(span)
             }
             NodeKind::AssignExpr => {
                 let assignment = AssignExpr::cast(ancestor).unwrap();
                 assignment.op() == AssignOp::NullCoalesceEq
-                    && contains(&assignment.value().span(), &span)
+                    && assignment.value().span().contains(span)
             }
             NodeKind::ForStmt => {
                 let loop_ = ForStmt::cast(ancestor).unwrap();
@@ -124,17 +123,17 @@ fn conditional(expression: Expr<'_>) -> bool {
             }
             NodeKind::IfElement => {
                 let branch = IfElement::cast(ancestor).unwrap();
-                contains(&branch.then_elem().span(), &span)
+                branch.then_elem().span().contains(span)
                     || branch
                         .else_elem()
-                        .is_some_and(|element| contains(&element.span(), &span))
+                        .is_some_and(|element| element.span().contains(span))
             }
             NodeKind::MapIfElement => {
                 let branch = MapIfElement::cast(ancestor).unwrap();
-                contains(&branch.then_entry().span(), &span)
+                branch.then_entry().span().contains(span)
                     || branch
                         .else_entry()
-                        .is_some_and(|entry| contains(&entry.span(), &span))
+                        .is_some_and(|entry| entry.span().contains(span))
             }
             NodeKind::ForElement => {
                 let loop_ = ForElement::cast(ancestor).unwrap();
@@ -154,11 +153,11 @@ fn conditional(expression: Expr<'_>) -> bool {
 }
 
 fn loop_region(header: ForHeader<'_>, body: Span, span: Span) -> bool {
-    contains(&body, &span)
+    body.contains(span)
         || header
             .condition()
-            .is_some_and(|condition| contains(&condition.span(), &span))
+            .is_some_and(|condition| condition.span().contains(span))
         || header
             .updates()
-            .any(|update| contains(&update.span(), &span))
+            .any(|update| update.span().contains(span))
 }

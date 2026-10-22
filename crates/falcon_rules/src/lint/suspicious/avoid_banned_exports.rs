@@ -1,10 +1,10 @@
 //! Ban decoded export URIs, including all conditional alternatives.
 
-use crate::lint::style::conditional_uri_does_not_exist::uri_value;
+use crate::lint::support::directive_strings::uri_value;
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::*;
 
-use super::avoid_banned_names::{Entry, report};
+use crate::lint::support::banned_entries::{Entry, report};
 
 #[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]

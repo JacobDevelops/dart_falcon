@@ -14,7 +14,7 @@ use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::avoid_duplicate_bloc_event_handlers::own_member;
+use crate::lint::bloc::own_member;
 use crate::lint::bloc::BlocTypes;
 
 #[derive(Default)]

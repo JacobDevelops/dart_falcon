@@ -11,10 +11,7 @@ impl Rule for PreferMultiBlocProvider {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(Box::new(Collector {
-            ctx,
-            diagnostics: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diagnostics)
     }
 }
 struct Collector<'a> {
@@ -26,7 +23,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         let Some(args) = provider_args(expression, state, self.ctx) else {
             return;
         };
-        let Some(child) = super::widget_replacements::argument(args, "child") else {
+        let Some(child) = crate::lint::support::widget_replacements::argument(args, "child") else {
             return;
         };
         if provider_args(child, state, self.ctx).is_some() {

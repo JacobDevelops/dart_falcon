@@ -20,6 +20,6 @@ impl Rule for ListAllEquatableFields {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        super::equatable::prepare(ctx, super::equatable::Check::Fields)
+        crate::lint::support::equatable::prepare(ctx, crate::lint::support::equatable::Check::Fields)
     }
 }

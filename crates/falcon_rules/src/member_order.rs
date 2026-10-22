@@ -41,15 +41,6 @@ pub(crate) enum WidgetCategory {
     OverriddenMethods,
 }
 
-pub(crate) fn is_override<'a>(mut annotations: AstChildren<'a, Annotation<'a>>) -> bool {
-    annotations.any(|annotation| {
-        annotation
-            .name()
-            .next_back()
-            .is_some_and(|id| id.name() == "override")
-    })
-}
-
 fn member_name(member: ClassMember<'_>) -> Option<&str> {
     match member {
         ClassMember::Field(f) => f.declarators().next().map(|d| d.name().name()),

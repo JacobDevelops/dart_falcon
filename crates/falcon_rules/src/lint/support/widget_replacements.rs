@@ -5,7 +5,7 @@ use falcon_analyze::{AnalyzeContext, ResolvedType, RulePreparation, Truth};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-pub(super) fn prepare<'a>(
+pub(crate) fn prepare<'a>(
     ctx: &'a AnalyzeContext<'a>,
     widget: &'static str,
     message: &'static str,
@@ -65,20 +65,20 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     }
 }
 
-pub(super) fn only_named(args: ArgList<'_>, allowed: &[&str]) -> bool {
+pub(crate) fn only_named(args: ArgList<'_>, allowed: &[&str]) -> bool {
     args.positional().is_empty()
         && args
             .named()
             .all(|argument| allowed.contains(&argument.name().name()))
 }
 
-pub(super) fn argument<'a>(args: ArgList<'a>, name: &str) -> Option<Expr<'a>> {
+pub(crate) fn argument<'a>(args: ArgList<'a>, name: &str) -> Option<Expr<'a>> {
     args.named()
         .find(|argument| argument.name().name() == name)
         .map(|argument| argument.value())
 }
 
-pub(super) fn only_property(
+pub(crate) fn only_property(
     args: ArgList<'_>,
     property: &str,
     allowed: &[&str],

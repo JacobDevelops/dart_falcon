@@ -23,7 +23,7 @@
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 
-use crate::lint::correctness::discarded_futures::{UnusedFuturesRule, unused_futures};
+use crate::lint::support::unused_futures::{UnusedFuturesRule, unused_futures};
 
 #[derive(Default)]
 pub struct UnawaitedFutures;

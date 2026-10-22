@@ -46,11 +46,7 @@ impl Rule for AvoidFinalParameters {
         {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        let collector = Collector {
-            ctx,
-            diags: Vec::new(),
-        };
-        RulePreparation::Structural(Box::new(collector))
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
     }
 }
 

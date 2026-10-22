@@ -97,8 +97,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if let Expr::Ident(identifier) = node
             && let Some(binding) = state.environment.binding_declaration(identifier.name())
             && let Some((body, used)) = self.references.get_mut(&binding)
-            && body.start <= identifier.span().start
-            && identifier.span().start < body.end
+            && body.contains_offset(identifier.span().start)
         {
             *used = true;
         }

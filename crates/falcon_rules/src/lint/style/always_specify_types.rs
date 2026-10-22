@@ -45,22 +45,7 @@ use falcon_analyze::semantic_scope::SemanticState;
 
 const MESSAGE: &str = "Missing type annotation.";
 
-/// Includes the setter's full parameter range rather than just its name.
-pub(crate) fn setter_parameter_span(node: SetterDecl<'_>, ctx: &AnalyzeContext) -> Span {
-    let start = significant_tokens_in(
-        ctx.tree(),
-        ctx.source(),
-        Span::new(node.name().span().end, node.param().span().end),
-    )
-    .skip_while(|token| token.kind() != TokenKind::LParen)
-    .nth(1)
-    .map_or(node.param().span().start, |token| token.offset());
-    documented_node_span(
-        Span::new(start, node.param().span().end),
-        node.param_annotations(),
-        ctx,
-    )
-}
+use crate::lint::support::parameter_spans::setter_parameter_span;
 
 #[derive(Default)]
 pub struct AlwaysSpecifyTypes;
@@ -94,51 +79,6 @@ impl Rule for AlwaysSpecifyTypes {
     }
 }
 
-/// The type parameters a top-level declaration scopes over its body.
-fn declared_type_parameters(node: TopLevelDecl<'_>) -> Option<AstChildren<'_, TypeParam<'_>>> {
-    Some(match node {
-        TopLevelDecl::Class(node) => node.type_params(),
-        TopLevelDecl::Mixin(node) => node.type_params(),
-        TopLevelDecl::MixinClass(node) => node.type_params(),
-        TopLevelDecl::Enum(node) => node.type_params(),
-        TopLevelDecl::Extension(node) => node.type_params(),
-        TopLevelDecl::ExtensionType(node) => node.type_params(),
-        TopLevelDecl::Function(node) => node.type_params(),
-        TopLevelDecl::ClassTypeAlias(node) => node.type_params(),
-        TopLevelDecl::TypeAlias(node) => node.type_params(),
-        TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => return None,
-    })
-}
-
-/// The number of type parameters of an SDK or allowlisted package type, which
-/// the resolver models by identity only.
-pub(crate) fn known_type_arity(identity: &DeclarationIdentity) -> Option<usize> {
-    match identity {
-        DeclarationIdentity::Sdk { library, name } => {
-            Some(match (library.as_str(), name.as_str()) {
-                (
-                    "dart:core",
-                    "Comparable" | "Iterable" | "Iterator" | "List" | "Set" | "Expando"
-                    | "WeakReference" | "Finalizer",
-                )
-                | ("dart:async", "Future" | "FutureOr" | "Completer" | "StreamController")
-                | (
-                    "dart:collection",
-                    "Queue" | "ListQueue" | "DoubleLinkedQueue" | "HashSet" | "LinkedHashSet"
-                    | "SplayTreeSet",
-                )
-                | ("dart:js_interop", "JSArray" | "JSPromise") => 1,
-                ("dart:core", "Map" | "MapEntry")
-                | ("dart:collection", "HashMap" | "LinkedHashMap" | "SplayTreeMap") => 2,
-                _ => 0,
-            })
-        }
-        DeclarationIdentity::Package { package, name, .. } => Some(usize::from(
-            package.as_str() == "flutter" && name.as_str() == "State",
-        )),
-        DeclarationIdentity::Library { .. } => None,
-    }
-}
 
 /// Whether the resolved declaration opts out of explicit type arguments.
 fn optional_type_args(identity: &DeclarationIdentity, state: &SemanticState<'_>) -> bool {
@@ -203,7 +143,6 @@ impl<'a> Collector<'a> {
             .model
             .type_alias_parameter_count(identity)
             .or_else(|| state.signatures.type_parameter_count(identity))
-            .or_else(|| known_type_arity(identity))
             .unwrap_or(0);
         arity > 0 && !optional_type_args(identity, state)
     }
@@ -437,12 +376,12 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         {
             self.members = member_names(members);
         }
-        self.push_type_parameters(declared_type_parameters(node).into_iter().flatten());
+        self.push_type_parameters(node.type_params());
         StructuralTraversal::Continue
     }
 
     fn exit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
-        self.pop_type_parameters(declared_type_parameters(node).into_iter().flatten());
+        self.pop_type_parameters(node.type_params());
         self.members.clear();
     }
 

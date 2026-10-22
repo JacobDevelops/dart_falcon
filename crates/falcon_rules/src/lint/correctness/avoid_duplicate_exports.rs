@@ -7,6 +7,7 @@ use std::collections::HashSet;
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst;
+use crate::lint::support::syntax::same_syntax;
 
 #[derive(Default)]
 pub struct AvoidDuplicateExports;
@@ -56,7 +57,7 @@ impl Rule for AvoidDuplicateExports {
     }
 }
 
-pub(crate) enum Visibility<'a> {
+enum Visibility<'a> {
     Only(HashSet<&'a str>),
     Except(HashSet<&'a str>),
 }
@@ -100,14 +101,6 @@ fn visibility<'a>(combinators: cst::AstChildren<'a, cst::ImportCombinator<'a>>) 
     result
 }
 
-/// Token comparison preserves boundaries and literal contents without allocating.
-pub(crate) fn same_syntax(left: cst::SyntaxNode<'_>, right: cst::SyntaxNode<'_>) -> bool {
-    left.significant_tokens()
-        .map(|token| (token.kind(), token.text()))
-        .eq(right
-            .significant_tokens()
-            .map(|token| (token.kind(), token.text())))
-}
 
 // Ordinary relative URI paths have lexical identity independent of `.`/`..`.
 // Leave schemes, escaping and query/fragment syntax untouched rather than

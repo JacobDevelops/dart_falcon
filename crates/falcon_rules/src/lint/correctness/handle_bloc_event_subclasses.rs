@@ -17,7 +17,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
 use crate::lint::bloc::BlocTypes;
-use crate::lint::correctness::avoid_duplicate_bloc_event_handlers::own_member;
+use crate::lint::bloc::own_member;
 
 #[derive(Default)]
 pub struct HandleBlocEventSubclasses;

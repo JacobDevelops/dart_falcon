@@ -7,13 +7,13 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
 #[derive(Clone, Copy)]
-pub(super) enum Passing {
+pub(crate) enum Passing {
     BlocToBloc,
     ContextToBloc,
     BlocToWidget,
 }
 
-pub(super) fn prepare<'a>(
+pub(crate) fn prepare<'a>(
     program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
     passing: Passing,

@@ -37,16 +37,20 @@ impl Rule for AvoidUnusedConstructorParameters {
         _program: cst::Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let collector = Collector {
-            ctx,
-            diagnostics: Vec::new(),
+        let Some(identities) = ctx.identities() else {
+            return RulePreparation::Diagnostics(Vec::new());
         };
-        RulePreparation::Structural(Box::new(collector))
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            model: falcon_analyze::SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
+            diagnostics: Vec::new(),
+        }))
     }
 }
 
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
+    model: falcon_analyze::SemanticModel<'a>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -59,7 +63,7 @@ impl Collector<'_, '_> {
     ) {
         for param in params.params() {
             let name = param.name().name();
-            if !is_candidate(param, primary) || used.contains(&param.name().span().start) {
+            if !is_candidate(param, primary, self.model) || used.contains(&param.name().span().start) {
                 continue;
             }
             self.diagnostics.push(self.ctx.diagnostic(format!("The parameter `{name}` is not used in the constructor."), param.span()));
@@ -82,7 +86,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, '_> {
         // constructors and their use includes eager instance field initializers.
         if let Some(members) = members
             && let Some(primary) = members.primary
-            && primary.params().params().any(|param| is_candidate(param, true))
+            && primary.params().params().any(|param| is_candidate(param, true, self.model))
         {
             let used = used_primary_constructor_parameters(primary, members.declared.clone());
             self.report(primary.params(), &used, true);
@@ -94,7 +98,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, '_> {
         if !node.is_primary
             && node.redirect.is_none()
             && !node.is_external
-            && node.params.params().any(|param| is_candidate(param, false))
+            && node.params.params().any(|param| is_candidate(param, false, self.model))
         {
             let used = used_constructor_parameters(node.params, node.initializers.clone(), node.body);
             self.report(node.params, &used, false);
@@ -104,18 +108,10 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, '_> {
 }
 }
 
-fn is_candidate(param: cst::FormalParam<'_>, primary: bool) -> bool {
+fn is_candidate(param: cst::FormalParam<'_>, primary: bool, model: falcon_analyze::SemanticModel<'_>) -> bool {
     param.initializing().is_none()
         && !(primary && (param.is_final() || param.is_var()))
-        && !is_deprecated(param)
+        && !crate::lint::support::annotations::has_deprecated(param.annotations(), model)
         && !param.name().name().bytes().all(|byte| byte == b'_')
 }
 
-fn is_deprecated(param: cst::FormalParam<'_>) -> bool {
-    param.annotations().any(|annotation| {
-        matches!(
-            annotation.name().last().map(|name| name.name()),
-            Some("deprecated" | "Deprecated")
-        )
-    })
-}

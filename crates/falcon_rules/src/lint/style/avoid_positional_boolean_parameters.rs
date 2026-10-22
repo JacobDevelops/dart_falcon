@@ -31,6 +31,7 @@ use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticState, resolved_super_param_type};
+use crate::lint::support::annotations::has_override;
 
 const MESSAGE: &str = "`bool` parameters should be named parameters.";
 
@@ -82,20 +83,12 @@ fn is_core_bool(ty: &ResolvedType) -> bool {
     )
 }
 
-fn has_override<'a>(mut annotations: AstChildren<'a, Annotation<'a>>) -> bool {
-    annotations.any(|annotation| {
-        annotation
-            .name()
-            .next_back()
-            .is_some_and(|name| name.name() == "override")
-    })
-}
 
 impl<'a> Collector<'a> {
     /// Whether a member named `name` has its signature fixed by an inherited
     /// member. Unresolvable hierarchies count as fixed so the rule stays quiet.
     fn is_fixed(&self, name: &str, annotations: AstChildren<'a, Annotation<'a>>) -> bool {
-        if has_override(annotations) {
+        if has_override(annotations, self.state.model) {
             return true;
         }
         let Some(container) = &self.container else {

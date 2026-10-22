@@ -86,9 +86,10 @@ impl Collector<'_> {
 falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
-        let (name, annotations, parameters) = match node {
-            TopLevelDecl::Class(class) => (class.name(), class.annotations(), class.type_params()),
-            TopLevelDecl::MixinClass(class) => (class.name(), class.annotations(), class.type_params()),
+        let parameters = node.type_params();
+        let (name, annotations) = match node {
+            TopLevelDecl::Class(class) => (class.name(), class.annotations()),
+            TopLevelDecl::MixinClass(class) => (class.name(), class.annotations()),
             _ => return StructuralTraversal::SkipChildren,
         };
         if self.ignored.iter().any(|name| crate::lint::declarations::annotation(annotations.clone(), name)) {

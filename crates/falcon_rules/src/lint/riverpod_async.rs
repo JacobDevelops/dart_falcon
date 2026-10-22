@@ -5,11 +5,11 @@ use falcon_analyze::{AnalyzeContext, ResolvedType, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::correctness::use_build_context_synchronously::{
-    AsyncFacts, async_gap_spans, constant_bool, equality_operands, mounted_kind,
-    mounted_receiver_kind,
-};
 use crate::lint::riverpod::is_exact_type;
+use crate::lint::support::async_semantics::{
+    Semantics as AsyncFacts, constant_bool, equality_operands, mounted_kind, mounted_receiver_kind,
+};
+use crate::lint::support::async_state::async_gap_spans;
 
 #[derive(Clone, Copy)]
 pub(crate) enum Target {

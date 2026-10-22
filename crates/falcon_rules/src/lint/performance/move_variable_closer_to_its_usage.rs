@@ -89,7 +89,7 @@ fn branch(mut node: SyntaxNode<'_>, declaration_block: NodeId) -> Option<Span> {
                     return None;
                 };
                 let span = block.span();
-                (span.start <= usage.start && usage.end <= span.end).then_some(span)
+                span.contains(usage).then_some(span)
             })
     })
 }
@@ -198,7 +198,6 @@ fn can_move_after_if(candidate: &Candidate<'_>, uses: &[Identifier<'_>]) -> bool
     };
     block.stmts().any(|statement| {
         matches!(statement, Stmt::If(_))
-            && statement.span().start >= candidate.declaration.span().end
-            && statement.span().end <= first.start
+            && Span::new(candidate.declaration.span().end, first.start).contains(statement.span())
     })
 }

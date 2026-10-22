@@ -19,13 +19,7 @@ impl Rule for PreferIterableAny {
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> {
-        let collector = Collector {
-            diags: Vec::new(),
-            ctx,
-        };
-        RulePreparation::Structural(Box::new(collector))
-    }
+    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags) }
 }
 
 fn is_where_is_not_empty(expr: Expr<'_>) -> Option<Span> {

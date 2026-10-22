@@ -1,9 +1,5 @@
 //! Correctness lint rules.
 
-mod equatable;
-pub(crate) mod flutter_state_rules;
-pub(crate) mod test_assertions;
-
 use crate::meta::{Domain, RuleSource};
 
 crate::declare_rules! {
@@ -42,12 +38,12 @@ crate::declare_rules! {
     valid_regexps::ValidRegexps => ("valid-regexps", resolved, None, true, RuleSource::Lints("valid_regexps"));
     implementation_imports::ImplementationImports => ("implementation-imports", resolved, None, true, RuleSource::Lints("implementation_imports"));
     avoid_global_state::AvoidGlobalState => ("avoid-global-state", file, None, false, RuleSource::DartCodeLinter("avoid-global-state"));
-    avoid_returning_widgets::AvoidReturningWidgets => ("avoid-returning-widgets", file, Some(Domain::Flutter), false, RuleSource::DartCodeLinter("avoid-returning-widgets"));
+    avoid_returning_widgets::AvoidReturningWidgets => ("avoid-returning-widgets", resolved, Some(Domain::Flutter), false, RuleSource::DartCodeLinter("avoid-returning-widgets"));
     avoid_collection_equality_checks::AvoidCollectionEqualityChecks => ("avoid-collection-equality-checks", resolved, None, true, RuleSource::Falcon);
     avoid_unrelated_type_casts::AvoidUnrelatedTypeCasts => ("avoid-unrelated-type-casts", resolved, None, true, RuleSource::Falcon);
     avoid_unsafe_collection_methods::AvoidUnsafeCollectionMethods => ("avoid-unsafe-collection-methods", resolved, None, false, RuleSource::Falcon);
     avoid_uncaught_future_errors::AvoidUncaughtFutureErrors => ("avoid-uncaught-future-errors", resolved, None, true, RuleSource::Falcon);
-    avoid_unused_parameters::AvoidUnusedParameters => ("avoid-unused-parameters", file, None, true, RuleSource::DartCodeLinter("avoid-unused-parameters"));
+    avoid_unused_parameters::AvoidUnusedParameters => ("avoid-unused-parameters", resolved, None, true, RuleSource::DartCodeLinter("avoid-unused-parameters"));
     avoid_mutable_global_variables::AvoidMutableGlobalVariables => ("avoid-mutable-global-variables", file, None, false, RuleSource::PyramidLint("avoid_mutable_global_variables"));
     correct_order_for_super_dispose::CorrectOrderForSuperDispose => ("correct-order-for-super-dispose", file, Some(Domain::Flutter), true, RuleSource::PyramidLint("correct_order_for_super_dispose"));
     unnecessary_flutter_imports::UnnecessaryFlutterImports => ("unnecessary-flutter-imports", resolved, Some(Domain::Flutter), true, RuleSource::Falcon);

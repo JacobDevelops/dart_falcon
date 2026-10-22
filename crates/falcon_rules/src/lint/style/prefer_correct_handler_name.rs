@@ -111,7 +111,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .declarations()
             .find_map(|declaration| match declaration {
                 TopLevelDecl::Class(class)
-                    if class.span().start <= span.start && class.span().end >= span.end =>
+                    if class.span().contains(span) =>
                 {
                     Some(class)
                 }

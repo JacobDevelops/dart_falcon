@@ -168,7 +168,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     }
     fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         if self.consuming.is_some_and(|operand| {
-            node.span().start < operand.start || node.span().end > operand.end
+            !operand.contains(node.span())
         }) {
             self.consuming = None;
         }

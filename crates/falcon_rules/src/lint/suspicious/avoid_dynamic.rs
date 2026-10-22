@@ -27,11 +27,7 @@ impl Rule for AvoidDynamic {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let visitor = DynamicVisitor {
-            diagnostics: Vec::new(),
-            ctx,
-        };
-        RulePreparation::Structural(Box::new(visitor))
+        crate::lint::support::preparation::prepare!(Structural, DynamicVisitor, ctx, diagnostics)
     }
 }
 

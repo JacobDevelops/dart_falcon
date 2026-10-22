@@ -60,8 +60,7 @@ impl<'a> StructuralRuleVisitor<'a> for NestedIf<'a> {
         if let Stmt::If(n) = node {
             for &index in &self.active {
                 let candidate = &mut self.candidates[index];
-                if candidate.then_span.start <= n.span().start
-                    && n.span().end <= candidate.then_span.end
+                if candidate.then_span.contains(n.span())
                     && candidate.then_span != n.span()
                 {
                     candidate.count += 1;

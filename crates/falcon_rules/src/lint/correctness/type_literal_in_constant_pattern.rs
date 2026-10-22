@@ -21,13 +21,7 @@ impl Rule for TypeLiteralInConstantPattern {
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> {
-        let collector = Collector {
-            diags: Vec::new(),
-            ctx,
-        };
-        RulePreparation::Semantic(Box::new(collector))
-    }
+    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diags) }
 }
 struct Collector<'a> {
     diags: Vec<Diagnostic>,

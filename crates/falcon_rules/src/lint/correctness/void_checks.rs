@@ -73,7 +73,7 @@ struct Collector<'a> {
 impl<'a> Collector<'a> {
     fn enter_function(&mut self, span: Span, return_type: Option<ResolvedType>) {
         self.functions
-            .retain(|(enclosing, _)| enclosing.start <= span.start && span.end <= enclosing.end);
+            .retain(|(enclosing, _)| enclosing.contains(span));
         self.functions.push((span, return_type));
     }
 
@@ -82,7 +82,7 @@ impl<'a> Collector<'a> {
     /// return type, not the context it was inferred against.
     fn return_type(&self, statement: Span, state: &SemanticState<'_>) -> Option<ResolvedType> {
         match self.functions.iter().rev().find(|(enclosing, _)| {
-            enclosing.start <= statement.start && statement.end <= enclosing.end
+            enclosing.contains(statement)
         }) {
             Some((_, Some(return_type))) => Some(return_type.clone()),
             _ if self
@@ -428,7 +428,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     ) {
         if let Pattern::Variable(variable) = node
             && self.pattern_assignments.iter().any(|assignment| {
-                assignment.start <= node.span().start && node.span().end <= assignment.end
+                assignment.contains(node.span())
             })
             && let Some(actual) = matched
         {

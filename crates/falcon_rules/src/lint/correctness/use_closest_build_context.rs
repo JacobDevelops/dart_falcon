@@ -12,6 +12,6 @@ impl Rule for UseClosestBuildContext {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        super::flutter_state_rules::prepare(program, ctx, "use-closest-build-context")
+        crate::lint::support::flutter_state::prepare(program, ctx, "use-closest-build-context")
     }
 }

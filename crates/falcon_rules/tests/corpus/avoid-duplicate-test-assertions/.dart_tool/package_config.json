@@ -1,1 +1,1 @@
-{"configVersion":2,"packages":[{"name":"test","rootUri":"../packages/test","packageUri":"lib/","languageVersion":"3.9"}]}
+{"configVersion":2,"packages":[{"name":"test","rootUri":"../packages/test","packageUri":"lib/","languageVersion":"3.9"},{"name":"test_core","rootUri":"../packages/test_core","packageUri":"lib/","languageVersion":"3.9"},{"name":"test_api","rootUri":"../packages/test_api","packageUri":"lib/","languageVersion":"3.9"}]}

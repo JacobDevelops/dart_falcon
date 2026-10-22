@@ -26,13 +26,7 @@ impl Rule for CollectionMethodsUnrelatedType {
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> {
-        let collector = Collector {
-            diagnostics: Vec::new(),
-            ctx,
-        };
-        RulePreparation::Semantic(Box::new(collector))
-    }
+    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diagnostics) }
 }
 
 struct Collector<'a> {

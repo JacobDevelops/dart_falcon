@@ -12,7 +12,7 @@ pub(crate) fn is_state(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
         == Truth::Yes
 }
 
-pub(super) fn is_context(ty: &ResolvedType) -> bool {
+pub(crate) fn is_context(ty: &ResolvedType) -> bool {
     matches!(ty, ResolvedType::Interface { identity, .. } if identity.is_package("flutter", "BuildContext"))
 }
 
@@ -73,7 +73,7 @@ struct Method<'a> {
     super_dispose: bool,
 }
 
-pub(super) fn prepare<'a>(
+pub(crate) fn prepare<'a>(
     program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
     rule: &'static str,
@@ -140,10 +140,6 @@ struct Collector<'a> {
     closures: Vec<Span>,
     contexts: Vec<(Span, &'a str)>,
     diags: Vec<Diagnostic>,
-}
-
-fn contains(outer: Span, inner: Span) -> bool {
-    outer.start <= inner.start && inner.end <= outer.end
 }
 
 impl Collector<'_> {
@@ -234,11 +230,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 && self
                     .late
                     .iter()
-                    .any(|(span, _)| contains(*span, expression.span()))
+                    .any(|(span, _)| span.contains(expression.span()))
                 && !self
                     .closures
                     .iter()
-                    .any(|span| contains(*span, expression.span()))
+                    .any(|span| span.contains(expression.span()))
                 && context_expression(expression, state)
             {
                 self.report(expression.span());
@@ -248,7 +244,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if self.rule == "use-closest-build-context" {
             if let Expr::Ident(identifier) = expression
                 && let Some((scope, closest)) = self.contexts.iter().rev().find(|(span, name)| {
-                    contains(*span, expression.span())
+                    span.contains(expression.span())
                         && is_context(&state.environment.declared_type(name))
                 })
                 && identifier.name() != *closest
@@ -282,14 +278,14 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         let Some(index) = self
             .methods
             .iter()
-            .position(|method| contains(method.declaration.span(), expression.span()))
+            .position(|method| method.declaration.span().contains(expression.span()))
         else {
             return;
         };
         if !self.methods[index].state
             || self.closures.iter().any(|span| {
-                contains(*span, expression.span())
-                    && contains(self.methods[index].declaration.span(), *span)
+                span.contains(expression.span())
+                    && self.methods[index].declaration.span().contains(*span)
             })
         {
             return;
@@ -366,7 +362,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 .collect();
             for span in spans {
                 if !self.diags.iter().any(|diagnostic| {
-                    span.start <= diagnostic.span.start && diagnostic.span.end <= span.end
+                    span.contains(Span::new(diagnostic.span.start, diagnostic.span.end))
                 }) {
                     self.report(span);
                 }

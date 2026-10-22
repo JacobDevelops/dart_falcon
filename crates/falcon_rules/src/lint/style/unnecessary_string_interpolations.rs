@@ -29,10 +29,7 @@ impl Rule for UnnecessaryStringInterpolations {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(Box::new(Collector {
-            diags: Vec::new(),
-            ctx,
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diags)
     }
 }
 struct Collector<'a> {

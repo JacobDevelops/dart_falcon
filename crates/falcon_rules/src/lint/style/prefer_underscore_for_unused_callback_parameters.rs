@@ -18,10 +18,7 @@ impl Rule for PreferUnderscoreForUnusedCallbackParameters {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Structural(Box::new(Collector {
-            ctx,
-            diagnostics: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diagnostics)
     }
 }
 

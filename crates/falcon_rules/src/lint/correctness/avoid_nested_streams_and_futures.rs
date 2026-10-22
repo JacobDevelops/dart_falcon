@@ -12,7 +12,7 @@
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 
-use super::avoid_nested_futures::{Nesting, prepare_nested};
+use crate::lint::support::nested_async::{Nesting, prepare_nested};
 
 #[derive(Default)]
 pub struct AvoidNestedStreamsAndFutures;

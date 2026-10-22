@@ -17,7 +17,7 @@ use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::test_assertions;
+use crate::lint::support::test_assertions;
 use crate::lint::options;
 
 #[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -68,19 +68,19 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .iter()
             .filter(|(_, callback)| {
                 !self.assertions.iter().any(|assertion| {
-                    contains(*callback, *assertion)
+                    callback.contains(*assertion)
                         && !self.tests.iter().any(|(_, nested)| {
                             *nested != *callback
-                                && contains(*callback, *nested)
-                                && contains(*nested, *assertion)
+                                && callback.contains(*nested)
+                                && nested.contains(*assertion)
                         })
                         && !self.closures.iter().any(|(binding, nested)| {
-                            contains(*callback, *nested)
-                                && contains(*nested, *assertion)
+                            callback.contains(*nested)
+                                && nested.contains(*assertion)
                                 && !self.references.iter().any(|(referenced, usage)| {
                                     referenced == binding
-                                        && contains(*callback, *usage)
-                                        && !contains(*nested, *usage)
+                                        && callback.contains(*usage)
+                                        && !nested.contains(*usage)
                                 })
                         })
                 })
@@ -140,6 +140,3 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     }
 }
 
-fn contains(outer: Span, inner: Span) -> bool {
-    outer.start <= inner.start && inner.end <= outer.end
-}

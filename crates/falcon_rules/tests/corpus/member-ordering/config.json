@@ -1,0 +1,14 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "member-ordering": {
+          "level": "warn",
+          "options": {
+            "widgets-order": ["init-state", "dispose", "build"]
+          }
+        }
+      }
+    }
+  }
+}

@@ -34,10 +34,11 @@ impl Rule for PreferConditionalExpressions {
 
 fn unwrap_single(mut stmt: Stmt<'_>) -> Stmt<'_> {
     while let Stmt::Block(block) = stmt {
-        if block.stmts().len() != 1 {
+        let mut statements = block.stmts();
+        let (Some(only), None) = (statements.next(), statements.next()) else {
             break;
-        }
-        stmt = block.stmts().first().unwrap();
+        };
+        stmt = only;
     }
     stmt
 }

@@ -6,7 +6,7 @@
 //! Deferred builders and conditional expressions are excluded because recursive
 //! data-driven widget trees can terminate normally.
 
-use super::proper_controller_dispose::constructed_identity;
+use crate::lint::support::controller_disposal::constructed_identity;
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, RulePreparation, SemanticModel,
     SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth,

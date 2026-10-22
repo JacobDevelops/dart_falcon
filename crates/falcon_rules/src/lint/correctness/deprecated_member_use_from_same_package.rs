@@ -108,19 +108,19 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
             locals: Vec::new(),
         };
         frontier.visit_program(program);
-        let declarations = frontier.excluded.len();
-        for (declaration, metadata) in frontier.metadata {
-            if frontier.excluded[..declarations].iter().any(|excluded| {
-                excluded.start <= declaration.start && excluded.end >= declaration.end
-            }) {
-                frontier.excluded.push(metadata);
-            }
-        }
+        let mut excluded = ExcludedSpans::new(frontier.excluded);
+        frontier
+            .metadata
+            .retain(|(declaration, _)| excluded.contains(*declaration));
+        excluded
+            .0
+            .extend(frontier.metadata.into_iter().map(|(_, metadata)| metadata));
+        excluded.index();
         let mut uses = Uses {
             ctx,
             package_root: package.lib_root.clone(),
             same_package: HashMap::new(),
-            excluded: frontier.excluded,
+            excluded,
             writes: frontier.writes,
             reads: frontier.reads,
             increments: frontier.increments,
@@ -202,11 +202,7 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
             let Some(scope) = scopes.scope_for(&block) else {
                 continue;
             };
-            if uses
-                .excluded
-                .iter()
-                .any(|span| span.start <= scope.span.start && scope.span.start < span.end)
-            {
+            if uses.excluded.contains_offset(scope.span.start) {
                 continue;
             }
             let (links, _) = references(&block);
@@ -258,23 +254,11 @@ fn deprecation<'a>(
     signatures: Option<&SignatureIndex>,
 ) -> Option<String> {
     for annotation in annotations {
-        if annotation.constructor_name().is_some() {
-            continue;
-        }
-        let Some(name) = QualifiedName::from_identifiers(annotation.name()) else {
-            continue;
-        };
-        if annotation.args().is_none()
-            && model
-                .resolve_sdk_member(name)
-                .is_some_and(|id| id.is_sdk("dart:core", "deprecated"))
-        {
+        if crate::lint::support::annotations::is_deprecated_constant(annotation, model) {
             return Some(String::new());
         }
         if annotation.args().is_some()
-            && model
-                .resolve_name(name)
-                .is_some_and(|id| id.is_sdk("dart:core", "Deprecated"))
+            && crate::lint::support::annotations::is_deprecated_constructor(annotation, model)
         {
             // Dynamic/unevaluated metadata cannot prove a deprecated constant.
             let expression = annotation.args()?.positional().next()?;
@@ -350,19 +334,11 @@ impl<'a> Visitor<'a> for Frontier<'a> {
                 TopLevelDecl::Function(_) | TopLevelDecl::Variable(_) | TopLevelDecl::TypeAlias(_)
             ),
         );
-        let parameters = match node {
-            TopLevelDecl::Class(n) => Some(n.type_params()),
-            TopLevelDecl::Mixin(n) => Some(n.type_params()),
-            TopLevelDecl::MixinClass(n) => Some(n.type_params()),
-            TopLevelDecl::Enum(n) => Some(n.type_params()),
-            TopLevelDecl::Extension(n) => Some(n.type_params()),
-            TopLevelDecl::ExtensionType(n) => Some(n.type_params()),
-            TopLevelDecl::ClassTypeAlias(n) => Some(n.type_params()),
-            TopLevelDecl::TypeAlias(n) => Some(n.type_params()),
-            _ => None,
-        }
-        .into_iter()
-        .flatten();
+        let parameters = if matches!(node, TopLevelDecl::Function(_)) {
+            AstChildren::empty()
+        } else {
+            node.type_params()
+        };
         self.parameters.push(parameters, &self.model);
         if let TopLevelDecl::Enum(enumeration) = node {
             for variant in enumeration.variants() {
@@ -616,7 +592,7 @@ impl<'a> Visitor<'a> for Frontier<'a> {
         if let Stmt::LocalFunc(function) = node {
             self.declaration = Some(function.span());
             if let Some(scope) = self.blocks.iter().rev().find(|scope| {
-                scope.start <= function.span().start && function.span().end <= scope.end
+                scope.contains(function.span())
             }) {
                 let message = deprecation(function.annotations(), self.model, self.signatures);
                 let mut parameters = Vec::new();
@@ -754,11 +730,43 @@ impl<'a> Visitor<'a> for Frontier<'a> {
     }
 }
 
+struct ExcludedSpans(Vec<Span>);
+
+impl ExcludedSpans {
+    fn new(spans: Vec<Span>) -> Self {
+        let mut excluded = Self(spans);
+        excluded.index();
+        excluded
+    }
+
+    fn index(&mut self) {
+        self.0.sort_unstable_by_key(|span| span.start);
+        let mut end = 0;
+        for span in &mut self.0 {
+            end = end.max(span.end);
+            span.end = end;
+        }
+    }
+
+    fn end_at(&self, offset: usize) -> Option<usize> {
+        let index = self.0.partition_point(|span| span.start <= offset);
+        index.checked_sub(1).map(|index| self.0[index].end)
+    }
+
+    fn contains(&self, span: Span) -> bool {
+        self.end_at(span.start).is_some_and(|end| span.end <= end)
+    }
+
+    fn contains_offset(&self, offset: usize) -> bool {
+        self.end_at(offset).is_some_and(|end| offset < end)
+    }
+}
+
 struct Uses<'a> {
     ctx: &'a AnalyzeContext<'a>,
     package_root: std::path::PathBuf,
     same_package: HashMap<std::path::PathBuf, bool>,
-    excluded: Vec<Span>,
+    excluded: ExcludedSpans,
     writes: HashSet<Span>,
     reads: HashSet<Span>,
     increments: HashSet<Span>,
@@ -930,17 +938,14 @@ fn file_uri(path: &std::path::Path) -> String {
 
 fn push_deprecation(
     ctx: &AnalyzeContext<'_>,
-    excluded: &[Span],
+    excluded: &ExcludedSpans,
     reported: &mut HashSet<(usize, usize, String)>,
     diagnostics: &mut Vec<Diagnostic>,
     name: &str,
     span: Span,
     detail: &str,
 ) {
-    if excluded
-        .iter()
-        .any(|excluded| excluded.start <= span.start && span.end <= excluded.end)
-    {
+    if excluded.contains(span) {
         return;
     }
     let base = format!("`{name}` is deprecated and shouldn't be used.");
@@ -961,8 +966,7 @@ impl<'ctx> Uses<'ctx> {
             .enumerate()
             .filter(|(_, local)| {
                 local.name == name
-                    && local.scope.start <= span.start
-                    && span.end <= local.scope.end
+                    && local.scope.contains(span)
                     && (state.environment.binding_declaration(name) == Some(local.binding)
                         || (local.function
                             && span.start < local.binding.start
@@ -970,19 +974,14 @@ impl<'ctx> Uses<'ctx> {
                                 .environment
                                 .binding_declaration(name)
                                 .is_none_or(|binding| {
-                                    binding.start < local.scope.start
-                                        || local.scope.end < binding.end
+                                    !local.scope.contains(binding)
                                 })))
             })
             .min_by_key(|(_, local)| local.scope.end - local.scope.start)
             .map(|(index, _)| index)
     }
     fn report(&mut self, target: &Target) {
-        if self
-            .excluded
-            .iter()
-            .any(|span| span.start <= target.span.start && target.span.end <= span.end)
-        {
+        if self.excluded.contains(target.span) {
             return;
         }
         self.emit(target);
@@ -1055,11 +1054,7 @@ impl<'ctx> Uses<'ctx> {
     }
 
     fn emit_message(&mut self, path: &std::path::Path, name: &str, span: Span, message: &str) {
-        if self
-            .excluded
-            .iter()
-            .any(|excluded| excluded.start <= span.start && span.end <= excluded.end)
-        {
+        if self.excluded.contains(span) {
             return;
         }
         let same_package = if let Some(&same_package) = self.same_package.get(path) {
@@ -1281,7 +1276,7 @@ impl<'ctx> Uses<'ctx> {
                     || state.environment.is_bound_in_root_scope(id.name()) =>
             {
                 let extension = self.extension_owners.iter().find(|owner| {
-                    owner.span.start <= id.span().start && id.span().end <= owner.span.end
+                    owner.span.contains(id.span())
                 });
                 if let Some(owner) = extension
                     && let Some((_, is_static)) =
@@ -1470,29 +1465,6 @@ impl<'ctx> Uses<'ctx> {
             self.report(&parameter);
         }
     }
-}
-
-fn binary_operator(op: BinaryOp) -> Option<&'static str> {
-    Some(match op {
-        BinaryOp::Add => "+",
-        BinaryOp::Sub => "-",
-        BinaryOp::Mul => "*",
-        BinaryOp::Div => "/",
-        BinaryOp::IntDiv => "~/",
-        BinaryOp::Mod => "%",
-        BinaryOp::EqEq | BinaryOp::NotEq => "==",
-        BinaryOp::Lt => "<",
-        BinaryOp::Gt => ">",
-        BinaryOp::LtEq => "<=",
-        BinaryOp::GtEq => ">=",
-        BinaryOp::BitAnd => "&",
-        BinaryOp::BitOr => "|",
-        BinaryOp::BitXor => "^",
-        BinaryOp::Shl => "<<",
-        BinaryOp::Shr => ">>",
-        BinaryOp::UShr => ">>>",
-        BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce => return None,
-    })
 }
 
 impl<'a> SemanticRuleVisitor<'a> for Uses<'a> {
@@ -1704,13 +1676,12 @@ impl<'a> SemanticRuleVisitor<'a> for Uses<'a> {
                 {
                     None
                 } else {
-                    binary_operator(op).map(|name| (left, name, 1))
+                    op.operator_name().map(|name| (left, name, 1))
                 }
             }
             Expr::Assign(assignment) => assignment
                 .op()
-                .binary()
-                .and_then(binary_operator)
+                .operator_name()
                 .map(|name| (assignment.target(), name, 1)),
             Expr::Unary(unary) => match unary.op() {
                 UnaryOp::Minus => Some((unary.operand(), "-", 0)),

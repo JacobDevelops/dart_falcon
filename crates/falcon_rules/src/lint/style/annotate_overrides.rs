@@ -20,7 +20,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::declarations::annotation;
+use crate::lint::support::annotations::has_override;
 use crate::lint::declarations::operator_token_span;
 use crate::lint::inherited_members::inheriting_declaration;
 
@@ -78,7 +78,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         for member in declaration.members.clone() {
             match member {
                 ClassMember::Field(field)
-                    if !field.is_static() && !annotation(field.annotations(), "override") =>
+                    if !field.is_static() && !has_override(field.annotations(), *model) =>
                 {
                     for declarator in field.declarators() {
                         report(
@@ -90,7 +90,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     }
                 }
                 ClassMember::Method(method)
-                    if !method.is_static() && !annotation(method.annotations(), "override") =>
+                    if !method.is_static() && !has_override(method.annotations(), *model) =>
                 {
                     report(
                         &owner,
@@ -100,7 +100,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     );
                 }
                 ClassMember::Getter(getter)
-                    if !getter.is_static() && !annotation(getter.annotations(), "override") =>
+                    if !getter.is_static() && !has_override(getter.annotations(), *model) =>
                 {
                     report(
                         &owner,
@@ -110,7 +110,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     );
                 }
                 ClassMember::Setter(setter)
-                    if !setter.is_static() && !annotation(setter.annotations(), "override") =>
+                    if !setter.is_static() && !has_override(setter.annotations(), *model) =>
                 {
                     report(
                         &owner,
@@ -120,7 +120,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     );
                 }
                 ClassMember::Operator(operator)
-                    if !annotation(operator.annotations(), "override") =>
+                    if !has_override(operator.annotations(), *model) =>
                 {
                     report(
                         &owner,
@@ -146,7 +146,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             representation: false,
         }
         .declaring_params()
-        .filter(|param| !annotation(param.annotations(), "override")))
+        .filter(|param| !has_override(param.annotations(), *model)))
         {
             report(
                 &owner,

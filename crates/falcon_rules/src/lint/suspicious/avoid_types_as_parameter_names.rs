@@ -110,17 +110,10 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
     fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         self.save_scope();
-        let params = match node {
-            TopLevelDecl::Class(node) => node.type_params(),
-            TopLevelDecl::ClassTypeAlias(node) => node.type_params(),
-            TopLevelDecl::MixinClass(node) => node.type_params(),
-            TopLevelDecl::Mixin(node) => node.type_params(),
-            TopLevelDecl::Enum(node) => node.type_params(),
-            TopLevelDecl::Extension(node) => node.type_params(),
-            TopLevelDecl::ExtensionType(node) => node.type_params(),
-            TopLevelDecl::TypeAlias(node) => node.type_params(),
-            _ => return StructuralTraversal::Continue,
-        };
+        if matches!(node, TopLevelDecl::Function(_) | TopLevelDecl::Variable(_) | TopLevelDecl::Error(_)) {
+            return StructuralTraversal::Continue;
+        }
+        let params = node.type_params();
         self.enter_types(params, false);
         self.representation_constructor = matches!(node, TopLevelDecl::ExtensionType(_));
         StructuralTraversal::Continue

@@ -23,7 +23,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::TokenKind;
 use falcon_syntax::cst::*;
 
-use crate::lint::correctness::exhaustive_cases::is_enum_like;
+use crate::lint::support::enum_like::is_enum_like;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
@@ -35,10 +35,7 @@ impl Rule for NoDefaultCases {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(Box::new(Collector {
-            diags: Vec::new(),
-            ctx,
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diags)
     }
 }
 
@@ -91,7 +88,7 @@ impl Collector<'_> {
             .map_or(case.span().start, |token| token.offset());
         let start = case
             .labels()
-            .filter(|label| from <= label.span().start && label.span().end <= keyword)
+            .filter(|label| Span::new(from, keyword).contains(label.span()))
             .map(|label| label.span().start)
             .min()
             .unwrap_or(keyword);

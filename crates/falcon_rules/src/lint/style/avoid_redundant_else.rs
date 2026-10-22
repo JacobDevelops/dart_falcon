@@ -22,10 +22,7 @@ impl Rule for AvoidRedundantElse {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Structural(Box::new(Collector {
-            ctx,
-            diags: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
     }
 }
 
@@ -49,11 +46,11 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             };
             let exits = match last {
                 Some(Stmt::Return(ret)) => ret.value().is_some()
-                    || !super::avoid_unnecessary_return::at_function_end(node),
+                    || !crate::lint::support::statement_position::at_function_end(node),
                 Some(Stmt::Throw(_) | Stmt::Rethrow(_)) => true,
                 _ => false,
             };
-            let normalize = crate::lint::suspicious::no_equal_then_else::normalize;
+            let normalize = crate::lint::support::source_equality::normalize;
             if exits && !normalize(self.ctx, branch.then_branch().span())
                 .eq(normalize(self.ctx, otherwise.span())) {
                 self.diags.push(self.ctx.diagnostic(

@@ -180,13 +180,8 @@ impl Checker<'_> {
         name: &str,
         annotations: AstChildren<'_, Annotation<'_>>,
     ) -> bool {
-        annotations.into_iter().any(|annotation| {
-            annotation.args().is_none()
-                && annotation
-                    .name()
-                    .last()
-                    .is_some_and(|segment| segment.name() == "override")
-        }) || match self.signatures.inherited_member_facts(owner, name) {
+        crate::lint::support::annotations::has_override(annotations, self.model)
+            || match self.signatures.inherited_member_facts(owner, name) {
             // A field or getter overrides an inherited member of its name
             // unless that member is only a setter.
             Some(facts) => facts.iter().any(|fact| fact.kind != MemberKind::Setter),

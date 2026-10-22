@@ -65,13 +65,8 @@ struct Collector<'a> {
 }
 
 impl<'a> Collector<'a> {
-    fn is_fixed(&self, name: &str, mut annotations: AstChildren<'a, Annotation<'a>>) -> bool {
-        if annotations.any(|annotation| {
-            annotation
-                .name()
-                .next_back()
-                .is_some_and(|name| name.name() == "override")
-        }) {
+    fn is_fixed(&self, name: &str, annotations: AstChildren<'a, Annotation<'a>>) -> bool {
+        if crate::lint::support::annotations::has_override(annotations, self.state.model) {
             return true;
         }
         if !self.is_interface {
@@ -141,18 +136,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         };
         self.is_interface = name.is_some();
         self.owner = name.and_then(|name| self.state.model.resolve_name(name.name()));
-        let params = match node {
-            TopLevelDecl::Class(node) => node.type_params(),
-            TopLevelDecl::ClassTypeAlias(node) => node.type_params(),
-            TopLevelDecl::MixinClass(node) => node.type_params(),
-            TopLevelDecl::Mixin(node) => node.type_params(),
-            TopLevelDecl::Enum(node) => node.type_params(),
-            TopLevelDecl::Extension(node) => node.type_params(),
-            TopLevelDecl::ExtensionType(node) => node.type_params(),
-            TopLevelDecl::Function(node) => node.type_params(),
-            TopLevelDecl::TypeAlias(node) => node.type_params(),
-            TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => AstChildren::empty(),
-        };
+        let params = node.type_params();
         self.type_parameters.push(params, &self.state.model);
         if let TopLevelDecl::Function(function) = node
             && function.name().name().starts_with('_')

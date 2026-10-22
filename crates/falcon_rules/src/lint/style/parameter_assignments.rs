@@ -120,7 +120,7 @@ impl<'a> Collector<'a> {
         let mut defaulted = false;
         for write in writes {
             let outside = scope
-                .is_some_and(|scope| write.span.start < scope.start || write.span.end > scope.end);
+                .is_some_and(|scope| !scope.contains(write.span));
             if outside || self.is_hidden(write, defaults_to_null) {
                 continue;
             }

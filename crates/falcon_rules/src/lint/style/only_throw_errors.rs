@@ -32,10 +32,7 @@ impl Rule for OnlyThrowErrors {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(Box::new(Collector {
-            diagnostics: Vec::new(),
-            ctx,
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diagnostics)
     }
 }
 

@@ -24,10 +24,7 @@ impl Rule for UnnecessaryGettersSetters {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Structural(Box::new(Collector {
-            ctx,
-            diags: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
     }
 }
 
@@ -91,33 +88,7 @@ fn check_members<'a>(
     }
 }
 
-fn field_name(expr: Expr<'_>) -> Option<&str> {
-    match expr.unparenthesized() {
-        Expr::Ident(id) => Some(id.name()),
-        Expr::Field(field) if matches!(field.object().unparenthesized(), Expr::This(_)) => {
-            Some(field.field().name())
-        }
-        _ => None,
-    }
-}
-
-pub(crate) fn getter_returns_field(getter: GetterDecl<'_>) -> Option<&str> {
-    match getter.body()? {
-        FunctionBody::Arrow(body) => field_name(body.expr()),
-        FunctionBody::Block(block) => {
-            let mut stmts = block.stmts();
-            let stmt = stmts.next()?;
-            if stmts.next().is_some() {
-                return None;
-            }
-            match stmt {
-                Stmt::Return(ret) => field_name(ret.value()?),
-                _ => None,
-            }
-        }
-        _ => None,
-    }
-}
+use crate::lint::support::field_accessors::{field_name, getter_returns_field};
 
 fn setter_assigns_field(setter: SetterDecl<'_>) -> Option<&str> {
     let assign = match setter.body()? {

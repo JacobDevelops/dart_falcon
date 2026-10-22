@@ -2,7 +2,7 @@
 //!
 //! `include-methods` (array of strings, default: []) adds custom test registration helpers.
 
-use crate::lint::correctness::test_assertions;
+use crate::lint::support::test_assertions;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
@@ -97,19 +97,18 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         let scope = |span: Span| {
             self.groups
                 .iter()
-                .filter(|group| group.start <= span.start && span.end <= group.end)
+                .filter(|group| group.contains(span))
                 .min_by_key(|group| group.end - group.start)
                 .copied()
         };
         let mut diagnostics = Vec::new();
         for (index, (name, span, function)) in self.tests.iter().enumerate() {
             let repeated_by_loop = self.loops.iter().any(|body| {
-                body.start <= span.start
-                    && span.end <= body.end
+                body.contains(*span)
                     && scope(*span)
-                        .is_none_or(|group| group.start <= body.start && body.end <= group.end)
+                        .is_none_or(|group| group.contains(*body))
                     && function.is_none_or(|function| {
-                        function.start <= body.start && body.end <= function.end
+                        function.contains(*body)
                     })
             });
             if repeated_by_loop

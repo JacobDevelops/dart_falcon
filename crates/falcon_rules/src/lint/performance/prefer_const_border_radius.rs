@@ -21,13 +21,7 @@ impl Rule for PreferConstBorderRadius {
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> {
-        let collector = Collector {
-            diags: Vec::new(),
-            ctx,
-        };
-        RulePreparation::Structural(Box::new(collector))
-    }
+    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags) }
 }
 fn check_border_radius_only_call(
     callee: Expr<'_>,
@@ -104,9 +98,12 @@ fn extract_radius_value(expr: Expr<'_>) -> Option<&str> {
         && let Expr::Ident(ident) = field.object().unparenthesized()
         && ident.name() == "Radius"
         && field.field().name() == "circular"
-        && call.args().positional().len() == 1
+        && let (Some(argument), None) = {
+            let mut arguments = call.args().positional();
+            (arguments.next(), arguments.next())
+        }
     {
-        return scalar_text(call.args().positional().next().unwrap());
+        return scalar_text(argument);
     }
     None
 }

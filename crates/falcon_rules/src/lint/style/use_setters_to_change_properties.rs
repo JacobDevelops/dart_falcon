@@ -254,7 +254,7 @@ fn changes_property<'a>(
         }
         _ => false,
     };
-    assigns_field && (extension || !overrides_method(method, owner, signatures, unresolved_super))
+    assigns_field && (extension || !overrides_method(method, owner, signatures, unresolved_super, *model))
 }
 
 /// A field or setter of this name declared by the type itself.
@@ -280,8 +280,9 @@ fn overrides_method(
     owner: &DeclarationIdentity,
     signatures: &SignatureIndex,
     unresolved_super: bool,
+    model: SemanticModel<'_>,
 ) -> bool {
-    if has_override(method) {
+    if crate::lint::support::annotations::has_override(method.annotations(), model) {
         return true;
     }
     signatures
@@ -292,9 +293,3 @@ fn overrides_method(
         )
 }
 
-fn has_override(method: MethodDecl<'_>) -> bool {
-    method.annotations().any(|annotation| {
-        let mut names = annotation.name();
-        matches!((names.next(), names.next()), (Some(name), None) if name.name() == "override")
-    })
-}

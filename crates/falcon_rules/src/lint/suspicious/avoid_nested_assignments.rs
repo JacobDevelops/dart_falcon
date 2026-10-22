@@ -2,7 +2,7 @@
 //! `ignore-null-aware-assignments` (default false) exempts `??=`.
 //! Conditions and chained assignments are handled by their dedicated rules.
 
-use super::avoid_assignments_as_conditions::is_in_condition;
+use crate::lint::support::condition_position::is_in_condition;
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };

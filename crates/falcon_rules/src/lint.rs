@@ -29,6 +29,7 @@ pub mod security;
 pub(crate) mod semantic_type_operations;
 pub(crate) mod string_lit;
 pub mod style;
+pub(crate) mod support;
 pub mod suspicious;
 #[cfg(test)]
 pub(crate) mod test_support;

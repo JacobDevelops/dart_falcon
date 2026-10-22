@@ -3407,7 +3407,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                 // its receiver; the right operand uses the operator parameter.
                 self.without_expected(|walker| walker.visit_expr(left));
                 let name = op
-                    .method_name()
+                    .operator_name()
                     .expect("logical and coalescing operators are visited separately");
                 let expected = self
                     .state

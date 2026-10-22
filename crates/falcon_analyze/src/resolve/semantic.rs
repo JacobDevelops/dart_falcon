@@ -13,8 +13,8 @@ use std::sync::Arc;
 
 use falcon_syntax::cst::visit::{Visitor, walk_expr, walk_stmt};
 use falcon_syntax::cst::{
-    AstChildren, BinaryOp, ClassMember, ClassRestriction, DartType, EffectiveMembers, Expr,
-    FormalParam, FormalParamList, FunctionBody, FunctionKind, InitializingFormal, NodeId,
+    Annotation, AstChildren, BinaryOp, ClassMember, ClassRestriction, DartType, EffectiveMembers,
+    Expr, FormalParam, FormalParamList, FunctionBody, FunctionKind, InitializingFormal, NodeId,
     ParamKind, Program, Span, TopLevelDecl, TypeParam, UnaryOp, VarKeyword,
 };
 
@@ -2694,6 +2694,44 @@ impl<'a> SemanticModel<'a> {
             })
     }
 
+    /// Whether metadata denotes the SDK's argument-free `deprecated` constant.
+    pub fn is_deprecated_constant(&self, annotation: Annotation<'_>) -> bool {
+        annotation.args().is_none()
+            && annotation.constructor_name().is_none()
+            && annotation
+                .name()
+                .last()
+                .is_some_and(|name| name.name() == "deprecated")
+            && QualifiedName::from_identifiers(annotation.name()).is_some_and(|name| {
+                self.resolve_sdk_member(name)
+                    .is_some_and(|identity| identity.is_sdk("dart:core", "deprecated"))
+            })
+    }
+
+    /// Whether metadata names the SDK's `Deprecated` type, including type aliases.
+    pub fn is_deprecated_constructor(&self, annotation: Annotation<'_>) -> bool {
+        let names = annotation.name();
+        let is_deprecated_type = |name: Option<QualifiedName<'_>>| {
+            name.is_some_and(|name| {
+                self.resolve_name(name).is_some_and(|identity| {
+                    self.unaliased(identity).is_sdk("dart:core", "Deprecated")
+                })
+            })
+        };
+        is_deprecated_type(QualifiedName::from_identifiers(names.clone()))
+            || (annotation.constructor_name().is_none()
+                && names.clone().count() > 1
+                && is_deprecated_type(QualifiedName::from_identifiers(
+                    names.clone().take(names.count() - 1),
+                )))
+    }
+
+    /// Whether metadata denotes either resolved SDK deprecation annotation.
+    pub fn is_deprecation(&self, annotation: Annotation<'_>) -> bool {
+        self.is_deprecated_constant(annotation)
+            || (annotation.args().is_some() && self.is_deprecated_constructor(annotation))
+    }
+
     pub fn resolve_name<'n>(
         &self,
         name: impl Into<QualifiedName<'n>>,
@@ -3981,6 +4019,8 @@ signature_index! {
         /// Non-promotable private instance names conflict library-wide.
         blocked_field_promotions: SignatureMap<LibraryId, FxHashSet<String>>,
         supertypes: SignatureMap<DeclarationIdentity, (Vec<TypeParameterId>, Vec<ResolvedType>)>,
+        /// Generic owner parameters for curated identities without hierarchy facts.
+        fallback_type_parameters: SignatureMap<DeclarationIdentity, Vec<TypeParameterId>>,
         owner_defaults: SignatureMap<TypeParameterId, ResolvedType>,
         /// Whether the declaration of each type parameter of an indexed type,
         /// alias, function or method states a bound; parameters of local
@@ -4454,6 +4494,10 @@ impl SignatureIndex {
         fill(&mut self.constructors, fallback.constructors);
         fill(&mut self.member_entries, fallback.member_entries);
         fill(&mut self.supertypes, fallback.supertypes);
+        fill(
+            &mut self.fallback_type_parameters,
+            fallback.fallback_type_parameters,
+        );
         fill(&mut self.superclasses, fallback.superclasses);
         fill(&mut self.member_supertypes, fallback.member_supertypes);
         fill(&mut self.declarations, fallback.declarations);
@@ -4743,22 +4787,13 @@ impl SignatureIndex {
             if !model.owns_top_level_declaration(declaration) {
                 continue;
             }
-            let (name, parameters, members) = match declaration {
-                TopLevelDecl::Class(class) => (class.name(), class.type_params(), class.members()),
-                TopLevelDecl::MixinClass(class) => {
-                    (class.name(), class.type_params(), class.members())
-                }
-                TopLevelDecl::Mixin(mixin) => (mixin.name(), mixin.type_params(), mixin.members()),
-                TopLevelDecl::Enum(enumeration) => (
-                    enumeration.name(),
-                    enumeration.type_params(),
-                    enumeration.members(),
-                ),
-                TopLevelDecl::ExtensionType(extension) => (
-                    extension.name(),
-                    extension.type_params(),
-                    extension.members(),
-                ),
+            let parameters = declaration.type_params();
+            let (name, members) = match declaration {
+                TopLevelDecl::Class(class) => (class.name(), class.members()),
+                TopLevelDecl::MixinClass(class) => (class.name(), class.members()),
+                TopLevelDecl::Mixin(mixin) => (mixin.name(), mixin.members()),
+                TopLevelDecl::Enum(enumeration) => (enumeration.name(), enumeration.members()),
+                TopLevelDecl::ExtensionType(extension) => (extension.name(), extension.members()),
                 _ => continue,
             };
             let Some(identity) = model.resolve_name(name.name()) else {
@@ -5945,10 +5980,11 @@ impl SignatureIndex {
             self.immutable.insert(identity.clone(), immutable);
             if let Some(superclass) = superclass {
                 let mut scope = TypeParameterScope::default();
-                match declaration {
-                    TopLevelDecl::Class(node) => scope.push(node.type_params(), model),
-                    TopLevelDecl::MixinClass(node) => scope.push(node.type_params(), model),
-                    _ => {}
+                if matches!(
+                    declaration,
+                    TopLevelDecl::Class(_) | TopLevelDecl::MixinClass(_)
+                ) {
+                    scope.push(declaration.type_params(), model);
                 }
                 self.superclasses
                     .insert(identity, model.resolve_type_in(superclass, &scope));
@@ -6853,6 +6889,16 @@ impl SignatureIndex {
             },
         );
         self.add_sdk_hierarchy();
+        for (identity, name, arity) in super::identity::fallback_types() {
+            if arity > 0 && !self.supertypes.contains_key(&identity) {
+                self.fallback_type_parameters.insert(
+                    identity,
+                    (0..arity)
+                        .map(|ordinal| sdk_parameter(name, ordinal))
+                        .collect(),
+                );
+            }
+        }
     }
 
     /// Seeds [`SDK_HIERARCHY`] plus the stream/file members whose results
@@ -7384,11 +7430,15 @@ impl SignatureIndex {
     }
 
     /// The number of type parameters an indexed class, mixin, enum, or
-    /// extension type declares (project or loaded external declaration);
-    /// `None` for unindexed types.
+    /// extension type declares (project, loaded external, or curated fallback);
+    /// SDK/package identities default to zero; unindexed local types return `None`.
     pub fn type_parameter_count(&self, identity: &DeclarationIdentity) -> Option<usize> {
         self.type_parameters(identity)
             .map(|parameters| parameters.len())
+            .or(match identity {
+                DeclarationIdentity::Sdk { .. } | DeclarationIdentity::Package { .. } => Some(0),
+                DeclarationIdentity::Library { .. } => None,
+            })
     }
 
     /// The declaration kind (class, mixin, enum, ...) of the indexed type
@@ -7581,6 +7631,11 @@ impl SignatureIndex {
         self.supertypes
             .get(identity)
             .map(|(parameters, _)| parameters.as_slice())
+            .or_else(|| {
+                self.fallback_type_parameters
+                    .get(identity)
+                    .map(Vec::as_slice)
+            })
     }
 
     /// `identity` instantiated with its own `parameters`, each bounded by its
@@ -14575,7 +14630,7 @@ fn operator_parameter_type(
     model: &SemanticModel<'_>,
 ) -> Option<ResolvedType> {
     let (signature, substitutions) =
-        signatures.resolved_member(receiver, op.method_name()?, model)?;
+        signatures.resolved_member(receiver, op.operator_name()?, model)?;
     signature
         .positional
         .first()
@@ -14596,7 +14651,7 @@ fn binary_result(
     if builtin != ResolvedType::Unknown || numeric(left) {
         return builtin;
     }
-    op.method_name().map_or(ResolvedType::Unknown, |name| {
+    op.operator_name().map_or(ResolvedType::Unknown, |name| {
         operator_return_type(left, name, signatures, model)
     })
 }
@@ -14718,6 +14773,104 @@ mod tests {
 
     use super::*;
     use crate::resolve::{IdentitySource, LibrarySource};
+
+    #[test]
+    fn fallback_generic_arities_live_in_the_signature_index() {
+        let mut signatures = SignatureIndex::default();
+        let list = DeclarationIdentity::sdk("dart:core", "List");
+        signatures.supertypes.insert(
+            list.clone(),
+            (
+                (0..3)
+                    .map(|ordinal| sdk_parameter("List", ordinal))
+                    .collect(),
+                Vec::new(),
+            ),
+        );
+        signatures.add_fallback_signatures();
+        assert_eq!(signatures.type_parameter_count(&list), Some(3));
+        for (identity, arity) in [
+            (DeclarationIdentity::sdk("dart:core", "String"), 0),
+            (DeclarationIdentity::sdk("dart:core", "Iterable"), 1),
+            (DeclarationIdentity::sdk("dart:core", "Iterator"), 1),
+            (DeclarationIdentity::sdk("dart:core", "Comparable"), 1),
+            (DeclarationIdentity::sdk("dart:core", "MapEntry"), 2),
+            (DeclarationIdentity::sdk("dart:core", "Expando"), 1),
+            (DeclarationIdentity::sdk("dart:core", "WeakReference"), 1),
+            (DeclarationIdentity::sdk("dart:core", "Finalizer"), 1),
+            (DeclarationIdentity::sdk("dart:core", "Map"), 2),
+            (DeclarationIdentity::sdk("dart:async", "Future"), 1),
+            (DeclarationIdentity::sdk("dart:async", "Completer"), 1),
+            (DeclarationIdentity::sdk("dart:async", "Stream"), 1),
+            (DeclarationIdentity::sdk("dart:async", "FutureOr"), 1),
+            (DeclarationIdentity::sdk("dart:collection", "HashMap"), 2),
+            (
+                DeclarationIdentity::sdk("dart:collection", "LinkedHashMap"),
+                2,
+            ),
+            (
+                DeclarationIdentity::sdk("dart:collection", "SplayTreeMap"),
+                2,
+            ),
+            (DeclarationIdentity::sdk("dart:collection", "HashSet"), 1),
+            (
+                DeclarationIdentity::sdk("dart:collection", "LinkedHashSet"),
+                1,
+            ),
+            (
+                DeclarationIdentity::sdk("dart:collection", "SplayTreeSet"),
+                1,
+            ),
+            (DeclarationIdentity::sdk("dart:collection", "ListQueue"), 1),
+            (
+                DeclarationIdentity::sdk("dart:collection", "DoubleLinkedQueue"),
+                1,
+            ),
+            (DeclarationIdentity::sdk("dart:js_interop", "JSArray"), 1),
+            (DeclarationIdentity::sdk("dart:js_interop", "JSPromise"), 1),
+            (DeclarationIdentity::package("flutter", "State"), 1),
+            (DeclarationIdentity::package("flutter", "BuildContext"), 0),
+            (DeclarationIdentity::package("flutter", "ValueNotifier"), 0),
+            (DeclarationIdentity::package("provider", "Provider"), 0),
+        ] {
+            assert_eq!(signatures.type_parameter_count(&identity), Some(arity));
+        }
+        assert_eq!(
+            signatures.type_parameter_count(&DeclarationIdentity::package("unknown", "Box")),
+            Some(0),
+        );
+    }
+
+    #[test]
+    fn fallback_arities_do_not_invent_supertype_facts() {
+        let mut signatures = SignatureIndex::default();
+        signatures.add_fallback_signatures();
+        for identity in [
+            DeclarationIdentity::sdk("dart:collection", "HashMap"),
+            DeclarationIdentity::sdk("dart:collection", "ListQueue"),
+            DeclarationIdentity::sdk("dart:js_interop", "JSArray"),
+            DeclarationIdentity::package("flutter", "BuildContext"),
+        ] {
+            assert_eq!(
+                signatures.implements_sdk(
+                    &ResolvedType::interface_identity(identity),
+                    "dart:core",
+                    "Iterable",
+                ),
+                Truth::Unknown,
+            );
+        }
+        for (name, supertype) in [("int", "num"), ("FormatException", "Exception")] {
+            assert_eq!(
+                signatures.implements_sdk(
+                    &ResolvedType::interface_identity(DeclarationIdentity::sdk("dart:core", name)),
+                    "dart:core",
+                    supertype,
+                ),
+                Truth::Yes,
+            );
+        }
+    }
 
     #[test]
     fn sdk_identities_remain_canonical_across_plain_and_embedded_contexts() {

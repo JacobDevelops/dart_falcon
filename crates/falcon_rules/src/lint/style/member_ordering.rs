@@ -22,7 +22,8 @@
 //! `dispose`, `build`, and `overridden-methods`.
 
 use falcon_analyze::{
-    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
+    StructuralTraversal, TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -51,9 +52,13 @@ impl Rule for MemberOrdering {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
+        let Some(identities) = ctx.identities() else {
+            return RulePreparation::Diagnostics(Vec::new());
+        };
         let options = options::get::<Options>(ctx, Self::NAME);
         RulePreparation::Structural(Box::new(Collector {
             ctx,
+            model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
             order: options.order.as_deref(),
             widgets_order: options.widgets_order.as_deref(),
             diags: Vec::new(),
@@ -63,6 +68,7 @@ impl Rule for MemberOrdering {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
+    model: SemanticModel<'a>,
     order: Option<&'a [MemberCategory]>,
     widgets_order: Option<&'a [WidgetCategory]>,
     diags: Vec<Diagnostic>,
@@ -71,25 +77,31 @@ struct Collector<'a> {
 falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
+        let mut parameters = TypeParameterScope::default();
+        if !decl.type_params().is_empty() {
+            parameters.push(decl.type_params(), &self.model);
+        }
             match decl {
                 TopLevelDecl::Class(c) => check_class(
                     c.members(),
-                    c.extends(),
+                    c.extends().map(|ty| self.model.resolve_type_in(ty, &parameters)),
                     self.order,
                     self.widgets_order,
                     &mut self.diags,
                     self.ctx,
+                    self.model,
                 ),
                 TopLevelDecl::Mixin(m) => {
-                    check_class(m.members(), None, self.order, self.widgets_order, &mut self.diags, self.ctx)
+                    check_class(m.members(), None, self.order, self.widgets_order, &mut self.diags, self.ctx, self.model)
                 }
                 TopLevelDecl::MixinClass(mc) => check_class(
                     mc.members(),
-                    mc.extends(),
+                    mc.extends().map(|ty| self.model.resolve_type_in(ty, &parameters)),
                     self.order,
                     self.widgets_order,
                     &mut self.diags,
                     self.ctx,
+                    self.model,
                 ),
                 _ => {}
             }
@@ -104,23 +116,24 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
 fn check_class(
     members: AstChildren<'_, ClassMember<'_>>,
-    extends: Option<DartType<'_>>,
+    extends: Option<ResolvedType>,
     order: Option<&[MemberCategory]>,
     widgets_order: Option<&[WidgetCategory]>,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
+    model: SemanticModel<'_>,
 ) {
     // A Flutter State subclass with a configured `widgets_order` uses the
     // lifecycle sequence; otherwise `order` (if any) drives the check; otherwise
     // the built-in default order.
     if let Some(seq) = widgets_order
-        && extends_state(extends)
+        && extends_state(extends.as_ref())
     {
         check_sequence(
             members,
             diags,
             ctx,
-            |m| widget_rank(m, seq),
+            |m| widget_rank(m, seq, model),
             widgets_message(),
         );
     } else if let Some(seq) = order {
@@ -137,13 +150,14 @@ fn check_class(
 }
 
 /// True when the class extends `State` / `State<T>` (Flutter widget state).
-fn extends_state(extends: Option<DartType<'_>>) -> bool {
-    matches!(extends, Some(DartType::Named(nt)) if nt.segments().last().is_some_and(|id| id.name() == "State"))
+fn extends_state(extends: Option<&ResolvedType>) -> bool {
+    matches!(extends, Some(ResolvedType::Interface { identity, .. })
+        if identity.is_package("flutter", "State"))
 }
 
 /// Lifecycle token for a State member, for `widgets_order`. `overridden-methods`
 /// is a best-effort catch-all for any other `@override` method.
-fn widget_token(member: ClassMember<'_>) -> Option<WidgetCategory> {
+fn widget_token(member: ClassMember<'_>, model: SemanticModel<'_>) -> Option<WidgetCategory> {
     use WidgetCategory::*;
     match member {
         ClassMember::Constructor(_) => Some(Constructor),
@@ -153,19 +167,19 @@ fn widget_token(member: ClassMember<'_>) -> Option<WidgetCategory> {
             "didUpdateWidget" => Some(DidUpdateWidget),
             "dispose" => Some(Dispose),
             "build" => Some(Build),
-            _ if is_override(m.annotations()) => Some(OverriddenMethods),
+            _ if has_override(m.annotations(), model) => Some(OverriddenMethods),
             _ => None,
         },
         _ => None,
     }
 }
 
-fn widget_rank(member: ClassMember<'_>, seq: &[WidgetCategory]) -> Option<usize> {
-    let token = widget_token(member)?;
+fn widget_rank(member: ClassMember<'_>, seq: &[WidgetCategory], model: SemanticModel<'_>) -> Option<usize> {
+    let token = widget_token(member, model)?;
     seq.iter().position(|t| *t == token)
 }
 
-use crate::member_order::is_override;
+use crate::lint::support::annotations::has_override;
 
 fn order_message() -> &'static str {
     "Class member is out of the configured order."

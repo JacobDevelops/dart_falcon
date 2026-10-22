@@ -6,7 +6,7 @@
 //! Widget helpers and didChangeDependencies are not assumed to run in build.
 //! Outside build, avoid-watch-outside-build owns the diagnostic.
 
-use super::avoid_read_inside_build::{Check, prepare};
+use crate::lint::support::provider_access::{Check, prepare};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 

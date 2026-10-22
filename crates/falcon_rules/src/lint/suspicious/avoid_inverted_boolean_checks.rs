@@ -2,7 +2,7 @@
 //! Unlike avoid-inverted-boolean-expressions, this does not diagnose `!!value`.
 //! Relational operators are excluded because NaN and custom operators lack reliable inverses.
 
-use super::avoid_assignments_as_conditions::is_in_condition;
+use crate::lint::support::condition_position::is_in_condition;
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
@@ -18,10 +18,7 @@ impl Rule for AvoidInvertedBooleanChecks {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Structural(Box::new(Collector {
-            ctx,
-            diags: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
     }
 }
 

@@ -18,10 +18,7 @@ pub struct AvoidUnnecessaryCollections;
 
 impl Rule for AvoidUnnecessaryCollections {
     fn prepare<'a>(&self, _: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> RulePreparation<'a> {
-        RulePreparation::Semantic(Box::new(Collector {
-            ctx,
-            diagnostics: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diagnostics)
     }
 }
 

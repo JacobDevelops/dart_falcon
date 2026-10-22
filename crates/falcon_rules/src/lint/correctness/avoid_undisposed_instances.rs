@@ -11,7 +11,7 @@
 //! proper-controller-dispose. Subscription and sink release obligations remain
 //! with cancel-subscriptions and close-sinks.
 
-use super::proper_controller_dispose::{constructed_identity, has_dispose};
+use crate::lint::support::controller_disposal::{constructed_identity, has_dispose};
 use falcon_analyze::{
     AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel, SignatureIndex,
     StructuralRuleVisitor, StructuralTraversal,
@@ -57,7 +57,7 @@ impl Collector<'_> {
         let enclosing_size = |spans: &[Span]| {
             spans
                 .iter()
-                .filter(|outer| outer.start <= span.start && outer.end >= span.end)
+                .filter(|outer| outer.contains(span))
                 .map(|outer| outer.end - outer.start)
                 .min()
         };

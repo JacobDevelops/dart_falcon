@@ -11,7 +11,8 @@
 //! frame.
 
 use falcon_analyze::{
-    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
+    StructuralTraversal, TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -25,9 +26,14 @@ impl Rule for AvoidReturningNullForVoid {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
+        let Some(identities) = ctx.identities() else {
+            return RulePreparation::Diagnostics(Vec::new());
+        };
         let collector = Collector {
             diags: Vec::new(),
             ctx,
+            model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
+            parameters: TypeParameterScope::default(),
             void_stack: Vec::new(),
         };
         RulePreparation::Structural(Box::new(collector))
@@ -37,6 +43,8 @@ impl Rule for AvoidReturningNullForVoid {
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
+    model: SemanticModel<'a>,
+    parameters: TypeParameterScope,
     /// Void-ness of each enclosing function boundary. The innermost frame decides
     /// whether a `return null;` is flagged; a nested function pushes its own frame
     /// so it is judged by its own return type.
@@ -44,6 +52,33 @@ struct Collector<'a> {
 }
 
 impl Collector<'_> {
+    fn enter(&mut self, parameters: AstChildren<'_, TypeParam<'_>>) {
+        if !parameters.is_empty() {
+            self.parameters.push(parameters, &self.model);
+        }
+    }
+
+    fn exit(&mut self, parameters: AstChildren<'_, TypeParam<'_>>) {
+        if !parameters.is_empty() {
+            self.parameters.pop();
+        }
+    }
+
+    fn is_void_return(&self, rt: Option<DartType<'_>>, marker: AsyncMarker) -> bool {
+        let Some(rt) = rt else {
+            return false;
+        };
+        let ty = self.model.resolve_type_in(rt, &self.parameters);
+        match marker {
+            AsyncMarker::Sync => matches!(ty, ResolvedType::Void),
+            AsyncMarker::Async => {
+                ty.interface("dart:async", "Future")
+                    && matches!(ty.arguments(), [ResolvedType::Void])
+            }
+            _ => false,
+        }
+    }
+
     /// An arrow body `=> null` of a void function is the expression form of
     /// `return null;`, so check it at the function boundary.
     fn check_arrow(&mut self, body: Option<FunctionBody<'_>>, is_void: bool) {
@@ -58,26 +93,27 @@ impl Collector<'_> {
     }
 }
 
-fn is_void_return(rt: Option<DartType<'_>>, marker: AsyncMarker) -> bool {
-    match (rt, marker) {
-        (Some(DartType::Void(_)), AsyncMarker::Sync) => true,
-        (Some(DartType::Named(n)), AsyncMarker::Async) => {
-            let mut args = n.type_args();
-            n.segments().last().is_some_and(|s| s.name() == "Future")
-                && matches!(args.next(), Some(DartType::Void(_)))
-                && args.next().is_none()
-        }
-        _ => false,
-    }
-}
 
 falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
+    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
+        if !matches!(node, TopLevelDecl::Function(_)) {
+            self.enter(node.type_params());
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn exit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
+        if !matches!(node, TopLevelDecl::Function(_)) {
+            self.exit(node.type_params());
+        }
+    }
+
     fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         if let ClassMember::Operator(operator) = node {
-            let is_void = is_void_return(operator.return_type(), operator.async_marker());
+            let is_void = self.is_void_return(operator.return_type(), operator.async_marker());
             self.check_arrow(operator.body(), is_void);
             self.void_stack.push(is_void);
         }
@@ -91,29 +127,33 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
-        let is_void = is_void_return(node.return_type(), node.async_marker());
+        self.enter(node.type_params());
+        let is_void = self.is_void_return(node.return_type(), node.async_marker());
         self.check_arrow(node.body(), is_void);
         self.void_stack.push(is_void);
         StructuralTraversal::Continue
     }
 
-    fn exit_function_decl(&mut self, _node: FunctionDecl<'a>) {
+    fn exit_function_decl(&mut self, node: FunctionDecl<'a>) {
+        self.exit(node.type_params());
         self.void_stack.pop();
     }
 
     fn visit_method_decl(&mut self, node: MethodDecl<'a>) -> StructuralTraversal {
-        let is_void = is_void_return(node.return_type(), node.async_marker());
+        self.enter(node.type_params());
+        let is_void = self.is_void_return(node.return_type(), node.async_marker());
         self.check_arrow(node.body(), is_void);
         self.void_stack.push(is_void);
         StructuralTraversal::Continue
     }
 
-    fn exit_method_decl(&mut self, _node: MethodDecl<'a>) {
+    fn exit_method_decl(&mut self, node: MethodDecl<'a>) {
+        self.exit(node.type_params());
         self.void_stack.pop();
     }
 
     fn visit_getter_decl(&mut self, node: GetterDecl<'a>) -> StructuralTraversal {
-        let is_void = is_void_return(node.return_type(), node.async_marker());
+        let is_void = self.is_void_return(node.return_type(), node.async_marker());
         self.check_arrow(node.body(), is_void);
         self.void_stack.push(is_void);
         StructuralTraversal::Continue
@@ -157,7 +197,8 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 }
             }
             Stmt::LocalFunc(lf) => {
-                let is_void = is_void_return(lf.return_type(), lf.async_marker());
+                self.enter(lf.type_params());
+                let is_void = self.is_void_return(lf.return_type(), lf.async_marker());
                 self.check_arrow(Some(lf.body()), is_void);
                 self.void_stack.push(is_void);
             }
@@ -167,13 +208,15 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn exit_stmt(&mut self, node: Stmt<'a>) {
-        if matches!(node, Stmt::LocalFunc(_)) {
+        if let Stmt::LocalFunc(function) = node {
+            self.exit(function.type_params());
             self.void_stack.pop();
         }
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         if let Expr::FuncExpr(function) = node {
+            self.enter(function.type_params());
             // Function expressions have no written return type, so they can never
             // be declared `void`.
             self.check_arrow(Some(function.body()), false);
@@ -183,7 +226,8 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn exit_expr(&mut self, node: Expr<'a>) {
-        if matches!(node, Expr::FuncExpr(_)) {
+        if let Expr::FuncExpr(function) = node {
+            self.exit(function.type_params());
             self.void_stack.pop();
         }
     }

@@ -30,7 +30,7 @@ pub(crate) struct Semantics {
     pub message: &'static str,
 }
 
-pub(super) fn prepare<'a>(
+pub(crate) fn prepare<'a>(
     program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
 ) -> Option<Collector<'a>> {
@@ -92,7 +92,7 @@ pub(super) fn prepare_setstate<'a>(
     Some(collector)
 }
 
-pub(super) struct Collector<'a> {
+pub(crate) struct Collector<'a> {
     program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
     semantics: Semantics,
@@ -518,7 +518,7 @@ impl<'a> Collector<'a> {
 
 impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<falcon_diagnostics::Diagnostic> {
-        super::analyze_semantics(self.program, self.ctx, self.semantics)
+        super::async_state::analyze_semantics(self.program, self.ctx, self.semantics)
     }
 
     fn visit_expr(&mut self, expression: Expr<'a>, state: &SemanticState<'a>) {
@@ -569,7 +569,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             Expr::Call(call) => {
                 let callee = call.callee();
                 let args = call.args();
-                if self.setstate && super::super::flutter_state_rules::is_setstate(call, state) {
+                if self.setstate && super::flutter_state::is_setstate(call, state) {
                     self.semantics.uses.insert(key(expression), true);
                 }
                 self.arguments(args, state);
@@ -726,9 +726,13 @@ void callbacks() {
   a.Future<void>.microtask(() {});
 }
 ";
-        inference::analyze("check-protected-callbacks", &CheckProtectedCallbacks, Path::new("generic_future_callbacks.dart"),
-        source,
-        &FalconConfig::default(),);
+        inference::analyze(
+            "check-protected-callbacks",
+            &CheckProtectedCallbacks,
+            Path::new("generic_future_callbacks.dart"),
+            source,
+            &FalconConfig::default(),
+        );
     }
 
     struct CheckCascadeCallbacks;
@@ -760,9 +764,13 @@ void use(Holder holder, BuildContext context) {
   holder..[0](context).then((value) {});
 }
 ";
-        inference::analyze("check-cascade-callbacks", &CheckCascadeCallbacks, Path::new("cascade_callbacks.dart"),
-        source,
-        &FalconConfig::default(),);
+        inference::analyze(
+            "check-cascade-callbacks",
+            &CheckCascadeCallbacks,
+            Path::new("cascade_callbacks.dart"),
+            source,
+            &FalconConfig::default(),
+        );
     }
 
     struct CheckEqualityConstants;
@@ -800,8 +808,12 @@ bool shadowed(bool aliased) => aliased == true;
 bool parenthesized() => aliased == (negated);
 bool nestedParenthesized() => aliased == ((negated));
 ";
-        inference::analyze("check-equality-constants", &CheckEqualityConstants, Path::new("equality_constants.dart"),
-        source,
-        &FalconConfig::default(),);
+        inference::analyze(
+            "check-equality-constants",
+            &CheckEqualityConstants,
+            Path::new("equality_constants.dart"),
+            source,
+            &FalconConfig::default(),
+        );
     }
 }

@@ -25,7 +25,7 @@ use crate::lint::inherited_members::{
     InheritanceSource, inherited_concrete_member, inheriting_declaration,
 };
 use crate::lint::package_layout::is_in_lib_dir;
-use crate::lint::style::public_member_api_docs::documented;
+use crate::lint::support::documentation::documented;
 
 #[derive(Default)]
 pub struct AvoidRenamingMethodParameters;

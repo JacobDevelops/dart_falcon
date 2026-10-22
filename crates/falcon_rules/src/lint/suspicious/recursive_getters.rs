@@ -23,10 +23,7 @@ impl Rule for RecursiveGetters {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Structural(Box::new(Collector {
-            ctx,
-            diags: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
     }
 }
 

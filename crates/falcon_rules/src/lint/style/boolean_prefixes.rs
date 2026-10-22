@@ -39,9 +39,13 @@ impl Rule for BooleanPrefixes {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
+        let Some(identities) = ctx.identities() else {
+            return RulePreparation::Diagnostics(Vec::new());
+        };
         let visitor = Collector {
             diags: Vec::new(),
             ctx,
+            model: falcon_analyze::SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
             prefixes: &crate::lint::options::get::<Options>(ctx, Self::NAME).valid_prefixes,
         };
         RulePreparation::Structural(Box::new(visitor))
@@ -57,10 +61,14 @@ const DEFAULT_PREFIXES: &[&str] = &[
 const MESSAGE: &str = "Boolean should be named with a valid prefix.";
 
 fn is_bool_type(ty: Option<DartType<'_>>) -> bool {
-    matches!(ty, Some(DartType::Named(nt)) if nt.segments().count() == 1 && nt.segments().next().unwrap().name() == "bool")
+    let Some(DartType::Named(named)) = ty else {
+        return false;
+    };
+    let mut segments = named.segments();
+    matches!((segments.next(), segments.next()), (Some(segment), None) if segment.name() == "bool")
 }
 
-use crate::member_order::is_override;
+use crate::lint::support::annotations::has_override;
 
 /// pyramid_lint strips a single leading underscore and then checks whether the
 /// name simply *starts with* a valid prefix (no camelCase boundary is required,
@@ -109,6 +117,7 @@ fn check_declarators(
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
+    model: falcon_analyze::SemanticModel<'a>,
     prefixes: &'a [String],
 }
 
@@ -136,10 +145,10 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 check_declarators(f.declarators(), &mut self.diags, self.ctx, self.prefixes);
                 None
             }
-            ClassMember::Method(m) if !is_override(m.annotations()) => {
+            ClassMember::Method(m) if !has_override(m.annotations(), self.model) => {
                 Some((m.name(), m.return_type()))
             }
-            ClassMember::Getter(g) if !is_override(g.annotations()) => {
+            ClassMember::Getter(g) if !has_override(g.annotations(), self.model) => {
                 Some((g.name(), g.return_type()))
             }
             _ => None,

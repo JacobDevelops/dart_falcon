@@ -22,7 +22,7 @@ use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::collection_checks::lacks_collection_member;
+use crate::lint::support::collection_checks::lacks_collection_member;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
@@ -33,10 +33,7 @@ impl Rule for PreferIterableWhereType {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(Box::new(Collector {
-            diags: Vec::new(),
-            ctx,
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diags)
     }
 }
 struct Collector<'a> {
@@ -56,10 +53,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         let Expr::Field(field) = call.callee().unparenthesized() else {
             return;
         };
+        let mut arguments = call.args().positional();
         if field.field().name() == "where"
             && call.args().named().is_empty()
-            && call.args().positional().len() == 1
-            && is_is_check_closure(call.args().positional().first().unwrap())
+            && let (Some(predicate), None) = (arguments.next(), arguments.next())
+            && is_is_check_closure(predicate)
             && !lacks_collection_member(self.ctx, field.object(), state, "whereType", &["Iterable"])
         {
             self.diags.push(self.ctx.diagnostic("Use `whereType<T>()` instead of `where` with an `is` check.", field.field().span()));
@@ -71,11 +69,10 @@ fn is_is_check_closure(expr: Expr<'_>) -> bool {
     let Expr::FuncExpr(function) = expr.unparenthesized() else {
         return false;
     };
-    let params = function.params().params();
-    if params.len() != 1 {
+    let mut params = function.params().params();
+    let (Some(param), None) = (params.next(), params.next()) else {
         return false;
-    }
-    let param = params.first().unwrap();
+    };
     if param.kind() != ParamKind::Positional {
         return false;
     }

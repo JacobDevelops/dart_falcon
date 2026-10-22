@@ -15,10 +15,7 @@ pub struct PreferVoidCallback;
 
 impl Rule for PreferVoidCallback {
     fn prepare<'a>(&self, _: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> RulePreparation<'a> {
-        RulePreparation::Structural(Box::new(Collector {
-            ctx,
-            diagnostics: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diagnostics)
     }
 }
 

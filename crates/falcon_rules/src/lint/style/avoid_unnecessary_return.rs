@@ -21,41 +21,11 @@ impl Rule for AvoidUnnecessaryReturn {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Structural(Box::new(Collector {
-            ctx,
-            diags: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
     }
 }
 
-/// Whether falling through this statement also leaves its function body.
-pub(crate) fn at_function_end(statement: Stmt<'_>) -> bool {
-    let mut current = statement.syntax();
-    while let Some(parent) = current.parent() {
-        if let Some(block) = Block::cast(parent) {
-            if block.stmts().last().map(|last| last.syntax().id()) != Some(current.id()) {
-                return false;
-            }
-        } else if IfStmt::cast(parent).is_none() {
-            return FunctionDecl::cast(parent).is_some()
-                || LocalFuncDecl::cast(parent).is_some()
-                || FuncExpr::cast(parent).is_some()
-                || matches!(
-                    ClassMember::cast(parent),
-                    Some(
-                        ClassMember::Method(_)
-                            | ClassMember::Getter(_)
-                            | ClassMember::Setter(_)
-                            | ClassMember::Operator(_)
-                            | ClassMember::Constructor(_)
-                            | ClassMember::PrimaryConstructorBody(_)
-                    )
-                );
-        }
-        current = parent;
-    }
-    false
-}
+use crate::lint::support::statement_position::at_function_end;
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
@@ -74,7 +44,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 .take_while(|ancestor| Stmt::cast(*ancestor).is_some())
                 .filter_map(IfStmt::cast)
                 .any(|branch| branch.else_branch().is_some_and(|otherwise| {
-                    let normalize = crate::lint::suspicious::no_equal_then_else::normalize;
+                    let normalize = crate::lint::support::source_equality::normalize;
                     normalize(self.ctx, branch.then_branch().span())
                         .eq(normalize(self.ctx, otherwise.span()))
                 }))

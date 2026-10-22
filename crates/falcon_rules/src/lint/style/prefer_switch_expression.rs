@@ -32,10 +32,7 @@ impl Rule for PreferSwitchExpression {
         if !ctx.language_version().supports(Feature::Patterns) {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        RulePreparation::Structural(Box::new(Collector {
-            ctx,
-            diags: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
     }
 }
 

@@ -28,11 +28,12 @@
 //! Adopted from the official `deprecated_consistency` lint.
 
 use falcon_analyze::{
-    AnalyzeContext, QualifiedName, ResolvedType, Rule, RulePreparation, SemanticModel,
-    StructuralRuleVisitor, StructuralTraversal,
+    AnalyzeContext, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
+
+use crate::lint::support::annotations::has_deprecated;
 
 #[derive(Default)]
 pub struct DeprecatedConsistency;
@@ -159,42 +160,6 @@ impl<'a> StructuralRuleVisitor<'a> for Declarations<'a> {
 }
 }
 
-fn has_deprecated<'a>(
-    mut annotations: AstChildren<'a, Annotation<'a>>,
-    model: SemanticModel<'_>,
-) -> bool {
-    annotations.any(|annotation| {
-        let names = annotation.name();
-        if annotation.args().is_none() {
-            return annotation.constructor_name().is_none()
-                && QualifiedName::from_identifiers(names).is_some_and(|name| {
-                    model
-                        .resolve_sdk_member(name)
-                        .is_some_and(|id| id.is_sdk("dart:core", "deprecated"))
-                });
-        }
-        let is_deprecated_type = |name: Option<QualifiedName<'_>>| {
-            name.is_some_and(|name| {
-                model.resolve_name(name).is_some_and(|identity| {
-                    if identity.is_sdk("dart:core", "Deprecated") {
-                        return true;
-                    }
-                    matches!(
-                        model.declared_type(&identity),
-                        ResolvedType::Interface { identity, .. }
-                            if identity.is_sdk("dart:core", "Deprecated")
-                    )
-                })
-            })
-        };
-        is_deprecated_type(QualifiedName::from_identifiers(names.clone()))
-            || (annotation.constructor_name().is_none()
-                && names.clone().count() > 1
-                && is_deprecated_type(QualifiedName::from_identifiers(
-                    names.clone().take(names.count() - 1),
-                )))
-    })
-}
 
 #[cfg(test)]
 mod tests {

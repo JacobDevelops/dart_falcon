@@ -592,3 +592,70 @@ impl ModelCollector<'_> {
         None
     }
 }
+pub(crate) fn own_member<'a>(
+    expression: Expr<'a>,
+    name: &str,
+    types: &BlocTypes<'a>,
+    state: &SemanticState<'a>,
+) -> bool {
+    let matches = match expression.unparenthesized() {
+        Expr::Ident(identifier) => {
+            identifier.name() == name
+                && !state.environment.is_bound(name)
+                && !matches!(
+                    state.model.resolve_library_name(name),
+                    falcon_analyze::DocName::Declaration { .. }
+                        | falcon_analyze::DocName::Extension
+                )
+        }
+        Expr::Field(field) => {
+            field.field().name() == name
+                && matches!(
+                    field.object().unparenthesized(),
+                    Expr::This(_) | Expr::Super(_)
+                )
+        }
+        _ => false,
+    };
+    if !matches {
+        return false;
+    }
+    let Some(class) = expression.syntax().ancestors().find_map(ClassDecl::cast) else {
+        return false;
+    };
+    if expression
+        .syntax()
+        .ancestors()
+        .filter_map(MethodDecl::cast)
+        .any(|method| method.is_static())
+    {
+        return false;
+    }
+    let is_super = matches!(expression.unparenthesized(),
+        Expr::Field(field) if matches!(field.object().unparenthesized(), Expr::Super(_)));
+    let receiver = state
+        .model
+        .resolve_name(class.name().name())
+        .map(ResolvedType::interface_identity)
+        .unwrap_or(ResolvedType::Unknown);
+    let owner = if is_super {
+        state
+            .signatures
+            .resolved_super_member_owner(&receiver, name, false, &state.model)
+    } else {
+        state
+            .signatures
+            .resolved_readable_member_owner(&receiver, name, &state.model)
+    };
+    if let Some(owner) = owner
+        && !owner.is_package("bloc", owner.name())
+        && !owner.is_package("flutter_bloc", owner.name())
+        && !state.model.declaration_uri(&owner).is_some_and(|uri| {
+            uri.starts_with("package:bloc/") || uri.starts_with("package:flutter_bloc/")
+        })
+    {
+        return false;
+    }
+    types.is_bloc_class(class, &state.model, Some(&state.signatures))
+        && !types.has_local_member(class, &state.model, name, !is_super)
+}

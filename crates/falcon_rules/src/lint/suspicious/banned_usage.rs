@@ -9,7 +9,7 @@ use falcon_analyze::{AnalyzeContext, QualifiedName, ResolvedType, Rule, RulePrep
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::avoid_banned_names::{Entry, report};
+use crate::lint::support::banned_entries::{Entry, report};
 
 #[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
@@ -214,8 +214,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         while let Some(ancestor) = parent {
             if let Some(Expr::Call(call)) = Expr::cast(ancestor) {
                 let callee = call.callee().span();
-                if callee.start <= node.span().start
-                    && node.span().end <= callee.end
+                if callee.contains(node.span())
                     && state.is_constructor_invocation(call.callee())
                 {
                     return;

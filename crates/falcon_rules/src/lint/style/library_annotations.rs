@@ -232,7 +232,11 @@ fn is_library_annotation(
     if !TEST_LIBRARY_NAMES.contains(&last.name()) {
         return false;
     }
-    let prefix = (annotation.name().count() > 1).then(|| annotation.name().next().unwrap().name());
+    let mut names = annotation.name();
+    let prefix = match (names.next(), names.next()) {
+        (Some(first), Some(_)) => Some(first.name()),
+        _ => None,
+    };
     program.imports().any(|import| {
         import.uri().value() == "package:test/test.dart"
             && import.as_name().map(|name| name.name()) == prefix
@@ -318,10 +322,10 @@ fn late_trust_pragma(
             })
             .is_some_and(|identity| identity.is_sdk("dart:core", "pragma"))
     });
+    let mut names = annotation.name();
     (canonical
         || (ctx.identities().is_none()
-            && annotation.name().count() == 1
-            && annotation.name().next().unwrap().name() == "pragma"
+            && matches!((names.next(), names.next()), (Some(name), None) if name.name() == "pragma")
             && !declared_names.contains("pragma")))
         && annotation
             .args()

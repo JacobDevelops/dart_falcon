@@ -13,7 +13,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::style::conditional_uri_does_not_exist::uri_value;
+use crate::lint::support::directive_strings::uri_value;
 
 #[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]

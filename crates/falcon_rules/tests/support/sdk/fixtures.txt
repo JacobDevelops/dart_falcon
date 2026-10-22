@@ -112,6 +112,8 @@ avoid-mutable-equatable-subclass-fields/good_primary.dart
 avoid-mutable-equatable-subclass-fields/support.dart
 avoid-duplicate-test-assertions/bad.dart
 avoid-duplicate-test-assertions/bad_test.dart
+avoid-duplicate-test-assertions/bad_test_api_test.dart
+avoid-duplicate-test-assertions/bad_test_core_test.dart
 avoid-duplicate-test-assertions/good.dart
 avoid-duplicate-test-assertions/good_no_import_test.dart
 avoid-duplicate-test-assertions/good_test.dart

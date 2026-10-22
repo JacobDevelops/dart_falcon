@@ -6,9 +6,9 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
-use glob::MatchOptions;
 
-use crate::lint::options::{Glob, nonblank_message, nonempty_patterns};
+
+
 
 #[derive(Default)]
 pub struct AvoidBannedNames;
@@ -22,39 +22,7 @@ pub(crate) struct Options {
 
 crate::lint::options::impl_options!(Options);
 
-#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub(crate) struct Entry {
-    /// Non-empty glob patterns (JSON key `deny`) that trigger this entry.
-    #[serde(rename = "deny", deserialize_with = "nonempty_patterns")]
-    #[schemars(length(min = 1))]
-    patterns: Vec<Glob>,
-    /// Diagnostic text emitted when any pattern in this entry matches.
-    #[serde(deserialize_with = "nonblank_message")]
-    message: String,
-}
-pub(super) fn report(
-    ctx: &AnalyzeContext<'_>,
-    entries: &[Entry],
-    value: &str,
-    span: Span,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    const MATCH: MatchOptions = MatchOptions {
-        case_sensitive: true,
-        require_literal_separator: true,
-        require_literal_leading_dot: false,
-    };
-    for entry in entries {
-        if entry
-            .patterns
-            .iter()
-            .any(|pattern| pattern.matches_with(value, MATCH))
-        {
-            diagnostics.push(ctx.diagnostic(&entry.message, span));
-        }
-    }
-}
+use crate::lint::support::banned_entries::{Entry, report};
 
 impl Rule for AvoidBannedNames {
     fn prepare<'a>(
@@ -66,9 +34,13 @@ impl Rule for AvoidBannedNames {
         if entries.is_empty() {
             return RulePreparation::Diagnostics(Vec::new());
         }
+        let Some(identities) = ctx.identities() else {
+            return RulePreparation::Diagnostics(Vec::new());
+        };
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             entries,
+            model: falcon_analyze::SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
             diagnostics: Vec::new(),
         }))
     }
@@ -77,6 +49,7 @@ impl Rule for AvoidBannedNames {
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     entries: &'a [Entry],
+    model: falcon_analyze::SemanticModel<'a>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -84,9 +57,7 @@ falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_constructor(&mut self, node: ConstructorRef<'a>) -> StructuralTraversal {
         if let Some(name) = node.constructor_name
-            && !node.annotations.into_iter().any(|annotation| {
-                annotation.name().any(|name| name.name() == "override")
-            })
+            && !crate::lint::support::annotations::has_override(node.annotations, self.model)
         {
             report(self.ctx, self.entries, name.name(), name.span(), &mut self.diagnostics);
         }
@@ -127,9 +98,9 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         } else {
             parent
         };
-        if declaration.children().filter_map(Annotation::cast)
-            .any(|annotation| annotation.name().any(|name| name.name() == "override"))
-        {
+        if crate::lint::support::annotations::has_override(
+            declaration.children().filter_map(Annotation::cast), self.model,
+        ) {
             return StructuralTraversal::Continue;
         }
         report(self.ctx, self.entries, node.name(), node.span(), &mut self.diagnostics);

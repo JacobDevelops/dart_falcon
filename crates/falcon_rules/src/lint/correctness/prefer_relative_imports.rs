@@ -13,7 +13,7 @@
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 
-use crate::lint::correctness::always_use_package_imports::uri_scheme;
+use crate::lint::support::uri::uri_scheme;
 use crate::lint::string_lit::decode_escapes;
 
 #[derive(Default)]

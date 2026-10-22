@@ -36,7 +36,7 @@ use falcon_syntax::cst::{
 
 use crate::lint::expressions::identifier_name;
 use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
-use crate::lint::style::unnecessary_null_checks::declaration_initializers;
+use crate::lint::support::null_assert_initializers::declaration_initializers;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState, returned_expressions};
 
 const MESSAGE: &str = "Avoid a null assertion on a nullable type parameter.";

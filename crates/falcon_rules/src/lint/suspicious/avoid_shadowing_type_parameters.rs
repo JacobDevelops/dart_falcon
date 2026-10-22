@@ -77,19 +77,17 @@ impl<'a> StructuralRuleVisitor<'a> for Checker<'_, 'a> {
 
     fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         self.save_scope();
-        let (type_params, kind) = match node {
-            TopLevelDecl::Class(x) => (x.type_params(), "class"),
-            TopLevelDecl::ClassTypeAlias(x) => (x.type_params(), "class"),
-            TopLevelDecl::Mixin(x) => (x.type_params(), "mixin"),
-            TopLevelDecl::MixinClass(x) => (x.type_params(), "mixin"),
-            TopLevelDecl::Enum(x) => (x.type_params(), "enum"),
-            TopLevelDecl::Extension(x) => (x.type_params(), "extension"),
-            TopLevelDecl::ExtensionType(x) => (x.type_params(), "extension type"),
-            TopLevelDecl::Function(x) => (x.type_params(), "function"),
-            TopLevelDecl::TypeAlias(x) => (x.type_params(), "typedef"),
+        let kind = match node {
+            TopLevelDecl::Class(_) | TopLevelDecl::ClassTypeAlias(_) => "class",
+            TopLevelDecl::Mixin(_) | TopLevelDecl::MixinClass(_) => "mixin",
+            TopLevelDecl::Enum(_) => "enum",
+            TopLevelDecl::Extension(_) => "extension",
+            TopLevelDecl::ExtensionType(_) => "extension type",
+            TopLevelDecl::Function(_) => "function",
+            TopLevelDecl::TypeAlias(_) => "typedef",
             TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => return StructuralTraversal::Continue,
         };
-        self.enter(type_params, kind);
+        self.enter(node.type_params(), kind);
         StructuralTraversal::Continue
     }
 

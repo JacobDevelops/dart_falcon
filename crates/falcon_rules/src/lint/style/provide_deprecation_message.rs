@@ -24,17 +24,21 @@ impl Rule for ProvideDeprecationMessage {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let collector = Collector {
-            diags: Vec::new(),
-            ctx,
+        let Some(identities) = ctx.identities() else {
+            return RulePreparation::Diagnostics(Vec::new());
         };
-        RulePreparation::Structural(Box::new(collector))
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            model: falcon_analyze::SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
+            diags: Vec::new(),
+        }))
     }
 }
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
+    model: falcon_analyze::SemanticModel<'a>,
 }
 
 falcon_analyze::structural_visitor! {
@@ -42,23 +46,20 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
     fn visit_annotation(&mut self, node: Annotation<'a>) -> StructuralTraversal {
-        let Some(last) = node.name().last() else {
-            return StructuralTraversal::SkipChildren;
-        };
-        let flagged = match last.name() {
-            // `@deprecated`: the predefined constant, never carries a message.
-            "deprecated" => node.args().is_none(),
-            // `@Deprecated(...)`: flag a missing argument, or a single positional
-            // message that is an empty/whitespace-only string literal.
-            "Deprecated" => match node.args() {
+        let model = self.model;
+        let flagged = if crate::lint::support::annotations::is_deprecated_constant(node, model) {
+            true
+        } else if crate::lint::support::annotations::is_deprecated_constructor(node, model) {
+            match node.args() {
                 None => true,
                 Some(args) => match args.positional().first().map(Expr::unparenthesized) {
                     None => true,
                     Some(Expr::StringLit(s)) => s.value().trim().is_empty(),
                     Some(_) => false,
                 },
-            },
-            _ => false,
+            }
+        } else {
+            false
         };
         if flagged {
             self.diags.push(self.ctx.diagnostic(

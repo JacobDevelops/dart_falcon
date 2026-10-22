@@ -19,10 +19,7 @@ impl Rule for AvoidUnnecessaryLengthCheck {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(Box::new(Collector {
-            ctx,
-            diagnostics: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diagnostics)
     }
 }
 
@@ -90,7 +87,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         }
         let body = match statement.then_branch() {
-            Stmt::Block(block) if block.stmts().len() == 1 => block.stmts().next().unwrap(),
+            Stmt::Block(block) => {
+                let mut statements = block.stmts();
+                match (statements.next(), statements.next()) {
+                    (Some(only), None) => only,
+                    _ => return,
+                }
+            }
             other => other,
         };
         let iterated = match body {
@@ -111,10 +114,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 if field.field().name() != "forEach"
                     || field.is_null_safe()
                     || !call.args().named().is_empty()
-                    || call.args().positional().len() != 1
                     || !matches!(
-                        call.args().positional().next().unwrap().unparenthesized(),
-                        Expr::FuncExpr(_)
+                        {
+                            let mut arguments = call.args().positional();
+                            (arguments.next(), arguments.next())
+                        },
+                        (Some(argument), None)
+                            if matches!(argument.unparenthesized(), Expr::FuncExpr(_))
                     )
                 {
                     return;

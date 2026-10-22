@@ -12,6 +12,6 @@ impl Rule for UseSetstateSynchronously {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        super::use_build_context_synchronously::prepare_setstate(program, ctx)
+        crate::lint::support::async_state::prepare_setstate(program, ctx)
     }
 }

@@ -13,7 +13,7 @@
 //! guards whose cross-invocation state is outside this rule's analysis.
 //! Deferred closures and short-circuit right operands do not prove cleanup.
 
-use super::proper_controller_dispose::{DisposalKind, prepare_disposal};
+use crate::lint::support::controller_disposal::{DisposalKind, prepare_disposal};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 

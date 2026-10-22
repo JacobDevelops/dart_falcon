@@ -22,10 +22,7 @@ impl Rule for PreferImmediateReturn {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Structural(Box::new(Collector {
-            ctx,
-            diags: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
     }
 }
 
@@ -72,9 +69,12 @@ fn check_stmts(
     // Check pairs: LocalVar immediately followed by Return of that var
     for (stmt, next) in stmts.clone().zip(stmts.skip(1)) {
         if let Stmt::LocalVar(local) = stmt
-            && local.declarators().len() == 1
+            && let (Some(declarator), None) = {
+                let mut declarators = local.declarators();
+                (declarators.next(), declarators.next())
+            }
         {
-            let var_name = local.declarators().first().unwrap().name().name();
+            let var_name = declarator.name().name();
             if let Stmt::Return(ret) = next
                 && let Some(Expr::Ident(ident)) = ret.value().map(Expr::unparenthesized)
                 && ident.name() == var_name

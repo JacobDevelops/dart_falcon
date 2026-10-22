@@ -7,8 +7,8 @@ use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::flutter_state_rules::is_setstate;
-use super::use_build_context_synchronously::{mounted_kind, mounted_receiver_kind};
+use crate::lint::support::flutter_state::is_setstate;
+use crate::lint::support::async_semantics::{mounted_kind, mounted_receiver_kind};
 
 #[derive(Default)]
 pub struct AvoidMountedInSetstate;
@@ -54,7 +54,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             self.callbacks.push(callback.span());
         }
         let scope = self.closures.iter().rev().find(|scope| {
-            scope.start <= expression.span().start && expression.span().end <= scope.end
+            scope.contains(expression.span())
         });
         if !scope.is_some_and(|scope| self.callbacks.contains(scope)) {
             return;

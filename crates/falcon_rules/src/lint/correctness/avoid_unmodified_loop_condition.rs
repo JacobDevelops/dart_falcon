@@ -62,7 +62,7 @@ struct Collector<'a> {
 impl<'a> Collector<'a> {
     fn capture(&mut self, span: Span) {
         for write in self.writes {
-            if contains(span, write.span) {
+            if span.contains(write.span) {
                 self.captured.insert(write.declaration);
             }
         }
@@ -92,7 +92,7 @@ impl<'a> Collector<'a> {
                         .iter()
                         .any(|name| ty.interface("dart:core", name))
                         && !self.writes.iter().any(|write| {
-                            write.declaration == *declaration && contains(repeated, write.span)
+                            write.declaration == *declaration && repeated.contains(write.span)
                         })
                 }
                 Expr::BoolLit(_)
@@ -112,10 +112,6 @@ impl<'a> Collector<'a> {
         });
         stable
     }
-}
-
-fn contains(outer: Span, inner: Span) -> bool {
-    outer.start <= inner.start && inner.end <= outer.end
 }
 
 impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
@@ -165,7 +161,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         ) || matches!(statement, Stmt::Continue(node) if node.label().is_some())
         {
             for candidate in &mut self.loops {
-                if contains(candidate.span, statement.span()) {
+                if candidate.span.contains(statement.span()) {
                     candidate.exits = true;
                 }
             }
@@ -194,14 +190,14 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         let within_loop = self
             .loops
             .iter()
-            .any(|candidate| !candidate.exits && contains(candidate.span, expression.span()));
+            .any(|candidate| !candidate.exits && candidate.span.contains(expression.span()));
         if within_loop
             && (matches!(expression, Expr::Await(_) | Expr::Throw(_))
                 || matches!(expression, Expr::Call(_))
                     && matches!(state.infer(expression), ResolvedType::Never))
         {
             for candidate in &mut self.loops {
-                if contains(candidate.span, expression.span()) {
+                if candidate.span.contains(expression.span()) {
                     candidate.exits = true;
                 }
             }

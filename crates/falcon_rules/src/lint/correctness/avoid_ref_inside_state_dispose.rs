@@ -1,6 +1,5 @@
 //! Rejects Riverpod widget references used during State.dispose.
 
-use crate::lint::function_bodies::contains;
 use crate::lint::riverpod::is_type;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
@@ -54,7 +53,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             || !self
                 .disposals
                 .iter()
-                .any(|body| contains(body, &expression.span()))
+                .any(|body| body.contains(expression.span()))
             || !state
                 .enclosing_type
                 .as_ref()

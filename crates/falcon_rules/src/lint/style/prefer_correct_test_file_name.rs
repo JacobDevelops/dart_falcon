@@ -22,10 +22,7 @@ impl Rule for PreferCorrectTestFileName {
         if !in_test || correct_name {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        RulePreparation::Structural(Box::new(Collector {
-            ctx,
-            diags: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
     }
 }
 

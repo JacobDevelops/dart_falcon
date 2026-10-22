@@ -915,22 +915,6 @@ impl IdentityIndex {
                 }
             }
         }
-        let mut source_annotations = HashMap::new();
-        for (index, (_, program, _)) in all.iter().enumerate() {
-            if matches!(
-                libraries[file_library[index].0].origin,
-                Some(ExternalOrigin::Sdk(_))
-            ) {
-                continue;
-            }
-            collect_source_annotations(
-                *program,
-                file_library[index],
-                FileId(index),
-                &mut source_annotations,
-                &parsed[index],
-            );
-        }
         let mut declared_by = FxHashMap::default();
         for instance in &package_copies {
             let library = &libraries[instance.library.0];
@@ -973,7 +957,7 @@ impl IdentityIndex {
             external_file_offsets,
             paths,
             parsed,
-            source_annotations,
+            source_annotations: HashMap::new(),
             core,
             colliding,
             aliases: HashMap::new(),
@@ -1036,6 +1020,32 @@ impl IdentityIndex {
                 }
             }
         }
+        // Resolve metadata only after aliases and declaration identities exist.
+        let mut source_annotations = HashMap::new();
+        for (file, (_, program, _)) in all.iter().enumerate() {
+            let library = index.file_library[file];
+            if matches!(
+                index.libraries[library.0].origin,
+                Some(ExternalOrigin::Sdk(_))
+            ) {
+                continue;
+            }
+            let model = super::SemanticModel::from_file(
+                Some(FileId(file)),
+                &index.parsed[file],
+                &index,
+                None,
+            );
+            collect_source_annotations(
+                *program,
+                library,
+                FileId(file),
+                &mut source_annotations,
+                &index.parsed[file],
+                model,
+            );
+        }
+        index.source_annotations = source_annotations;
         index
     }
 
@@ -1187,8 +1197,8 @@ impl IdentityIndex {
         }
         self.file_library[file.0 & !EXTERNAL_ID]
     }
-    /// Possible deprecation metadata (`@deprecated`/`@Deprecated(...)`; other
-    /// annotations are not indexed) for a proven declaration.
+    /// Possible deprecation metadata, including constructor annotations whose
+    /// types may alias `dart:core`'s `Deprecated`, for a proven declaration.
     pub fn source_annotations(
         &self,
         identity: &DeclarationIdentity,
@@ -2257,13 +2267,14 @@ fn collect_source_annotations(
     file: FileId,
     index: &mut SourceAnnotations,
     parsed: &Arc<ParsedFile>,
+    model: super::SemanticModel<'_>,
 ) {
     use MemberSelectorKind as Kind;
     let mut add = |owner: &str,
                    selector: MemberSelector<'_>,
                    annotations: AstChildren<'_, Annotation<'_>>,
                    params: Option<FormalParamList<'_>>| {
-        let annotations = deprecation_annotations(annotations, parsed);
+        let annotations = deprecation_annotations(annotations, parsed, model);
         let mut parameters = HashMap::new();
         if let Some(params) = params {
             let mut positional = 0;
@@ -2275,7 +2286,7 @@ fn collect_source_annotations(
                     positional += 1;
                     Some(position)
                 };
-                if let Some(annotations) = parameter_deprecation(param, parsed) {
+                if let Some(annotations) = parameter_deprecation(param, parsed, model) {
                     parameters.insert(
                         param.name().name().to_owned(),
                         (position, (file, annotations)),
@@ -2456,26 +2467,17 @@ fn collect_source_annotations(
     }
 }
 
-/// Whether `annotation` is spelled like `dart:core`'s `@deprecated` or
-/// `@Deprecated(...)`. Only these can resolve to the SDK deprecation metadata
-/// (a project typedef or constant resolves to a project identity), so the
-/// index skips every other annotation instead of cloning it.
-fn may_be_deprecation(annotation: Annotation<'_>) -> bool {
-    annotation.constructor_name().is_none()
-        && match annotation.name().last().map(|name| name.name()) {
-            Some("deprecated") => annotation.args().is_none(),
-            Some("Deprecated") => annotation.args().is_some(),
-            _ => false,
-        }
-}
-
 /// Deprecation does not apply to required parameters (the official
 /// `deprecated_member_use` verifier skips them), so they are never indexed.
-fn parameter_deprecation(param: FormalParam<'_>, parsed: &Arc<ParsedFile>) -> Option<Vec<NodeRef>> {
+fn parameter_deprecation(
+    param: FormalParam<'_>,
+    parsed: &Arc<ParsedFile>,
+    model: super::SemanticModel<'_>,
+) -> Option<Vec<NodeRef>> {
     if is_required_parameter(param) {
         return None;
     }
-    deprecation_annotations(param.annotations(), parsed)
+    deprecation_annotations(param.annotations(), parsed, model)
 }
 
 fn is_required_parameter(param: FormalParam<'_>) -> bool {
@@ -2485,14 +2487,23 @@ fn is_required_parameter(param: FormalParam<'_>) -> bool {
     )
 }
 
-/// The possible deprecation annotations in `annotations`; `None` when there
-/// are none.
+/// SDK-spelled candidates (even without SDK sources) and resolved SDK aliases.
+/// Consumers must resolve identity before treating retained metadata as deprecated.
 fn deprecation_annotations(
     annotations: AstChildren<'_, Annotation<'_>>,
     parsed: &Arc<ParsedFile>,
+    model: super::SemanticModel<'_>,
 ) -> Option<Vec<NodeRef>> {
     let annotations: Vec<_> = annotations
-        .filter(|annotation| may_be_deprecation(*annotation))
+        .filter(|annotation| {
+            let sdk_spelling = annotation.constructor_name().is_none()
+                && match annotation.name().last().map(|name| name.name()) {
+                    Some("deprecated") => annotation.args().is_none(),
+                    Some("Deprecated") => annotation.args().is_some(),
+                    _ => false,
+                };
+            sdk_spelling || model.is_deprecation(*annotation)
+        })
         .map(|annotation| NodeRef::new(Arc::clone(parsed), annotation.syntax().id()))
         .collect();
     (!annotations.is_empty()).then_some(annotations)
@@ -3028,6 +3039,7 @@ const PACKAGE_TYPES: Allowlist = &[
             "Diagnosticable",
             "DiagnosticableTree",
             "DiagnosticableTreeMixin",
+            "FlutterError",
         ],
     ),
     ("provider", &["Provider"]),
@@ -3036,6 +3048,35 @@ const PACKAGE_TYPES: Allowlist = &[
         &["SingleChildStatelessWidget", "SingleChildState"],
     ),
 ];
+
+/// Curated fallback identities; arities already supplied by the SDK hierarchy are omitted here.
+pub(super) fn fallback_types() -> impl Iterator<Item = (DeclarationIdentity, &'static str, usize)> {
+    SDK_TYPES
+        .iter()
+        .flat_map(|(library, names)| {
+            names.iter().map(move |name| {
+                let arity = match (*library, *name) {
+                    ("dart:collection", "HashMap" | "LinkedHashMap" | "SplayTreeMap") => 2,
+                    ("dart:core", "Expando" | "WeakReference" | "Finalizer")
+                    | ("dart:async", "FutureOr")
+                    | (
+                        "dart:collection",
+                        "ListQueue" | "DoubleLinkedQueue" | "HashSet" | "LinkedHashSet"
+                        | "SplayTreeSet",
+                    )
+                    | ("dart:js_interop", "JSArray" | "JSPromise") => 1,
+                    _ => 0,
+                };
+                (DeclarationIdentity::sdk(library, name), *name, arity)
+            })
+        })
+        .chain(PACKAGE_TYPES.iter().flat_map(|(package, names)| {
+            names.iter().map(move |name| {
+                let arity = usize::from(*package == "flutter" && *name == "State");
+                (DeclarationIdentity::package(package, name), *name, arity)
+            })
+        }))
+}
 
 const PACKAGE_MEMBERS: Allowlist = &[
     (
@@ -4767,6 +4808,9 @@ mod tests {
             &[(
                 file,
                 r"
+typedef Dep = Deprecated;
+class Marker { const Marker(String message); }
+typedef NotDep = Marker;
 class C {
   @deprecated int get value => 0;
   @deprecated set value(int next) {}
@@ -4776,12 +4820,21 @@ class C {
   @deprecated C operator -() => this;
   @deprecated C operator -(C other) => this;
   static void method({@deprecated int? argument}) {}
+  @Dep('old') void aliased() {}
+  @Marker('not deprecated') void marked() {}
+  @NotDep('not deprecated') void aliasedMarker() {}
 }
 ",
             )],
             &[],
         );
         let owner = declaration(&index, file, "C").unwrap();
+        let aliased = MemberSelector::new(Kind::Read, false, "aliased");
+        assert!(index.source_annotations(&owner, aliased.into()).is_some());
+        for name in ["marked", "aliasedMarker"] {
+            let selector = MemberSelector::new(Kind::Read, false, name);
+            assert!(index.source_annotations(&owner, selector.into()).is_none());
+        }
         for selector in [
             MemberSelector::new(Kind::Read, false, "value"),
             MemberSelector::new(Kind::Write, false, "value"),

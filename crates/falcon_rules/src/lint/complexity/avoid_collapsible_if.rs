@@ -20,10 +20,7 @@ impl Rule for AvoidCollapsibleIf {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Structural(Box::new(CollapsibleIf {
-            ctx,
-            diags: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Structural, CollapsibleIf, ctx, diags)
     }
 }
 

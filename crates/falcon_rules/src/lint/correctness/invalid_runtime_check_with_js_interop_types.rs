@@ -19,11 +19,7 @@ impl Rule for InvalidRuntimeCheckWithJsInteropTypes {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let visitor = RuntimeChecks {
-            ctx,
-            diagnostics: Vec::new(),
-        };
-        RulePreparation::Semantic(Box::new(visitor))
+        crate::lint::support::preparation::prepare!(Semantic, RuntimeChecks, ctx, diagnostics)
     }
 }
 

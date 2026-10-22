@@ -82,7 +82,9 @@ impl Declarations {
         if keyword != VarKeyword::Final {
             return;
         }
-        let Some(last) = declarators.clone().last() else {
+        let (Some(first), Some(last)) =
+            (declarators.clone().next(), declarators.clone().last())
+        else {
             return;
         };
         let index = self.groups.len();
@@ -91,7 +93,7 @@ impl Declarations {
                 start: span.start,
                 end: last.span().end,
             },
-            first_name: declarators.clone().next().unwrap().name().span().start,
+            first_name: first.name().span().start,
             is_local,
             remaining: declarators.len(),
             valid: declarators

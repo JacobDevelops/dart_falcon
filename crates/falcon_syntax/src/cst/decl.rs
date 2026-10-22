@@ -333,6 +333,23 @@ macro_rules! view_enum { ($name:ident { $($variant:ident($inner:ident)),* $(,)? 
     impl std::fmt::Debug for $name<'_> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { match self { $(Self::$variant(value) => f.debug_tuple(stringify!($variant)).field(value).finish()),* } } }
 }; }
 view_enum!(TopLevelDecl { Class(ClassDecl), ClassTypeAlias(ClassTypeAliasDecl), Mixin(MixinDecl), MixinClass(MixinClassDecl), Enum(EnumDecl), Extension(ExtensionDecl), ExtensionType(ExtensionTypeDecl), Function(FunctionDecl), Variable(TopLevelVarDecl), TypeAlias(TypeAliasDecl), Error(ErrorNode) });
+impl<'a> TopLevelDecl<'a> {
+    /// The type parameters declared by this declaration, in source order.
+    pub fn type_params(self) -> AstChildren<'a, TypeParam<'a>> {
+        match self {
+            Self::Class(node) => node.type_params(),
+            Self::ClassTypeAlias(node) => node.type_params(),
+            Self::Mixin(node) => node.type_params(),
+            Self::MixinClass(node) => node.type_params(),
+            Self::Enum(node) => node.type_params(),
+            Self::Extension(node) => node.type_params(),
+            Self::ExtensionType(node) => node.type_params(),
+            Self::Function(node) => node.type_params(),
+            Self::TypeAlias(node) => node.type_params(),
+            Self::Variable(_) | Self::Error(_) => AstChildren::empty(),
+        }
+    }
+}
 view_enum!(ClassMember { Field(FieldDecl), Constructor(ConstructorDecl), Method(MethodDecl), Getter(GetterDecl), Setter(SetterDecl), Operator(OperatorDecl), PrimaryConstructorBody(PrimaryConstructorBody), Error(ErrorNode) });
 top_view!(ClassDecl {
     annotations,

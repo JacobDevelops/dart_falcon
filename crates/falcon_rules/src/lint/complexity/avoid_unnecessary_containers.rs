@@ -21,13 +21,7 @@ impl Rule for AvoidUnnecessaryContainers {
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> {
-        let collector = Collector {
-            diags: Vec::new(),
-            ctx,
-        };
-        RulePreparation::Structural(Box::new(collector))
-    }
+    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags) }
 }
 
 struct Collector<'a> {
@@ -41,8 +35,11 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         if let Some((name, args, span)) = crate::lint::flutter::widget_construction(node)
             && name == "Container"
             && args.positional().is_empty()
-            && args.named().len() == 1
-            && args.named().next().unwrap().name().name() == "child"
+            && let (Some(argument), None) = {
+                let mut arguments = args.named();
+                (arguments.next(), arguments.next())
+            }
+            && argument.name().name() == "child"
         {
             self.diags.push(self.ctx.diagnostic(
                 "Avoid a `Container` with only a child; use the child directly.",

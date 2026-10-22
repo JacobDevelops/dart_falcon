@@ -152,9 +152,9 @@ impl WeakCrypto<'_> {
         if let Some((_, body, members)) = self
             .extensions
             .iter()
-            .find(|(extension, _, _)| extension.start <= span.start && span.end <= extension.end)
+            .find(|(extension, _, _)| extension.contains(span))
         {
-            return body.start <= span.start && span.end <= body.end && members.contains(name);
+            return body.contains(span) && members.contains(name);
         }
         state.constant_owner.as_ref().is_some_and(|owner| {
             !state

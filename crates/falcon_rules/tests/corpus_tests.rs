@@ -5,7 +5,7 @@
 //! the `cargo test` counterpart of the out-of-process `cargo xtask validate-rules` harness:
 //! it needs no pre-built binary, so `cargo test -p falcon_rules` exercises every rule.
 //! Fixtures that need SDK member declarations opt into the shared parsed SDK
-//! below; other fixtures keep their SDK-free, source-local inference context.
+//! below; other resolved fixtures load local dependencies without an SDK.
 //!
 //! Invariants enforced:
 //!   * every registered rule has real positive and negative corpus coverage;
@@ -33,8 +33,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use falcon_analyze::{
-    AnalyzeContext, CrossFileRuleRegistry, IdentityIndex, IdentitySource, LibrarySource,
-    ParsedFile, ProjectFile, Rule, RuleAnalysis, SignatureIndex, TypeIndex,
+    AnalyzeContext, CrossFileRuleRegistry, ExternalLibraries, ExternalSources, IdentityIndex,
+    IdentitySource, LibrarySource, ParsedFile, ProjectFile, Rule, RuleAnalysis, SignatureIndex,
+    TypeIndex,
 };
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::parse;
@@ -299,15 +300,31 @@ fn run_rule(
         });
         let program = parsed.program();
         let resolver_dependent = rule_requires_resolution(rule_name);
+        let environment =
+            falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator([file], |_| None);
+        let externals = resolver_dependent.then(|| {
+            ExternalLibraries::load(&environment, &[(file, program, source)], |path| {
+                path == file
+            })
+        });
         let identity_sources = [IdentitySource {
             path: file,
             parsed: &parsed,
             has_parse_errors: !errors.is_empty(),
         }];
-        let identities = resolver_dependent
-            .then(|| IdentityIndex::build(&identity_sources, &[source], &[], None));
+        let identities = resolver_dependent.then(|| {
+            IdentityIndex::build(
+                &identity_sources,
+                &[source],
+                &[],
+                externals.as_ref().map(|libraries| ExternalSources {
+                    libraries,
+                    environment: &environment,
+                }),
+            )
+        });
         let types = identities.as_ref().map(|identities| {
-            TypeIndex::from_resolved_files(
+            let mut types = TypeIndex::from_resolved_files(
                 [(
                     file,
                     LibrarySource {
@@ -317,18 +334,23 @@ fn run_rule(
                     },
                 )],
                 identities,
-            )
+            );
+            if let Some(externals) = externals.as_ref() {
+                types.add_external(externals, identities);
+            }
+            types
         });
         let signatures = identities
             .as_ref()
             .zip(types.as_ref())
             .map(|(identities, types)| {
-                let model =
-                    falcon_analyze::SemanticModel::new(file, &parsed, identities, Some(types));
-                SignatureIndex::from_program(program, &model)
+                SignatureIndex::build(
+                    &[(file.to_path_buf(), Arc::clone(&parsed))],
+                    externals.as_ref(),
+                    identities,
+                    types,
+                )
             });
-        let environment =
-            falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator([file], |_| None);
         let mut ctx =
             AnalyzeContext::new(file, config, &parsed).with_environment(Some(&environment));
         if let Some(types) = types.as_ref() {

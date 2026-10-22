@@ -101,10 +101,6 @@ impl<'a> FunctionBodies<'a> {
     }
 }
 
-pub(crate) fn contains(outer: &Span, inner: &Span) -> bool {
-    outer.start <= inner.start && inner.end <= outer.end
-}
-
 /// The parent of each span in `spans` (sorted by `(start, Reverse(end))`):
 /// the nearest earlier span containing it. Function bodies and try blocks are
 /// syntax nodes, so they nest without partial overlap.
@@ -113,10 +109,7 @@ fn nesting_parents(spans: impl ExactSizeIterator<Item = Span>) -> Vec<Option<usi
     // The currently open chain of containers; its length is the nesting depth.
     let mut open: Vec<(usize, Span)> = Vec::new();
     for (index, span) in spans.enumerate() {
-        while open
-            .last()
-            .is_some_and(|(_, outer)| !contains(outer, &span))
-        {
+        while open.last().is_some_and(|(_, outer)| !outer.contains(span)) {
             open.pop();
         }
         parents.push(open.last().map(|&(parent, _)| parent));
@@ -138,7 +131,7 @@ fn innermost<'a, T>(
         .partition_point(|item| span_of(item).start <= span.start)
         .checked_sub(1);
     while let Some(index) = candidate {
-        if contains(&span_of(&items[index]), span) {
+        if span_of(&items[index]).contains(*span) {
             return Some(&items[index]);
         }
         candidate = parents[index];

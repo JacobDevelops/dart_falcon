@@ -23,7 +23,7 @@
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 
-use super::collection_checks::{Emptiness, analyze_emptiness};
+use crate::lint::support::collection_checks::{Emptiness, analyze_emptiness};
 
 #[derive(Default)]
 pub struct PreferIsEmpty;

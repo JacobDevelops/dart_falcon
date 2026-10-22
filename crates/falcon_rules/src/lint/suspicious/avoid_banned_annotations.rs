@@ -6,7 +6,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::avoid_banned_names::{Entry, report};
+use crate::lint::support::banned_entries::{Entry, report};
 
 #[derive(Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]

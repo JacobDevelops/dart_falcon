@@ -10,16 +10,10 @@
 //! Calls after a possible return/throw are not proof, including idempotence
 //! guards whose cross-invocation state is outside this rule's analysis.
 
-use super::proper_controller_dispose::{DisposalKind, prepare_disposal};
+use crate::lint::support::controller_disposal::{DisposalKind, prepare_disposal};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 
-pub(crate) const TIMER_RELEASE: crate::lint::resource_leaks::Release =
-    crate::lint::resource_leaks::Release {
-        library: "dart:async",
-        type_name: "Timer",
-        method: "cancel",
-    };
 
 #[derive(Default)]
 pub struct DisposeFocusNodeAndTimer;

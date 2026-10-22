@@ -31,16 +31,14 @@ impl ConstructorConstContexts {
 
     /// Whether `span` lies inside a constant context.
     pub(crate) fn contains(&self, span: &Span) -> bool {
-        self.spans
-            .iter()
-            .any(|context| context.start <= span.start && span.end <= context.end)
+        self.spans.iter().any(|context| context.contains(*span))
     }
 
     /// Whether `span` lies inside an assert initializer of a `const` constructor.
     pub(crate) fn in_const_constructor_assert(&self, span: &Span) -> bool {
         self.const_constructor_asserts
             .iter()
-            .any(|context| context.start <= span.start && span.end <= context.end)
+            .any(|context| context.contains(*span))
     }
 }
 

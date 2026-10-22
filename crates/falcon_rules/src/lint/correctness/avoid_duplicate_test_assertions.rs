@@ -14,7 +14,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 use std::collections::BTreeMap;
 
-use super::test_assertions;
+use crate::lint::support::test_assertions;
 
 #[derive(Default)]
 pub struct AvoidDuplicateTestAssertions;
@@ -127,7 +127,7 @@ fn inert(expression: Expr<'_>, state: &SemanticState<'_>) -> bool {
                 .model
                 .resolve_value(falcon_analyze::QualifiedName::from(name.name()))
                 .is_some_and(|identity| {
-                    ["test", "test_api", "flutter_test", "matcher"]
+                    crate::lint::support::test_assertions::MATCHER_PACKAGES
                         .iter()
                         .any(|package| identity.is_package(package, name.name()))
                 })

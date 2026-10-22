@@ -8,7 +8,7 @@
 //! Widget helpers, unresolved bases and callback arguments with an unknown
 //! execution phase are skipped. Named on… callbacks are deferred events.
 
-use super::avoid_read_inside_build::{Check, prepare};
+use crate::lint::support::provider_access::{Check, prepare};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 

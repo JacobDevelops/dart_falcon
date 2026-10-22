@@ -21,10 +21,7 @@ impl Rule for AvoidTopLevelMembersInTests {
         if !crate::lint::declarations::has_test_file_suffix(ctx.file_path()) {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        RulePreparation::Structural(Box::new(Collector {
-            ctx,
-            diags: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
     }
 }
 

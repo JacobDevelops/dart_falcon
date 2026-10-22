@@ -25,7 +25,7 @@ use falcon_analyze::{
     StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::{TokenKind, cst::*};
+use falcon_syntax::cst::*;
 
 use crate::lint::declarations::has_meta_annotation;
 
@@ -49,16 +49,7 @@ pub(crate) struct ApiDeclaration<'a> {
     pub internal: bool,
 }
 
-pub(crate) fn documented(tokens: &[SyntaxToken<'_>], start: usize) -> bool {
-    let end = tokens.partition_point(|token| token.offset() < start);
-    crate::lint::tokens::preceding_trivia(tokens[..end].iter().copied(), start)
-        // The lexer leaves `/**/` as ordinary trivia; analyzer still attaches
-        // that empty block as a declaration's documentation comment.
-        .any(|t| {
-            t.kind() == TokenKind::DocComment
-                || (t.kind() == TokenKind::BlockComment && t.len() == 4)
-        })
-}
+use crate::lint::support::documentation::documented;
 
 impl ApiDeclaration<'_> {
     /// Whether a doc comment precedes the declaration, its metadata, or any

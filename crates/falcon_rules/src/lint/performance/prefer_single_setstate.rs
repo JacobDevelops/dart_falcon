@@ -8,7 +8,7 @@ use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::correctness::flutter_state_rules::is_setstate;
+use crate::lint::support::flutter_state::is_setstate;
 
 #[derive(Default)]
 pub struct PreferSingleSetstate;

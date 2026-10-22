@@ -18,6 +18,6 @@ impl Rule for AvoidMutableEquatableSubclassFields {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        super::equatable::prepare(ctx, super::equatable::Check::Mutable)
+        crate::lint::support::equatable::prepare(ctx, crate::lint::support::equatable::Check::Mutable)
     }
 }

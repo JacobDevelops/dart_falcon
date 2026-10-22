@@ -2,7 +2,7 @@
 //!
 //! `include-methods` (array of strings, default: []) adds custom test registration helpers.
 
-use crate::lint::correctness::test_assertions;
+use crate::lint::support::test_assertions;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
@@ -91,13 +91,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         self.groups
             .iter()
             .filter(|(_, body)| {
-                !self.tests.iter().any(|test| contains(*body, *test))
+                !self.tests.iter().any(|test| body.contains(*test))
                     && !self.unknown_calls.iter().any(|call| {
-                        contains(*body, *call)
+                        body.contains(*call)
                             && !self
                                 .lifecycle_callbacks
                                 .iter()
-                                .any(|callback| contains(*callback, *call))
+                                .any(|callback| callback.contains(*call))
                     })
             })
             .map(|(span, _)| {
@@ -107,6 +107,3 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     }
 }
 
-fn contains(outer: Span, inner: Span) -> bool {
-    outer.start <= inner.start && inner.end <= outer.end
-}

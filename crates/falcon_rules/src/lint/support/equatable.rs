@@ -9,13 +9,13 @@ use falcon_syntax::cst::visit;
 use falcon_syntax::cst::*;
 
 #[derive(Clone, Copy)]
-pub(super) enum Check {
+pub(crate) enum Check {
     Fields,
     Props,
     Mutable,
 }
 
-pub(super) fn prepare<'a>(ctx: &'a AnalyzeContext<'a>, check: Check) -> RulePreparation<'a> {
+pub(crate) fn prepare<'a>(ctx: &'a AnalyzeContext<'a>, check: Check) -> RulePreparation<'a> {
     let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
         return RulePreparation::Diagnostics(Vec::new());
     };

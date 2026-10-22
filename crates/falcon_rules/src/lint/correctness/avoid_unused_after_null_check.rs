@@ -105,9 +105,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 };
                 let ty = state.infer(argument).non_null();
                 for guard in &mut self.guards {
-                    if contains(guard.branch, argument.span())
+                    if guard.branch.contains(argument.span())
                         && guard.declaration != *declaration
-                        && !contains(guard.branch, declaration_span)
+                        && !guard.branch.contains(declaration_span)
                         && ty == guard.ty
                     {
                         guard.replacement = true;
@@ -122,7 +122,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         };
         for guard in &mut self.guards {
-            if guard.declaration == *declaration && contains(guard.branch, name.span()) {
+            if guard.declaration == *declaration && guard.branch.contains(name.span()) {
                 guard.used = true;
             }
         }
@@ -149,6 +149,3 @@ impl Collector<'_> {
     }
 }
 
-fn contains(outer: Span, inner: Span) -> bool {
-    outer.start <= inner.start && inner.end <= outer.end
-}

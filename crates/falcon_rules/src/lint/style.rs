@@ -1,11 +1,5 @@
 //! Style lint rules.
 
-mod collection_checks;
-mod newline_spacing;
-mod ordering;
-
-pub(crate) mod widget_replacements;
-
 use crate::meta::{Domain, RuleSource};
 
 crate::declare_rules! {
@@ -27,7 +21,7 @@ crate::declare_rules! {
     prefer_is_not_empty::PreferIsNotEmpty => ("prefer-is-not-empty", resolved, None, true, RuleSource::Lints("prefer_is_not_empty"));
     prefer_iterable_where_type::PreferIterableWhereType => ("prefer-iterable-where-type", resolved, None, true, RuleSource::Lints("prefer_iterable_whereType"));
     prefer_typing_uninitialized_variables::PreferTypingUninitializedVariables => ("prefer-typing-uninitialized-variables", file, None, true, RuleSource::Lints("prefer_typing_uninitialized_variables"));
-    provide_deprecation_message::ProvideDeprecationMessage => ("provide-deprecation-message", file, None, true, RuleSource::Lints("provide_deprecation_message"));
+    provide_deprecation_message::ProvideDeprecationMessage => ("provide-deprecation-message", resolved, None, true, RuleSource::Lints("provide_deprecation_message"));
     unintended_html_in_doc_comment::UnintendedHtmlInDocComment => ("unintended-html-in-doc-comment", file, None, true, RuleSource::Lints("unintended_html_in_doc_comment"));
     use_string_in_part_of_directives::UseStringInPartOfDirectives => ("use-string-in-part-of-directives", file, None, true, RuleSource::Lints("use_string_in_part_of_directives"));
     avoid_init_to_null::AvoidInitToNull => ("avoid-init-to-null", resolved, None, true, RuleSource::Lints("avoid_init_to_null"));
@@ -73,11 +67,11 @@ crate::declare_rules! {
     avoid_abbreviations_in_doc_comments::AvoidAbbreviationsInDocComments => ("avoid-abbreviations-in-doc-comments", file, None, false, RuleSource::PyramidLint("avoid_abbreviations_in_doc_comments"));
     avoid_positional_fields_in_records::AvoidPositionalFieldsInRecords => ("avoid-positional-fields-in-records", file, None, false, RuleSource::PyramidLint("avoid_positional_fields_in_records"));
     binary_expression_operand_order::BinaryExpressionOperandOrder => ("binary-expression-operand-order", file, None, false, RuleSource::DartCodeLinter("binary-expression-operand-order"));
-    boolean_prefixes::BooleanPrefixes => ("boolean-prefixes", file, None, false, RuleSource::PyramidLint("boolean_prefixes"), options = boolean_prefixes::Options);
+    boolean_prefixes::BooleanPrefixes => ("boolean-prefixes", resolved, None, false, RuleSource::PyramidLint("boolean_prefixes"), options = boolean_prefixes::Options);
     class_members_ordering::ClassMembersOrdering => ("class-members-ordering", file, None, false, RuleSource::PyramidLint("class_members_ordering"), options = class_members_ordering::Options);
     double_literal_format::DoubleLiteralFormat => ("double-literal-format", file, None, false, RuleSource::DartCodeLinter("double-literal-format"));
     format_comment::FormatComment => ("format-comment", file, None, false, RuleSource::DartCodeLinter("format-comment"), options = format_comment::Options);
-    member_ordering::MemberOrdering => ("member-ordering", file, None, false, RuleSource::DartCodeLinter("member-ordering"), options = member_ordering::Options);
+    member_ordering::MemberOrdering => ("member-ordering", resolved, None, false, RuleSource::DartCodeLinter("member-ordering"), options = member_ordering::Options);
     newline_before_return::NewlineBeforeReturn => ("newline-before-return", file, None, false, RuleSource::DartCodeLinter("newline-before-return"));
     newline_before_method::NewlineBeforeMethod => ("newline-before-method", file, None, false, RuleSource::Falcon);
     newline_before_case::NewlineBeforeCase => ("newline-before-case", file, None, false, RuleSource::Falcon);
@@ -176,7 +170,7 @@ crate::declare_rules! {
     parameter_assignments::ParameterAssignments => ("parameter-assignments", file, None, false, RuleSource::Lints("parameter_assignments"));
     unnecessary_parenthesis::UnnecessaryParenthesis => ("unnecessary-parenthesis", resolved, None, true, RuleSource::Lints("unnecessary_parenthesis"));
     use_late_for_private_fields_and_variables::UseLateForPrivateFieldsAndVariables => ("use-late-for-private-fields-and-variables", resolved, None, false, RuleSource::Lints("use_late_for_private_fields_and_variables"));
-    avoid_unused_constructor_parameters::AvoidUnusedConstructorParameters => ("avoid-unused-constructor-parameters", file, None, false, RuleSource::Lints("avoid_unused_constructor_parameters"));
+    avoid_unused_constructor_parameters::AvoidUnusedConstructorParameters => ("avoid-unused-constructor-parameters", resolved, None, false, RuleSource::Lints("avoid_unused_constructor_parameters"));
     tighten_type_of_initializing_formals::TightenTypeOfInitializingFormals => ("tighten-type-of-initializing-formals", resolved, None, false, RuleSource::Lints("tighten_type_of_initializing_formals"));
     avoid_equals_and_hash_code_on_mutable_classes::AvoidEqualsAndHashCodeOnMutableClasses => ("avoid-equals-and-hash-code-on-mutable-classes", resolved, None, false, RuleSource::Lints("avoid_equals_and_hash_code_on_mutable_classes"));
     avoid_field_initializers_in_const_classes::AvoidFieldInitializersInConstClasses => ("avoid-field-initializers-in-const-classes", file, None, false, RuleSource::Lints("avoid_field_initializers_in_const_classes"));

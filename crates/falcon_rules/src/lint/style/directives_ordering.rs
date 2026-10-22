@@ -27,7 +27,7 @@ use std::collections::HashSet;
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, library_doc_imports};
 use falcon_syntax::cst::*;
 
-use super::conditional_uri_does_not_exist::uri_value;
+use crate::lint::support::directive_strings::uri_value;
 
 #[derive(Default)]
 pub struct DirectivesOrdering;

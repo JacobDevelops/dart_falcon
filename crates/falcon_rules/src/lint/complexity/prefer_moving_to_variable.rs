@@ -242,8 +242,8 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             self.read_spans.sort_unstable_by_key(|(initializer, _)| initializer.start);
             for list in &self.lists {
                 for binding in &mut self.late.bindings {
-                    if list.span.start <= binding.start && binding.start < list.span.end
-                        && binding.scope.start <= list.span.start && list.span.end <= binding.scope.end
+                    if list.span.contains_offset(binding.start)
+                        && binding.scope.contains(list.span)
                     {
                         binding.scope = list.span;
                     }
@@ -265,8 +265,8 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     self.read_spans[start..end].iter().any(|(_, read)| {
                     let name = &self.ctx.source()[read.start..read.end];
                     self.late.bindings.iter().filter(|binding| {
-                        binding.name == name && binding.scope.start <= read.start
-                            && read.end <= binding.scope.end && binding.start <= read.start
+                        binding.name == name && binding.scope.contains(*read)
+                            && binding.start <= read.start
                     }).max_by_key(|binding| (binding.scope.start, binding.start))
                         .is_some_and(|binding| binding.deferred_effects)
                     })
@@ -387,7 +387,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn visit_identifier(&mut self, node: Identifier<'a>) -> StructuralTraversal {
-        if self.initializer.is_some_and(|span| span.start <= node.span().start && node.span().end <= span.end) {
+        if self.initializer.is_some_and(|span| span.contains(node.span())) {
             self.read_spans.push((self.initializer.unwrap(), node.span()));
         }
         StructuralTraversal::Continue

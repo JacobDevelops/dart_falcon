@@ -10,7 +10,7 @@ use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, Ru
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::avoid_duplicate_map_keys::scalar_literal;
+use crate::lint::support::syntax::scalar_literal;
 use crate::lint::expressions::equivalent;
 
 #[derive(Default)]
@@ -22,10 +22,7 @@ impl Rule for AvoidDuplicateCollectionElements {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(Box::new(Collector {
-            ctx,
-            diagnostics: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diagnostics)
     }
 }
 

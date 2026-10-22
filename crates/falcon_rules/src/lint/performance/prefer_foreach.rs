@@ -154,7 +154,13 @@ impl Collector<'_> {
         }
         let name = init.name();
         let body = match statement.body() {
-            Stmt::Block(block) if block.stmts().len() == 1 => block.stmts().next().unwrap(),
+            Stmt::Block(block) => {
+                let mut statements = block.stmts();
+                match (statements.next(), statements.next()) {
+                    (Some(only), None) => only,
+                    _ => return,
+                }
+            }
             other => other,
         };
         let Stmt::Expr(expression) = body else {
@@ -163,10 +169,10 @@ impl Collector<'_> {
         let Expr::Call(call) = expression.expr().unparenthesized() else {
             return;
         };
-        if call.args().positional().len() != 1 {
+        let mut arguments = call.args().positional();
+        let (Some(argument), None) = (arguments.next(), arguments.next()) else {
             return;
-        }
-        let argument = call.args().positional().next().unwrap();
+        };
         let Expr::Ident(argument) = argument.unparenthesized() else {
             return;
         };

@@ -23,11 +23,7 @@ impl Rule for NoWildcardVariableUses {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let visitor = WildcardUseVisitor {
-            diags: Vec::new(),
-            ctx,
-        };
-        RulePreparation::Structural(Box::new(visitor))
+        crate::lint::support::preparation::prepare!(Structural, WildcardUseVisitor, ctx, diags)
     }
 }
 

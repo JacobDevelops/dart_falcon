@@ -20,7 +20,7 @@
 //! precedence. Without a type index, those negative proofs are unavailable,
 //! but source-derived receiver types are still inferred.
 
-use super::collection_checks::{Emptiness, analyze_emptiness};
+use crate::lint::support::collection_checks::{Emptiness, analyze_emptiness};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 

@@ -7,7 +7,7 @@
 //! Switch-case statement lists are not blocks. A blank line contains two or more
 //! newlines and may appear above attached comments; spaces and tabs do not matter.
 
-use super::newline_spacing::has_blank_line_before;
+use crate::lint::support::newline_spacing::has_blank_line_before;
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
     structural_visitor,
@@ -25,10 +25,7 @@ impl Rule for NewlineBeforeReturn {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Structural(Box::new(Collector {
-            ctx,
-            diags: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
     }
 }
 

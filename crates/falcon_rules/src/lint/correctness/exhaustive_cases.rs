@@ -18,6 +18,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{Visitor, walk_pattern};
 use falcon_syntax::cst::*;
+use crate::lint::support::enum_like::{exact_identity, is_enum_like};
 
 #[derive(Default)]
 pub struct ExhaustiveCases;
@@ -27,13 +28,7 @@ impl Rule for ExhaustiveCases {
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> {
-        let collector = Collector {
-            diagnostics: Vec::new(),
-            ctx,
-        };
-        RulePreparation::Semantic(Box::new(collector))
-    }
+    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diagnostics) }
 }
 
 struct Collector<'a> {
@@ -184,26 +179,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     }
 }
 
-pub(crate) fn is_enum_like(facts: &DeclarationFacts, identity: &DeclarationIdentity) -> bool {
-    !facts.is_abstract
-        && !facts.has_subclass_in_library
-        && !facts.constructors.is_empty()
-        && facts
-            .constructors
-            .iter()
-            .all(|constructor| constructor.is_private && !constructor.is_factory)
-        && facts
-            .static_consts
-            .iter()
-            .filter(|constant| exact_identity(&constant.ty, identity))
-            .count()
-            >= 2
-}
 
-fn exact_identity(ty: &ResolvedType, expected: &DeclarationIdentity) -> bool {
-    matches!(ty, ResolvedType::Interface { identity, arguments, nullable: false, .. }
-        if identity == expected && arguments.is_empty())
-}
 
 fn constant_values(
     facts: &DeclarationFacts,

@@ -11,7 +11,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{self, Visitor};
 use falcon_syntax::cst::*;
 
-use super::ordering::Order;
+use crate::lint::support::ordering::Order;
 
 
 #[derive(Default)]

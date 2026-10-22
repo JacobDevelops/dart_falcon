@@ -27,6 +27,8 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
+use crate::lint::support::annotations::has_override;
+
 #[derive(Default)]
 pub struct AvoidReturningThis;
 
@@ -106,7 +108,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         let (Some(return_type), Some(body)) = (return_type, body) else {
             return StructuralTraversal::SkipChildren;
         };
-        if !names_type(return_type, name) || has_override(annotations) {
+        if !names_type(return_type, name) || has_override(annotations, self.model) {
             return StructuralTraversal::SkipChildren;
         }
         let overrides = self.signatures
@@ -176,9 +178,3 @@ fn names_type(ty: DartType<'_>, name: &str) -> bool {
     })
 }
 
-fn has_override<'a>(mut annotations: AstChildren<'a, Annotation<'a>>) -> bool {
-    annotations.any(|annotation| {
-        let mut names = annotation.name();
-        names.next().is_some_and(|name| name.name() == "override") && names.next().is_none()
-    })
-}

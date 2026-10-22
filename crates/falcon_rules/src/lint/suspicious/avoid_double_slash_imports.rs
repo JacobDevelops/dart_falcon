@@ -3,7 +3,7 @@
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::*;
 
-use crate::lint::style::conditional_uri_does_not_exist::uri_value;
+use crate::lint::support::directive_strings::uri_value;
 
 #[derive(Default)]
 pub struct AvoidDoubleSlashImports;

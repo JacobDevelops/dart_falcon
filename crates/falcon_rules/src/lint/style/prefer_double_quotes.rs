@@ -17,7 +17,7 @@
 //!
 //! Adopted from the official `prefer_double_quotes` lint.
 
-use crate::lint::style::prefer_single_quotes::{QuotePreference, QuoteVisitor};
+use crate::lint::support::quote_style::{QuotePreference, QuoteVisitor};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::*;
 

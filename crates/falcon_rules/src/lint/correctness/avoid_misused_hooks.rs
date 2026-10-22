@@ -11,7 +11,7 @@ use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::avoid_hooks_outside_build::HookContexts;
+use crate::lint::support::hook_contexts::HookContexts;
 use crate::lint::flutter_hooks::HookCalls;
 
 #[derive(Default)]

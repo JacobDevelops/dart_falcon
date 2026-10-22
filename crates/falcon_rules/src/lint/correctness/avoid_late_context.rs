@@ -12,6 +12,6 @@ impl Rule for AvoidLateContext {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        super::flutter_state_rules::prepare(program, ctx, "avoid-late-context")
+        crate::lint::support::flutter_state::prepare(program, ctx, "avoid-late-context")
     }
 }

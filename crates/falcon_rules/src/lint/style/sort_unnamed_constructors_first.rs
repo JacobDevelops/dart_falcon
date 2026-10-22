@@ -22,7 +22,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::sort_constructors_first::{constructor_container, constructor_name_range};
+use crate::lint::support::constructors::{constructor_container, constructor_name_range};
 
 #[derive(Default)]
 pub struct SortUnnamedConstructorsFirst;
@@ -33,10 +33,7 @@ impl Rule for SortUnnamedConstructorsFirst {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Structural(Box::new(Collector {
-            ctx,
-            diags: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
     }
 }
 

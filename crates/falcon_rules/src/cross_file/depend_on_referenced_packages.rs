@@ -8,25 +8,23 @@
 //! declarations and dev-dependencies imported from `lib/`; this rule only adds
 //! its stricter executable/build-hook dependency check, avoiding duplicate reports.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 
-use serde_yaml::{Mapping, Value};
+
 
 use super::{canonical_or_lexical, enclosing_pubspec};
 
 #[derive(Default)]
 pub struct DependOnReferencedPackages;
 
-pub(super) struct PackageManifest {
-    pub(super) name: String,
-    pub(super) dependencies: HashSet<String>,
-    pub(super) dev_dependencies: HashSet<String>,
-}
+use crate::lint::support::package_manifests::{
+    PackageManifest, imported_package, is_library_file, read_manifest,
+};
 
 impl CrossFileRule for DependOnReferencedPackages {
     fn prepare_project(
@@ -98,52 +96,6 @@ impl CrossFileRule for DependOnReferencedPackages {
     }
 }
 
-pub(super) fn read_manifest(path: &Path) -> Option<PackageManifest> {
-    let source = std::fs::read_to_string(path).ok()?;
-    parse_manifest(&source)
-}
-
-fn parse_manifest(source: &str) -> Option<PackageManifest> {
-    let root: Value = serde_yaml::from_str(source).ok()?;
-    let mapping = root.as_mapping()?;
-    Some(PackageManifest {
-        name: mapping_string(mapping, "name")?.to_owned(),
-        dependencies: mapping_keys(mapping, "dependencies")?,
-        dev_dependencies: mapping_keys(mapping, "dev_dependencies")?,
-    })
-}
-
-fn mapping_string<'a>(mapping: &'a Mapping, key: &str) -> Option<&'a str> {
-    mapping.get(Value::String(key.to_string()))?.as_str()
-}
-
-/// Dependency-section keys. `None` when the section exists but isn't a mapping —
-/// a malformed manifest, which callers skip rather than treat as "no dependencies"
-/// and report every import as undeclared.
-fn mapping_keys(mapping: &Mapping, key: &str) -> Option<HashSet<String>> {
-    match mapping.get(Value::String(key.to_string())) {
-        None | Some(Value::Null) => Some(HashSet::new()),
-        Some(Value::Mapping(entries)) => Some(
-            entries
-                .keys()
-                .filter_map(Value::as_str)
-                .map(ToOwned::to_owned)
-                .collect(),
-        ),
-        Some(_) => None,
-    }
-}
-
-pub(super) fn imported_package(uri: &str) -> Option<&str> {
-    let (package, path) = uri.strip_prefix("package:")?.split_once('/')?;
-    (!package.is_empty() && !path.is_empty()).then_some(package)
-}
-
-pub(super) fn is_library_file(file: &Path, pubspec: &Path) -> bool {
-    let file = super::canonical_package_path(file);
-    let root = pubspec.parent().unwrap_or_else(|| Path::new(""));
-    file.starts_with(super::canonical_package_path(&root.join("lib")))
-}
 
 fn is_public_or_executable(file: &Path, pubspec: &Path) -> bool {
     let root = pubspec.parent().unwrap_or_else(|| Path::new(""));
@@ -164,6 +116,7 @@ fn is_public_or_executable(file: &Path, pubspec: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint::support::package_manifests::parse_manifest;
     use falcon_analyze::CrossFileRuleAnalysis;
 
     #[cfg(unix)]

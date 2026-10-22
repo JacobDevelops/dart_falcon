@@ -35,7 +35,7 @@ fn without_prefix(directive: cst::ImportDirective<'_>) -> impl Iterator<Item = (
         .syntax()
         .significant_tokens()
         .filter(move |token| {
-            !(token.span().start >= uri.start && token.span().end <= uri.end)
+            !uri.contains(token.span())
                 && !prefix.is_some_and(|span| {
                     token.span() == span
                         || (token.kind() == TokenKind::As

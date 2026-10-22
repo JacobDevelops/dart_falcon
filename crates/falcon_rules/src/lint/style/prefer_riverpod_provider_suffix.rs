@@ -1,6 +1,6 @@
 //! Requires a Provider suffix on resolved Riverpod top-level providers and static fields.
 
-use super::prefer_riverpod_notifier_suffix::{Naming, prepare};
+use crate::lint::support::riverpod_naming::{Naming, prepare};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 

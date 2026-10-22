@@ -4,7 +4,7 @@
 //! types, imported enums, aliases and dot shorthands. Build-independent constant
 //! branches and statically known spreads contribute keys; unknown coverage disables the check.
 
-use super::avoid_constant_conditions::constant_value;
+use crate::lint::support::constants::constant_value;
 use std::collections::HashSet;
 
 use falcon_analyze::constant_value::evaluate_stable_constant_with_local_values_in_context;
@@ -25,10 +25,7 @@ impl Rule for AvoidMissingEnumConstantInMap {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(Box::new(Collector {
-            ctx,
-            diagnostics: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diagnostics)
     }
 }
 

@@ -94,7 +94,7 @@ pub enum BinaryOp {
 impl BinaryOp {
     /// The name of the user-definable operator method this operator invokes;
     /// `None` for `&&`, `||` and `??`. `!=` invokes `==`.
-    pub fn method_name(self) -> Option<&'static str> {
+    pub fn operator_name(self) -> Option<&'static str> {
         Some(match self {
             Self::Add => "+",
             Self::Sub => "-",
@@ -156,6 +156,12 @@ impl AssignOp {
             Self::NullCoalesceEq => BinaryOp::NullCoalesce,
         })
     }
+
+    /// The user-definable operator method a compound assignment invokes.
+    /// Plain and null-coalescing assignments do not invoke an operator method.
+    pub fn operator_name(self) -> Option<&'static str> {
+        self.binary().and_then(BinaryOp::operator_name)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -206,4 +212,56 @@ pub fn parse_string_delimiter(raw: &str) -> Option<StringDelimiter<'_>> {
         content_offset,
         terminated,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AssignOp, BinaryOp};
+
+    #[test]
+    fn operator_names_follow_dispatch_not_spelling() {
+        for (operator, name) in [
+            (BinaryOp::Add, "+"),
+            (BinaryOp::Sub, "-"),
+            (BinaryOp::Mul, "*"),
+            (BinaryOp::Div, "/"),
+            (BinaryOp::Mod, "%"),
+            (BinaryOp::IntDiv, "~/"),
+            (BinaryOp::EqEq, "=="),
+            (BinaryOp::NotEq, "=="),
+            (BinaryOp::Lt, "<"),
+            (BinaryOp::Gt, ">"),
+            (BinaryOp::LtEq, "<="),
+            (BinaryOp::GtEq, ">="),
+            (BinaryOp::BitAnd, "&"),
+            (BinaryOp::BitOr, "|"),
+            (BinaryOp::BitXor, "^"),
+            (BinaryOp::Shl, "<<"),
+            (BinaryOp::Shr, ">>"),
+            (BinaryOp::UShr, ">>>"),
+        ] {
+            assert_eq!(operator.operator_name(), Some(name));
+        }
+        for operator in [BinaryOp::And, BinaryOp::Or, BinaryOp::NullCoalesce] {
+            assert_eq!(operator.operator_name(), None);
+        }
+        for (operator, name) in [
+            (AssignOp::PlusEq, "+"),
+            (AssignOp::MinusEq, "-"),
+            (AssignOp::MulEq, "*"),
+            (AssignOp::DivEq, "/"),
+            (AssignOp::ModEq, "%"),
+            (AssignOp::IntDivEq, "~/"),
+            (AssignOp::AndEq, "&"),
+            (AssignOp::OrEq, "|"),
+            (AssignOp::XorEq, "^"),
+            (AssignOp::ShlEq, "<<"),
+            (AssignOp::ShrEq, ">>"),
+            (AssignOp::UShrEq, ">>>"),
+        ] {
+            assert_eq!(operator.operator_name(), Some(name));
+        }
+        assert_eq!(AssignOp::Eq.operator_name(), None);
+        assert_eq!(AssignOp::NullCoalesceEq.operator_name(), None);
+    }
 }

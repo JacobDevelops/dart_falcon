@@ -1,6 +1,6 @@
 //! Keeps Flutter BuildContext arguments outside Bloc and Cubit APIs.
 
-use super::bloc_passing::{Passing, prepare};
+use crate::lint::support::bloc_passing::{Passing, prepare};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 

@@ -33,11 +33,7 @@ impl Rule for InvalidCasePatterns {
         if ctx.language_version().supports(Feature::Patterns) {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        let collector = Collector {
-            diags: Vec::new(),
-            ctx,
-        };
-        RulePreparation::Semantic(Box::new(collector))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diags)
     }
 }
 

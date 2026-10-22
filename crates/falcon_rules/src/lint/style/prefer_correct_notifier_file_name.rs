@@ -1,6 +1,6 @@
 //! Requires snake_case file names ending in _notifier.dart for resolved Riverpod notifier classes.
 
-use super::prefer_riverpod_notifier_suffix::{Naming, prepare};
+use crate::lint::support::riverpod_naming::{Naming, prepare};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;
 

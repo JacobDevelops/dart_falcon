@@ -8,7 +8,7 @@
 //!
 //! `threshold` (integer, default: 1) — maximum number of logical operands.
 
-use super::avoid_complex_conditions::logical_operands;
+use crate::lint::support::logical_operands::logical_operands;
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };

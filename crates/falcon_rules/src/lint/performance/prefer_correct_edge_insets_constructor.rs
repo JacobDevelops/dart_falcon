@@ -21,13 +21,7 @@ impl Rule for PreferCorrectEdgeInsetsConstructor {
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> {
-        let collector = Collector {
-            diags: Vec::new(),
-            ctx,
-        };
-        RulePreparation::Structural(Box::new(collector))
-    }
+    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags) }
 }
 fn check_edge_insets_only_call(
     callee: Expr<'_>,
@@ -82,8 +76,11 @@ fn check_edge_insets_only(
     ctx: &AnalyzeContext,
 ) {
     if let DartType::Named(nt) = dart_type
-        && nt.segments().count() == 1
-        && nt.segments().next().unwrap().name() == "EdgeInsets"
+        && let (Some(segment), None) = {
+            let mut segments = nt.segments();
+            (segments.next(), segments.next())
+        }
+        && segment.name() == "EdgeInsets"
     {
         let should_flag = should_use_better_constructor(args);
         if should_flag {

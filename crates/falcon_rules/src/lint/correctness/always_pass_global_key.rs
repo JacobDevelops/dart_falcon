@@ -198,7 +198,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if self
             .state_receivers
             .iter()
-            .any(|span| span.start <= node.span().start && span.end >= node.span().end)
+            .any(|span| span.contains(node.span()))
         {
             return;
         }
@@ -238,8 +238,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         if !self.arguments.iter().any(|(argument_owner, span)| {
             argument_owner == owner
-                && span.start <= node.span().start
-                && span.end >= node.span().end
+                && span.contains(node.span())
         }) {
             return;
         }

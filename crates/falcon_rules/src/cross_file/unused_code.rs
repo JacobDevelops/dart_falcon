@@ -93,7 +93,7 @@ impl CrossFileRule for UnusedCode {
                 // span → used (matches dcl, which records same-file references).
                 let used_same_file = idents.iter().any(|&(offset, len)| {
                     f.source().get(offset..offset + len) == Some(cand.name)
-                        && !(offset >= cand.decl_span.start && offset < cand.decl_span.end)
+                        && !cand.decl_span.contains_offset(offset)
                 });
                 if used_same_file {
                     continue;

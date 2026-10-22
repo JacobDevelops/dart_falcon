@@ -162,19 +162,20 @@ fn lint_helper_imports_include_grouped_relative_and_direct_paths() {
             "{source}"
         );
     }
+    let module = root.join("support/constants.rs");
     assert!(
         lint_helper_dependencies(&root, &module, "use super::equatable;", &tokenizer)
-            .contains(&root.join("correctness/equatable.rs"))
+            .contains(&root.join("support/equatable.rs"))
     );
-    let module = root.join("correctness/use_build_context_synchronously.rs");
+    let module = root.join("support/async_state.rs");
     for source in [
-        "#[path = \"use_build_context_semantics.rs\"] mod semantics;",
-        "#[path = \"use_build_context_semantics.rs\"] pub(crate) mod semantics;",
-        "#[path = \"use_build_context_semantics.rs\"] #[doc(hidden)] mod semantics;",
+        "#[path = \"equatable.rs\"] mod semantics;",
+        "#[path = \"equatable.rs\"] pub(crate) mod semantics;",
+        "#[path = \"equatable.rs\"] #[doc(hidden)] mod semantics;",
     ] {
         assert!(
             lint_helper_dependencies(&root, &module, source, &tokenizer)
-                .contains(&root.join("correctness/use_build_context_semantics.rs"))
+                .contains(&root.join("support/equatable.rs"))
         );
     }
     for source in [
@@ -189,11 +190,11 @@ fn lint_helper_imports_include_grouped_relative_and_direct_paths() {
     assert!(
         lint_helper_dependencies(
             &root,
-            &root.join("correctness.rs"),
+            &root.join("support.rs"),
             "mod equatable;",
             &tokenizer,
         )
-        .contains(&root.join("correctness/equatable.rs"))
+        .contains(&root.join("support/equatable.rs"))
     );
 }
 

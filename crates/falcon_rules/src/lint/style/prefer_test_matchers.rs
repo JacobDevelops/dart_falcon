@@ -5,7 +5,7 @@ use falcon_analyze::{AnalyzeContext, QualifiedName, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::correctness::test_assertions;
+use crate::lint::support::test_assertions;
 
 #[derive(Default)]
 pub struct PreferTestMatchers;
@@ -19,10 +19,7 @@ impl Rule for PreferTestMatchers {
         if !test_assertions::enabled(program, ctx) {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        RulePreparation::Semantic(Box::new(Collector {
-            ctx,
-            diags: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diags)
     }
 }
 
@@ -122,7 +119,7 @@ fn boolean_expectation(
         |prefix| QualifiedName::prefixed(prefix, name),
     );
     let identity = state.model.resolve_value(qualified)?;
-    ["test", "test_core", "test_api", "flutter_test", "matcher"]
+    crate::lint::support::test_assertions::MATCHER_PACKAGES
         .iter()
         .any(|package| {
             ctx.identities()
@@ -145,7 +142,7 @@ fn known_non_matcher(
         ResolvedType::Interface { identity, .. } if identity.is_sdk("dart:core", "Object") => false,
         ResolvedType::Interface { identity, .. } => {
             state.signatures.supertype_matches(identity, &|identity| {
-                ["matcher", "test", "test_core", "test_api", "flutter_test"]
+                crate::lint::support::test_assertions::MATCHER_PACKAGES
                     .iter()
                     .any(|package| {
                         ctx.identities().is_some_and(|index| {

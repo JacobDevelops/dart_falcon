@@ -206,7 +206,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         let span = node.span();
         let in_own_field = self.own_field_initializers.iter().any(|(class, range)| {
-            *class == identity.name() && range.start <= span.start && span.end <= range.end
+            *class == identity.name() && range.contains(span)
         });
         if in_own_field {
             return;

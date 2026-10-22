@@ -24,6 +24,6 @@ impl Rule for DisposeProviderResources {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        super::dispose_provided_instances::prepare_resources(program, ctx, false)
+        crate::lint::support::provider_resources::prepare_resources(program, ctx, false)
     }
 }

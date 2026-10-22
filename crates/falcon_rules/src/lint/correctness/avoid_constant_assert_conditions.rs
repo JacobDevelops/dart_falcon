@@ -1,7 +1,7 @@
 //! Flags assertions whose Boolean condition is statically constant.
 //! Remove an always-passing assertion or fix an always-failing condition.
 
-use super::avoid_constant_conditions::constant_value;
+use crate::lint::support::constants::constant_value;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, ConstantValue, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
@@ -16,10 +16,7 @@ impl Rule for AvoidConstantAssertConditions {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(Box::new(Collector {
-            ctx,
-            diagnostics: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diagnostics)
     }
 }
 

@@ -31,7 +31,6 @@ use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, Ru
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::style::always_specify_types::known_type_arity;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
@@ -43,10 +42,7 @@ impl Rule for OmitLocalVariableTypes {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(Box::new(Collector {
-            diags: Vec::new(),
-            ctx,
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diags)
     }
 }
 
@@ -71,10 +67,7 @@ fn settled(ty: &ResolvedType, state: &SemanticState<'_>) -> bool {
             arguments,
             ..
         } => {
-            let arity = state
-                .signatures
-                .type_parameter_count(identity)
-                .or_else(|| known_type_arity(identity));
+            let arity = state.signatures.type_parameter_count(identity);
             arity == Some(arguments.len()) && arguments.iter().all(|arg| settled(arg, state))
         }
         ResolvedType::Function {

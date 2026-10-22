@@ -19,7 +19,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::avoid_shadowing::has_instance_member;
+use crate::lint::support::instance_members::has_instance_member;
 
 #[derive(Default)]
 pub struct AvoidShadowedExtensionMethods;

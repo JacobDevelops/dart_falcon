@@ -14,6 +14,7 @@ use falcon_syntax::cst::visit::{self, Visitor};
 use falcon_syntax::cst::*;
 
 use crate::lint::expressions::equivalent;
+use crate::lint::support::syntax::scalar_literal;
 
 #[derive(Default)]
 pub struct AvoidDuplicateMapKeys;
@@ -98,17 +99,9 @@ fn compatible_branches(left: Expr<'_>, right: Expr<'_>) -> bool {
         .filter_map(MapIfElement::cast)
         .all(|branch| {
             let then_span = branch.then_entry().span();
-            let in_then = |span: Span| then_span.start <= span.start && span.end <= then_span.end;
-            let in_branch =
-                branch.span().start <= right.span().start && right.span().end <= branch.span().end;
+            let in_then = |span: Span| then_span.contains(span);
+            let in_branch = branch.span().contains(right.span());
             !in_branch || in_then(left.span()) == in_then(right.span())
         })
 }
 
-pub(super) fn scalar_literal(expression: Expr<'_>) -> bool {
-    match expression.unparenthesized() {
-        Expr::IntLit(_) | Expr::DoubleLit(_) | Expr::BoolLit(_) | Expr::NullLit(_) => true,
-        Expr::StringLit(string) => string.interpolations().next().is_none(),
-        _ => false,
-    }
-}

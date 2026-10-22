@@ -12,6 +12,6 @@ impl Rule for AvoidInheritedWidgetInInitstate {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        super::flutter_state_rules::prepare(program, ctx, "avoid-inherited-widget-in-initstate")
+        crate::lint::support::flutter_state::prepare(program, ctx, "avoid-inherited-widget-in-initstate")
     }
 }

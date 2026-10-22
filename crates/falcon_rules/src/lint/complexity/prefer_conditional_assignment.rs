@@ -12,7 +12,7 @@ use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::complexity::join_return_with_assignment::same_element;
+use crate::lint::support::element_identity::same_element;
 use crate::lint::expressions::null_check;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -25,10 +25,7 @@ impl Rule for PreferConditionalAssignment {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(Box::new(Collector {
-            diags: Vec::new(),
-            ctx,
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diags)
     }
 }
 

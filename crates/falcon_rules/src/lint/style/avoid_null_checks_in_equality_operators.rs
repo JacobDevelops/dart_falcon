@@ -60,10 +60,6 @@ struct OperatorChecks<'a> {
 }
 
 impl OperatorChecks<'_> {
-    fn contains(&self, span: Span) -> bool {
-        self.body.start <= span.start && span.end <= self.body.end
-    }
-
     fn check(&mut self, name: Identifier<'_>) {
         self.rebound |= name.name() == self.name;
     }
@@ -109,7 +105,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
-        let Some(checks) = self.active.as_mut().filter(|checks| checks.contains(node.span())) else {
+        let Some(checks) = self.active.as_mut().filter(|checks| checks.body.contains(node.span())) else {
             return StructuralTraversal::Continue;
         };
         match node {
@@ -144,7 +140,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
-        let Some(checks) = self.active.as_mut().filter(|checks| checks.contains(node.span())) else {
+        let Some(checks) = self.active.as_mut().filter(|checks| checks.body.contains(node.span())) else {
             return StructuralTraversal::Continue;
         };
         if let Expr::FuncExpr(function) = node {
@@ -179,7 +175,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn visit_pattern(&mut self, node: Pattern<'a>) -> StructuralTraversal {
-        if let Some(checks) = self.active.as_mut().filter(|checks| checks.contains(node.span()))
+        if let Some(checks) = self.active.as_mut().filter(|checks| checks.body.contains(node.span()))
             && let Pattern::Variable(variable) = node
         {
             checks.check(variable.name());

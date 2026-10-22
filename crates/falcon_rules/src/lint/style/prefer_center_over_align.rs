@@ -10,7 +10,7 @@ use falcon_analyze::semantic_scope::SemanticState;
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, expression_segments};
 use falcon_syntax::cst::*;
 
-use super::widget_replacements::{argument, only_named, prepare};
+use crate::lint::support::widget_replacements::{argument, only_named, prepare};
 
 #[derive(Default)]
 pub struct PreferCenterOverAlign;

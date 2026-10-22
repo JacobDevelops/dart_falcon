@@ -16,7 +16,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
 use crate::lint::flutter::{constructor_span, scoped_constructor_invocation};
-use crate::lint::function_bodies::{FunctionBodies, contains};
+use crate::lint::function_bodies::FunctionBodies;
 
 const CLEANUP: [&str; 3] = ["dispose", "close", "cancel"];
 
@@ -144,7 +144,7 @@ impl<'a> Collector<'a> {
                 continue;
             };
             if declaration == value.span()
-                && contains(&body, &call_span)
+                && body.contains(call_span)
                 && self
                     .bodies
                     .enclosing(&call_span)

@@ -12,7 +12,8 @@
 //! such as `Container`.
 
 use falcon_analyze::{
-    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
+    StructuralTraversal, TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -26,8 +27,13 @@ impl Rule for AvoidReturningWidgets {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
+        let Some(identities) = ctx.identities() else {
+            return RulePreparation::Diagnostics(Vec::new());
+        };
         RulePreparation::Structural(Box::new(Collector {
             ctx,
+            model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
+            parameters: TypeParameterScope::default(),
             diags: Vec::new(),
         }))
     }
@@ -35,15 +41,20 @@ impl Rule for AvoidReturningWidgets {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
+    model: SemanticModel<'a>,
+    parameters: TypeParameterScope,
     diags: Vec<Diagnostic>,
 }
 
 falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
+        if !decl.type_params().is_empty() {
+            self.parameters.push(decl.type_params(), &self.model);
+        }
         if let TopLevelDecl::Function(f) = decl {
             if let Some(ret_type) = f.return_type()
-                && contains_widget_type(ret_type)
+                && contains_widget_type(self.model.resolve_type_in(ret_type, &self.parameters))
             {
                 self.diags.push(self.ctx.diagnostic("Functions should not return `Widget` directly; extract to a separate widget class.", f.span()));
             }
@@ -52,8 +63,14 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         StructuralTraversal::Continue
     }
 
+    fn exit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) {
+        if !decl.type_params().is_empty() {
+            self.parameters.pop();
+        }
+    }
+
     fn visit_class_member(&mut self, member: ClassMember<'a>) -> StructuralTraversal {
-        check_class_member(member, &mut self.diags, self.ctx);
+        check_class_member(member, &mut self.diags, self.ctx, &self.model, &mut self.parameters);
         StructuralTraversal::SkipChildren
     }
 
@@ -63,74 +80,52 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 }
 }
 
-fn is_widget_type(dart_type: DartType<'_>) -> bool {
-    match dart_type {
-        DartType::Named(nt) => {
-            if let Some(last) = nt.segments().last() {
-                let name = last.name();
-                // Only flag Widget, StatelessWidget, and StatefulWidget
-                // Don't flag specific widget subclasses like Card, Container, etc.
-                name == "Widget" || name == "StatelessWidget" || name == "StatefulWidget"
-            } else {
-                false
-            }
-        }
-        _ => false,
-    }
+fn is_widget_type(dart_type: &ResolvedType) -> bool {
+    matches!(dart_type, ResolvedType::Interface { identity, .. }
+        if ["Widget", "StatelessWidget", "StatefulWidget"]
+            .iter()
+            .any(|name| identity.is_package("flutter", name)))
 }
 
-fn contains_widget_type(dart_type: DartType<'_>) -> bool {
-    if is_widget_type(dart_type) {
-        return true;
-    }
-
-    // For Future<Widget>, Stream<Widget>, etc., check the wrapped type
-    match dart_type {
-        DartType::Named(nt) => {
-            if let Some(last) = nt.segments().last() {
-                let name = last.name();
-                // Only check wrapped type for specific async/wrapper types
-                if (name == "Future" || name == "Stream" || name == "Completer")
-                    && !nt.type_args().is_empty()
-                {
-                    // Check if the type argument is a Widget type
-                    if let Some(first_arg) = nt.type_args().next() {
-                        return is_widget_type(first_arg);
-                    }
-                }
-            }
-            false
-        }
-        _ => false,
-    }
+fn contains_widget_type(dart_type: ResolvedType) -> bool {
+    is_widget_type(&dart_type)
+        || (["Future", "Stream", "Completer"]
+            .iter()
+            .any(|name| dart_type.interface("dart:async", name))
+            && dart_type
+                .type_argument(0)
+                .is_some_and(|type_argument| is_widget_type(&type_argument)))
 }
 
-fn has_override_annotation(annotations: AstChildren<'_, Annotation<'_>>) -> bool {
-    annotations.into_iter().any(|ann| {
-        if let Some(first) = ann.name().next() {
-            first.name() == "override"
-        } else {
-            false
-        }
-    })
-}
 
-fn check_class_member(member: ClassMember<'_>, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn check_class_member(
+    member: ClassMember<'_>,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+    model: &SemanticModel<'_>,
+    parameters: &mut TypeParameterScope,
+) {
     match member {
         ClassMember::Method(m) => {
+            if !m.type_params().is_empty() {
+                parameters.push(m.type_params(), model);
+            }
             if let Some(ret_type) = m.return_type()
-                && contains_widget_type(ret_type)
+                && contains_widget_type(model.resolve_type_in(ret_type, parameters))
                 && m.name().name() != "build"
-                && !has_override_annotation(m.annotations())
+                && !crate::lint::support::annotations::has_override(m.annotations(), *model)
             {
                 diags.push(ctx.diagnostic("Methods should not return `Widget` directly; extract to a separate widget class.", m.name().span()));
+            }
+            if !m.type_params().is_empty() {
+                parameters.pop();
             }
         }
         ClassMember::Getter(g) => {
             if let Some(ret_type) = g.return_type()
-                && contains_widget_type(ret_type)
+                && contains_widget_type(model.resolve_type_in(ret_type, parameters))
                 && g.name().name() != "build"
-                && !has_override_annotation(g.annotations())
+                && !crate::lint::support::annotations::has_override(g.annotations(), *model)
             {
                 diags.push(ctx.diagnostic("Getters should not return `Widget` directly; extract to a separate widget class.", g.span()));
             }

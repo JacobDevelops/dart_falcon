@@ -80,7 +80,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if self
             .labeled
             .iter()
-            .any(|span| span.start <= node.span().start && span.end >= node.span().end)
+            .any(|span| span.contains(node.span()))
         {
             return;
         }

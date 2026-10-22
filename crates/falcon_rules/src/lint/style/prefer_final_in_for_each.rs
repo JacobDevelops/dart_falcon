@@ -62,7 +62,7 @@ impl Collector<'_, '_> {
         if !self
             .bodies
             .iter()
-            .any(|body| body.start <= span.start && span.end <= body.end)
+            .any(|body| body.contains(span))
         {
             return;
         }

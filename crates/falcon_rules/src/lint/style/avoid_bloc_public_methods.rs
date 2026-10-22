@@ -9,6 +9,6 @@ impl Rule for AvoidBlocPublicMethods {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        crate::lint::style::avoid_bloc_public_fields::prepare(program, ctx, true)
+        crate::lint::support::bloc_public_members::prepare(program, ctx, true)
     }
 }

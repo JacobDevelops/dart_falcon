@@ -65,14 +65,12 @@ struct Collector<'a> {
 falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
-        let (name, type_params, members, representation) = match decl {
-            TopLevelDecl::Class(node) => (node.name(), node.type_params(), node.members(), None),
-            TopLevelDecl::MixinClass(node) => {
-                (node.name(), node.type_params(), node.members(), None)
-            }
+        let type_params = decl.type_params();
+        let (name, members, representation) = match decl {
+            TopLevelDecl::Class(node) => (node.name(), node.members(), None),
+            TopLevelDecl::MixinClass(node) => (node.name(), node.members(), None),
             TopLevelDecl::ExtensionType(node) => (
                 node.name(),
-                node.type_params(),
                 node.members(),
                 Some(
                     node.primary_constructor()

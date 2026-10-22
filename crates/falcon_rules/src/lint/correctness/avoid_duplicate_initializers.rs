@@ -19,10 +19,7 @@ impl Rule for AvoidDuplicateInitializers {
         _program: cst::Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Structural(Box::new(Collector {
-            ctx,
-            diags: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
     }
 }
 
@@ -60,14 +57,14 @@ impl<'a> Collector<'a> {
             let original = seen.iter().find(|earlier| {
                 earlier.category == category
                     && match (earlier.type_, type_) {
-                        (Some(left), Some(right)) => super::avoid_duplicate_exports::same_syntax(
+                        (Some(left), Some(right)) => crate::lint::support::syntax::same_syntax(
                             left.syntax(),
                             right.syntax(),
                         ),
                         (None, None) => true,
                         _ => false,
                     }
-                    && super::avoid_duplicate_exports::same_syntax(
+                    && crate::lint::support::syntax::same_syntax(
                         earlier.value.syntax(),
                         value.syntax(),
                     )

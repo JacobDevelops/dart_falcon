@@ -77,7 +77,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         // siblings visited in evaluation order rather than source order.
         while self.ancestors.last().is_some_and(|frame| {
             let parent = frame.expression.span();
-            span.start < parent.start || span.end > parent.end
+            !parent.contains(span)
         }) {
             self.ancestors.pop();
         }
@@ -88,7 +88,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 _ => None,
             };
             if excluded
-                .is_some_and(|excluded| excluded.start <= span.start && span.end <= excluded.end)
+                .is_some_and(|excluded| excluded.contains(span))
             {
                 None
             } else {

@@ -22,10 +22,7 @@ impl Rule for AvoidRedundantAsync {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Structural(Box::new(AsyncDeclarations {
-            diags: Vec::new(),
-            ctx,
-        }))
+        crate::lint::support::preparation::prepare!(Structural, AsyncDeclarations, ctx, diags)
     }
 }
 

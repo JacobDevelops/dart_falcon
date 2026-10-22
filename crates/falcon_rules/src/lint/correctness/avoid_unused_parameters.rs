@@ -21,16 +21,20 @@ mod dcl {
             _program: Program<'a>,
             ctx: &'a AnalyzeContext<'a>,
         ) -> RulePreparation<'a> {
-            let collector = Collector {
-                ctx,
-                diagnostics: Vec::new(),
+            let Some(identities) = ctx.identities() else {
+                return RulePreparation::Diagnostics(Vec::new());
             };
-            RulePreparation::Structural(Box::new(collector))
+            RulePreparation::Structural(Box::new(Collector {
+                ctx,
+                model: falcon_analyze::SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
+                diagnostics: Vec::new(),
+            }))
         }
     }
 
     struct Collector<'a, 'ctx> {
         ctx: &'a AnalyzeContext<'ctx>,
+        model: falcon_analyze::SemanticModel<'a>,
         diagnostics: Vec<Diagnostic>,
     }
 
@@ -72,12 +76,7 @@ mod dcl {
 
         fn visit_method_decl(&mut self, node: MethodDecl<'a>) -> StructuralTraversal {
             let exempt = node.name().name() == "noSuchMethod"
-                || node.annotations().any(|annotation| {
-                    annotation
-                        .name()
-                        .last()
-                        .is_some_and(|name| name.name() == "override")
-                });
+                || crate::lint::support::annotations::has_override(node.annotations(), self.model);
             self.check(node.params(), node.body(), exempt);
             StructuralTraversal::Continue
         }

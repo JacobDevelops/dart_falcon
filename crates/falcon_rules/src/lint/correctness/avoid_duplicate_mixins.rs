@@ -194,7 +194,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 }
 
 fn same(left: cst::DartType<'_>, right: cst::DartType<'_>) -> bool {
-    super::avoid_duplicate_exports::same_syntax(left.syntax(), right.syntax())
+    crate::lint::support::syntax::same_syntax(left.syntax(), right.syntax())
 }
 
 fn conflicts(members: cst::AstChildren<'_, cst::ClassMember<'_>>, names: &HashSet<&str>) -> bool {

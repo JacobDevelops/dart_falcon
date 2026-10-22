@@ -81,7 +81,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 ClassMember::Setter(setter) if setter.name().name() == getter.name().name())) {
                 continue;
             }
-            let Some(name) = crate::lint::complexity::unnecessary_getters_setters::getter_returns_field(*getter) else { continue };
+            let Some(name) = crate::lint::support::field_accessors::getter_returns_field(*getter) else { continue };
             if !name.starts_with('_') { continue; }
             let field = members.iter().find_map(|member| match member {
                 ClassMember::Field(field) if !field.is_static()

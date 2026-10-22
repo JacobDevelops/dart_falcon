@@ -74,10 +74,6 @@ fn is_integer(expression: Expr<'_>, value: &str) -> bool {
     matches!(expression.unparenthesized(), Expr::IntLit(literal) if literal.value() == value)
 }
 
-fn contains(outer: Span, inner: Span) -> bool {
-    outer.start <= inner.start && inner.end <= outer.end
-}
-
 impl<'a> Collector<'a> {
     fn known_list(&self, identifier: Identifier<'a>) -> Option<NodeId> {
         let declaration = *self.locals.get(&identifier.span().start)?;
@@ -158,7 +154,7 @@ impl<'a> Collector<'a> {
         let body = statement.body().span();
         if !unit_step
             || self.ctx.local_writes(self.program).iter().any(|write| {
-                contains(body, write.span)
+                body.contains(write.span)
                     && (write.declaration == declaration.name().syntax().id()
                         || write.declaration == collection_declaration)
             })
@@ -181,7 +177,7 @@ falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         for candidate in &mut self.candidates {
-            if contains(candidate.body, node.span())
+            if candidate.body.contains(node.span())
                 && (matches!(node, Stmt::PatternAssign(_) | Stmt::LocalFunc(_) | Stmt::Yield(_))
                     || matches!(node, Stmt::For(statement) if statement.is_await()))
             {
@@ -198,7 +194,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         for candidate in &mut self.candidates {
-            if !candidate.valid || !contains(candidate.body, node.span()) {
+            if !candidate.valid || !candidate.body.contains(node.span()) {
                 continue;
             }
             match node {
@@ -237,7 +233,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
     fn visit_local_var(&mut self, node: LocalVarDecl<'a>) -> StructuralTraversal {
         for candidate in &mut self.candidates {
-            if contains(candidate.body, node.span())
+            if candidate.body.contains(node.span())
                 && node.declarators().any(|declaration| {
                     let name = declaration.name().name();
                     name == candidate.index || name == candidate.collection

@@ -23,7 +23,7 @@ use falcon_syntax::cst::visit::{
 };
 use falcon_syntax::cst::*;
 
-use crate::lint::function_bodies::{FunctionBodies, contains};
+use crate::lint::function_bodies::FunctionBodies;
 use falcon_analyze::semantic_scope::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
 
 /// A resource type and the method that releases it.
@@ -185,7 +185,7 @@ impl Candidate<'_> {
                     if (self.is_reference(access.object(), references)
                         && self.methods.contains(&access.field().name()))
                         || (self.methods.contains(&access.field().name())
-                            && contains(&self.declarator, &call.span()))
+                            && self.declarator.contains(call.span()))
                         // Only field/accessor elements match the official
                         // cascade helper for an arbitrary method name.
                         || (self.kind == VariableKind::Field && self.is_name(access.object(), references)));
@@ -201,7 +201,7 @@ impl Candidate<'_> {
                     if (self.kind == VariableKind::Field && self.is_name(cascade.object(), references))
                         || (self.is_reference(cascade.object(), references)
                             && self.methods.contains(&call.name().name()))
-                        || (contains(&self.declarator, &node.span())
+                        || (self.declarator.contains(node.span())
                             && self.methods.contains(&call.name().name())))
                     || section.ops().any(|op| match op {
                         CascadeOp::Call(call) => self.passed_in(call.args(), references),
@@ -268,7 +268,7 @@ impl<'a> SemanticRuleVisitor<'a> for LocalCandidates<'a> {
             .references
             .extension_receivers
             .iter()
-            .find(|(scope, _)| contains(scope, &node.span()))
+            .find(|(scope, _)| scope.contains(node.span()))
             .map(|(_, receiver)| receiver)
             .or(state.enclosing_type.as_ref());
         let static_owner = if let Expr::Field(access) = node {
@@ -332,7 +332,7 @@ impl<'a> SemanticRuleVisitor<'a> for LocalCandidates<'a> {
                     self.references
                         .mixin_constraints
                         .iter()
-                        .filter(|(scope, _)| contains(scope, &node.span()))
+                        .filter(|(scope, _)| scope.contains(node.span()))
                         .find_map(|(_, constraint)| {
                             state.signatures.resolved_member_owner(
                                 constraint,
@@ -455,7 +455,7 @@ impl<'a> SemanticRuleVisitor<'a> for LocalCandidates<'a> {
                         .any(|(span, constructor)| {
                             *constructor == name
                                 && self.references.owners.iter().any(|(owner, class)| {
-                                    contains(owner, span)
+                                    owner.contains(*span)
                                         && state.model.resolve_name(*class).as_ref()
                                             == Some(&identity)
                                 })
@@ -572,7 +572,7 @@ struct ValidUses<'a> {
 impl ValidUses<'_> {
     fn mark(&mut self, span: &Span, valid: impl Fn(&Candidate<'_>) -> bool) {
         for candidate in &mut self.candidates {
-            if !candidate.valid && contains(&candidate.container, span) && valid(candidate) {
+            if !candidate.valid && candidate.container.contains(*span) && valid(candidate) {
                 candidate.valid = true;
             }
         }
@@ -585,7 +585,7 @@ impl<'a> Visitor<'a> for ValidUses<'a> {
         let excluded_calls = &self.excluded_calls;
         for candidate in &mut self.candidates {
             if !candidate.valid
-                && contains(&candidate.container, &node.span())
+                && candidate.container.contains(node.span())
                 && candidate.is_valid_use(node, references, excluded_calls)
             {
                 candidate.valid = true;
@@ -600,7 +600,7 @@ impl<'a> Visitor<'a> for ValidUses<'a> {
         {
             let references = &self.references;
             for candidate in &mut self.candidates {
-                if contains(&candidate.container, &statement.span())
+                if candidate.container.contains(statement.span())
                     && candidate.kind == VariableKind::Local
                     && candidate.is_name(value, references)
                 {
@@ -755,7 +755,7 @@ impl<'a> References<'a> {
                 .iter()
                 .copied()
                 .filter(|scope| {
-                    contains(scope, &binding.declaration)
+                    scope.contains(binding.declaration)
                         && !(binding.kind == BindingKind::LocalFunction
                             && *scope == binding.declaration)
                 })
@@ -792,7 +792,7 @@ impl<'a> References<'a> {
             .filter(|binding| {
                 binding.name == name
                     && (!field || binding.kind == BindingKind::Field)
-                    && contains(&binding.scope, span)
+                    && binding.scope.contains(*span)
             })
             .min_by_key(|binding| binding.scope.end - binding.scope.start)
             .map(|binding| binding.declaration)

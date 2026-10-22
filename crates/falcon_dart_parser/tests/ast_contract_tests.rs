@@ -2,6 +2,52 @@ use falcon_dart_parser::parser::parse;
 use falcon_syntax::cst::*;
 
 #[test]
+fn top_level_type_parameters_cover_declaration_shapes() {
+    let source = r#"
+class C<T> {}
+class Alias<T> = C<T> with M<T>;
+mixin M<T> {}
+mixin class MC<T> {}
+enum E<T> { value; }
+extension X<T> on C<T> {}
+extension type ET<T>(C<T> value) {}
+void f<T>() {}
+typedef F<T> = C<T>;
+typedef T Legacy<T>(T value);
+int value = 0;
+"#;
+    let parsed = parse(source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let parameters: Vec<Vec<_>> = parsed
+        .tree
+        .program(source)
+        .declarations()
+        .map(|declaration| {
+            declaration
+                .type_params()
+                .map(|parameter| parameter.name().name())
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        parameters,
+        [
+            vec!["T"],
+            vec!["T"],
+            vec!["T"],
+            vec!["T"],
+            vec!["T"],
+            vec!["T"],
+            vec!["T"],
+            vec!["T"],
+            vec!["T"],
+            vec!["T"],
+            vec![],
+        ]
+    );
+}
+
+#[test]
 fn test_identifier_basic() {
     let source = "class Foo {}";
     let falcon_dart_parser::ParseResult { tree, errors } = parse(source);

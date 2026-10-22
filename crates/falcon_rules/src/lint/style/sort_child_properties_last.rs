@@ -17,10 +17,7 @@ impl Rule for SortChildPropertiesLast {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(Box::new(ChildOrdering {
-            ctx,
-            diagnostics: Vec::new(),
-        }))
+        crate::lint::support::preparation::prepare!(Semantic, ChildOrdering, ctx, diagnostics)
     }
 }
 

@@ -14,7 +14,7 @@ use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::flutter_state_rules::is_state;
+use crate::lint::support::flutter_state::is_state;
 
 #[derive(Default)]
 pub struct AvoidDisposingLateFields;
@@ -150,7 +150,7 @@ impl Collector<'_> {
                 if !owner
                     .methods
                     .iter()
-                    .any(|method| method.start <= span.start && span.end <= method.end)
+                    .any(|method| method.contains(span))
                 {
                     return None;
                 }

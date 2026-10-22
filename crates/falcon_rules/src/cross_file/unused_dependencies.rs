@@ -20,7 +20,7 @@ use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use marked_yaml::{LoaderOptions, parse_yaml_with_options};
 
-use super::depend_on_referenced_packages::{imported_package, read_manifest};
+use crate::lint::support::package_manifests::{imported_package, read_manifest};
 use super::{character_to_byte, enclosing_pubspec, program_reference_uris, scalar_source_span};
 
 #[derive(Default)]

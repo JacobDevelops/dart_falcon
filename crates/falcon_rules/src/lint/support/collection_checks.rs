@@ -4,7 +4,7 @@ use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
-pub(super) fn lacks_collection_member(
+pub(crate) fn lacks_collection_member(
     ctx: &AnalyzeContext<'_>,
     receiver: Expr<'_>,
     state: &SemanticState<'_>,
@@ -38,7 +38,7 @@ pub(super) fn lacks_collection_member(
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum Emptiness {
+pub(crate) enum Emptiness {
     Empty,
     NotEmpty,
 }
@@ -106,7 +106,7 @@ impl Emptiness {
     }
 }
 
-pub(super) fn analyze_emptiness<'a>(
+pub(crate) fn analyze_emptiness<'a>(
     ctx: &'a AnalyzeContext<'a>,
     emptiness: Emptiness,
 ) -> Box<dyn SemanticRuleVisitor<'a> + 'a> {
@@ -149,10 +149,10 @@ pub(super) fn analyze_emptiness<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::super::prefer_is_empty::PreferIsEmpty;
-    use super::super::prefer_is_not_empty::PreferIsNotEmpty;
-    use super::super::prefer_iterable_where_type::PreferIterableWhereType;
     use super::*;
+    use crate::lint::style::prefer_is_empty::PreferIsEmpty;
+    use crate::lint::style::prefer_is_not_empty::PreferIsNotEmpty;
+    use crate::lint::style::prefer_iterable_where_type::PreferIterableWhereType;
     use falcon_analyze::Rule;
     use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;

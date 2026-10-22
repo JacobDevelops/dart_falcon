@@ -10,7 +10,7 @@ use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::use_existing_variable::same_block;
+use crate::lint::support::block_scope::same_block;
 
 #[derive(Default)]
 pub struct UseExistingDestructuring;

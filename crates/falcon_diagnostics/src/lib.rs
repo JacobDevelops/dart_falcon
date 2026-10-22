@@ -61,6 +61,16 @@ pub struct Span {
     pub end: usize,
 }
 
+impl Span {
+    pub fn contains(&self, other: Span) -> bool {
+        self.start <= other.start && other.end <= self.end
+    }
+
+    pub fn contains_offset(&self, offset: usize) -> bool {
+        self.start <= offset && offset < self.end
+    }
+}
+
 impl From<falcon_syntax::cst::Span> for Span {
     fn from(span: falcon_syntax::cst::Span) -> Self {
         Self {
@@ -261,11 +271,24 @@ impl fmt::Display for Severity {
 
 #[cfg(test)]
 mod position_tests {
-    use super::{LineIndex, byte_to_lsp_position, lsp_position_to_byte};
+    use super::{LineIndex, Span, byte_to_lsp_position, lsp_position_to_byte};
     use lsp_types::Position;
 
     // `😀` is U+1F600: 4 UTF-8 bytes, 1 scalar, 2 UTF-16 code units.
     const EMOJI: &str = "😀";
+
+    #[test]
+    fn span_containment_uses_half_open_offsets() {
+        let span = Span { start: 3, end: 7 };
+        assert!(span.contains(span));
+        assert!(span.contains(Span { start: 7, end: 7 }));
+        assert!(!span.contains(Span { start: 2, end: 7 }));
+        assert!(!span.contains(Span { start: 3, end: 8 }));
+        assert!(span.contains_offset(3));
+        assert!(span.contains_offset(6));
+        assert!(!span.contains_offset(7));
+        assert!(!Span { start: 3, end: 3 }.contains_offset(3));
+    }
 
     #[test]
     fn line_index_matches_scanning_at_every_offset() {

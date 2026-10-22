@@ -123,12 +123,7 @@ fn check_members<'a>(
             continue;
         };
         let name = setter.name().name();
-        let overrides = setter.annotations().any(|annotation| {
-            annotation
-                .name()
-                .last()
-                .is_some_and(|n| n.name() == "override")
-        });
+        let overrides = crate::lint::support::annotations::has_override(setter.annotations(), state.model);
         if overrides || declares_getter(members.clone(), name) || OBJECT_GETTERS.contains(&name) {
             continue;
         }

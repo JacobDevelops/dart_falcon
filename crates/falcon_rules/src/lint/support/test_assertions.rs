@@ -4,11 +4,17 @@ use falcon_analyze::semantic_scope::SemanticState;
 use falcon_analyze::{AnalyzeContext, QualifiedName};
 use falcon_syntax::cst::*;
 
+const FRAMEWORK_PACKAGES: [&str; 4] = ["test", "test_core", "test_api", "flutter_test"];
+pub(crate) const MATCHER_PACKAGES: [&str; 5] =
+    ["test", "test_core", "test_api", "flutter_test", "matcher"];
+
 pub(crate) fn enabled(program: Program<'_>, ctx: &AnalyzeContext<'_>) -> bool {
     crate::lint::declarations::has_test_file_suffix(ctx.file_path())
         && program.imports().any(|import| {
             let uri = import.uri().value();
-            uri.starts_with("package:test/") || uri.starts_with("package:flutter_test/")
+            uri.strip_prefix("package:")
+                .and_then(|uri| uri.split_once('/'))
+                .is_some_and(|(package, _)| is_framework(package))
         })
 }
 
@@ -46,15 +52,7 @@ pub(crate) fn package_call<'a>(
         _ => return None,
     };
     let identity = state.model.resolve_value(qualified)?;
-    for package in [
-        "test",
-        "test_core",
-        "test_api",
-        "flutter_test",
-        "matcher",
-        "mockito",
-        "mocktail",
-    ] {
+    for package in MATCHER_PACKAGES.into_iter().chain(["mockito", "mocktail"]) {
         if identity.is_package(package, name) {
             return Some((name, package));
         }
@@ -63,10 +61,10 @@ pub(crate) fn package_call<'a>(
 }
 
 pub(crate) fn is_framework(package: &str) -> bool {
-    matches!(package, "test" | "test_core" | "test_api" | "flutter_test")
+    FRAMEWORK_PACKAGES.contains(&package)
 }
 
-pub(super) fn is_assertion(name: &str, package: &str) -> bool {
+pub(crate) fn is_assertion(name: &str, package: &str) -> bool {
     match name {
         "expect" | "expectLater" | "fail" => is_framework(package) || package == "matcher",
         "verify"

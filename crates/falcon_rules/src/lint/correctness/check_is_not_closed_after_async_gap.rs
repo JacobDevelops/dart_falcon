@@ -33,7 +33,7 @@ use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use super::avoid_duplicate_bloc_event_handlers::own_member;
+use crate::lint::bloc::own_member;
 use crate::lint::bloc::BlocTypes;
 
 #[derive(Default)]
@@ -160,7 +160,7 @@ impl<'a> Collector<'a> {
         }
         let mut result = Evidence::None;
         for awaited in &self.awaits {
-            if contains(statement.span(), awaited.span())
+            if statement.span().contains(awaited.span())
                 && function_body(awaited.syntax()) == Some(body)
             {
                 if awaited
@@ -182,7 +182,7 @@ impl<'a> Collector<'a> {
             return false;
         };
         if self.awaits.iter().any(|awaited| {
-            contains(call.args().span(), awaited.span())
+            call.args().span().contains(awaited.span())
                 && function_body(awaited.syntax()) == Some(body)
                 && !awaited
                     .syntax()
@@ -260,9 +260,6 @@ enum Evidence {
     Barrier,
 }
 
-fn contains(outer: Span, inner: Span) -> bool {
-    outer.start <= inner.start && inner.end <= outer.end
-}
 
 fn function_body(node: SyntaxNode<'_>) -> Option<NodeId> {
     node.ancestors()

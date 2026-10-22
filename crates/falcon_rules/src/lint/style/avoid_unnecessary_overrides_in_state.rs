@@ -18,6 +18,6 @@ impl Rule for AvoidUnnecessaryOverridesInState {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        crate::lint::complexity::unnecessary_overrides::prepare(ctx, true)
+        crate::lint::support::forwarding_overrides::prepare(ctx, true)
     }
 }

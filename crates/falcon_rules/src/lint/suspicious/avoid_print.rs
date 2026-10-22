@@ -163,7 +163,7 @@ impl Collector<'_> {
                     .clone()
                     .find(|declaration| {
                         let enclosing_span = declaration.span();
-                        enclosing_span.start <= span.start && span.end <= enclosing_span.end
+                        enclosing_span.contains(span)
                     })
                     .and_then(members_of)
                     .is_some_and(|mut members| {
