@@ -227,7 +227,15 @@ fn closure_flow_joins_keep_nested_optional_writes_nullable() {
          catch (_) { int inner = 2; value = inner; } finally { int inner = 3; } return value; }; \
          int? Function(bool) switched() => (bool flag) { int? value; \
          switch (flag) { case true: { int inner = 1; value = inner; break; } \
-         case false: break; } return value; };",
+         case false: break; } return value; }; \
+         int? Function(bool) conjunction() => (bool flag) { int? value; \
+         flag && ((value = 1) > 0); return value; }; \
+         int? Function(bool) disjunction() => (bool flag) { int? value; \
+         flag || ((value = 1) > 0); return value; }; \
+         int? Function(bool?) coalesced() => (bool? flag) { int? value; \
+         flag ?? ((value = 1) > 0); return value; }; \
+         int Function(bool) leftAssigned() => (bool flag) { int? value; \
+         ((value = 1) > 0) && flag; return value; };",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
             for declaration in program.declarations() {

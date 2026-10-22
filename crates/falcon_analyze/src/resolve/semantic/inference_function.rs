@@ -1,5 +1,6 @@
 use super::flow::FlowContext;
 use crate::resolve::semantic::ResolvedTypeKind;
+use std::borrow::Cow;
 
 use super::*;
 
@@ -439,7 +440,7 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                         returns.visit_stmt(statement.then_branch());
                     });
                     let then_environment = self.environment.clone();
-                    self.environment = before.join(&then_environment);
+                    FlowContext::join_branches(&mut self.environment, before, false, false);
                     if let Some(branch) = statement.else_branch() {
                         self.visit_stmt(branch);
                     }
@@ -485,6 +486,7 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
             }),
             Stmt::TryCatch(statement) => {
                 let before = self.environment.clone();
+                let depth = before.depth();
                 self.scoped(|returns| {
                     for statement in statement.body().stmts() {
                         returns.visit_stmt(statement);
@@ -492,7 +494,15 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                 });
                 let mut exits = self.environment.clone();
                 for catch in statement.catches() {
-                    self.environment = before.join(&exits);
+                    FlowContext::join_paths(
+                        &mut self.environment,
+                        [
+                            (Cow::Borrowed(&before), true),
+                            (Cow::Borrowed(&exits), true),
+                        ],
+                        depth,
+                        false,
+                    );
                     self.scoped(|returns| {
                         // Untyped `catch (e, s)` binds `Object` and `StackTrace`.
                         if let Some(name) = catch.exception_var() {
@@ -511,9 +521,19 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                             returns.visit_stmt(statement);
                         }
                     });
-                    exits = exits.join(&self.environment);
+                    FlowContext::join_paths(
+                        &mut exits,
+                        [(Cow::Borrowed(&self.environment), true)],
+                        depth,
+                        true,
+                    );
                 }
-                self.environment = before.join(&exits);
+                FlowContext::join_paths(
+                    &mut self.environment,
+                    [(Cow::Owned(before), true), (Cow::Borrowed(&exits), true)],
+                    depth,
+                    false,
+                );
                 if let Some(finally) = statement.finally() {
                     self.scoped(|returns| {
                         for statement in finally.stmts() {
@@ -529,9 +549,18 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                     self.exhaustive_switches.push(statement.span());
                 }
                 let before = self.environment.clone();
+                let depth = before.depth();
                 let mut exits = before.clone();
                 for case in statement.cases() {
-                    self.environment = before.join(&exits);
+                    FlowContext::join_paths(
+                        &mut self.environment,
+                        [
+                            (Cow::Borrowed(&before), true),
+                            (Cow::Borrowed(&exits), true),
+                        ],
+                        depth,
+                        false,
+                    );
                     self.scoped(|returns| {
                         for kind in case.cases() {
                             if let SwitchCaseKind::Pattern(label) = kind {
@@ -542,7 +571,12 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                             returns.visit_stmt(statement);
                         }
                     });
-                    exits = exits.join(&self.environment);
+                    FlowContext::join_paths(
+                        &mut exits,
+                        [(Cow::Borrowed(&self.environment), true)],
+                        depth,
+                        true,
+                    );
                 }
                 self.environment = exits;
             }
@@ -602,7 +636,7 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                     if optional {
                         let before = self.environment.clone();
                         self.visit_expr(right);
-                        self.environment = before.join(&self.environment);
+                        FlowContext::join_branches(&mut self.environment, before, false, false);
                     } else {
                         self.visit_expr(right);
                     }
