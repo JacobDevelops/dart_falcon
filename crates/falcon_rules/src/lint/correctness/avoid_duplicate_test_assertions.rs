@@ -159,7 +159,7 @@ fn inert_matcher<'a>(expression: Expr<'a>, state: &SemanticState<'a>) -> bool {
             | "lessThan"
             | "greaterThanOrEqualTo"
             | "lessThanOrEqualTo"
-    ) && (test_assertions::is_framework(package) || package == "matcher")
+    ) && test_assertions::MATCHER_PACKAGES.contains(&package)
         && call.args().named().is_empty()
         && call
             .args()

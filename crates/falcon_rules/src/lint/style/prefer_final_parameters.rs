@@ -77,7 +77,7 @@ impl Collector<'_, '_> {
             start: doc.start,
             end: span.end,
         });
-        self.diagnostics.push(self.ctx.diagnostic(format!("The parameter `{}` should be final.", name.name()), span));
+        self.diagnostics.push(self.ctx.diagnostic(format!("The parameter `{}` should be `final`.", name.name()), span));
     }
 
     fn check(&mut self, params: FormalParamList<'_>) {

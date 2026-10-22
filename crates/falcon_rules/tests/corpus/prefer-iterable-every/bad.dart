@@ -60,3 +60,13 @@ void containersRegression(int rcount, List<int> items) {
 
 bool parenthesized(List<int> items) =>
     (items.where((x) => x > 0).isEmpty); /* expect: prefer-iterable-every */
+
+void universalComparisons(List<int> items) {
+  final equalsTrue = items.where((x) => x > 0).isEmpty == true; /* expect: prefer-iterable-every */
+  final differsFalse = items.where((x) => x > 0).isEmpty != false; /* expect: prefer-iterable-every */
+  final reversedTrue = true == items.where((x) => x > 0).isEmpty; /* expect: prefer-iterable-every */
+  final reversedFalse = false != (items.where((x) => x > 0).isEmpty); /* expect: prefer-iterable-every */
+  final negatedComparison = !(items.where((x) => x > 0).isEmpty == false); /* expect: prefer-iterable-every */
+  final repeatedComparison = (items.where((x) => x > 0).isEmpty == false) == false; /* expect: prefer-iterable-every */
+  final doubleNegation = !(!items.where((x) => x > 0).isEmpty); /* expect: prefer-iterable-every */
+}

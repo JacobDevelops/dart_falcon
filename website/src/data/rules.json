@@ -1152,31 +1152,31 @@
     },
     "diagnostics": [
       {
-        "message": "Merge this nested if with its outer condition using &&.",
+        "message": "Merge this nested `if` with its outer condition using `&&`.",
         "line": 2,
         "column": 16,
         "file": null
       },
       {
-        "message": "Merge this nested if with its outer condition using &&.",
+        "message": "Merge this nested `if` with its outer condition using `&&`.",
         "line": 3,
         "column": 14,
         "file": null
       },
       {
-        "message": "Merge this nested if with its outer condition using &&.",
+        "message": "Merge this nested `if` with its outer condition using `&&`.",
         "line": 4,
         "column": 21,
         "file": null
       },
       {
-        "message": "Merge this nested if with its outer condition using &&.",
+        "message": "Merge this nested `if` with its outer condition using `&&`.",
         "line": 5,
         "column": 18,
         "file": null
       },
       {
-        "message": "Merge this nested if with its outer condition using &&.",
+        "message": "Merge this nested `if` with its outer condition using `&&`.",
         "line": 6,
         "column": 17,
         "file": null
@@ -3504,8 +3504,8 @@
     "description": "Flags `iterable.where(predicate).isEmpty` and filtered-length comparisons.",
     "docs": "Flags `iterable.where(predicate).isEmpty` and filtered-length comparisons.\n\nAn empty filtered iterable means every element fails the predicate. Prefer\n`iterable.every((element) => !predicate(element))` to express that condition\ndirectly. When a filtered length equals the original iterable's length, use\n`iterable.every(predicate)` instead. Both forms can stop at the first failure.",
     "examples": {
-      "bad": "// Bad: filtered emptiness means every item fails the predicate.\nvoid validateItems(List<int> items) {\n  if (items.where((x) => x > 0).isEmpty) {\n    print('No items are positive');\n  }\n}\n\n// Bad: .where().length == list.length pattern\nvoid checkAllValid(List<String> values) {\n  bool allNonEmpty = values.where((v) => v.isNotEmpty).length == values.length;\n  if (allNonEmpty) {\n    print('All strings are non-empty');\n  }\n}\n\n// Bad: the predicate must be negated when replacing filtered emptiness.\nvoid processCollection() {\n  final data = [2, 4, 6, 8];\n  final allOdd = data.where((n) => n % 2 == 0).isEmpty;\n}\n\n// Bad: nested where with length comparison\nvoid checkMatrix(List<List<int>> matrix) {\n  if (matrix.where((row) => row.isNotEmpty).length == matrix.length) {\n    print('All rows are non-empty');\n  }\n}\n\n// Bad: where with complex predicate and length check\nvoid checkAllPositive(List<int> numbers) {\n  final allPositive = numbers.where((n) => n > 0 && n < 100).length == numbers.length;\n}\n\n// Bad: filtered emptiness in a variable declaration.\nvoid verifyList(List<String> items) {\n  bool allEmpty = items.where((i) => i.isNotEmpty).isEmpty;\n}\n\n// Regression: the violation must still be found inside Dart 3 containers\n// (pattern declaration, labeled statement, switch expression and subject,\n// collection if/spread, record field).\nvoid containersRegression(int rcount, List<int> items) {\n  final (ra, _) = (items.where((x) => x > 1).isEmpty, 0);\n  lbl: {\n    final rb = items.where((x) => x > 1).isEmpty;\n    print(rb);\n  }\n  final rc = switch (rcount) {\n    0 => items.where((x) => x > 1).isEmpty,\n    _ => null,\n  };\n  final rd = switch (items.where((x) => x > 1).isEmpty) {\n    _ => 0,\n  };\n  final re = [if (rcount > 0) items.where((x) => x > 1).isEmpty];\n  final rf = [...[items.where((x) => x > 1).isEmpty]];\n  final rg = (p: items.where((x) => x > 1).isEmpty, q: 0);\n  print([ra, rc, rd, re, rf, rg]);\n}\n\nbool parenthesized(List<int> items) =>\n    (items.where((x) => x > 0).isEmpty);",
-      "good": "// Good: using .every() for a universal predicate.\nvoid validateItems(List<int> items) {\n  if (items.every((x) => x > 0)) {\n    print('All items are positive');\n  }\n}\n\n// Good: .every() pattern for checking all elements\nvoid checkAllValid(List<String> values) {\n  bool allNonEmpty = values.every((v) => v.isNotEmpty);\n  if (allNonEmpty) {\n    print('All strings are non-empty');\n  }\n}\n\n// Good: assignment with .every()\nvoid processCollection() {\n  final data = [2, 4, 6, 8];\n  final allEven = data.every((n) => n % 2 == 0);\n}\n\n// Good: nested every() instead of where().length\nvoid checkMatrix(List<List<int>> matrix) {\n  if (matrix.every((row) => row.isNotEmpty)) {\n    print('All rows are non-empty');\n  }\n}\n\n// Good: other iterable methods are fine\nvoid useOtherMethods(List<int> numbers) {\n  final filtered = numbers.where((n) => n > 0).toList();\n  final hasAny = numbers.any((n) => n > 10);\n}\n\n// Negated filtered emptiness is any(predicate), not every(predicate).\nvoid existentialChecks(List<int> items) {\n  final hasPositive = !items.where((x) => x > 0).isEmpty;\n  final parenthesized = !(items.where((x) => x > 0).isEmpty);\n  final nested = !((items.where((x) => x > 0).isEmpty));\n  final allNonPositive = items.every((x) => !(x > 0));\n  final empty = <int>[].every((x) => !(x > 0));\n  print([hasPositive, parenthesized, nested, allNonPositive, empty]);\n}",
+      "bad": "// Bad: filtered emptiness means every item fails the predicate.\nvoid validateItems(List<int> items) {\n  if (items.where((x) => x > 0).isEmpty) {\n    print('No items are positive');\n  }\n}\n\n// Bad: .where().length == list.length pattern\nvoid checkAllValid(List<String> values) {\n  bool allNonEmpty = values.where((v) => v.isNotEmpty).length == values.length;\n  if (allNonEmpty) {\n    print('All strings are non-empty');\n  }\n}\n\n// Bad: the predicate must be negated when replacing filtered emptiness.\nvoid processCollection() {\n  final data = [2, 4, 6, 8];\n  final allOdd = data.where((n) => n % 2 == 0).isEmpty;\n}\n\n// Bad: nested where with length comparison\nvoid checkMatrix(List<List<int>> matrix) {\n  if (matrix.where((row) => row.isNotEmpty).length == matrix.length) {\n    print('All rows are non-empty');\n  }\n}\n\n// Bad: where with complex predicate and length check\nvoid checkAllPositive(List<int> numbers) {\n  final allPositive = numbers.where((n) => n > 0 && n < 100).length == numbers.length;\n}\n\n// Bad: filtered emptiness in a variable declaration.\nvoid verifyList(List<String> items) {\n  bool allEmpty = items.where((i) => i.isNotEmpty).isEmpty;\n}\n\n// Regression: the violation must still be found inside Dart 3 containers\n// (pattern declaration, labeled statement, switch expression and subject,\n// collection if/spread, record field).\nvoid containersRegression(int rcount, List<int> items) {\n  final (ra, _) = (items.where((x) => x > 1).isEmpty, 0);\n  lbl: {\n    final rb = items.where((x) => x > 1).isEmpty;\n    print(rb);\n  }\n  final rc = switch (rcount) {\n    0 => items.where((x) => x > 1).isEmpty,\n    _ => null,\n  };\n  final rd = switch (items.where((x) => x > 1).isEmpty) {\n    _ => 0,\n  };\n  final re = [if (rcount > 0) items.where((x) => x > 1).isEmpty];\n  final rf = [...[items.where((x) => x > 1).isEmpty]];\n  final rg = (p: items.where((x) => x > 1).isEmpty, q: 0);\n  print([ra, rc, rd, re, rf, rg]);\n}\n\nbool parenthesized(List<int> items) =>\n    (items.where((x) => x > 0).isEmpty);\n\nvoid universalComparisons(List<int> items) {\n  final equalsTrue = items.where((x) => x > 0).isEmpty == true;\n  final differsFalse = items.where((x) => x > 0).isEmpty != false;\n  final reversedTrue = true == items.where((x) => x > 0).isEmpty;\n  final reversedFalse = false != (items.where((x) => x > 0).isEmpty);\n  final negatedComparison = !(items.where((x) => x > 0).isEmpty == false);\n  final repeatedComparison = (items.where((x) => x > 0).isEmpty == false) == false;\n  final doubleNegation = !(!items.where((x) => x > 0).isEmpty);\n}",
+      "good": "// Good: using .every() for a universal predicate.\nvoid validateItems(List<int> items) {\n  if (items.every((x) => x > 0)) {\n    print('All items are positive');\n  }\n}\n\n// Good: .every() pattern for checking all elements\nvoid checkAllValid(List<String> values) {\n  bool allNonEmpty = values.every((v) => v.isNotEmpty);\n  if (allNonEmpty) {\n    print('All strings are non-empty');\n  }\n}\n\n// Good: assignment with .every()\nvoid processCollection() {\n  final data = [2, 4, 6, 8];\n  final allEven = data.every((n) => n % 2 == 0);\n}\n\n// Good: nested every() instead of where().length\nvoid checkMatrix(List<List<int>> matrix) {\n  if (matrix.every((row) => row.isNotEmpty)) {\n    print('All rows are non-empty');\n  }\n}\n\n// Good: other iterable methods are fine\nvoid useOtherMethods(List<int> numbers) {\n  final filtered = numbers.where((n) => n > 0).toList();\n  final hasAny = numbers.any((n) => n > 10);\n}\n\n// Negated filtered emptiness is any(predicate), not every(predicate).\nvoid existentialChecks(List<int> items) {\n  final hasPositive = !items.where((x) => x > 0).isEmpty;\n  final parenthesized = !(items.where((x) => x > 0).isEmpty);\n  final nested = !((items.where((x) => x > 0).isEmpty));\n  final comparedFalse = items.where((x) => x > 0).isEmpty == false;\n  final comparedTrue = items.where((x) => x > 0).isEmpty != true;\n  final reversedFalse = false == (items.where((x) => x > 0).isEmpty);\n  final reversedTrue = true != ((items.where((x) => x > 0).isEmpty));\n  final negatedComparison = !(items.where((x) => x > 0).isEmpty == true);\n  final repeatedComparison = (items.where((x) => x > 0).isEmpty == false) != false;\n  final allNonPositive = items.every((x) => !(x > 0));\n  final empty = <int>[].every((x) => !(x > 0));\n  print([hasPositive, parenthesized, nested, allNonPositive, empty]);\n}",
       "crossFile": null
     },
     "diagnostics": [
@@ -3591,6 +3591,48 @@
         "message": "Use `every((element) => !predicate(element))` instead of `where(predicate).isEmpty`.",
         "line": 62,
         "column": 6,
+        "file": null
+      },
+      {
+        "message": "Use `every((element) => !predicate(element))` instead of `where(predicate).isEmpty`.",
+        "line": 65,
+        "column": 22,
+        "file": null
+      },
+      {
+        "message": "Use `every((element) => !predicate(element))` instead of `where(predicate).isEmpty`.",
+        "line": 66,
+        "column": 24,
+        "file": null
+      },
+      {
+        "message": "Use `every((element) => !predicate(element))` instead of `where(predicate).isEmpty`.",
+        "line": 67,
+        "column": 32,
+        "file": null
+      },
+      {
+        "message": "Use `every((element) => !predicate(element))` instead of `where(predicate).isEmpty`.",
+        "line": 68,
+        "column": 35,
+        "file": null
+      },
+      {
+        "message": "Use `every((element) => !predicate(element))` instead of `where(predicate).isEmpty`.",
+        "line": 69,
+        "column": 31,
+        "file": null
+      },
+      {
+        "message": "Use `every((element) => !predicate(element))` instead of `where(predicate).isEmpty`.",
+        "line": 70,
+        "column": 31,
+        "file": null
+      },
+      {
+        "message": "Use `every((element) => !predicate(element))` instead of `where(predicate).isEmpty`.",
+        "line": 71,
+        "column": 29,
         "file": null
       }
     ]
@@ -6966,7 +7008,7 @@
     },
     "diagnostics": [
       {
-        "message": "Include every Color value in this map; missing: green, blue.",
+        "message": "Include every `Color` value in this map; missing: `green`, `blue`.",
         "line": 3,
         "column": 17,
         "file": "main.dart"
@@ -6994,61 +7036,61 @@
     },
     "diagnostics": [
       {
-        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}.",
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in `${...}`.",
         "line": 9,
         "column": 17,
         "file": null
       },
       {
-        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}.",
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in `${...}`.",
         "line": 10,
         "column": 17,
         "file": null
       },
       {
-        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}.",
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in `${...}`.",
         "line": 11,
         "column": 10,
         "file": null
       },
       {
-        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}.",
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in `${...}`.",
         "line": 12,
         "column": 20,
         "file": null
       },
       {
-        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}.",
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in `${...}`.",
         "line": 13,
         "column": 12,
         "file": null
       },
       {
-        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}.",
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in `${...}`.",
         "line": 14,
         "column": 20,
         "file": null
       },
       {
-        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}.",
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in `${...}`.",
         "line": 15,
         "column": 28,
         "file": null
       },
       {
-        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}.",
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in `${...}`.",
         "line": 16,
         "column": 24,
         "file": null
       },
       {
-        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}.",
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in `${...}`.",
         "line": 17,
         "column": 13,
         "file": null
       },
       {
-        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in ${...}.",
+        "message": "Interpolation leaves a member access or call as literal text; wrap the complete expression in `${...}`.",
         "line": 19,
         "column": 1,
         "file": null
@@ -7234,31 +7276,31 @@
     },
     "diagnostics": [
       {
-        "message": "Mutable fields can invalidate Equatable equality and hash codes. Make this field final.",
+        "message": "Mutable fields can invalidate `Equatable` equality and hash codes. Make this field `final`.",
         "line": 5,
         "column": 7,
         "file": null
       },
       {
-        "message": "Mutable fields can invalidate Equatable equality and hash codes. Make this field final.",
+        "message": "Mutable fields can invalidate `Equatable` equality and hash codes. Make this field `final`.",
         "line": 9,
         "column": 7,
         "file": null
       },
       {
-        "message": "Mutable fields can invalidate Equatable equality and hash codes. Make this field final.",
+        "message": "Mutable fields can invalidate `Equatable` equality and hash codes. Make this field `final`.",
         "line": 13,
         "column": 7,
         "file": null
       },
       {
-        "message": "Mutable fields can invalidate Equatable equality and hash codes. Make this field final.",
+        "message": "Mutable fields can invalidate `Equatable` equality and hash codes. Make this field `final`.",
         "line": 16,
         "column": 12,
         "file": null
       },
       {
-        "message": "Mutable fields can invalidate Equatable equality and hash codes. Make this field final.",
+        "message": "Mutable fields can invalidate `Equatable` equality and hash codes. Make this field `final`.",
         "line": 20,
         "column": 7,
         "file": null
@@ -9637,73 +9679,73 @@
     },
     "diagnostics": [
       {
-        "message": "Check `isClosed` after the await before adding an event or emitting a state.",
+        "message": "Check `isClosed` after the `await` before adding an event or emitting a state.",
         "line": 7,
         "column": 5,
         "file": null
       },
       {
-        "message": "Check `isClosed` after the await before adding an event or emitting a state.",
+        "message": "Check `isClosed` after the `await` before adding an event or emitting a state.",
         "line": 11,
         "column": 5,
         "file": null
       },
       {
-        "message": "Check `isClosed` after the await before adding an event or emitting a state.",
+        "message": "Check `isClosed` after the `await` before adding an event or emitting a state.",
         "line": 16,
         "column": 7,
         "file": null
       },
       {
-        "message": "Check `isClosed` after the await before adding an event or emitting a state.",
+        "message": "Check `isClosed` after the `await` before adding an event or emitting a state.",
         "line": 22,
         "column": 7,
         "file": null
       },
       {
-        "message": "Check `isClosed` after the await before adding an event or emitting a state.",
+        "message": "Check `isClosed` after the `await` before adding an event or emitting a state.",
         "line": 28,
         "column": 5,
         "file": null
       },
       {
-        "message": "Check `isClosed` after the await before adding an event or emitting a state.",
+        "message": "Check `isClosed` after the `await` before adding an event or emitting a state.",
         "line": 31,
         "column": 5,
         "file": null
       },
       {
-        "message": "Check `isClosed` after the await before adding an event or emitting a state.",
+        "message": "Check `isClosed` after the `await` before adding an event or emitting a state.",
         "line": 34,
         "column": 20,
         "file": null
       },
       {
-        "message": "Check `isClosed` after the await before adding an event or emitting a state.",
+        "message": "Check `isClosed` after the `await` before adding an event or emitting a state.",
         "line": 38,
         "column": 5,
         "file": null
       },
       {
-        "message": "Check `isClosed` after the await before adding an event or emitting a state.",
+        "message": "Check `isClosed` after the `await` before adding an event or emitting a state.",
         "line": 48,
         "column": 7,
         "file": null
       },
       {
-        "message": "Check `isClosed` after the await before adding an event or emitting a state.",
+        "message": "Check `isClosed` after the `await` before adding an event or emitting a state.",
         "line": 49,
         "column": 7,
         "file": null
       },
       {
-        "message": "Check `isClosed` after the await before adding an event or emitting a state.",
+        "message": "Check `isClosed` after the `await` before adding an event or emitting a state.",
         "line": 54,
         "column": 5,
         "file": null
       },
       {
-        "message": "Check `isClosed` after the await before adding an event or emitting a state.",
+        "message": "Check `isClosed` after the `await` before adding an event or emitting a state.",
         "line": 59,
         "column": 7,
         "file": null
@@ -10970,67 +11012,67 @@
     },
     "diagnostics": [
       {
-        "message": "Dispose the created value in this Provider's dispose callback.",
+        "message": "Dispose the created value in this `Provider`'s `dispose` callback.",
         "line": 21,
         "column": 3,
         "file": null
       },
       {
-        "message": "Dispose the created value in this Provider's dispose callback.",
+        "message": "Dispose the created value in this `Provider`'s `dispose` callback.",
         "line": 22,
         "column": 3,
         "file": null
       },
       {
-        "message": "Dispose the created value in this Provider's dispose callback.",
+        "message": "Dispose the created value in this `Provider`'s `dispose` callback.",
         "line": 23,
         "column": 3,
         "file": null
       },
       {
-        "message": "Dispose the created value in this Provider's dispose callback.",
+        "message": "Dispose the created value in this `Provider`'s `dispose` callback.",
         "line": 24,
         "column": 3,
         "file": null
       },
       {
-        "message": "Dispose the created value in this Provider's dispose callback.",
+        "message": "Dispose the created value in this `Provider`'s `dispose` callback.",
         "line": 25,
         "column": 3,
         "file": null
       },
       {
-        "message": "Dispose the created value in this Provider's dispose callback.",
+        "message": "Dispose the created value in this `Provider`'s `dispose` callback.",
         "line": 26,
         "column": 7,
         "file": null
       },
       {
-        "message": "Dispose the created value in this Provider's dispose callback.",
+        "message": "Dispose the created value in this `Provider`'s `dispose` callback.",
         "line": 27,
         "column": 3,
         "file": null
       },
       {
-        "message": "Dispose the created value in this Provider's dispose callback.",
+        "message": "Dispose the created value in this `Provider`'s `dispose` callback.",
         "line": 28,
         "column": 3,
         "file": null
       },
       {
-        "message": "Dispose the created value in this Provider's dispose callback.",
+        "message": "Dispose the created value in this `Provider`'s `dispose` callback.",
         "line": 29,
         "column": 3,
         "file": null
       },
       {
-        "message": "Dispose the created value in this Provider's dispose callback.",
+        "message": "Dispose the created value in this `Provider`'s `dispose` callback.",
         "line": 30,
         "column": 3,
         "file": null
       },
       {
-        "message": "Dispose the created value in this Provider's dispose callback.",
+        "message": "Dispose the created value in this `Provider`'s `dispose` callback.",
         "line": 33,
         "column": 3,
         "file": null
@@ -11164,49 +11206,49 @@
     },
     "diagnostics": [
       {
-        "message": "This function returns null on every path; remove the return value or return a meaningful value.",
+        "message": "This function returns `null` on every path; remove the return value or return a meaningful value.",
         "line": 2,
         "column": 9,
         "file": null
       },
       {
-        "message": "This function returns null on every path; remove the return value or return a meaningful value.",
+        "message": "This function returns `null` on every path; remove the return value or return a meaningful value.",
         "line": 3,
         "column": 9,
         "file": null
       },
       {
-        "message": "This function returns null on every path; remove the return value or return a meaningful value.",
+        "message": "This function returns `null` on every path; remove the return value or return a meaningful value.",
         "line": 4,
         "column": 9,
         "file": null
       },
       {
-        "message": "This function returns null on every path; remove the return value or return a meaningful value.",
+        "message": "This function returns `null` on every path; remove the return value or return a meaningful value.",
         "line": 7,
         "column": 9,
         "file": null
       },
       {
-        "message": "This function returns null on every path; remove the return value or return a meaningful value.",
+        "message": "This function returns `null` on every path; remove the return value or return a meaningful value.",
         "line": 11,
         "column": 9,
         "file": null
       },
       {
-        "message": "This function returns null on every path; remove the return value or return a meaningful value.",
+        "message": "This function returns `null` on every path; remove the return value or return a meaningful value.",
         "line": 14,
         "column": 9,
         "file": null
       },
       {
-        "message": "This function returns null on every path; remove the return value or return a meaningful value.",
+        "message": "This function returns `null` on every path; remove the return value or return a meaningful value.",
         "line": 20,
         "column": 11,
         "file": null
       },
       {
-        "message": "This function returns null on every path; remove the return value or return a meaningful value.",
+        "message": "This function returns `null` on every path; remove the return value or return a meaningful value.",
         "line": 23,
         "column": 9,
         "file": null
@@ -12818,145 +12860,145 @@
     },
     "diagnostics": [
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 15,
         "column": 14,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 16,
         "column": 19,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 17,
         "column": 21,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 17,
         "column": 27,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 18,
         "column": 18,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 19,
         "column": 24,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 20,
         "column": 20,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 21,
         "column": 19,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 22,
         "column": 21,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 23,
         "column": 30,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 24,
         "column": 26,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 25,
         "column": 15,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 25,
         "column": 21,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 26,
         "column": 20,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 27,
         "column": 18,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 28,
         "column": 13,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 29,
         "column": 20,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 30,
         "column": 19,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 38,
         "column": 14,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 47,
         "column": 28,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 48,
         "column": 27,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 49,
         "column": 28,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 52,
         "column": 25,
         "file": null
       },
       {
-        "message": "Pass a closure instead of null.",
+        "message": "Pass a closure instead of `null`.",
         "line": 65,
         "column": 14,
         "file": null
@@ -17415,55 +17457,55 @@
     },
     "diagnostics": [
       {
-        "message": "Constructor could be declared as const.",
+        "message": "Constructor could be declared as `const`.",
         "line": 6,
         "column": 3,
         "file": null
       },
       {
-        "message": "Constructor could be declared as const.",
+        "message": "Constructor could be declared as `const`.",
         "line": 15,
         "column": 3,
         "file": null
       },
       {
-        "message": "Constructor could be declared as const.",
+        "message": "Constructor could be declared as `const`.",
         "line": 24,
         "column": 3,
         "file": null
       },
       {
-        "message": "Constructor could be declared as const.",
+        "message": "Constructor could be declared as `const`.",
         "line": 32,
         "column": 3,
         "file": null
       },
       {
-        "message": "Constructor could be declared as const.",
+        "message": "Constructor could be declared as `const`.",
         "line": 40,
         "column": 3,
         "file": null
       },
       {
-        "message": "Constructor could be declared as const.",
+        "message": "Constructor could be declared as `const`.",
         "line": 48,
         "column": 3,
         "file": null
       },
       {
-        "message": "Constructor could be declared as const.",
+        "message": "Constructor could be declared as `const`.",
         "line": 54,
         "column": 3,
         "file": null
       },
       {
-        "message": "Constructor could be declared as const.",
+        "message": "Constructor could be declared as `const`.",
         "line": 60,
         "column": 3,
         "file": null
       },
       {
-        "message": "Constructor could be declared as const.",
+        "message": "Constructor could be declared as `const`.",
         "line": 66,
         "column": 3,
         "file": null
@@ -19720,61 +19762,61 @@
     },
     "diagnostics": [
       {
-        "message": "Explicit check for double or int.",
+        "message": "Explicit check for `double` or `int`.",
         "line": 4,
         "column": 14,
         "file": null
       },
       {
-        "message": "Explicit check for double or int.",
+        "message": "Explicit check for `double` or `int`.",
         "line": 12,
         "column": 14,
         "file": null
       },
       {
-        "message": "Explicit check for double or int.",
+        "message": "Explicit check for `double` or `int`.",
         "line": 23,
         "column": 14,
         "file": null
       },
       {
-        "message": "Explicit check for double or int.",
+        "message": "Explicit check for `double` or `int`.",
         "line": 29,
         "column": 46,
         "file": null
       },
       {
-        "message": "Explicit check for double or int.",
+        "message": "Explicit check for `double` or `int`.",
         "line": 35,
         "column": 14,
         "file": null
       },
       {
-        "message": "Explicit check for double or int.",
+        "message": "Explicit check for `double` or `int`.",
         "line": 43,
         "column": 14,
         "file": null
       },
       {
-        "message": "Explicit check for double or int.",
+        "message": "Explicit check for `double` or `int`.",
         "line": 52,
         "column": 14,
         "file": null
       },
       {
-        "message": "Explicit check for double or int.",
+        "message": "Explicit check for `double` or `int`.",
         "line": 60,
         "column": 14,
         "file": null
       },
       {
-        "message": "Explicit check for double or int.",
+        "message": "Explicit check for `double` or `int`.",
         "line": 71,
         "column": 16,
         "file": null
       },
       {
-        "message": "Explicit check for double or int.",
+        "message": "Explicit check for `double` or `int`.",
         "line": 80,
         "column": 16,
         "file": null
@@ -20134,91 +20176,91 @@
     },
     "diagnostics": [
       {
-        "message": "Don't explicitly initialize variables to null.",
+        "message": "Don't explicitly initialize variables to `null`.",
         "line": 1,
         "column": 6,
         "file": null
       },
       {
-        "message": "Don't explicitly initialize variables to null.",
+        "message": "Don't explicitly initialize variables to `null`.",
         "line": 2,
         "column": 5,
         "file": null
       },
       {
-        "message": "Don't explicitly initialize variables to null.",
+        "message": "Don't explicitly initialize variables to `null`.",
         "line": 5,
         "column": 11,
         "file": null
       },
       {
-        "message": "Don't explicitly initialize variables to null.",
+        "message": "Don't explicitly initialize variables to `null`.",
         "line": 6,
         "column": 11,
         "file": null
       },
       {
-        "message": "Don't explicitly initialize variables to null.",
+        "message": "Don't explicitly initialize variables to `null`.",
         "line": 10,
         "column": 9,
         "file": null
       },
       {
-        "message": "Don't explicitly initialize variables to null.",
+        "message": "Don't explicitly initialize variables to `null`.",
         "line": 15,
         "column": 10,
         "file": null
       },
       {
-        "message": "Don't explicitly initialize variables to null.",
+        "message": "Don't explicitly initialize variables to `null`.",
         "line": 16,
         "column": 9,
         "file": null
       },
       {
-        "message": "Don't explicitly initialize variables to null.",
+        "message": "Don't explicitly initialize variables to `null`.",
         "line": 17,
         "column": 13,
         "file": null
       },
       {
-        "message": "Don't explicitly initialize variables to null.",
+        "message": "Don't explicitly initialize variables to `null`.",
         "line": 22,
         "column": 20,
         "file": null
       },
       {
-        "message": "Don't explicitly initialize variables to null.",
+        "message": "Don't explicitly initialize variables to `null`.",
         "line": 23,
         "column": 25,
         "file": null
       },
       {
-        "message": "Don't explicitly initialize variables to null.",
+        "message": "Don't explicitly initialize variables to `null`.",
         "line": 27,
         "column": 17,
         "file": null
       },
       {
-        "message": "Don't explicitly initialize variables to null.",
+        "message": "Don't explicitly initialize variables to `null`.",
         "line": 35,
         "column": 26,
         "file": null
       },
       {
-        "message": "Don't explicitly initialize variables to null.",
+        "message": "Don't explicitly initialize variables to `null`.",
         "line": 38,
         "column": 28,
         "file": null
       },
       {
-        "message": "Don't explicitly initialize variables to null.",
+        "message": "Don't explicitly initialize variables to `null`.",
         "line": 45,
         "column": 28,
         "file": null
       },
       {
-        "message": "Don't explicitly initialize variables to null.",
+        "message": "Don't explicitly initialize variables to `null`.",
         "line": 53,
         "column": 23,
         "file": null
@@ -22143,49 +22185,49 @@
     },
     "diagnostics": [
       {
-        "message": "Remove this trailing continue; the loop already advances here.",
+        "message": "Remove this trailing `continue`; the loop already advances here.",
         "line": 4,
         "column": 5,
         "file": null
       },
       {
-        "message": "Remove this trailing continue; the loop already advances here.",
+        "message": "Remove this trailing `continue`; the loop already advances here.",
         "line": 11,
         "column": 5,
         "file": null
       },
       {
-        "message": "Remove this trailing continue; the loop already advances here.",
+        "message": "Remove this trailing `continue`; the loop already advances here.",
         "line": 17,
         "column": 5,
         "file": null
       },
       {
-        "message": "Remove this trailing continue; the loop already advances here.",
+        "message": "Remove this trailing `continue`; the loop already advances here.",
         "line": 23,
         "column": 5,
         "file": null
       },
       {
-        "message": "Remove this trailing continue; the loop already advances here.",
+        "message": "Remove this trailing `continue`; the loop already advances here.",
         "line": 30,
         "column": 5,
         "file": null
       },
       {
-        "message": "Remove this trailing continue; the loop already advances here.",
+        "message": "Remove this trailing `continue`; the loop already advances here.",
         "line": 35,
         "column": 17,
         "file": null
       },
       {
-        "message": "Remove this trailing continue; the loop already advances here.",
+        "message": "Remove this trailing `continue`; the loop already advances here.",
         "line": 41,
         "column": 7,
         "file": null
       },
       {
-        "message": "Remove this trailing continue; the loop already advances here.",
+        "message": "Remove this trailing `continue`; the loop already advances here.",
         "line": 44,
         "column": 7,
         "file": null
@@ -28039,169 +28081,169 @@
     },
     "diagnostics": [
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 11,
         "column": 3,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 17,
         "column": 3,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 18,
         "column": 3,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 24,
         "column": 3,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 33,
         "column": 3,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 40,
         "column": 3,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 45,
         "column": 3,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 52,
         "column": 7,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 55,
         "column": 7,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 58,
         "column": 7,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 65,
         "column": 16,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 67,
         "column": 16,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 69,
         "column": 16,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 75,
         "column": 7,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 80,
         "column": 7,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 85,
         "column": 16,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 88,
         "column": 16,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 91,
         "column": 7,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 97,
         "column": 7,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 102,
         "column": 13,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 106,
         "column": 3,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 110,
         "column": 16,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 115,
         "column": 16,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 122,
         "column": 3,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 124,
         "column": 3,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 129,
         "column": 3,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 134,
         "column": 3,
         "file": null
       },
       {
-        "message": "Declare a const constructor in an immutable class.",
+        "message": "Declare a `const` constructor in an immutable class.",
         "line": 138,
         "column": 16,
         "file": null
@@ -28827,31 +28869,31 @@
     },
     "diagnostics": [
       {
-        "message": "This error parameter does not match the configured names; rename it to one of: error, exception.",
+        "message": "This error parameter does not match the configured names; rename it to one of: `error`, `exception`.",
         "line": 3,
         "column": 17,
         "file": null
       },
       {
-        "message": "This error parameter does not match the configured names; rename it to one of: error, exception.",
+        "message": "This error parameter does not match the configured names; rename it to one of: `error`, `exception`.",
         "line": 4,
         "column": 43,
         "file": null
       },
       {
-        "message": "This error parameter does not match the configured names; rename it to one of: error, exception.",
+        "message": "This error parameter does not match the configured names; rename it to one of: `error`, `exception`.",
         "line": 5,
         "column": 22,
         "file": null
       },
       {
-        "message": "This error parameter does not match the configured names; rename it to one of: error, exception.",
+        "message": "This error parameter does not match the configured names; rename it to one of: `error`, `exception`.",
         "line": 6,
         "column": 39,
         "file": null
       },
       {
-        "message": "This error parameter does not match the configured names; rename it to one of: error, exception.",
+        "message": "This error parameter does not match the configured names; rename it to one of: `error`, `exception`.",
         "line": 7,
         "column": 23,
         "file": null
@@ -29694,49 +29736,49 @@
     },
     "diagnostics": [
       {
-        "message": "The variable `n` should be final.",
+        "message": "The variable `n` should be `final`.",
         "line": 9,
         "column": 12,
         "file": null
       },
       {
-        "message": "The variable `n` should be final.",
+        "message": "The variable `n` should be `final`.",
         "line": 12,
         "column": 12,
         "file": null
       },
       {
-        "message": "The pattern should be final.",
+        "message": "The pattern should be `final`.",
         "line": 15,
         "column": 12,
         "file": null
       },
       {
-        "message": "The pattern should be final.",
+        "message": "The pattern should be `final`.",
         "line": 18,
         "column": 12,
         "file": null
       },
       {
-        "message": "The pattern should be final.",
+        "message": "The pattern should be `final`.",
         "line": 21,
         "column": 12,
         "file": null
       },
       {
-        "message": "The pattern should be final.",
+        "message": "The pattern should be `final`.",
         "line": 24,
         "column": 12,
         "file": null
       },
       {
-        "message": "The variable `n` should be final.",
+        "message": "The variable `n` should be `final`.",
         "line": 27,
         "column": 29,
         "file": null
       },
       {
-        "message": "The variable `v` should be final.",
+        "message": "The variable `v` should be `final`.",
         "line": 32,
         "column": 18,
         "file": null
@@ -29764,91 +29806,91 @@
     },
     "diagnostics": [
       {
-        "message": "Local variables should be final.",
+        "message": "Local variables should be `final`.",
         "line": 8,
         "column": 3,
         "file": null
       },
       {
-        "message": "Local variables should be final.",
+        "message": "Local variables should be `final`.",
         "line": 9,
         "column": 3,
         "file": null
       },
       {
-        "message": "Local variables should be final.",
+        "message": "Local variables should be `final`.",
         "line": 10,
         "column": 3,
         "file": null
       },
       {
-        "message": "Local variables should be final.",
+        "message": "Local variables should be `final`.",
         "line": 11,
         "column": 8,
         "file": null
       },
       {
-        "message": "Local variables should be final.",
+        "message": "Local variables should be `final`.",
         "line": 16,
         "column": 3,
         "file": null
       },
       {
-        "message": "Local variables should be final.",
+        "message": "Local variables should be `final`.",
         "line": 18,
         "column": 13,
         "file": null
       },
       {
-        "message": "Local variables should be final.",
+        "message": "Local variables should be `final`.",
         "line": 18,
         "column": 16,
         "file": null
       },
       {
-        "message": "Local variables should be final.",
+        "message": "Local variables should be `final`.",
         "line": 21,
         "column": 14,
         "file": null
       },
       {
-        "message": "Local variables should be final.",
+        "message": "Local variables should be `final`.",
         "line": 25,
         "column": 10,
         "file": null
       },
       {
-        "message": "Local variables should be final.",
+        "message": "Local variables should be `final`.",
         "line": 27,
         "column": 19,
         "file": null
       },
       {
-        "message": "Local variables should be final.",
+        "message": "Local variables should be `final`.",
         "line": 33,
         "column": 3,
         "file": null
       },
       {
-        "message": "Local variables should be final.",
+        "message": "Local variables should be `final`.",
         "line": 40,
         "column": 8,
         "file": null
       },
       {
-        "message": "Local variables should be final.",
+        "message": "Local variables should be `final`.",
         "line": 47,
         "column": 5,
         "file": null
       },
       {
-        "message": "Local variables should be final.",
+        "message": "Local variables should be `final`.",
         "line": 48,
         "column": 5,
         "file": null
       },
       {
-        "message": "Local variables should be final.",
+        "message": "Local variables should be `final`.",
         "line": 51,
         "column": 9,
         "file": null
@@ -29876,79 +29918,79 @@
     },
     "diagnostics": [
       {
-        "message": "The parameter `start` should be final.",
+        "message": "The parameter `start` should be `final`.",
         "line": 6,
         "column": 11,
         "file": null
       },
       {
-        "message": "The parameter `amount` should be final.",
+        "message": "The parameter `amount` should be `final`.",
         "line": 8,
         "column": 12,
         "file": null
       },
       {
-        "message": "The parameter `v` should be final.",
+        "message": "The parameter `v` should be `final`.",
         "line": 12,
         "column": 13,
         "file": null
       },
       {
-        "message": "The parameter `other` should be final.",
+        "message": "The parameter `other` should be `final`.",
         "line": 14,
         "column": 22,
         "file": null
       },
       {
-        "message": "The parameter `factor` should be final.",
+        "message": "The parameter `factor` should be `final`.",
         "line": 19,
         "column": 15,
         "file": null
       },
       {
-        "message": "The parameter `name` should be final.",
+        "message": "The parameter `name` should be `final`.",
         "line": 22,
         "column": 12,
         "file": null
       },
       {
-        "message": "The parameter `greeting` should be final.",
+        "message": "The parameter `greeting` should be `final`.",
         "line": 22,
         "column": 26,
         "file": null
       },
       {
-        "message": "The parameter `items` should be final.",
+        "message": "The parameter `items` should be `final`.",
         "line": 26,
         "column": 15,
         "file": null
       },
       {
-        "message": "The parameter `item` should be final.",
+        "message": "The parameter `item` should be `final`.",
         "line": 27,
         "column": 18,
         "file": null
       },
       {
-        "message": "The parameter `x` should be final.",
+        "message": "The parameter `x` should be `final`.",
         "line": 28,
         "column": 14,
         "file": null
       },
       {
-        "message": "The parameter `cb` should be final.",
+        "message": "The parameter `cb` should be `final`.",
         "line": 36,
         "column": 15,
         "file": null
       },
       {
-        "message": "The parameter `input` should be final.",
+        "message": "The parameter `input` should be `final`.",
         "line": 42,
         "column": 16,
         "file": null
       },
       {
-        "message": "The parameter `amount` should be final.",
+        "message": "The parameter `amount` should be `final`.",
         "line": 43,
         "column": 12,
         "file": null
@@ -36687,79 +36729,79 @@
     },
     "diagnostics": [
       {
-        "message": "Use super parameters instead of forwarding parameters to super.",
+        "message": "Use `super` parameters instead of forwarding parameters to `super`.",
         "line": 10,
         "column": 3,
         "file": null
       },
       {
-        "message": "Use super parameters instead of forwarding parameters to super.",
+        "message": "Use `super` parameters instead of forwarding parameters to `super`.",
         "line": 14,
         "column": 3,
         "file": null
       },
       {
-        "message": "Use super parameters instead of forwarding parameters to super.",
+        "message": "Use `super` parameters instead of forwarding parameters to `super`.",
         "line": 18,
         "column": 3,
         "file": null
       },
       {
-        "message": "Use super parameters instead of forwarding parameters to super.",
+        "message": "Use `super` parameters instead of forwarding parameters to `super`.",
         "line": 22,
         "column": 3,
         "file": null
       },
       {
-        "message": "Use super parameters instead of forwarding parameters to super.",
+        "message": "Use `super` parameters instead of forwarding parameters to `super`.",
         "line": 26,
         "column": 3,
         "file": null
       },
       {
-        "message": "Use super parameters instead of forwarding parameters to super.",
+        "message": "Use `super` parameters instead of forwarding parameters to `super`.",
         "line": 34,
         "column": 3,
         "file": null
       },
       {
-        "message": "Use super parameters instead of forwarding parameters to super.",
+        "message": "Use `super` parameters instead of forwarding parameters to `super`.",
         "line": 40,
         "column": 3,
         "file": null
       },
       {
-        "message": "Use super parameters instead of forwarding parameters to super.",
+        "message": "Use `super` parameters instead of forwarding parameters to `super`.",
         "line": 44,
         "column": 3,
         "file": null
       },
       {
-        "message": "Use super parameters instead of forwarding parameters to super.",
+        "message": "Use `super` parameters instead of forwarding parameters to `super`.",
         "line": 51,
         "column": 3,
         "file": null
       },
       {
-        "message": "Use super parameters instead of forwarding parameters to super.",
+        "message": "Use `super` parameters instead of forwarding parameters to `super`.",
         "line": 54,
         "column": 7,
         "file": null
       },
       {
-        "message": "Use super parameters instead of forwarding parameters to super.",
+        "message": "Use `super` parameters instead of forwarding parameters to `super`.",
         "line": 59,
         "column": 3,
         "file": null
       },
       {
-        "message": "Use super parameters instead of forwarding parameters to super.",
+        "message": "Use `super` parameters instead of forwarding parameters to `super`.",
         "line": 64,
         "column": 3,
         "file": null
       },
       {
-        "message": "Use super parameters instead of forwarding parameters to super.",
+        "message": "Use `super` parameters instead of forwarding parameters to `super`.",
         "line": 68,
         "column": 3,
         "file": null
@@ -37946,19 +37988,19 @@
     },
     "diagnostics": [
       {
-        "message": "Uri query parameter values must be null, strings or iterables of strings.",
+        "message": "`Uri` query parameter values must be `null`, strings or iterables of strings.",
         "line": 5,
         "column": 34,
         "file": null
       },
       {
-        "message": "Uri query parameter values must be null, strings or iterables of strings.",
+        "message": "`Uri` query parameter values must be `null`, strings or iterables of strings.",
         "line": 6,
         "column": 41,
         "file": null
       },
       {
-        "message": "Uri query parameter values must be null, strings or iterables of strings.",
+        "message": "`Uri` query parameter values must be `null`, strings or iterables of strings.",
         "line": 7,
         "column": 43,
         "file": null
@@ -37970,25 +38012,25 @@
         "file": null
       },
       {
-        "message": "Uri query parameter values must be null, strings or iterables of strings.",
+        "message": "`Uri` query parameter values must be `null`, strings or iterables of strings.",
         "line": 9,
         "column": 38,
         "file": null
       },
       {
-        "message": "Uri query parameter values must be null, strings or iterables of strings.",
+        "message": "`Uri` query parameter values must be `null`, strings or iterables of strings.",
         "line": 10,
         "column": 39,
         "file": null
       },
       {
-        "message": "Uri query parameter values must be null, strings or iterables of strings.",
+        "message": "`Uri` query parameter values must be `null`, strings or iterables of strings.",
         "line": 11,
         "column": 49,
         "file": null
       },
       {
-        "message": "Uri query parameter values must be null, strings or iterables of strings.",
+        "message": "`Uri` query parameter values must be `null`, strings or iterables of strings.",
         "line": 12,
         "column": 35,
         "file": null
@@ -38000,31 +38042,31 @@
         "file": null
       },
       {
-        "message": "Uri query parameter values must be null, strings or iterables of strings.",
+        "message": "`Uri` query parameter values must be `null`, strings or iterables of strings.",
         "line": 17,
         "column": 52,
         "file": null
       },
       {
-        "message": "Uri query parameter values must be null, strings or iterables of strings.",
+        "message": "`Uri` query parameter values must be `null`, strings or iterables of strings.",
         "line": 19,
         "column": 32,
         "file": null
       },
       {
-        "message": "Uri query parameter values must be null, strings or iterables of strings.",
+        "message": "`Uri` query parameter values must be `null`, strings or iterables of strings.",
         "line": 20,
         "column": 19,
         "file": null
       },
       {
-        "message": "Uri query parameter values must be null, strings or iterables of strings.",
+        "message": "`Uri` query parameter values must be `null`, strings or iterables of strings.",
         "line": 21,
         "column": 48,
         "file": null
       },
       {
-        "message": "Uri query parameter values must be null, strings or iterables of strings.",
+        "message": "`Uri` query parameter values must be `null`, strings or iterables of strings.",
         "line": 23,
         "column": 41,
         "file": null
@@ -38432,37 +38474,37 @@
     },
     "diagnostics": [
       {
-        "message": "Make exception instance fields final.",
+        "message": "Make exception instance fields `final`.",
         "line": 2,
         "column": 10,
         "file": null
       },
       {
-        "message": "Make exception instance fields final.",
+        "message": "Make exception instance fields `final`.",
         "line": 3,
         "column": 7,
         "file": null
       },
       {
-        "message": "Make exception instance fields final.",
+        "message": "Make exception instance fields `final`.",
         "line": 4,
         "column": 7,
         "file": null
       },
       {
-        "message": "Make exception instance fields final.",
+        "message": "Make exception instance fields `final`.",
         "line": 5,
         "column": 15,
         "file": null
       },
       {
-        "message": "Make exception instance fields final.",
+        "message": "Make exception instance fields `final`.",
         "line": 9,
         "column": 10,
         "file": null
       },
       {
-        "message": "Make exception instance fields final.",
+        "message": "Make exception instance fields `final`.",
         "line": 13,
         "column": 7,
         "file": null
@@ -38850,43 +38892,43 @@
     },
     "diagnostics": [
       {
-        "message": "Avoid using print in production code; use a logging framework instead.",
+        "message": "Avoid using `print` in production code; use a logging framework instead.",
         "line": 3,
         "column": 3,
         "file": null
       },
       {
-        "message": "Avoid using print in production code; use a logging framework instead.",
+        "message": "Avoid using `print` in production code; use a logging framework instead.",
         "line": 4,
         "column": 3,
         "file": null
       },
       {
-        "message": "Avoid using print in production code; use a logging framework instead.",
+        "message": "Avoid using `print` in production code; use a logging framework instead.",
         "line": 6,
         "column": 3,
         "file": null
       },
       {
-        "message": "Avoid using print in production code; use a logging framework instead.",
+        "message": "Avoid using `print` in production code; use a logging framework instead.",
         "line": 7,
         "column": 3,
         "file": null
       },
       {
-        "message": "Avoid using print in production code; use a logging framework instead.",
+        "message": "Avoid using `print` in production code; use a logging framework instead.",
         "line": 9,
         "column": 23,
         "file": null
       },
       {
-        "message": "Avoid using print in production code; use a logging framework instead.",
+        "message": "Avoid using `print` in production code; use a logging framework instead.",
         "line": 10,
         "column": 3,
         "file": null
       },
       {
-        "message": "Avoid using print in production code; use a logging framework instead.",
+        "message": "Avoid using `print` in production code; use a logging framework instead.",
         "line": 26,
         "column": 3,
         "file": null
@@ -38990,37 +39032,37 @@
     },
     "diagnostics": [
       {
-        "message": "Don't return null from a function with a void return type.",
+        "message": "Don't return `null` from a function with a `void` return type.",
         "line": 2,
         "column": 3,
         "file": null
       },
       {
-        "message": "Don't return null from a function with a void return type.",
+        "message": "Don't return `null` from a function with a `void` return type.",
         "line": 5,
         "column": 13,
         "file": null
       },
       {
-        "message": "Don't return null from a function with a void return type.",
+        "message": "Don't return `null` from a function with a `void` return type.",
         "line": 8,
         "column": 3,
         "file": null
       },
       {
-        "message": "Don't return null from a function with a void return type.",
+        "message": "Don't return `null` from a function with a `void` return type.",
         "line": 13,
         "column": 5,
         "file": null
       },
       {
-        "message": "Don't return null from a function with a void return type.",
+        "message": "Don't return `null` from a function with a `void` return type.",
         "line": 17,
         "column": 5,
         "file": null
       },
       {
-        "message": "Don't return null from a function with a void return type.",
+        "message": "Don't return `null` from a function with a `void` return type.",
         "line": 23,
         "column": 5,
         "file": null
@@ -40944,31 +40986,31 @@
     },
     "diagnostics": [
       {
-        "message": "Remove this unnecessary null-aware assignment to null.",
+        "message": "Remove this unnecessary null-aware assignment to `null`.",
         "line": 2,
         "column": 3,
         "file": null
       },
       {
-        "message": "Remove this unnecessary null-aware assignment to null.",
+        "message": "Remove this unnecessary null-aware assignment to `null`.",
         "line": 3,
         "column": 3,
         "file": null
       },
       {
-        "message": "Remove this unnecessary null-aware assignment to null.",
+        "message": "Remove this unnecessary null-aware assignment to `null`.",
         "line": 4,
         "column": 3,
         "file": null
       },
       {
-        "message": "Remove this unnecessary null-aware assignment to null.",
+        "message": "Remove this unnecessary null-aware assignment to `null`.",
         "line": 5,
         "column": 3,
         "file": null
       },
       {
-        "message": "Remove this unnecessary null-aware assignment to null.",
+        "message": "Remove this unnecessary null-aware assignment to `null`.",
         "line": 6,
         "column": 3,
         "file": null
@@ -40996,31 +41038,31 @@
     },
     "diagnostics": [
       {
-        "message": "Remove the unnecessary null from this if-null (`??`) expression.",
+        "message": "Remove the unnecessary `null` from this if-null (`??`) expression.",
         "line": 2,
         "column": 12,
         "file": null
       },
       {
-        "message": "Remove the unnecessary null from this if-null (`??`) expression.",
+        "message": "Remove the unnecessary `null` from this if-null (`??`) expression.",
         "line": 3,
         "column": 12,
         "file": null
       },
       {
-        "message": "Remove the unnecessary null from this if-null (`??`) expression.",
+        "message": "Remove the unnecessary `null` from this if-null (`??`) expression.",
         "line": 4,
         "column": 12,
         "file": null
       },
       {
-        "message": "Remove the unnecessary null from this if-null (`??`) expression.",
+        "message": "Remove the unnecessary `null` from this if-null (`??`) expression.",
         "line": 5,
         "column": 12,
         "file": null
       },
       {
-        "message": "Remove the unnecessary null from this if-null (`??`) expression.",
+        "message": "Remove the unnecessary `null` from this if-null (`??`) expression.",
         "line": 6,
         "column": 12,
         "file": null

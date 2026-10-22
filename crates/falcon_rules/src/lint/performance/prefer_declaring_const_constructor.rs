@@ -146,7 +146,7 @@ fn check_class(
 
     for constructor in constructors {
         if candidates.contains(constructor_name(constructor)) {
-            diags.push(ctx.diagnostic("Constructor could be declared as const.", constructor.span()));
+            diags.push(ctx.diagnostic("Constructor could be declared as `const`.", constructor.span()));
         }
     }
 }

@@ -148,7 +148,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
 impl Collector<'_> {
     fn mutable(&mut self, name: Identifier<'_>) {
-        self.diags.push(self.ctx.diagnostic("Mutable fields can invalidate Equatable equality and hash codes. Make this field final.", name.span()));
+        self.diags.push(self.ctx.diagnostic("Mutable fields can invalidate `Equatable` equality and hash codes. Make this field `final`.", name.span()));
     }
 }
 

@@ -37,7 +37,7 @@ struct Collector<'a> {
 
 impl Collector<'_> {
     fn report(&mut self, name: Identifier<'_>) {
-        self.diagnostics.push(self.ctx.diagnostic("Make exception instance fields final.", name.span()));
+        self.diagnostics.push(self.ctx.diagnostic("Make exception instance fields `final`.", name.span()));
     }
 }
 

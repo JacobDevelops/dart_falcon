@@ -97,7 +97,7 @@ struct Collector<'ctx, 'a> {
 impl<'a> Collector<'_, 'a> {
     fn report(&mut self, span: Span) {
         self.diagnostics
-            .push(self.ctx.diagnostic("Local variables should be final.", span));
+            .push(self.ctx.diagnostic("Local variables should be `final`.", span));
     }
 
     fn is_mutated(&self, name: Identifier<'a>) -> bool {

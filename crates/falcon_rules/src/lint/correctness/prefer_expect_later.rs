@@ -35,7 +35,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         let Some(("expect", package)) = test_assertions::package_call(call, state) else {
             return;
         };
-        if !(test_assertions::is_framework(package) || package == "matcher") {
+        if !test_assertions::MATCHER_PACKAGES.contains(&package) {
             return;
         }
         let Some(actual) = call.args().positional().next() else {

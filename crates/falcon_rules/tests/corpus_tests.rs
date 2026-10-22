@@ -160,7 +160,7 @@ fn message_style_errors(message: &str) -> Vec<&'static str> {
     });
     static BARE_CODE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(
-            r"\b(?:[a-z][a-z0-9]*[A-Z][A-Za-z0-9]*|[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*|[A-Za-z_$][A-Za-z0-9_$]*\.[A-Za-z_$][A-Za-z0-9_$]*)\b",
+            r"\b(?:[a-z][a-z0-9]*[A-Z][A-Za-z0-9]*|[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*|[A-Za-z_$][A-Za-z0-9_$]*\.[A-Za-z_$][A-Za-z0-9_$]*|[A-Za-z_$]*_[A-Za-z0-9_$]+)\b|&&|\|\||==|!=|=>|\?\?|\?\.",
         ).unwrap()
     });
     if message.split('`').step_by(2).any(|prose| {
@@ -169,7 +169,7 @@ fn message_style_errors(message: &str) -> Vec<&'static str> {
             !matches!(code.as_str(), "e.g" | "i.e" | "JavaScript" | "TypeScript")
         })
     }) {
-        errors.push("enclose code identifiers and qualified names in backticks");
+        errors.push("enclose code identifiers, qualified names, and operators in backticks");
     }
     if message.split('`').step_by(2).any(|prose| {
         QUOTED_CODE.find_iter(prose).any(|code| {
@@ -194,6 +194,7 @@ fn message_style_preserves_natural_apostrophes_and_quoted_prose() {
         "The 'Important' label is ordinary prose.",
         "The 'JavaScript' language has different conventions.",
         "Use `Foo('value')` instead.",
+        "Use `snake_case` and `&&` instead.",
     ] {
         assert!(message_style_errors(message).is_empty(), "{message}");
     }
@@ -203,9 +204,82 @@ fn message_style_preserves_natural_apostrophes_and_quoted_prose() {
         "Use 'var' instead.",
         "Use 'foo.bar()' instead.",
         "Use 'snake_case' instead.",
+        "Use snake_case instead.",
+        "Merge the conditions using &&.",
     ] {
         assert!(!message_style_errors(message).is_empty(), "{message}");
     }
+}
+
+/// Inspect ordinary literals passed directly to `diagnostic`, including inline
+/// `format!` templates. Computed messages remain covered by corpus execution.
+fn diagnostic_message_literals(source: &str) -> Vec<String> {
+    static CALLS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r#"(?s)\.diagnostic\s*\(\s*(format!\s*\(\s*)?("(?:\\.|[^"\\])*")"#)
+            .unwrap()
+    });
+    static CONTINUATION: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"\\\r?\n\s*").unwrap());
+    static FORMAT_FIELDS: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"\{\{|\}\}|\{[^{}]*\}").unwrap());
+    CALLS
+        .captures_iter(source)
+        .filter_map(|capture| {
+            let literal = CONTINUATION.replace_all(&capture[2], "");
+            // Rust-only escapes need a Rust literal parser. Leave those literals
+            // to corpus execution rather than rejecting valid Rust source.
+            let message: String = serde_json::from_str(&literal).ok()?;
+            Some(if capture.get(1).is_some() {
+                FORMAT_FIELDS
+                    .replace_all(&message, |field: &regex::Captures<'_>| match &field[0] {
+                        "{{" => "{",
+                        "}}" => "}",
+                        _ => "value",
+                    })
+                    .into_owned()
+            } else {
+                message
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn static_diagnostic_literals_follow_message_style() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut failures = Vec::new();
+    for file in support::files(&root, usize::MAX, Some("rs")) {
+        let source = fs::read_to_string(&file).unwrap();
+        for message in diagnostic_message_literals(&source) {
+            for problem in message_style_errors(&message) {
+                failures.push(format!("{}: {problem}: {message:?}", file.display()));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn static_message_scan_covers_direct_and_formatted_literals() {
+    let source = r#"
+        let unrelated = format!("Not a diagnostic");
+        ctx.diagnostic("Use `print`.", span);
+        self.ctx.diagnostic(format!(
+            "Use `{name}` instead of \
+             repeating \"ordinary prose\"."
+        ), span);
+        ctx.diagnostic(format!("Function has {line_count} lines; use `{{...}}`."), span);
+        ctx.diagnostic(computed_message, span);
+        ctx.diagnostic("\u{41} Rust-only escape.", span);
+    "#;
+    assert_eq!(
+        diagnostic_message_literals(source),
+        [
+            "Use `print`.",
+            "Use `value` instead of repeating \"ordinary prose\".",
+            "Function has value lines; use `{...}`.",
+        ]
+    );
 }
 
 #[test]

@@ -66,14 +66,14 @@ pub(crate) fn is_framework(package: &str) -> bool {
 
 pub(crate) fn is_assertion(name: &str, package: &str) -> bool {
     match name {
-        "expect" | "expectLater" | "fail" => is_framework(package) || package == "matcher",
+        "expect" | "expectLater" | "fail" => MATCHER_PACKAGES.contains(&package),
         "verify"
         | "verifyNever"
         | "verifyInOrder"
         | "verifyNoMoreInteractions"
         | "verifyZeroInteractions" => matches!(package, "mockito" | "mocktail"),
         _ => {
-            (is_framework(package) || package == "matcher")
+            MATCHER_PACKAGES.contains(&package)
                 && matches!(
                     name,
                     "expectAsync0"
@@ -91,6 +91,32 @@ pub(crate) fn is_assertion(name: &str, package: &str) -> bool {
                         | "expectAsyncUntil5"
                         | "expectAsyncUntil6"
                 )
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matcher_packages_share_assertion_classification() {
+        for package in ["test", "test_core", "test_api", "flutter_test", "matcher"] {
+            for name in [
+                "expect",
+                "expectLater",
+                "fail",
+                "expectAsync0",
+                "expectAsyncUntil6",
+            ] {
+                assert!(is_assertion(name, package), "{package}: {name}");
+            }
+            assert!(!is_assertion("verify", package), "{package}");
+        }
+        assert!(!is_assertion("expect", "unrelated"));
+        for package in ["mockito", "mocktail"] {
+            assert!(is_assertion("verify", package));
+            assert!(!is_assertion("expect", package));
         }
     }
 }

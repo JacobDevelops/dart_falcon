@@ -40,7 +40,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && matches!(assign.value().unparenthesized(), Expr::NullLit(_))
         {
             self.diags.push(self.ctx.diagnostic(
-                "Remove this unnecessary null-aware assignment to null.",
+                "Remove this unnecessary null-aware assignment to `null`.",
                 assign.span(),
             ));
         }

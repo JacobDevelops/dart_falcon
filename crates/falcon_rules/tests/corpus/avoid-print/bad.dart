@@ -1,6 +1,6 @@
 // Bad: calls to the top-level print function.
 void main() {
-  print('hello'); /* expect: avoid-print */
+  print('hello'); /* expect: avoid-print, msg: "Avoid using `print` in production code; use a logging framework instead." */
   print(42); /* expect: avoid-print */
   const value = 7;
   print(value); /* expect: avoid-print */

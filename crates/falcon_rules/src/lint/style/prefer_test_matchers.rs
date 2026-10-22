@@ -35,7 +35,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         };
         if !matches!(name, "expect" | "expectLater")
-            || !(test_assertions::is_framework(package) || package == "matcher")
+            || !test_assertions::MATCHER_PACKAGES.contains(&package)
         {
             return;
         }

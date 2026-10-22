@@ -1,7 +1,7 @@
 void handle(num x) {
   if (x is double) {
     print('double');
-  } else if (x is int) { /* expect: avoid-double-and-int-checks */
+  } else if (x is int) { /* expect: avoid-double-and-int-checks, msg: "Explicit check for `double` or `int`." */
     print('int');
   }
 }

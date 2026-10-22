@@ -37,6 +37,12 @@ void existentialChecks(List<int> items) {
   final hasPositive = !items.where((x) => x > 0).isEmpty;
   final parenthesized = !(items.where((x) => x > 0).isEmpty);
   final nested = !((items.where((x) => x > 0).isEmpty));
+  final comparedFalse = items.where((x) => x > 0).isEmpty == false;
+  final comparedTrue = items.where((x) => x > 0).isEmpty != true;
+  final reversedFalse = false == (items.where((x) => x > 0).isEmpty);
+  final reversedTrue = true != ((items.where((x) => x > 0).isEmpty));
+  final negatedComparison = !(items.where((x) => x > 0).isEmpty == true);
+  final repeatedComparison = (items.where((x) => x > 0).isEmpty == false) != false;
   final allNonPositive = items.every((x) => !(x > 0));
   final empty = <int>[].every((x) => !(x > 0));
   print([hasPositive, parenthesized, nested, allNonPositive, empty]);

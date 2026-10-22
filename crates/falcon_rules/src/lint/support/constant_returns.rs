@@ -59,7 +59,7 @@ impl<'a> Collector<'a> {
         };
         let message = match (self.kind, is_null) {
             (ReturnKind::Null, true) => {
-                "This function returns null on every path; remove the return value or return a meaningful value."
+                "This function returns `null` on every path; remove the return value or return a meaningful value."
             }
             (ReturnKind::NonNull, true) | (ReturnKind::Null, false) => return,
             (ReturnKind::NonNull, _) => {

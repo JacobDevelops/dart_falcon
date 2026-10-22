@@ -62,7 +62,7 @@ impl<'a> Collector<'a> {
                 d.initializer().map(Expr::unparenthesized),
                 Some(Expr::NullLit(_))
             ) {
-                self.diags.push(self.ctx.diagnostic("Don't explicitly initialize variables to null.", d.span()));
+                self.diags.push(self.ctx.diagnostic("Don't explicitly initialize variables to `null`.", d.span()));
             }
         }
     }
@@ -129,7 +129,7 @@ impl<'a> Collector<'a> {
                 Some(Expr::NullLit(_))
             )
         {
-            diags.push(ctx.diagnostic("Don't explicitly initialize variables to null.", param.span()));
+            diags.push(ctx.diagnostic("Don't explicitly initialize variables to `null`.", param.span()));
         }
     }
 }

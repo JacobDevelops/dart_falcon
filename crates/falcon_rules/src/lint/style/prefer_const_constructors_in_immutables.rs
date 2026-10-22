@@ -171,7 +171,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 .next()
                 .map_or(start, |token| token.offset() + token.len());
             self.diagnostics.push(self.ctx.diagnostic(
-                "Declare a const constructor in an immutable class.",
+                "Declare a `const` constructor in an immutable class.",
                 Span::new(start, end),
             ));
         }
@@ -199,7 +199,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     && self.signatures.has_non_final_field(&scope.owner) == Some(false)))
         {
             self.diagnostics.push(self.ctx.diagnostic(
-                "Declare a const constructor in an immutable class.",
+                "Declare a `const` constructor in an immutable class.",
                 Span::new(
                     scope.name.span().start,
                     primary.constructor_name()

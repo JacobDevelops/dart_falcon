@@ -30,17 +30,28 @@ fn is_where_is_empty(expr: Expr<'_>) -> Option<Span> {
         && where_field.field().name() == "where"
     {
         let mut parent = expr.syntax().parent();
-        while parent
-            .and_then(Expr::cast)
-            .is_some_and(|node| matches!(node, Expr::Paren(_)))
-        {
+        let mut negated = false;
+        while let Some(node) = parent.and_then(Expr::cast) {
+            match node {
+                Expr::Paren(_) => {}
+                Expr::Unary(unary) if unary.op() == UnaryOp::Bang => negated = !negated,
+                Expr::Binary(binary)
+                    if matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq) =>
+                {
+                    let literal = match (
+                        binary.left().unparenthesized(),
+                        binary.right().unparenthesized(),
+                    ) {
+                        (Expr::BoolLit(literal), _) | (_, Expr::BoolLit(literal)) => literal,
+                        _ => break,
+                    };
+                    negated ^= literal.value() == (binary.op() == BinaryOp::NotEq);
+                }
+                _ => break,
+            }
             parent = parent.and_then(|node| node.parent());
         }
-        if matches!(parent.and_then(Expr::cast), Some(Expr::Unary(unary)) if unary.op() == UnaryOp::Bang)
-        {
-            return None;
-        }
-        return Some(field.span());
+        return (!negated).then_some(field.span());
     }
     None
 }

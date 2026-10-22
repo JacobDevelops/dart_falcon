@@ -45,7 +45,7 @@ impl Collector<'_> {
         match element {
             MapElement::Entry(entry) if invalid_query_value(entry.value(), state) => self.report(
                 entry.value().span(),
-                "Uri query parameter values must be null, strings or iterables of strings.",
+                "`Uri` query parameter values must be `null`, strings or iterables of strings.",
             ),
             MapElement::If(element) => {
                 self.query_element(element.then_entry(), state);

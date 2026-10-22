@@ -5,7 +5,7 @@ class Point {
 }
 
 int compute(List<int> items) {
-  var total = items.length; /* expect: prefer-final-locals */
+  var total = items.length; /* expect: prefer-final-locals, msg: "Local variables should be `final`." */
   int doubled = total * 2; /* expect: prefer-final-locals */
   var a = 1, b = 2; /* expect: prefer-final-locals */
   late var lazy = a + b; /* expect: prefer-final-locals */

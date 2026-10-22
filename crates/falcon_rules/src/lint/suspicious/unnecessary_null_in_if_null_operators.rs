@@ -41,7 +41,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 || matches!(binary.right().unparenthesized(), Expr::NullLit(_)))
         {
             self.diags.push(self.ctx.diagnostic(
-                "Remove the unnecessary null from this if-null (`??`) expression.",
+                "Remove the unnecessary `null` from this if-null (`??`) expression.",
                 binary.span(),
             ));
         }

@@ -228,9 +228,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .collect();
         if !missing.is_empty() {
             self.diagnostics.push(self.ctx.diagnostic(format!(
-                "Include every {} value in this map; missing: {}.",
+                "Include every `{}` value in this map; missing: `{}`.",
                 identity.name(),
-                missing.join(", ")
+                missing.join("`, `")
             ), map.span()));
         }
     }

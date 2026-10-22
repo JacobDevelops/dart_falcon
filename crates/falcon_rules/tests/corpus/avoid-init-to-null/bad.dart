@@ -1,4 +1,4 @@
-int? topLevel = null; /* expect: avoid-init-to-null */
+int? topLevel = null; /* expect: avoid-init-to-null, msg: "Don't explicitly initialize variables to `null`." */
 var inferred = null; /* expect: avoid-init-to-null */
 
 class C {

@@ -177,7 +177,7 @@ impl Collector<'_> {
         {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic("Avoid using print in production code; use a logging framework instead.", span));
+        self.diagnostics.push(self.ctx.diagnostic("Avoid using `print` in production code; use a logging framework instead.", span));
     }
 }
 
@@ -195,6 +195,8 @@ mod tests {
         source,
         &FalconConfig::default(),);
         assert_eq!(diagnostics.len(), 2);
+        assert!(diagnostics.iter().all(|diagnostic| diagnostic.message
+            == "Avoid using `print` in production code; use a logging framework instead."));
         for (diagnostic, (start, _)) in diagnostics.iter().zip(source.match_indices("print")) {
             assert_eq!(diagnostic.span.start, start);
             assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "print");

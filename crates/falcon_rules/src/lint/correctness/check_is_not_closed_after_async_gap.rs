@@ -320,7 +320,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .iter()
             .filter(|call| self.violates(**call))
             .map(|call| {
-                self.ctx.diagnostic("Check `isClosed` after the await before adding an event or emitting a state.", call.span())
+                self.ctx.diagnostic("Check `isClosed` after the `await` before adding an event or emitting a state.", call.span())
             })
             .collect()
     }

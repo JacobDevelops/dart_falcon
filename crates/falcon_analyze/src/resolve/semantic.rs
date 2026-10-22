@@ -6592,12 +6592,9 @@ impl SignatureIndex {
                 let declared_ty = field
                     .field_type()
                     .map(|ty| model.resolve_type_in(ty, &scope));
-                let is_deprecated = field.annotations().any(|annotation| {
-                    annotation
-                        .name()
-                        .last()
-                        .is_some_and(|name| matches!(name.name(), "deprecated" | "Deprecated"))
-                });
+                let is_deprecated = field
+                    .annotations()
+                    .any(|annotation| model.is_deprecation(annotation));
                 field.declarators().filter_map(move |declarator| {
                     declarator
                         .initializer()
