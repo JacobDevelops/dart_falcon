@@ -259,10 +259,12 @@ pub struct LspState {
     resolve_semantics: bool,
     /// Lazily rebuilt after document, config, or watched-workspace changes.
     semantic_snapshot: Option<SemanticSnapshot>,
-    /// A failed project parse invalidates the complete view until its inputs change.
+    /// A failed project parse or semantic build invalidates the complete view until its inputs change.
     semantic_snapshot_error: Option<std::io::Error>,
     #[cfg(test)]
     parser_failure_path: Option<PathBuf>,
+    #[cfg(test)]
+    build_panic: bool,
     /// Dependents from the graph before an edit, retained until that edit is analyzed.
     pending_semantic_affected: HashMap<String, HashSet<String>>,
     /// Instrumentation for incremental tests: number of semantic snapshot builds.
@@ -354,6 +356,8 @@ impl LspState {
             semantic_snapshot_error: None,
             #[cfg(test)]
             parser_failure_path: None,
+            #[cfg(test)]
+            build_panic: false,
             pending_semantic_affected: HashMap::new(),
             semantic_snapshot_build_count: 0,
             semantic_topology_build_count: 0,
@@ -486,6 +490,10 @@ impl LspState {
     fn reset_external_environment(&mut self) {
         self.environment.reset();
         self.environment_stamps = None;
+        self.reset_external_layer();
+    }
+
+    fn reset_external_layer(&mut self) {
         self.external_libraries = ExternalLibraries::default();
         self.external_indexes = None;
         self.cross_file_index_cache = None;
@@ -991,7 +999,16 @@ impl LspState {
         });
         let reuse_snapshot = indexes.is_some();
         if !reuse_snapshot && self.cross_file_resolve_semantics {
-            self.ensure_cross_file_indexes(&files);
+            // Dependency waves would otherwise parse on Rayon's global small-stack workers.
+            if let Err(error) =
+                falcon_dart_parser::with_stack(|| self.ensure_cross_file_indexes(&files))
+            {
+                warn!("cross-file index worker failed: {error}");
+                // Per-file publication carries the failure until inputs change, without reloading.
+                self.semantic_snapshot = None;
+                self.semantic_snapshot_error = Some(error);
+                return HashMap::new();
+            }
         }
         let indexes = if reuse_snapshot {
             self.semantic_snapshot
@@ -1036,6 +1053,8 @@ impl LspState {
     }
 
     fn ensure_cross_file_indexes(&mut self, files: &[ProjectFile]) {
+        #[cfg(test)]
+        assert!(!self.build_panic, "semantic build regression");
         let dart_files = || files.iter().filter(|file| is_dart_file(&file.path));
         let packages = package_identities(files.iter().map(|file| file.path.as_path()));
         if self.cross_file_index_cache.as_ref().is_some_and(|cache| {
@@ -1346,6 +1365,17 @@ impl LspState {
         {
             return;
         }
+        // Dependency waves and recursive index builds need the large-stack workers.
+        if let Err(error) = falcon_dart_parser::with_stack(|| self.build_semantic_snapshot()) {
+            // Keep the environment so its dependency roots stay watched for recovery.
+            self.reset_external_layer();
+            self.semantic_snapshot_error = Some(error);
+        }
+    }
+
+    fn build_semantic_snapshot(&mut self) {
+        #[cfg(test)]
+        assert!(!self.build_panic, "semantic build regression");
         let (mut files, _) = self.collect_project_files(ProjectView::Semantic);
         if self.semantic_snapshot_error.is_some() {
             return;
@@ -1669,7 +1699,23 @@ fn reject_oversized_buffer(path: &Path, text: &mut String) -> Option<Diagnostic>
 
 #[cfg(test)]
 mod source_size_tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
+
+    struct CountCrossRuns(Arc<AtomicUsize>);
+    impl falcon_analyze::CrossFileRule for CountCrossRuns {
+        fn prepare_project(
+            &self,
+            _environment: &AnalysisEnvironment,
+            _files: &[ProjectFile],
+            _config: &FalconConfig,
+            _indexes: Option<&SemanticIndexes>,
+        ) -> Vec<Diagnostic> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Vec::new()
+        }
+    }
 
     #[test]
     fn parser_worker_panics_publish_worker_diagnostics_not_syntax_errors() {
@@ -1710,22 +1756,6 @@ mod source_size_tests {
 
     #[test]
     fn project_parse_failures_publish_once_skip_cross_rules_and_recover_on_disk_events() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        struct CountCrossRuns(Arc<AtomicUsize>);
-        impl falcon_analyze::CrossFileRule for CountCrossRuns {
-            fn prepare_project(
-                &self,
-                _environment: &AnalysisEnvironment,
-                _files: &[ProjectFile],
-                _config: &FalconConfig,
-                _indexes: Option<&SemanticIndexes>,
-            ) -> Vec<Diagnostic> {
-                self.0.fetch_add(1, Ordering::SeqCst);
-                Vec::new()
-            }
-        }
-
         for companion in [false, true] {
             let directory = tempfile::tempdir().unwrap();
             let app = directory.path().join("app");
@@ -1812,6 +1842,75 @@ mod source_size_tests {
             );
             assert!(state.semantic_snapshot_error.is_none());
             assert!(state.semantic_snapshot.is_some());
+        }
+    }
+
+    #[test]
+    fn build_panics_publish_once_and_recover_on_dependency_events() {
+        for cross_file in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let app = directory.path().join("app");
+            let dep = directory.path().join("dep/lib");
+            std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
+            std::fs::create_dir_all(&dep).unwrap();
+            std::fs::write(
+                app.join(".dart_tool/package_config.json"),
+                r#"{"configVersion":2,"packages":[{"name":"app","rootUri":"../","packageUri":""},{"name":"dep","rootUri":"../../dep","packageUri":"lib/"}]}"#,
+            )
+            .unwrap();
+            let dependency = dep.join("dep.dart");
+            std::fs::write(&dependency, "class Dep {}").unwrap();
+            let dependency = canonical_or_lexical(&dependency);
+            let config = app.join("falcon.json");
+            std::fs::write(&config, "{}").unwrap();
+            let mut state = LspState::new_from(Some(config), |_| None, app.clone());
+            // Without per-file semantic rules, only the cross-file view loads dependencies.
+            state.resolve_semantics = !cross_file;
+            state.cross_file_resolve_semantics = cross_file;
+            let runs = Arc::new(AtomicUsize::new(0));
+            state.cross_file_rules.register(
+                "count-cross-runs",
+                Box::new(CountCrossRuns(Arc::clone(&runs))),
+            );
+            state.build_panic = true;
+            let uri = format!("file://{}", app.join("main.dart").display());
+            state.open(&uri, "import 'package:dep/dep.dart';".into(), Some(1));
+            let published = state.cross_file_pass();
+            assert_eq!(published.len(), 1);
+            let failures: Vec<_> = published[0]
+                .1
+                .iter()
+                .filter(|diagnostic| {
+                    diagnostic.rule == falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
+                })
+                .collect();
+            assert_eq!(failures.len(), 1, "{:?}", published[0].1);
+            assert!(failures[0].message.contains("semantic build regression"));
+            assert_eq!(runs.load(Ordering::SeqCst), 0);
+            assert!(
+                state
+                    .environment
+                    .watched_dependency_roots()
+                    .any(|root| dependency.starts_with(root))
+            );
+
+            // The failure stays recorded instead of rebuilding on every pass.
+            state.build_panic = false;
+            state.cross_file_pass();
+            assert_eq!(runs.load(Ordering::SeqCst), 0);
+            assert!(state.semantic_snapshot.is_none());
+            assert!(state.cross_file_index_cache.is_none());
+
+            let recovered = state.watched_files_changed(std::slice::from_ref(&dependency));
+            assert_eq!(recovered.len(), 1);
+            assert!(recovered[0].1.iter().all(|diagnostic| {
+                diagnostic.rule != falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
+            }));
+            assert!(state.semantic_snapshot_error.is_none());
+            state.cross_file_pass();
+            assert_eq!(runs.load(Ordering::SeqCst), 1);
+            assert_eq!(state.semantic_snapshot.is_some(), !cross_file);
+            assert_eq!(state.cross_file_index_cache.is_some(), cross_file);
         }
     }
 
