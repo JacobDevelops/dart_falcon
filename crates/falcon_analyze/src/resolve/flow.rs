@@ -895,7 +895,7 @@ pub fn completes_normally<'tree>(
     !statements.any(|statement| exits(statement, never, exhaustive, true))
 }
 
-fn exits<'tree>(
+pub(super) fn exits<'tree>(
     statement: Stmt<'tree>,
     never: &impl Fn(Expr<'tree>) -> bool,
     exhaustive: &impl Fn(SwitchStmt<'tree>) -> bool,

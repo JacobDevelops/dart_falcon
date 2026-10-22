@@ -806,6 +806,8 @@ impl TypeEnvironment {
                     lexical: ClosureReturns {
                         environment: self.clone(),
                         conservative_writes: false,
+                        never_expressions: FxHashSet::default(),
+                        expression_never: None,
                         flow: super::flow::FlowContext {
                             model,
                             signatures,
@@ -914,6 +916,8 @@ impl TypeEnvironment {
                     lexical: ClosureReturns {
                         environment: self.clone(),
                         conservative_writes: false,
+                        never_expressions: FxHashSet::default(),
+                        expression_never: None,
                         flow: super::flow::FlowContext {
                             model,
                             signatures,

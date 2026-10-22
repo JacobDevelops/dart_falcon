@@ -118,6 +118,8 @@ impl TypeEnvironment {
                             lookup,
                             types: Vec::new(),
                             exhaustive_switches: Vec::new(),
+                            never_expressions: FxHashSet::default(),
+                            expression_never: None,
                         };
                         for statement in block.stmts() {
                             returns.visit_stmt(statement);
@@ -125,7 +127,7 @@ impl TypeEnvironment {
                         // A reachable end returns `null` implicitly.
                         if super::flow::completes_normally(
                             block.stmts(),
-                            &|expression| returns.infer(expression, None) == ResolvedType::Never,
+                            &|expression| returns.never_expressions.contains(&expression.span()),
                             &|statement| returns.exhaustive_switches.contains(&statement.span()),
                         ) {
                             returns.types.push(ResolvedType::Null);
@@ -232,6 +234,10 @@ pub(super) struct ClosureReturns<'a, 'model, L> {
     pub(super) lookup: &'a L,
     pub(super) types: Vec<ResolvedType>,
     pub(super) exhaustive_switches: Vec<Span>,
+    /// Preserve statement-time flow facts without reinferring nested callables.
+    pub(super) never_expressions: FxHashSet<Span>,
+    /// Reuse assignment inference only within the current expression's flow state.
+    pub(super) expression_never: Option<bool>,
 }
 
 impl<L: Fn(&str) -> Option<ResolvedType>> ClosureReturns<'_, '_, L> {
@@ -247,6 +253,15 @@ impl<L: Fn(&str) -> Option<ResolvedType>> ClosureReturns<'_, '_, L> {
             self.flow.type_parameters,
             expected,
             self.lookup,
+        )
+    }
+
+    fn statement_exits(&self, statement: falcon_syntax::cst::Stmt<'_>) -> bool {
+        super::flow::exits(
+            statement,
+            &|expression| self.never_expressions.contains(&expression.span()),
+            &|_| false,
+            true,
         )
     }
 
@@ -416,6 +431,17 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
         let optional_entry =
             (self.conservative_writes && !conservative_before).then(|| self.environment.clone());
         match statement {
+            Stmt::Expr(statement) => {
+                let expression = statement.expr();
+                self.visit_expr(expression);
+                let never = self
+                    .expression_never
+                    .take()
+                    .unwrap_or_else(|| self.infer(expression, None) == ResolvedType::Never);
+                if never {
+                    self.never_expressions.insert(expression.span());
+                }
+            }
             Stmt::Return(statement) => {
                 if let Some(value) = statement.value() {
                     self.visit_expr(value);
@@ -456,16 +482,14 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                     self.flow
                         .assume_condition(&mut self.environment, condition, true);
                     self.scoped(|returns| returns.visit_stmt(statement.then_branch()));
-                    let then_exits = self
-                        .flow
-                        .statement_exits(&self.environment, statement.then_branch());
+                    let then_exits = self.statement_exits(statement.then_branch());
                     let then_environment = self.environment.clone();
                     self.environment = before;
                     self.flow
                         .assume_condition(&mut self.environment, condition, false);
                     let else_exits = if let Some(branch) = statement.else_branch() {
                         self.scoped(|returns| returns.visit_stmt(branch));
-                        self.flow.statement_exits(&self.environment, branch)
+                        self.statement_exits(branch)
                     } else {
                         false
                     };
@@ -604,6 +628,7 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
     }
 
     fn visit_expr(&mut self, expression: Expr<'tree>) {
+        self.expression_never = None;
         let conservative_before = self.conservative_writes;
         self.conservative_writes |= matches!(
             expression,
@@ -665,6 +690,8 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
             }
             _ => walk_expr(self, expression),
         }
+        // A child's result does not describe its containing expression.
+        self.expression_never = None;
         if self.conservative_writes {
             let target = match expression {
                 Expr::Assign(assignment) => Some(assignment.target()),
@@ -694,7 +721,11 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                         }
                         _ => None,
                     };
-                    Some(self.infer(value, expected.as_ref()))
+                    let assigned = self.infer(value, expected.as_ref());
+                    if op.binary().is_none() {
+                        self.expression_never = Some(assigned == ResolvedType::Never);
+                    }
+                    Some(assigned)
                 }
                 _ => None,
             };
