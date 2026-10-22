@@ -7,6 +7,7 @@ use tracing::info;
 
 use clap::{Args, ValueEnum};
 use falcon_analyze::environment::{DartSdk, PackageConfig};
+use falcon_analyze::package_identities;
 use falcon_analyze::{
     AnalysisEnvironment, ParsedFile, ProjectFile, Workspace, analyze_parallel_collecting_resolving,
 };
@@ -17,7 +18,7 @@ use falcon_diagnostics::{
 };
 use falcon_rules::{
     apply_severities, build_cross_file_registry, build_registry, cross_file_requires_resolution,
-    load_config, load_or_default, package_identities, requires_resolution, run_cross_file,
+    load_config, load_or_default, requires_resolution, run_cross_file,
 };
 
 use crate::file_walker::walk_project;

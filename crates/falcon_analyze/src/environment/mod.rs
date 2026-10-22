@@ -4,10 +4,14 @@
 
 mod external;
 mod package_config;
+pub mod packages;
 mod sdk;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use packages::{FilePackage, PackageMetadata};
 
 pub use external::{
     ExternalFile, ExternalLibraries, ExternalLibrary, ExternalOrigin, ExternalTarget,
@@ -41,6 +45,12 @@ impl EnvironmentCacheKey {
     }
 }
 
+#[derive(Debug, Default)]
+struct PackageDiscovery {
+    directories: HashMap<PathBuf, Option<Arc<PackageMetadata>>>,
+    manifests: HashMap<PathBuf, Arc<PackageMetadata>>,
+}
+
 /// Package configurations, SDKs and language versions for a set of files.
 ///
 /// Built once per run (or per LSP workspace state) from the analyzed paths;
@@ -59,6 +69,8 @@ pub struct AnalysisEnvironment {
     /// Uncanonicalized package/SDK roots, so retargeted symlinks rediscover contexts.
     root_candidates: std::collections::BTreeSet<PathBuf>,
     mutable_roots: std::collections::BTreeSet<PathBuf>,
+    directory_packages: HashMap<PathBuf, Option<Arc<PackageMetadata>>>,
+    package_discovery: Arc<Mutex<PackageDiscovery>>,
 }
 
 impl Default for AnalysisEnvironment {
@@ -78,6 +90,8 @@ impl AnalysisEnvironment {
             config_candidates: std::collections::BTreeSet::new(),
             root_candidates: std::collections::BTreeSet::new(),
             mutable_roots: std::collections::BTreeSet::new(),
+            directory_packages: HashMap::new(),
+            package_discovery: Arc::default(),
         }
     }
 
@@ -112,6 +126,18 @@ impl AnalysisEnvironment {
             if self.directories.contains_key(&directory) {
                 continue;
             }
+            let package = self.package_metadata(path);
+            if let Some(package) = &package {
+                self.root_candidates
+                    .insert(package.manifest.parent().unwrap().join("lib"));
+            }
+            if let Some(alias) = package
+                .as_ref()
+                .and_then(|package| package.directory_alias(&directory))
+            {
+                self.directory_packages.insert(alias, package.clone());
+            }
+            self.directory_packages.insert(directory.clone(), package);
             for ancestor in directory.ancestors() {
                 self.config_candidates
                     .insert(ancestor.join(".dart_tool/package_config.json"));
@@ -208,6 +234,16 @@ impl AnalysisEnvironment {
         roots.extend(sdk::discovery_inputs());
         roots.extend(self.mutable_roots.iter().cloned());
         let mut files = self.config_candidates.clone();
+        {
+            let discovery = self.package_discovery.lock().unwrap();
+            for directory in discovery.directories.keys() {
+                files.extend(directory.ancestors().map(|root| root.join("pubspec.yaml")));
+            }
+            for package in discovery.manifests.values() {
+                files.insert(package.manifest.clone());
+                roots.insert(package.manifest.parent().unwrap().join("lib"));
+            }
+        }
         for root in &roots {
             files.insert(root.join("version"));
             files.insert(root.join("lib/libraries.json"));
@@ -231,10 +267,77 @@ impl AnalysisEnvironment {
         }
     }
 
+    /// Include lazily discovered package inputs in events arriving after a saved key.
+    pub fn package_inputs_affected_by(&self, path: &Path) -> bool {
+        let discovery = self.package_discovery.lock().unwrap();
+        discovery.directories.keys().any(|directory| {
+            directory
+                .ancestors()
+                .any(|root| root.join("pubspec.yaml").starts_with(path))
+        }) || discovery.manifests.values().any(|package| {
+            package.manifest.starts_with(path)
+                || package
+                    .manifest
+                    .parent()
+                    .unwrap()
+                    .join("lib")
+                    .starts_with(path)
+                || package.identity.lib_root.starts_with(path)
+        })
+    }
+
     /// Raw roots of path/git/unknown packages, including absent generated files.
     /// A lockfile's hosted source is the only immutable package classification.
     pub fn watched_dependency_roots(&self) -> impl Iterator<Item = &Path> {
         self.mutable_roots.iter().map(PathBuf::as_path)
+    }
+
+    /// Package metadata captured during discovery, without rule-time manifest I/O.
+    pub fn package(&self, path: &Path) -> Option<&PackageMetadata> {
+        let directory = package_config::absolute(path.parent().unwrap_or(Path::new("")));
+        self.directory_packages.get(&directory)?.as_deref()
+    }
+
+    /// Bind cached package metadata to one file's normalized location.
+    /// External directories are discovered lazily and shared across file contexts.
+    pub fn file_package(&self, path: &Path) -> FilePackage {
+        FilePackage::new(path, self.package_metadata(path))
+    }
+
+    fn package_metadata(&self, path: &Path) -> Option<Arc<PackageMetadata>> {
+        let directory = package_config::absolute(path.parent().unwrap_or(Path::new("")));
+        if let Some(package) = self.directory_packages.get(&directory) {
+            return package.clone();
+        }
+        if let Some(package) = self
+            .package_discovery
+            .lock()
+            .unwrap()
+            .directories
+            .get(&directory)
+        {
+            return package.clone();
+        }
+        let package = packages::enclosing_pubspec(path).map(|manifest| {
+            let cached = self
+                .package_discovery
+                .lock()
+                .unwrap()
+                .manifests
+                .get(&manifest)
+                .cloned();
+            let package = cached.unwrap_or_else(|| Arc::new(PackageMetadata::load(&manifest)));
+            (manifest, package)
+        });
+        let mut discovery = self.package_discovery.lock().unwrap();
+        let package = package.map(|(manifest, package)| {
+            Arc::clone(discovery.manifests.entry(manifest).or_insert(package))
+        });
+        discovery
+            .directories
+            .entry(directory)
+            .or_insert(package)
+            .clone()
     }
 
     /// The package configuration governing `path`, if any.

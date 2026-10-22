@@ -74,22 +74,13 @@ impl Rule for UseLateForPrivateFieldsAndVariables {
         }
         let names: HashSet<&str> = candidates.iter().map(|candidate| candidate.name).collect();
 
-        let mut scopes = DeclarationScopes::of(program, 0);
+        let mut owners = HashMap::new();
+        declaration_owners(program, 0, &state, &mut owners);
         if let Some(library) = ctx.library() {
             for (file, sibling) in library.siblings().iter().enumerate() {
-                scopes.extend(DeclarationScopes::of(*sibling, file + 1));
+                declaration_owners(*sibling, file + 1, &state, &mut owners);
             }
         }
-        let owners: HashMap<DeclarationIdentity, OwnerKey> = scopes
-            .types
-            .iter()
-            .filter_map(|(name, key)| {
-                state
-                    .model
-                    .resolve_name(*name)
-                    .map(|identity| (identity, *key))
-            })
-            .collect();
         let mut disqualified = HashSet::new();
         check_doc_uses(program, ctx, &state, &names, &owners, &mut disqualified);
         if let Some(library) = ctx.library() {
@@ -102,11 +93,9 @@ impl Rule for UseLateForPrivateFieldsAndVariables {
                 let sibling_ctx = ctx.for_file(library.sibling_paths()[file], parsed);
                 if let Some(state) = SemanticState::new(*sibling, &sibling_ctx) {
                     check_uses(
-                        file + 1,
                         &sibling_ctx,
                         state,
                         &names,
-                        &scopes,
                         &owners,
                         &mut disqualified,
                     );
@@ -118,7 +107,6 @@ impl Rule for UseLateForPrivateFieldsAndVariables {
             program,
             ctx,
             candidates,
-            scopes,
             disqualified,
             safe: SafeUses {
                 types: ctx.types(),
@@ -135,7 +123,6 @@ struct LateCandidates<'a> {
     program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
     candidates: Vec<Candidate<'a>>,
-    scopes: DeclarationScopes<'a>,
     disqualified: HashSet<NullableAccess<'a>>,
     safe: SafeUses<'a, 'a>,
 }
@@ -143,6 +130,10 @@ struct LateCandidates<'a> {
 impl<'a> SemanticRuleVisitor<'a> for LateCandidates<'a> {
     fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         self.safe.visit_expr(node, state);
+    }
+
+    fn visit_constructor(&mut self, node: ConstructorDecl<'a>, state: &SemanticState<'a>) {
+        self.safe.visit_constructor(node, state);
     }
 
     fn visit_cascade_operation(
@@ -170,9 +161,7 @@ impl<'a> SemanticRuleVisitor<'a> for LateCandidates<'a> {
     fn finish(mut self: Box<Self>) -> Vec<Diagnostic> {
         check_mentions(
             self.program,
-            0,
             &self.safe.names,
-            &self.scopes,
             &self.safe,
             &mut self.disqualified,
         );
@@ -204,11 +193,9 @@ enum NullableAccess<'a> {
 }
 
 fn check_uses<'a, 'n>(
-    file: usize,
     ctx: &'a AnalyzeContext<'a>,
     state: SemanticState<'a>,
     names: &HashSet<&'n str>,
-    scopes: &DeclarationScopes<'_>,
     owners: &HashMap<DeclarationIdentity, OwnerKey>,
     disqualified: &mut HashSet<NullableAccess<'n>>,
 ) {
@@ -222,7 +209,7 @@ fn check_uses<'a, 'n>(
         spans: HashSet::new(),
     };
     visit_program(&mut safe, program, state);
-    check_mentions(program, file, names, scopes, &safe, disqualified);
+    check_mentions(program, names, &safe, disqualified);
 }
 
 fn check_doc_uses<'a, 'n>(
@@ -265,18 +252,12 @@ fn check_doc_uses<'a, 'n>(
 
 fn check_mentions<'n>(
     program: Program<'_>,
-    file: usize,
     names: &HashSet<&'n str>,
-    scopes: &DeclarationScopes<'_>,
     safe: &SafeUses<'_, '_>,
     disqualified: &mut HashSet<NullableAccess<'n>>,
 ) {
     let mut mentions = Mentions {
         names,
-        types: &scopes.types,
-        file,
-        enclosing: None,
-        cascade_members: HashSet::new(),
         declarations: HashSet::new(),
         found: Vec::new(),
     };
@@ -285,12 +266,7 @@ fn check_mentions<'n>(
         if mentions.declarations.contains(&mention.start) || safe.spans.contains(&mention.start) {
             continue;
         }
-        match safe
-            .resolved_owners
-            .get(&mention.start)
-            .copied()
-            .or_else(|| scopes.owner(mention))
-        {
+        match safe.resolved_owners.get(&mention.start).copied() {
             Some(owner) => {
                 disqualified.insert(NullableAccess::Resolved(mention.name, owner));
             }
@@ -459,15 +435,8 @@ impl SafeUses<'_, '_> {
             return;
         }
         let owner = state
-            .signatures
-            .resolved_readable_member_owner(receiver, identifier.name(), &state.model)
-            .or_else(|| {
-                state.signatures.resolved_writable_member_owner(
-                    receiver,
-                    identifier.name(),
-                    &state.model,
-                )
-            });
+            .referenced_member_owner(receiver, identifier.name(), false)
+            .or_else(|| state.referenced_member_owner(receiver, identifier.name(), true));
         if let Some(key) = owner.as_ref().and_then(|owner| self.owners.get(owner)) {
             self.resolved_owners
                 .insert(identifier.span().start, Some(*key));
@@ -512,6 +481,22 @@ impl SafeUses<'_, '_> {
 }
 
 impl<'a> SemanticRuleVisitor<'a> for SafeUses<'_, '_> {
+    fn visit_constructor(&mut self, node: ConstructorDecl<'a>, state: &SemanticState<'a>) {
+        let Some(receiver) = state.enclosing_type.as_ref() else {
+            return;
+        };
+        for parameter in node.params().params() {
+            if parameter.initializing() == Some(InitializingFormal::This) {
+                self.record_owner(parameter.name(), receiver, state);
+            }
+        }
+        for initializer in node.initializers() {
+            if let ConstructorInitializer::FieldInit(field) = initializer {
+                self.record_owner(field.field(), receiver, state);
+            }
+        }
+    }
+
     fn visit_cascade_operation(
         &mut self,
         operation: CascadeOp<'a>,
@@ -542,19 +527,28 @@ impl<'a> SemanticRuleVisitor<'a> for SafeUses<'_, '_> {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
-        if let Expr::Field(field) = node
-            && self.names.contains(field.field().name())
-        {
-            self.record_owner(field.field(), &state.infer(field.object()), state);
-        } else if let Expr::Ident(identifier) = node
+        let identifier = match node {
+            Expr::Ident(identifier) => Some(identifier),
+            Expr::Field(field) => Some(field.field()),
+            _ => None,
+        };
+        if let Some(identifier) = identifier
             && self.names.contains(identifier.name())
-            && state
-                .environment
-                .binding_depth(identifier.name())
-                .is_some_and(|depth| depth > 0)
         {
-            // A local binding is not the same element as a private field.
-            self.spans.insert(identifier.span().start);
+            if matches!(node, Expr::Ident(_))
+                && state.environment.binding_depth(identifier.name()).is_some_and(|depth| depth > 0)
+            {
+                // A local binding is not the same element as a private field.
+                self.spans.insert(identifier.span().start);
+            } else if let Some(reference) = state.referenced_declaration(node, false)
+                .or_else(|| state.referenced_declaration(node, true))
+            {
+                if reference.selector.name.is_empty() {
+                    self.resolved_owners.insert(identifier.span().start, None);
+                } else if let Some(key) = self.owners.get(&reference.owner) {
+                    self.resolved_owners.insert(identifier.span().start, Some(*key));
+                }
+            }
         }
         match node {
             Expr::NullAssert(assertion) => self.record_null_assert(assertion.operand()),
@@ -586,191 +580,51 @@ impl<'a> SemanticRuleVisitor<'a> for SafeUses<'_, '_> {
     }
 }
 
-/// The member names each type declaration of a file declares, and its
-/// top-level names, for resolving mentions to their declaring type. Private
-/// names never resolve to other libraries, so this file (plus its parts, which
-/// are matched by name) holds every declaration a mention can denote.
-struct DeclarationScopes<'p> {
-    /// Type declarations by name.
-    types: HashMap<&'p str, OwnerKey>,
-    /// Names declared by each type declaration, keyed by syntax identity.
-    members: HashMap<OwnerKey, HashSet<&'p str>>,
-    top_level: HashSet<&'p str>,
-}
-
-impl<'p> DeclarationScopes<'p> {
-    fn of(program: Program<'p>, file: usize) -> Self {
-        let mut scopes = Self {
-            types: HashMap::new(),
-            members: HashMap::new(),
-            top_level: HashSet::new(),
+/// Maps semantic owners to tree-local candidate identities, including parts.
+fn declaration_owners(
+    program: Program<'_>,
+    file: usize,
+    state: &SemanticState<'_>,
+    owners: &mut HashMap<DeclarationIdentity, OwnerKey>,
+) {
+    for declaration in program.declarations() {
+        let name = match declaration {
+            TopLevelDecl::Class(class) => Some(class.name()),
+            TopLevelDecl::MixinClass(class) => Some(class.name()),
+            TopLevelDecl::Mixin(mixin) => Some(mixin.name()),
+            TopLevelDecl::Extension(extension) => extension.name(),
+            TopLevelDecl::ExtensionType(extension) => Some(extension.name()),
+            TopLevelDecl::Enum(enumeration) => Some(enumeration.name()),
+            _ => None,
         };
-        for declaration in program.declarations() {
-            let (name, members, extra): (
-                Option<Identifier<'p>>,
-                AstChildren<'p, ClassMember<'p>>,
-                Vec<&str>,
-            ) = match declaration {
-                TopLevelDecl::Variable(variable) => {
-                    scopes.top_level.extend(
-                        variable
-                            .declarators()
-                            .map(|declarator| declarator.name().name()),
-                    );
-                    continue;
-                }
-                TopLevelDecl::Function(function) => {
-                    scopes.top_level.insert(function.name().name());
-                    continue;
-                }
-                TopLevelDecl::ClassTypeAlias(alias) => {
-                    scopes.top_level.insert(alias.name().name());
-                    continue;
-                }
-                TopLevelDecl::TypeAlias(alias) => {
-                    scopes.top_level.insert(alias.name().name());
-                    continue;
-                }
-                TopLevelDecl::Error(_) => continue,
-                TopLevelDecl::Class(class) => (Some(class.name()), class.members(), Vec::new()),
-                TopLevelDecl::MixinClass(class) => {
-                    (Some(class.name()), class.members(), Vec::new())
-                }
-                TopLevelDecl::Mixin(mixin) => (Some(mixin.name()), mixin.members(), Vec::new()),
-                TopLevelDecl::Extension(extension) => {
-                    (extension.name(), extension.members(), Vec::new())
-                }
-                TopLevelDecl::ExtensionType(extension) => (
-                    Some(extension.name()),
-                    extension.members(),
-                    extension
-                        .representation()
-                        .map(|representation| representation.name().name())
-                        .into_iter()
-                        .collect(),
-                ),
-                TopLevelDecl::Enum(enumeration) => (
-                    Some(enumeration.name()),
-                    enumeration.members(),
-                    enumeration
-                        .variants()
-                        .map(|variant| variant.name().name())
-                        .collect(),
-                ),
-            };
-            let key = (file, declaration.syntax().id());
-            if let Some(name) = name {
-                scopes.top_level.insert(name.name());
-                scopes.types.insert(name.name(), key);
-            }
-            let mut names: HashSet<&str> = extra.into_iter().collect();
-            for member in members {
-                match member {
-                    ClassMember::Field(field) => names.extend(
-                        field
-                            .declarators()
-                            .map(|declarator| declarator.name().name()),
-                    ),
-                    ClassMember::Method(method) => {
-                        names.insert(method.name().name());
-                    }
-                    ClassMember::Getter(getter) => {
-                        names.insert(getter.name().name());
-                    }
-                    ClassMember::Setter(setter) => {
-                        names.insert(setter.name().name());
-                    }
-                    ClassMember::Constructor(_)
-                    | ClassMember::PrimaryConstructorBody(_)
-                    | ClassMember::Operator(_)
-                    | ClassMember::Error(_) => {}
-                }
-            }
-            scopes.members.insert(key, names);
-        }
-        scopes
-    }
-
-    fn extend(&mut self, other: Self) {
-        self.types.extend(other.types);
-        self.members.extend(other.members);
-        self.top_level.extend(other.top_level);
-    }
-    /// The declaring type (`Some(None)` for top level) that `mention` denotes,
-    /// or `None` when it cannot be resolved here, which disqualifies every
-    /// declaration of the name.
-    fn owner(&self, mention: &Mention<'_>) -> Option<Option<OwnerKey>> {
-        let declares = |key: OwnerKey| {
-            self.members
-                .get(&key)
-                .is_some_and(|names| names.contains(mention.name))
-        };
-        match mention.access {
-            // Lexical lookup: the enclosing type's own members, then the
-            // library scope; an unresolved name in a type body may be an
-            // inherited member (`this._x`).
-            Access::Bare => match mention.enclosing {
-                Some(key) if declares(key) => Some(Some(key)),
-                _ if self.top_level.contains(mention.name) => Some(None),
-                Some(_) => None,
-                None => Some(None),
-            },
-            Access::This => mention.enclosing.filter(|key| declares(*key)).map(Some),
-            Access::Type(key) => declares(key).then_some(Some(key)),
-            Access::Member => None,
+        if let Some(name) = name
+            && let Some(identity) = state.model.resolve_name(name.name())
+                .or_else(|| state.model.resolve_extension(name.name()))
+        {
+            owners.insert(identity, (file, declaration.syntax().id()));
         }
     }
-}
-
-/// How a mention of a candidate name is reached.
-#[derive(Clone, Copy)]
-enum Access {
-    /// An unqualified identifier.
-    Bare,
-    /// `this.name`.
-    This,
-    /// `Type.name` for a type declared in this file.
-    Type(OwnerKey),
-    /// Any other member access (`object.name`, `super.name`, cascade sections,
-    /// dot shorthands): the receiver's declaring type is not resolved here.
-    Member,
 }
 
 struct Mention<'a> {
     name: &'a str,
     start: usize,
-    /// The enclosing type declaration's syntax identity.
-    enclosing: Option<OwnerKey>,
-    access: Access,
 }
 
-/// Every occurrence of a candidate name, declarations included. Like the
-/// analyzer, the bodies of enums and of classes with a `const` constructor are
-/// not visited.
+/// Syntax occurrences not accounted for by semantic expression callbacks remain
+/// conservative (for example, initializing formals and dot shorthands).
 struct Mentions<'a, 'n> {
     names: &'a HashSet<&'n str>,
-    types: &'a HashMap<&'a str, OwnerKey>,
-    file: usize,
-    enclosing: Option<OwnerKey>,
-    /// Starts of identifiers naming a member in a cascade section.
-    cascade_members: HashSet<usize>,
     declarations: HashSet<usize>,
     found: Vec<Mention<'n>>,
 }
 
 impl Mentions<'_, '_> {
-    fn record(&mut self, identifier: Identifier<'_>, access: Access) {
+    fn record(&mut self, identifier: Identifier<'_>) {
         if let Some(name) = self.names.get(identifier.name()) {
-            let access = if self.cascade_members.contains(&identifier.span().start) {
-                Access::Member
-            } else {
-                access
-            };
             self.found.push(Mention {
                 name,
                 start: identifier.span().start,
-                enclosing: self.enclosing,
-                access,
             });
         }
     }
@@ -785,24 +639,13 @@ impl<'a> Visitor<'a> for Mentions<'_, '_> {
                     .map(|declarator| declarator.name().span().start),
             );
         }
-        let enclosing = match node {
+        match node {
             TopLevelDecl::Enum(_) => return,
             TopLevelDecl::Class(class) if has_const_constructor(class.members()) => return,
             TopLevelDecl::MixinClass(class) if has_const_constructor(class.members()) => return,
-            TopLevelDecl::Class(_)
-            | TopLevelDecl::MixinClass(_)
-            | TopLevelDecl::Mixin(_)
-            | TopLevelDecl::Extension(_)
-            | TopLevelDecl::ExtensionType(_) => Some((self.file, node.syntax().id())),
-            TopLevelDecl::Variable(_)
-            | TopLevelDecl::Function(_)
-            | TopLevelDecl::ClassTypeAlias(_)
-            | TopLevelDecl::TypeAlias(_)
-            | TopLevelDecl::Error(_) => None,
-        };
-        let saved = std::mem::replace(&mut self.enclosing, enclosing);
+            _ => {}
+        }
         walk_top_level_decl(self, node);
-        self.enclosing = saved;
     }
 
     fn visit_field_decl(&mut self, node: FieldDecl<'a>) {
@@ -822,93 +665,108 @@ impl<'a> Visitor<'a> for Mentions<'_, '_> {
     }
 
     fn visit_identifier(&mut self, node: Identifier<'a>) {
-        self.record(node, Access::Bare);
+        self.record(node);
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
         match node {
-            Expr::Field(field) => {
-                let access = match field.object().unparenthesized() {
-                    Expr::This(_) => Access::This,
-                    Expr::Ident(owner) => self
-                        .types
-                        .get(owner.name())
-                        .map_or(Access::Member, |key| Access::Type(*key)),
-                    _ => Access::Member,
-                };
-                self.record(field.field(), access);
-            }
-            Expr::DotShorthand(shorthand) => self.record(shorthand.name(), Access::Member),
-            Expr::Cascade(cascade) => {
-                for op in cascade.sections().flat_map(|section| section.ops()) {
-                    let member = match op {
-                        CascadeOp::Field(field) => Some(field.name()),
-                        CascadeOp::Call(call) => Some(call.name()),
-                        CascadeOp::Assign(assignment) => receiver_root(assignment.target()),
-                        CascadeOp::Invoke(_)
-                        | CascadeOp::NullAssert(_)
-                        | CascadeOp::Index(_)
-                        | CascadeOp::IndexAssign(_) => None,
-                    };
-                    if let Some(member) = member {
-                        self.cascade_members.insert(member.span().start);
-                    }
-                }
-            }
+            Expr::Field(field) => self.record(field.field()),
+            Expr::DotShorthand(shorthand) => self.record(shorthand.name()),
             _ => {}
         }
         walk_expr(self, node);
     }
 }
 
-/// The identifier a selector chain starts from: `a` in `a.b[0].c()`.
-fn receiver_root(mut expression: Expr<'_>) -> Option<Identifier<'_>> {
-    loop {
-        match expression.unparenthesized() {
-            Expr::Ident(identifier) => return Some(identifier),
-            Expr::Field(field) => expression = field.object(),
-            Expr::Index(index) => expression = index.object(),
-            Expr::Call(call) => expression = call.callee(),
-            _ => return None,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use falcon_analyze::ParsedFile;
-    use falcon_dart_parser::parse;
+    use super::UseLateForPrivateFieldsAndVariables;
+    use crate::lint::test_support::TestIndexes;
+    use falcon_analyze::{ParsedFile, RuleAnalysis};
+    use falcon_config::FalconConfig;
+    use falcon_diagnostics::Span;
+    use std::path::Path;
     use std::sync::Arc;
 
-    #[test]
-    fn declaration_scopes_distinguish_library_part_trees() {
-        let first_source = "class A { int? _x; }";
-        let second_source = "class B { int? _x; }";
-        let first = parse(first_source);
-        let second = parse(second_source);
-        assert!(first.errors.is_empty(), "{:?}", first.errors);
-        assert!(second.errors.is_empty(), "{:?}", second.errors);
-        let first = Arc::new(ParsedFile {
-            source: first_source.into(),
-            tree: first.tree,
+    fn assert_only_field(source: &str, owner: &str) {
+        let falcon_dart_parser::ParseResult { errors, tree } = falcon_dart_parser::parse(source);
+        assert!(errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(ParsedFile {
+            source: source.into(),
+            tree,
         });
-        let second = Arc::new(ParsedFile {
-            source: second_source.into(),
-            tree: second.tree,
-        });
-        let first_program = first.program();
-        let second_program = second.program();
-        let first_declaration = first_program.declarations().next().unwrap();
-        let second_declaration = second_program.declarations().next().unwrap();
-        let mut scopes = DeclarationScopes::of(first_program, 0);
-        scopes.extend(DeclarationScopes::of(second_program, 1));
+        let path = Path::new("main.dart");
+        let config = FalconConfig::default();
+        let indexes = TestIndexes::single(path, &parsed, true);
+        let context = indexes.context(path, &config, &parsed);
+        let diagnostics = UseLateForPrivateFieldsAndVariables.analyze(
+            "use-late-for-private-fields-and-variables",
+            parsed.program(),
+            &context,
+        );
+        let owner_start = source.find(owner).unwrap();
+        let field_start = owner_start + source[owner_start..].find("_value").unwrap();
+        assert_eq!(
+            diagnostics.iter().map(|diagnostic| diagnostic.span).collect::<Vec<_>>(),
+            [Span {
+                start: field_start,
+                end: field_start + "_value".len(),
+            }],
+        );
+    }
 
-        assert_eq!(scopes.members.len(), 2);
-        assert_eq!(scopes.types["A"], (0, first_declaration.syntax().id()));
-        assert_eq!(scopes.types["B"], (1, second_declaration.syntax().id()));
-        for owner in scopes.types.values() {
-            assert!(scopes.members[owner].contains("_x"));
-        }
+    #[test]
+    fn constructor_initialization_disqualifies_only_the_declaring_field() {
+        assert_only_field(
+            r"
+class First {
+  int? _value;
+  First(this._value);
+}
+class Second {
+  int? _value;
+  void setValue() {
+    _value = 1;
+    print(_value!);
+  }
+}
+class Third {
+  int? _value;
+  Third() : _value = null;
+}
+",
+            "class Second",
+        );
+    }
+
+    #[test]
+    fn library_variables_precede_inherited_and_extension_on_type_members() {
+        assert_only_field(
+            r"
+int? _value;
+class Parent {
+  int? _value;
+}
+class Child extends Parent {
+  void readLibraryVariable() {
+    print(_value);
+  }
+}
+class Declared {
+  int? _value;
+  void readDeclaredField() {
+    print(_value);
+  }
+}
+extension Reader on Parent {
+  void readLibraryVariable() {
+    print(_value);
+  }
+}
+",
+            "class Parent",
+        );
     }
 }
+
+

@@ -36,23 +36,15 @@ pub enum ConstantValue {
     /// A canonical instance: its class, runtime type arguments, and every
     /// field's value keyed by declaring class and field name.
     Instance(
-        ConstantDeclaration,
+        DeclarationIdentity,
         Vec<ConstantType>,
-        Vec<(ConstantDeclaration, String, ConstantValue)>,
+        Vec<(DeclarationIdentity, String, ConstantValue)>,
     ),
-    EnumValue(ConstantDeclaration, String),
+    EnumValue(DeclarationIdentity, String),
     /// A type literal (`int`, `List`), compared after instantiate-to-bounds.
     Type(ConstantType),
     /// A canonical function or constructor tear-off and its callable type.
-    TearOff(ConstantDeclaration, String, ConstantType),
-}
-
-/// Structural declaration identity, independent of display/debug formatting.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum ConstantDeclaration {
-    Project(crate::LibraryId, crate::InternedString),
-    Sdk(crate::InternedString, crate::InternedString),
-    Package(crate::InternedString, crate::InternedString, Option<u32>),
+    TearOff(DeclarationIdentity, String, ConstantType),
 }
 
 /// Resolved type identity retained in explicitly typed constants.
@@ -62,7 +54,7 @@ pub enum ConstantType {
     Void,
     Never,
     Null,
-    Interface(ConstantDeclaration, Vec<ConstantType>, bool),
+    Interface(DeclarationIdentity, Vec<ConstantType>, bool),
     Function(
         Box<ConstantType>,
         Vec<ConstantType>,
@@ -91,6 +83,59 @@ impl Number {
             Self::Float(bits) => f64::from_bits(bits),
         }
     }
+}
+
+/// Whether instances use primitive equality rather than a custom `==`.
+/// Enums and `Object` qualify; incomplete class hierarchies do not.
+pub fn class_has_primitive_equality(
+    identity: &DeclarationIdentity,
+    signatures: &SignatureIndex,
+) -> bool {
+    if signatures.is_enum(identity) || *identity == DeclarationIdentity::OBJECT {
+        return true;
+    }
+    let custom = |facts: &crate::MemberFacts| {
+        !facts.is_static
+            && !facts.is_abstract
+            && facts.declaring_type != DeclarationIdentity::OBJECT
+    };
+    !signatures
+        .declared_member_facts(identity, "==")
+        .iter()
+        .any(custom)
+        && signatures
+            .inherited_member_facts(identity, "==")
+            .is_some_and(|facts| !facts.iter().any(custom))
+}
+
+/// Checks every syntactic operand of a constant expression, including operands
+/// in unevaluated branches. Stops checking after the first rejected operand.
+pub fn constant_operands_all<'a>(
+    expression: Expr<'a>,
+    allowed: impl FnMut(Expr<'a>) -> bool,
+) -> bool {
+    use falcon_syntax::cst::visit::{Visitor, walk_expr};
+
+    struct Operands<F> {
+        allowed: F,
+        accepted: bool,
+    }
+    impl<'a, F: FnMut(Expr<'a>) -> bool> Visitor<'a> for Operands<F> {
+        fn visit_expr(&mut self, expression: Expr<'a>) {
+            if self.accepted {
+                self.accepted = (self.allowed)(expression);
+                if self.accepted {
+                    walk_expr(self, expression);
+                }
+            }
+        }
+    }
+    let mut operands = Operands {
+        allowed,
+        accepted: true,
+    };
+    operands.visit_expr(expression);
+    operands.accepted
 }
 
 /// Evaluates in the owner's declaring library, including loaded external sources;
@@ -686,9 +731,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 };
                 self.signatures
                     .is_enum_value(identity, name.name())
-                    .then(|| {
-                        ConstantValue::EnumValue(declaration_key(identity), name.name().to_owned())
-                    })
+                    .then(|| ConstantValue::EnumValue(identity.clone(), name.name().to_owned()))
             }
             Expr::This(_)
             | Expr::Super(_)
@@ -749,36 +792,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             let ConstantValue::Instance(class, ..) = left.as_ref() else {
                 return Some(eval_equality(&op, &left, &right));
             };
-            let identity = match class {
-                ConstantDeclaration::Project(library, name) => DeclarationIdentity::Library {
-                    library: *library,
-                    name: name.clone(),
-                },
-                ConstantDeclaration::Sdk(library, name) => DeclarationIdentity::Sdk {
-                    library: library.clone(),
-                    name: name.clone(),
-                },
-                ConstantDeclaration::Package(package, name, copy) => DeclarationIdentity::Package {
-                    package: package.clone(),
-                    name: name.clone(),
-                    copy: *copy,
-                },
-            };
-            let custom = |fact: &crate::MemberFacts| {
-                !fact.is_static
-                    && !fact.is_abstract
-                    && fact.declaring_type != DeclarationIdentity::OBJECT
-            };
-            if self
-                .signatures
-                .declared_member_facts(&identity, "==")
-                .iter()
-                .any(custom)
-                || self
-                    .signatures
-                    .inherited_member_facts(&identity, "==")
-                    .is_none_or(|facts| facts.iter().any(custom))
-            {
+            if !class_has_primitive_equality(class, self.signatures) {
                 return None;
             }
         }
@@ -864,7 +878,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         if *nullable && !target.nullable() {
             return Some(false);
         }
-        if *class == declaration_key(identity) && arguments.len() == target_arguments.len() {
+        if class == identity && arguments.len() == target_arguments.len() {
             let mut unknown = false;
             for (argument, target) in arguments.iter().zip(target_arguments.iter()) {
                 match self.type_cast_accepts(argument, target) {
@@ -877,21 +891,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         }
         let source = ResolvedType::Interface {
             occurrence: Default::default(),
-            identity: match class {
-                ConstantDeclaration::Project(library, name) => DeclarationIdentity::Library {
-                    library: *library,
-                    name: name.clone(),
-                },
-                ConstantDeclaration::Sdk(library, name) => DeclarationIdentity::Sdk {
-                    library: library.clone(),
-                    name: name.clone(),
-                },
-                ConstantDeclaration::Package(package, name, copy) => DeclarationIdentity::Package {
-                    package: package.clone(),
-                    name: name.clone(),
-                    copy: *copy,
-                },
-            },
+            identity: class.clone(),
             arguments: Vec::new().into(),
             nullable: false,
             extension_type: false,
@@ -1022,7 +1022,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         }
         if let Some(signature) = self.signatures.function(&identity) {
             return Some(Arc::new(ConstantValue::TearOff(
-                declaration_key(&identity),
+                identity.clone(),
                 String::new(),
                 constant_type(&signature.function_type())?,
             )));
@@ -1040,7 +1040,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
     ) -> Option<Option<Arc<ConstantValue>>> {
         if self.signatures.is_enum_value(&owner, name) {
             return Some(Some(Arc::new(ConstantValue::EnumValue(
-                declaration_key(&owner),
+                owner.clone(),
                 name.to_owned(),
             ))));
         }
@@ -1070,13 +1070,8 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             .any(|fact| fact.is_static && fact.kind == crate::MemberKind::Method)
         {
             return Some(self.signatures.member(&owner, name).and_then(|signature| {
-                constant_type(&signature.function_type()).map(|ty| {
-                    Arc::new(ConstantValue::TearOff(
-                        declaration_key(&owner),
-                        name.to_owned(),
-                        ty,
-                    ))
-                })
+                constant_type(&signature.function_type())
+                    .map(|ty| Arc::new(ConstantValue::TearOff(owner.clone(), name.to_owned(), ty)))
             }));
         }
         let signatures = self.signatures;
@@ -1984,7 +1979,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         if !known || self.failed {
             return None;
         }
-        let class = declaration_key(identity);
+        let class = identity.clone();
         let mut fields = fields
             .into_iter()
             .map(|(name, value)| Some((class.clone(), name, value?)))
@@ -2005,7 +2000,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         body: &ConstConstructorBody,
         type_args: &[ResolvedType],
         environment: &HashMap<String, Option<ConstantValue>>,
-    ) -> Option<(ConstantDeclaration, Vec<ConstantType>)> {
+    ) -> Option<(DeclarationIdentity, Vec<ConstantType>)> {
         let signature = self.signatures.constructor(identity, constructor)?;
         if !type_args.is_empty()
             && let Some(arguments) = type_args
@@ -2013,7 +2008,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 .map(constant_type)
                 .collect::<Option<Vec<_>>>()
         {
-            return Some((declaration_key(identity), arguments));
+            return Some((identity.clone(), arguments));
         }
         let parameter_types = body
             .params
@@ -2037,7 +2032,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 value_type(environment.get(name)?.as_ref()?)
             })
             .collect::<Option<Vec<_>>>()?;
-        Some((declaration_key(identity), arguments))
+        Some((identity.clone(), arguments))
     }
 }
 
@@ -2107,7 +2102,7 @@ fn value_size(value: &ConstantValue, limit: usize) -> Option<usize> {
         ConstantValue::Instance(_, _, values) => {
             for (_, name, value) in values {
                 remaining = remaining
-                    .checked_sub(std::mem::size_of::<ConstantDeclaration>())?
+                    .checked_sub(std::mem::size_of::<DeclarationIdentity>())?
                     .checked_sub(std::mem::size_of::<String>())?
                     .checked_sub(name.len())?;
                 remaining = remaining.checked_sub(value_size(value, remaining)?)?;
@@ -2130,7 +2125,7 @@ fn value_size(value: &ConstantValue, limit: usize) -> Option<usize> {
 fn value_type(value: &ConstantValue) -> Option<ConstantType> {
     let core = |name, arguments: &[ConstantType]| {
         Some(ConstantType::Interface(
-            declaration_key(&DeclarationIdentity::sdk("dart:core", name)),
+            DeclarationIdentity::sdk("dart:core", name),
             arguments.to_vec(),
             false,
         ))
@@ -2299,22 +2294,6 @@ fn decode_string_content(
     Some(())
 }
 
-fn declaration_key(identity: &DeclarationIdentity) -> ConstantDeclaration {
-    match identity {
-        DeclarationIdentity::Library { library, name } => {
-            ConstantDeclaration::Project(*library, name.clone())
-        }
-        DeclarationIdentity::Sdk { library, name } => {
-            ConstantDeclaration::Sdk(library.clone(), name.clone())
-        }
-        DeclarationIdentity::Package {
-            package,
-            name,
-            copy,
-        } => ConstantDeclaration::Package(package.clone(), name.clone(), *copy),
-    }
-}
-
 /// The identity of a resolved type; `None` when it is unknown or names a
 /// type parameter.
 fn constant_type(ty: &ResolvedType) -> Option<ConstantType> {
@@ -2338,7 +2317,7 @@ fn constant_type(ty: &ResolvedType) -> Option<ConstantType> {
             arguments,
             nullable,
             ..
-        } => ConstantType::Interface(declaration_key(identity), positional(arguments)?, *nullable),
+        } => ConstantType::Interface(identity.clone(), positional(arguments)?, *nullable),
         ResolvedType::Function {
             return_type,
             positional: parameters,
@@ -2384,21 +2363,7 @@ fn resolved_constant_type(ty: &ConstantType) -> ResolvedType {
         ConstantType::Null => ResolvedType::Null,
         ConstantType::Interface(declaration, arguments, nullable) => ResolvedType::Interface {
             occurrence: Default::default(),
-            identity: match declaration {
-                ConstantDeclaration::Project(library, name) => DeclarationIdentity::Library {
-                    library: *library,
-                    name: name.clone(),
-                },
-                ConstantDeclaration::Sdk(library, name) => DeclarationIdentity::Sdk {
-                    library: library.clone(),
-                    name: name.clone(),
-                },
-                ConstantDeclaration::Package(package, name, copy) => DeclarationIdentity::Package {
-                    package: package.clone(),
-                    name: name.clone(),
-                    copy: *copy,
-                },
-            },
+            identity: declaration.clone(),
             arguments: arguments.iter().map(resolved_constant_type).collect(),
             nullable: *nullable,
             extension_type: false,
@@ -2599,7 +2564,7 @@ mod tests {
     use crate::{IdentityIndex, IdentitySource, ParsedFile, QualifiedName, TypeIndex};
 
     #[test]
-    fn constant_declarations_share_interned_library_names() {
+    fn resolved_constant_type_preserves_interned_library_names() {
         with_constants(|_, model, _| {
             let identity = model.resolve_name("ConstBox").unwrap();
             let DeclarationIdentity::Library {
@@ -2609,14 +2574,14 @@ mod tests {
             else {
                 panic!("expected a shared library name");
             };
-            let declaration = declaration_key(&identity);
-            let ConstantDeclaration::Project(_, crate::InternedString::Shared(stored)) =
-                &declaration
-            else {
-                panic!("expected a shared library name");
-            };
-            assert!(Arc::ptr_eq(name, stored));
-            let constant = ConstantType::Interface(declaration, vec![], false);
+            let constant = constant_type(&ResolvedType::Interface {
+                occurrence: Default::default(),
+                identity: identity.clone(),
+                arguments: Vec::new().into(),
+                nullable: false,
+                extension_type: false,
+            })
+            .unwrap();
             let ResolvedType::Interface {
                 identity:
                     DeclarationIdentity::Library {
@@ -2678,6 +2643,66 @@ mod tests {
             panic!()
         };
         assert_eq!(decode_string(node).as_deref(), Some("a\n\\bc"));
+    }
+
+    #[test]
+    fn constant_operands_check_dead_branches_and_stop_at_rejection() {
+        for source in [
+            "const value = true ? 1 : blocked + later;",
+            "const value = false && blocked && later;",
+        ] {
+            let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+            assert!(errors.is_empty(), "{errors:?}");
+            let TopLevelDecl::Variable(declaration) =
+                tree.program(source).declarations().next().unwrap()
+            else {
+                panic!("expected a constant declaration");
+            };
+            let expression = declaration
+                .declarators()
+                .next()
+                .unwrap()
+                .initializer()
+                .unwrap();
+            let mut names = Vec::new();
+            assert!(!constant_operands_all(expression, |operand| {
+                if let Expr::Ident(identifier) = operand {
+                    names.push(identifier.name());
+                    return identifier.name() != "blocked";
+                }
+                true
+            }));
+            assert_eq!(names, ["blocked"]);
+            assert!(constant_operands_all(expression, |_| true));
+        }
+    }
+
+    #[test]
+    fn primitive_equality_rejects_custom_and_unknown_classes() {
+        with_constants(|_, model, signatures| {
+            assert!(class_has_primitive_equality(
+                &DeclarationIdentity::OBJECT,
+                signatures
+            ));
+            assert!(class_has_primitive_equality(
+                &model.resolve_name("Shade").unwrap(),
+                signatures,
+            ));
+            assert!(class_has_primitive_equality(
+                &model.resolve_name("ConstBox").unwrap(),
+                signatures,
+            ));
+            for name in ["CustomEquality", "InheritedEquality"] {
+                assert!(!class_has_primitive_equality(
+                    &model.resolve_name(name).unwrap(),
+                    signatures,
+                ));
+            }
+            assert!(!class_has_primitive_equality(
+                &DeclarationIdentity::sdk("dart:core", "UnknownClass"),
+                signatures,
+            ));
+        });
     }
 
     fn with_constants(test: impl FnOnce(Program<'_>, &SemanticModel<'_>, &SignatureIndex)) {
@@ -2800,6 +2825,7 @@ class CustomEquality {
   const CustomEquality();
   bool operator ==(Object other) => true;
 }
+class InheritedEquality extends CustomEquality {}
 const customEquality = CustomEquality() == CustomEquality();
 enum Shade { red }
 const Shade shade = .red;
@@ -3641,7 +3667,7 @@ const futureOrCast = null as FutureOr<int?>;
             assert_eq!(
                 *result,
                 ConstantType::Interface(
-                    declaration_key(&model.resolve_dotted(&["ImplicitConstructor"]).unwrap()),
+                    model.resolve_dotted(&["ImplicitConstructor"]).unwrap(),
                     Vec::new(),
                     false,
                 ),

@@ -7,7 +7,7 @@ use falcon_analyze::semantic_scope::SemanticState;
 use falcon_analyze::{DeclarationIdentity, QualifiedName, ResolvedType};
 use falcon_syntax::cst::*;
 
-use crate::lint::function_bodies::FunctionBodies;
+use falcon_analyze::{AnalyzeContext, FunctionBodies};
 
 pub(crate) fn hook_name(name: &str) -> bool {
     name.strip_prefix('_')
@@ -179,13 +179,13 @@ struct Call<'a> {
 /// Records semantic calls, then computes the least fixed point of composing
 /// custom hooks. A useX name alone never establishes hook identity.
 pub(crate) struct HookCalls<'a> {
-    bodies: FunctionBodies<'a>,
+    bodies: &'a FunctionBodies<'a>,
     custom: Vec<CustomHook<'a>>,
     calls: Vec<Call<'a>>,
     hooks: HashSet<(usize, usize)>,
 }
 impl<'a> HookCalls<'a> {
-    pub(crate) fn new(program: Program<'a>) -> Self {
+    pub(crate) fn new(program: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> Self {
         let mut custom = Vec::new();
         for declaration in program.declarations() {
             match declaration {
@@ -230,7 +230,7 @@ impl<'a> HookCalls<'a> {
             }
         }
         Self {
-            bodies: FunctionBodies::new(program),
+            bodies: ctx.function_bodies(program),
             custom,
             calls: Vec::new(),
             hooks: HashSet::new(),

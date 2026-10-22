@@ -1,9 +1,11 @@
 //! Rule contracts and parallel analysis engine.
 
+pub mod const_contexts;
 pub mod constant_value;
 pub mod context;
 pub mod cross_file;
 pub mod environment;
+pub mod function_bodies;
 mod intern;
 mod memo;
 pub mod parallel;
@@ -15,23 +17,25 @@ pub mod source;
 pub mod structural_scope;
 pub mod suppressions;
 
+pub use const_contexts::ConstContexts;
 pub use constant_value::{
-    ConstantCache, ConstantDeclaration, ConstantType, ConstantValue, Construction,
-    evaluate_constant, evaluate_constant_cached, evaluate_constant_in_library,
-    evaluate_constant_in_member_context, evaluate_constant_name_with_local_values,
-    evaluate_constant_with_local_values, evaluate_construction,
-    evaluate_construction_with_local_values, evaluate_pattern_constant, invocation_type_args,
-    parse_int,
+    ConstantCache, ConstantType, ConstantValue, Construction, evaluate_constant,
+    evaluate_constant_cached, evaluate_constant_in_library, evaluate_constant_in_member_context,
+    evaluate_constant_name_with_local_values, evaluate_constant_with_local_values,
+    evaluate_construction, evaluate_construction_with_local_values, evaluate_pattern_constant,
+    invocation_type_args, parse_int,
 };
 pub use context::AnalyzeContext;
 pub use cross_file::{
     CrossFileRule, CrossFileRuleAnalysis, CrossFileRuleRegistry, NodeRef, ParsedFile, ProjectFile,
     SemanticIndexes,
 };
+pub use environment::packages::package_identities;
 pub use environment::{
     AnalysisEnvironment, ExternalLibraries, ExternalOrigin, Feature, LanguageVersion,
     PackageConfig, percent_decode,
 };
+pub use function_bodies::{BodyOwner, FunctionBodies, FunctionBodyInfo};
 pub use intern::InternedString;
 pub use parallel::{
     Workspace, analyze_parallel, analyze_parallel_collecting,

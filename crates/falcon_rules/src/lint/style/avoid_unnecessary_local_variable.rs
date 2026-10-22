@@ -4,7 +4,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::resolve::lexical_usage::local_declarations;
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
@@ -20,7 +19,7 @@ impl Rule for AvoidUnnecessaryLocalVariable {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let references = local_declarations(program);
+        let references = ctx.local_declarations(program);
         let mut uses = HashMap::new();
         for id in references.values() {
             *uses.entry(*id).or_insert(0usize) += 1;
@@ -37,7 +36,7 @@ impl Rule for AvoidUnnecessaryLocalVariable {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    references: HashMap<usize, NodeId>,
+    references: &'a HashMap<usize, NodeId>,
     uses: HashMap<NodeId, usize>,
     mutated: &'a HashSet<NodeId>,
     diagnostics: Vec<Diagnostic>,

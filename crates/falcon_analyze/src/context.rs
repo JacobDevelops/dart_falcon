@@ -9,12 +9,13 @@ use falcon_syntax::cst::{FunctionKind, NodeId, Program, SyntaxToken, SyntaxTree,
 
 use crate::environment::{AnalysisEnvironment, LanguageVersion};
 use crate::resolve::flow_writes::FlowWrites;
-use crate::resolve::lexical_usage::{LocalWrite, local_writes};
+use crate::resolve::lexical_usage::{LocalWrite, local_declarations, local_writes};
 use crate::resolve::{
     IdentityIndex, LibraryUnit, ResolvedType, SemanticModel, SignatureIndex, TypeIndex,
     TypeParameterScope,
 };
 
+use crate::{ConstContexts, FunctionBodies};
 use crate::{ConstantCache, ParsedFile};
 
 /// Lazily computed facts shared by all rules analyzing one file.
@@ -23,6 +24,11 @@ pub struct AnalysisCache<'a> {
     flow_writes: OnceLock<Arc<FlowWrites>>,
     local_writes: OnceLock<LocalWrites>,
     globals: OnceLock<HashMap<&'a str, ResolvedType>>,
+    function_bodies: OnceLock<FunctionBodies<'a>>,
+    const_contexts: OnceLock<ConstContexts>,
+    local_declarations: OnceLock<HashMap<usize, NodeId>>,
+    package: OnceLock<crate::environment::packages::FilePackage>,
+    same_package: Mutex<HashMap<std::path::PathBuf, bool>>,
     constants: ConstantCache,
     config_errors: Mutex<Vec<Diagnostic>>,
 }
@@ -151,8 +157,73 @@ impl<'a> AnalyzeContext<'a> {
         self.environment
     }
 
+    /// Package facts shared by every rule; standalone callers discover them once.
+    pub fn file_package(&self) -> &crate::environment::packages::FilePackage {
+        self.cache.package.get_or_init(|| {
+            self.environment.map_or_else(
+                || crate::environment::packages::FilePackage::discover(self.file_path),
+                |environment| environment.file_package(self.file_path),
+            )
+        })
+    }
+
+    pub fn package(&self) -> Option<&crate::PackageIdentity> {
+        self.file_package().identity()
+    }
+
+    pub fn lib_dir_package(&self) -> Option<&crate::PackageIdentity> {
+        self.file_package().lib_identity()
+    }
+
+    /// Compare declaration source ownership using the environment's package snapshot.
+    pub fn in_same_package(&self, path: &std::path::Path) -> bool {
+        let Some(own) = self.package() else {
+            return false;
+        };
+        if path == self.file_path {
+            return true;
+        }
+        let mut packages = self.cache.same_package.lock().unwrap();
+        if let Some(&same_package) = packages.get(path) {
+            return same_package;
+        }
+        let same_package = if let Some(environment) = self.environment {
+            environment
+                .file_package(path)
+                .identity()
+                .is_some_and(|package| package.lib_root == own.lib_root)
+        } else {
+            crate::environment::packages::FilePackage::discover(path)
+                .identity()
+                .is_some_and(|package| package.lib_root == own.lib_root)
+        };
+        packages.insert(path.to_path_buf(), same_package);
+        same_package
+    }
+
     pub fn tree(&self) -> &'a SyntaxTree {
         &self.parsed.tree
+    }
+
+    /// Function ownership and try boundaries collected once for this file.
+    pub fn function_bodies(&self, program: Program<'a>) -> &FunctionBodies<'a> {
+        self.cache
+            .function_bodies
+            .get_or_init(|| FunctionBodies::new(program))
+    }
+
+    /// Dart constant contexts collected once for this file.
+    pub fn const_contexts(&self, program: Program<'a>) -> &ConstContexts {
+        self.cache
+            .const_contexts
+            .get_or_init(|| ConstContexts::new(program))
+    }
+
+    /// Lexical identifier bindings collected once for this file.
+    pub fn local_declarations(&self, program: Program<'a>) -> &HashMap<usize, NodeId> {
+        self.cache
+            .local_declarations
+            .get_or_init(|| local_declarations(program))
     }
 
     /// Lexical writes collected once for this file's parsed program.
@@ -253,6 +324,8 @@ impl<'a> AnalyzeContext<'a> {
         environment: Option<&'a AnalysisEnvironment>,
         package_version: Option<LanguageVersion>,
     ) -> Self {
+        self.cache.package.take();
+        self.cache.same_package.get_mut().unwrap().clear();
         self.environment = environment;
         self.package_language_version = package_version;
         self

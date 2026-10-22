@@ -8,7 +8,7 @@ use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::function_bodies::FunctionBodies;
+use falcon_analyze::FunctionBodies;
 
 #[derive(Default)]
 pub struct PreferReturnAwait;
@@ -21,7 +21,7 @@ impl Rule for PreferReturnAwait {
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
-            bodies: FunctionBodies::new(program),
+            bodies: ctx.function_bodies(program),
             diagnostics: Vec::new(),
         }))
     }
@@ -29,7 +29,7 @@ impl Rule for PreferReturnAwait {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    bodies: FunctionBodies<'a>,
+    bodies: &'a FunctionBodies<'a>,
     diagnostics: Vec<Diagnostic>,
 }
 

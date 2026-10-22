@@ -16,7 +16,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
 use crate::lint::flutter::{constructor_span, scoped_constructor_invocation};
-use crate::lint::function_bodies::FunctionBodies;
+use falcon_analyze::FunctionBodies;
 
 const CLEANUP: [&str; 3] = ["dispose", "close", "cancel"];
 
@@ -32,7 +32,7 @@ impl Rule for DisposeProviders {
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
             program,
-            bodies: FunctionBodies::new(program),
+            bodies: ctx.function_bodies(program),
             mutated: ctx.mutated_declarations(program),
             providers: Vec::new(),
         }))
@@ -49,7 +49,7 @@ struct Provider<'a> {
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     program: Program<'a>,
-    bodies: FunctionBodies<'a>,
+    bodies: &'a FunctionBodies<'a>,
     mutated: &'a HashSet<NodeId>,
     providers: Vec<Provider<'a>>,
 }

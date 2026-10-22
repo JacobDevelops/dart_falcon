@@ -39,7 +39,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{self as cst_visit, Visitor};
 use falcon_syntax::cst::{self, AstChildren, Span};
 
-use crate::lint::const_eval::ConstructorConstContexts as ConstContexts;
+use falcon_analyze::ConstContexts;
 use crate::lint::const_eval::mentions_type_parameter;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState, explicit_call_receiver};
 
@@ -60,7 +60,7 @@ impl Rule for AvoidRedundantArgumentValues {
             diags: Vec::new(),
             targets: Targets {
                 ctx,
-                contexts: ConstContexts::new(program),
+                contexts: ctx.const_contexts(program),
                 locals: HashMap::new(),
             },
         }))
@@ -111,7 +111,7 @@ struct Collector<'a> {
 
 struct Targets<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    contexts: ConstContexts,
+    contexts: &'a ConstContexts,
     /// Local declarations keyed by the shared walker's visible binding identity.
     locals: HashMap<Span, Target<'static>>,
 }
@@ -558,7 +558,7 @@ impl Targets<'_> {
     ) -> bool {
         let mut checker = NonConstantFinder {
             found: false,
-            constant_context: self.contexts.contains(&argument.span()),
+            constant_context: self.contexts.contains_including_explicit(&argument.span()),
             state,
             caller,
         };

@@ -32,7 +32,7 @@ use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
 use crate::lint::expressions::is_parenthesized;
-use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
+use falcon_analyze::{BodyOwner, FunctionBodies};
 #[cfg(test)]
 use falcon_analyze::semantic_scope::visit_program;
 use falcon_analyze::semantic_scope::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
@@ -51,7 +51,7 @@ impl Rule for VoidChecks {
             ctx,
             pending_return: None,
             functions: Vec::new(),
-            bodies: FunctionBodies::new(program),
+            bodies: ctx.function_bodies(program),
             pattern_assignments: Vec::new(),
         };
         RulePreparation::Semantic(Box::new(collector))
@@ -66,7 +66,7 @@ struct Collector<'a> {
     /// function literal with its inferred return type, or a local function
     /// declaration (`None`), whose returns use the walker's return type.
     functions: Vec<(Span, Option<ResolvedType>)>,
-    bodies: FunctionBodies<'a>,
+    bodies: &'a FunctionBodies<'a>,
     pattern_assignments: Vec<Span>,
 }
 

@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::resolve::lexical_usage::local_declarations;
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
@@ -24,7 +23,7 @@ impl Rule for AvoidRecursiveCalls {
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            declarations: local_declarations(program),
+            declarations: ctx.local_declarations(program),
             diags: Vec::new(),
         }))
     }
@@ -32,7 +31,7 @@ impl Rule for AvoidRecursiveCalls {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    declarations: HashMap<usize, NodeId>,
+    declarations: &'a HashMap<usize, NodeId>,
     diags: Vec<Diagnostic>,
 }
 

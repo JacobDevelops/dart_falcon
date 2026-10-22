@@ -36,7 +36,7 @@ impl Rule for AvoidUndisposedInstances {
             signatures,
             retained: Vec::new(),
             barriers: Vec::new(),
-            locals: falcon_analyze::resolve::lexical_usage::local_declarations(program),
+            locals: ctx.local_declarations(program),
             diagnostics: Vec::new(),
         }))
     }
@@ -48,7 +48,7 @@ struct Collector<'a> {
     signatures: &'a SignatureIndex,
     retained: Vec<Span>,
     barriers: Vec<Span>,
-    locals: std::collections::HashMap<usize, NodeId>,
+    locals: &'a std::collections::HashMap<usize, NodeId>,
     diagnostics: Vec<Diagnostic>,
 }
 

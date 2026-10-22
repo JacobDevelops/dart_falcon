@@ -48,7 +48,7 @@ impl Rule for PreferContainer {
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
-            contexts: crate::lint::const_eval::ConstContexts::of(program),
+            contexts: ctx.const_contexts(program),
             minimum: crate::lint::options::get::<Options>(ctx, Self::NAME)
                 .min_sequence
                 .max(3),
@@ -60,7 +60,7 @@ impl Rule for PreferContainer {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    contexts: crate::lint::const_eval::ConstContexts,
+    contexts: &'a falcon_analyze::ConstContexts,
     minimum: usize,
     covered: [usize; 6],
     diags: Vec<Diagnostic>,

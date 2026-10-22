@@ -17,7 +17,8 @@ impl Rule for PreferCorrectTestFileName {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let in_test = in_test_runner_directory(ctx.file_path());
+        let in_test = ctx.file_package().in_directory("test")
+            || ctx.file_package().in_directory("integration_test");
         let correct_name = crate::lint::declarations::has_test_file_suffix(ctx.file_path());
         if !in_test || correct_name {
             return RulePreparation::Diagnostics(Vec::new());
@@ -26,24 +27,6 @@ impl Rule for PreferCorrectTestFileName {
     }
 }
 
-fn in_test_runner_directory(path: &std::path::Path) -> bool {
-    let Some(pubspec) = crate::cross_file::enclosing_pubspec(path) else {
-        return false;
-    };
-    let Some(root) = pubspec.parent() else {
-        return false;
-    };
-    falcon_analyze::canonical_or_lexical(path)
-        .strip_prefix(root)
-        .is_ok_and(|relative| {
-            relative.components().next().is_some_and(|first| {
-                matches!(
-                    first.as_os_str().to_str(),
-                    Some("test" | "integration_test")
-                )
-            })
-        })
-}
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,

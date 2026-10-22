@@ -20,7 +20,6 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::resolve::lexical_usage::local_declarations;
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
@@ -39,7 +38,7 @@ impl Rule for PreferForIn {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             program,
-            locals: local_declarations(program),
+            locals: ctx.local_declarations(program),
             candidates: Vec::new(),
             diags: Vec::new(),
             unshadowed_list: true,
@@ -60,7 +59,7 @@ struct Candidate<'a> {
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     program: Program<'a>,
-    locals: HashMap<usize, NodeId>,
+    locals: &'a HashMap<usize, NodeId>,
     candidates: Vec<Candidate<'a>>,
     diags: Vec<Diagnostic>,
     unshadowed_list: bool,

@@ -24,7 +24,6 @@ use falcon_syntax::cst::*;
 use crate::lint::inherited_members::{
     InheritanceSource, inherited_concrete_member, inheriting_declaration,
 };
-use crate::lint::package_layout::is_in_lib_dir;
 use crate::lint::support::documentation::documented;
 
 #[derive(Default)]
@@ -39,7 +38,7 @@ impl Rule for AvoidRenamingMethodParameters {
         let (Some(identities), Some(signatures)) = (ctx.identities(), ctx.signatures()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
-        if !is_in_lib_dir(ctx.file_path()) {
+        if !ctx.file_package().in_directory("lib") {
             return RulePreparation::Diagnostics(Vec::new());
         }
         RulePreparation::Structural(Box::new(Collector {

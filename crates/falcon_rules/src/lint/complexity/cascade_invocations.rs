@@ -51,7 +51,6 @@ use falcon_syntax::cst::visit::{Visitor, for_each_stmt_list, walk_expr};
 use falcon_syntax::cst::*;
 
 use crate::lint::const_eval::mentions_type_parameter;
-use falcon_analyze::resolve::lexical_usage::local_declarations;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
@@ -66,7 +65,7 @@ impl Rule for CascadeInvocations {
         RulePreparation::Semantic(Box::new(Statements {
             program,
             ctx,
-            locals: local_declarations(program),
+            locals: ctx.local_declarations(program),
             prefixes: program
                 .imports()
                 .filter_map(|import| import.as_name())
@@ -184,7 +183,7 @@ struct Statements<'a> {
     program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
     /// Local declarations keyed by their identifier uses.
-    locals: HashMap<usize, NodeId>,
+    locals: &'a HashMap<usize, NodeId>,
     /// Import prefixes of this file.
     prefixes: HashSet<&'a str>,
     facts: HashMap<usize, Cascadable<'a>>,
@@ -202,7 +201,7 @@ impl<'a> SemanticRuleVisitor<'a> for Statements<'a> {
     fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
         let scope = Scope {
             state,
-            locals: &self.locals,
+            locals: self.locals,
             prefixes: &self.prefixes,
         };
         let facts = match node {

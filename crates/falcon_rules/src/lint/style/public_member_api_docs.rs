@@ -266,7 +266,7 @@ impl Rule for PublicMemberApiDocs {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        if crate::cross_file::lib_dir_package(ctx.file_path()).is_none() {
+        if ctx.lib_dir_package().is_none() {
             return RulePreparation::Diagnostics(Vec::new());
         }
         let model = ctx.identities().map(|identities| {

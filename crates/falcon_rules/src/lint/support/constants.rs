@@ -1,6 +1,6 @@
 //! Stable constants without runtime allocations or implicit extension receivers.
 
-use crate::lint::const_eval::{ConstContexts, constant_in_context, deferred_prefixes};
+use crate::lint::const_eval::{constant_in_context, deferred_prefixes};
 use falcon_analyze::constant_value::evaluate_stable_constant_with_local_values;
 use falcon_analyze::semantic_scope::SemanticState;
 use falcon_analyze::{AnalyzeContext, ConstantValue};
@@ -50,7 +50,7 @@ pub(crate) fn constant_value(
             return None;
         }
     }
-    if has_runtime_allocation(expression, state, ctx.parsed().program()) {
+    if has_runtime_allocation(expression, state, ctx) {
         return None;
     }
     if !constant_in_context(
@@ -72,7 +72,7 @@ pub(crate) fn constant_value(
 fn has_runtime_allocation(
     expression: Expr<'_>,
     state: &SemanticState<'_>,
-    program: Program<'_>,
+    ctx: &AnalyzeContext<'_>,
 ) -> bool {
     struct Allocations<'s, 'a> {
         state: &'s SemanticState<'a>,
@@ -118,5 +118,8 @@ fn has_runtime_allocation(
         found: false,
     };
     falcon_syntax::cst::visit::Visitor::visit_expr(&mut allocations, expression);
-    allocations.found && !ConstContexts::of(program).contains(&expression.span())
+    allocations.found
+        && !ctx
+            .const_contexts(ctx.parsed().program())
+            .contains(&expression.span())
 }

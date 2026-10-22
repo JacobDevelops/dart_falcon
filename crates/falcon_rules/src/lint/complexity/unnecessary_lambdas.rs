@@ -60,7 +60,6 @@ use falcon_syntax::cst::*;
 
 use crate::lint::declarations::{declaration_initializers, members_of};
 use crate::lint::lexical_usage::collection_for_inits;
-use falcon_analyze::resolve::lexical_usage::local_declarations;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
@@ -78,7 +77,7 @@ impl Rule for UnnecessaryLambdas {
             diags: Vec::new(),
             ctx,
             program,
-            locals: local_declarations(program),
+            locals: ctx.local_declarations(program),
             stable_locals: stable.0,
             optional_locals: stable.1,
             late_fields: late_fields(program),
@@ -212,7 +211,7 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     program: Program<'a>,
     /// The local declaration each identifier expression resolves to.
-    locals: HashMap<usize, NodeId>,
+    locals: &'a HashMap<usize, NodeId>,
     stable_locals: HashMap<NodeId, Callee>,
     /// Parameter shape of local callables, before function-type inference erases it.
     optional_locals: HashMap<NodeId, Vec<(Span, ParamKind)>>,

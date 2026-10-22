@@ -3,20 +3,20 @@
 use crate::lint::flutter_hooks::{
     hook_name, hook_widget_context, is_hook_builder_context, non_hook_widget, non_widget_context,
 };
-use crate::lint::function_bodies::FunctionBodies;
 use falcon_analyze::semantic_scope::SemanticState;
+use falcon_analyze::{AnalyzeContext, FunctionBodies};
 use falcon_syntax::cst::visit::{Visitor, walk_local_func_decl};
 use falcon_syntax::cst::*;
 /// An executable's permission never extends into another function body.
 pub(crate) struct HookContexts<'a> {
-    bodies: FunctionBodies<'a>,
+    bodies: &'a FunctionBodies<'a>,
     methods: Vec<(Span, &'a str, bool)>,
     hooks: Vec<Span>,
     builders: Vec<Span>,
 }
 
 impl<'a> HookContexts<'a> {
-    pub(crate) fn new(program: Program<'a>) -> Self {
+    pub(crate) fn new(program: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> Self {
         let mut methods = Vec::new();
         let mut hooks = Vec::new();
         for declaration in program.declarations() {
@@ -46,7 +46,7 @@ impl<'a> HookContexts<'a> {
         }
         LocalHooks(&mut hooks).visit_program(program);
         Self {
-            bodies: FunctionBodies::new(program),
+            bodies: ctx.function_bodies(program),
             methods,
             hooks,
             builders: Vec::new(),

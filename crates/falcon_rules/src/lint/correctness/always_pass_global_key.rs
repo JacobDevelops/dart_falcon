@@ -106,7 +106,7 @@ impl Rule for AlwaysPassGlobalKey {
             arguments: Vec::new(),
             state_receivers: Vec::new(),
             diagnostics: Vec::new(),
-            const_contexts: crate::lint::const_eval::ConstContexts::of(program),
+            const_contexts: ctx.const_contexts(program),
         }))
     }
 }
@@ -117,7 +117,7 @@ struct Collector<'a> {
     arguments: Vec<(DeclarationIdentity, Span)>,
     state_receivers: Vec<Span>,
     diagnostics: Vec<Diagnostic>,
-    const_contexts: crate::lint::const_eval::ConstContexts,
+    const_contexts: &'a falcon_analyze::ConstContexts,
 }
 
 fn cached_initializer(expression: Expr<'_>) -> bool {

@@ -36,6 +36,12 @@ pub struct CascadeAssignment<'a> {
     pub indexed: bool,
 }
 
+/// A resolved non-local reference, retaining member access and static dispatch.
+pub struct ReferencedDeclaration<'a> {
+    pub owner: DeclarationIdentity,
+    pub selector: crate::MemberSelector<'a>,
+}
+
 /// Observes semantic events without recursing into syntax.
 ///
 /// The shared traversal owns scope and inference state for every observer.
@@ -112,6 +118,7 @@ pub struct SemanticState<'a> {
     pub enclosing_type: Option<ResolvedType>,
     /// Lexical constant namespace, distinct from an extension's `this` on-type.
     pub constant_owner: Option<DeclarationIdentity>,
+    unnamed_extension_members: Option<AstChildren<'a, ClassMember<'a>>>,
     pub superclass: Option<ResolvedType>,
     globals: &'a HashMap<&'a str, ResolvedType>,
     /// `const` local variables in open scopes, with the environment scope
@@ -147,6 +154,7 @@ impl<'a> SemanticState<'a> {
             matched: Vec::new(),
             enclosing_type: None,
             constant_owner: None,
+            unnamed_extension_members: None,
             globals: ctx.globals(program),
             writes: ctx.flow_writes(program),
             superclass: None,
@@ -155,6 +163,240 @@ impl<'a> SemanticState<'a> {
             inference_depth: std::cell::Cell::new(0),
             inference_cache: std::cell::RefCell::new(HashMap::new()),
             inside_cascade: false,
+        })
+    }
+
+    /// Resolve a declaration reference in the current lexical and receiver scope.
+    /// Local bindings and ambiguous or unknown receivers have no declaration target.
+    /// `write` selects setters rather than getters; constructors retain their name.
+    pub fn referenced_declaration(
+        &self,
+        expression: Expr<'a>,
+        write: bool,
+    ) -> Option<ReferencedDeclaration<'a>> {
+        use crate::{MemberSelector, MemberSelectorKind as Kind};
+
+        let mut node = expression.unparenthesized();
+        while let Expr::GenericInstantiation(instantiation) = node {
+            node = instantiation.target().unparenthesized();
+        }
+        let kind = if write { Kind::Write } else { Kind::Read };
+        let target = |owner, selector| Some(ReferencedDeclaration { owner, selector });
+        let static_selector = |owner: &DeclarationIdentity, name: &'a str| {
+            self.signatures
+                .declared_member_facts(owner, name)
+                .iter()
+                .find_map(|fact| {
+                    if !fact.is_static {
+                        return None;
+                    }
+                    let selector_kind = match fact.kind {
+                        crate::MemberKind::Field { writable, .. } if !write || writable => {
+                            Kind::Field
+                        }
+                        crate::MemberKind::Setter if write => Kind::Write,
+                        crate::MemberKind::Getter | crate::MemberKind::Method if !write => {
+                            Kind::Read
+                        }
+                        _ => return None,
+                    };
+                    Some(MemberSelector::new(selector_kind, true, name))
+                })
+                .or_else(|| {
+                    self.model
+                        .identities()
+                        .static_member_selector(owner, name, write)
+                })
+        };
+        match node {
+            Expr::Ident(name) => {
+                if self.environment.is_bound(name.name())
+                    && !self.environment.is_bound_in_root_scope(name.name())
+                {
+                    return None;
+                }
+                if self
+                    .unnamed_extension_members
+                    .as_ref()
+                    .is_some_and(|members| {
+                        members.clone().any(|member| match member {
+                            ClassMember::Field(field) => field
+                                .declarators()
+                                .any(|declarator| declarator.name().name() == name.name()),
+                            ClassMember::Method(method) => method.name().name() == name.name(),
+                            ClassMember::Getter(getter) => getter.name().name() == name.name(),
+                            ClassMember::Setter(setter) => setter.name().name() == name.name(),
+                            _ => false,
+                        })
+                    })
+                {
+                    // Unnamed extensions have no addressable declaration identity,
+                    // but their own members still shadow the on-type and library.
+                    return None;
+                }
+                if let Some(owner) = &self.constant_owner {
+                    let facts = self.signatures.declared_member_facts(owner, name.name());
+                    if write
+                        && !facts.is_empty()
+                        && facts
+                            .iter()
+                            .all(|fact| matches!(fact.kind, MemberKind::Getter))
+                    {
+                        return None;
+                    }
+                    if let Some(fact) = facts.first() {
+                        if fact.is_static {
+                            let selector = static_selector(owner, name.name())?;
+                            return target(owner.clone(), selector);
+                        }
+                        // Extension bodies bind `this` to their on-type, not
+                        // to the extension declaration supplying the member.
+                        if !matches!(&self.enclosing_type,
+                            Some(ResolvedType::Interface { identity, .. }) if identity == owner)
+                        {
+                            return target(
+                                owner.clone(),
+                                MemberSelector::new(kind, false, name.name()),
+                            );
+                        }
+                    }
+                }
+                if matches!((&self.constant_owner, &self.enclosing_type),
+                    (Some(owner), Some(ResolvedType::Interface { identity, .. })) if owner == identity)
+                    && self.enclosing_type_declares(name.name())
+                    && let Some(receiver) = &self.enclosing_type
+                {
+                    let owner = self.referenced_member_owner(receiver, name.name(), write)?;
+                    return target(owner, MemberSelector::new(kind, false, name.name()));
+                }
+                let value = self.model.resolve_value(name.name());
+                if let Some(owner) = value
+                    .clone()
+                    .or_else(|| self.model.resolve_name(name.name()))
+                    .or_else(|| self.model.resolve_extension(name.name()))
+                {
+                    return target(
+                        owner,
+                        MemberSelector::new(
+                            if write && value.is_some() {
+                                Kind::Write
+                            } else {
+                                Kind::Declaration
+                            },
+                            false,
+                            "",
+                        ),
+                    );
+                }
+                let receiver = self.enclosing_type.as_ref()?;
+                let owner = self.referenced_member_owner(receiver, name.name(), write)?;
+                target(owner, MemberSelector::new(kind, false, name.name()))
+            }
+            Expr::Field(access) => {
+                let name = access.field().name();
+                let mut object = access.object().unparenthesized();
+                while let Expr::GenericInstantiation(instantiation) = object {
+                    object = instantiation.target().unparenthesized();
+                }
+                // Type-qualified constructor tear-offs precede ordinary static lookup.
+                let qualified = match object {
+                    Expr::Ident(identifier) if !self.environment.is_bound(identifier.name()) => {
+                        Some(QualifiedName::from(identifier.name()))
+                    }
+                    Expr::Field(field) => match field.object().unparenthesized() {
+                        Expr::Ident(prefix) if !self.environment.is_bound(prefix.name()) => {
+                            Some(QualifiedName::prefixed(prefix.name(), field.field().name()))
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if let Some(owner) = qualified.and_then(|name| self.model.resolve_name(name)) {
+                    let owner = self.model.unaliased(owner);
+                    if self.signatures.constructor(&owner, name).is_some() {
+                        return target(owner, MemberSelector::new(Kind::Constructor, false, name));
+                    }
+                }
+                if matches!(object, Expr::Super(_)) {
+                    let owner = self.signatures.resolved_super_member_owner(
+                        self.enclosing_type.as_ref()?,
+                        name,
+                        write,
+                        &self.model,
+                    )?;
+                    return target(owner, MemberSelector::new(kind, false, name));
+                }
+                if let Some(owner) = self.named_extension(object)
+                    && let Some(selector) = static_selector(&owner, name)
+                {
+                    return target(owner, selector);
+                }
+                if let Expr::Call(call) = object
+                    && let Some(owner) = self.named_extension(call.callee())
+                {
+                    return target(owner, MemberSelector::new(kind, false, name));
+                }
+                if let Expr::Ident(prefix) = object
+                    && !self.environment.is_bound(prefix.name())
+                {
+                    let qualified = QualifiedName::prefixed(prefix.name(), name);
+                    let value = self.model.resolve_value(qualified);
+                    if let Some(owner) = value
+                        .clone()
+                        .or_else(|| self.model.resolve_name(qualified))
+                        .or_else(|| self.model.resolve_extension(qualified))
+                    {
+                        return target(
+                            owner,
+                            MemberSelector::new(
+                                if write && value.is_some() {
+                                    Kind::Write
+                                } else {
+                                    Kind::Declaration
+                                },
+                                false,
+                                "",
+                            ),
+                        );
+                    }
+                    if let Some(owner) = self.model.resolve_name(prefix.name()) {
+                        let owner = self.model.unaliased(owner);
+                        let selector = static_selector(&owner, name)?;
+                        return target(owner, selector);
+                    }
+                }
+                let receiver =
+                    self.infer_access_receiver(access.object(), name, access.is_null_safe());
+                let owner = self.referenced_member_owner(&receiver, name, write)?;
+                target(owner, MemberSelector::new(kind, false, name))
+            }
+            _ => None,
+        }
+    }
+
+    /// Resolve an instance or implicit-extension member, including cascade members.
+    pub fn referenced_member_owner(
+        &self,
+        receiver: &ResolvedType,
+        name: &str,
+        write: bool,
+    ) -> Option<DeclarationIdentity> {
+        if name == "call"
+            && (matches!(receiver, ResolvedType::Function { .. })
+                || receiver.interface("dart:core", "Function"))
+        {
+            return None;
+        }
+        if write {
+            self.signatures
+                .resolved_writable_member_owner(receiver, name, &self.model)
+        } else {
+            self.signatures
+                .resolved_readable_member_owner(receiver, name, &self.model)
+        }
+        .or_else(|| {
+            self.signatures
+                .resolved_extension_access_owner(receiver, name, write, &self.model)
         })
     }
 
@@ -2461,6 +2703,15 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
         };
         if let Some((type_parameters, members)) = scoped {
             self.with_fresh_environment(|walker| {
+                let previous_unnamed_members = std::mem::replace(
+                    &mut walker.state.unnamed_extension_members,
+                    match node {
+                        TopLevelDecl::Extension(extension) if extension.name().is_none() => {
+                            Some(extension.members())
+                        }
+                        _ => None,
+                    },
+                );
                 let previous_constant_owner = std::mem::replace(
                     &mut walker.state.constant_owner,
                     match node {
@@ -2578,6 +2829,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                 walker.state.type_parameters.pop();
                 walker.state.enclosing_type = previous_enclosing;
                 walker.state.constant_owner = previous_constant_owner;
+                walker.state.unnamed_extension_members = previous_unnamed_members;
             });
         } else if matches!(node, TopLevelDecl::Function(_)) {
             self.with_fresh_environment(|walker| walk_top_level_decl(walker, node));

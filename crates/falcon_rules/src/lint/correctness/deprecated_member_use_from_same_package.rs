@@ -62,7 +62,7 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(package) = crate::cross_file::enclosing_package(ctx.file_path()) else {
+        let Some(package) = ctx.package() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let Some(state) = SemanticState::new(program, ctx) else {
@@ -103,7 +103,6 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
             increments: HashSet::new(),
             parameters: TypeParameterScope::default(),
             types: StoredTargets::default(),
-            extension_owners: Vec::new(),
             blocks: Vec::new(),
             locals: Vec::new(),
         };
@@ -118,8 +117,6 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
         excluded.index();
         let mut uses = Uses {
             ctx,
-            package_root: package.lib_root.clone(),
-            same_package: HashMap::new(),
             excluded,
             writes: frontier.writes,
             reads: frontier.reads,
@@ -127,7 +124,6 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
             diagnostics: Vec::new(),
             reported: HashSet::new(),
             locals: frontier.locals,
-            extension_owners: frontier.extension_owners,
             cascade_targets: HashSet::new(),
         };
         for target in &frontier.types.0 {
@@ -146,7 +142,7 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
                 crate::cross_file::resolve_directive_uri(
                     ctx.file_path(),
                     &uri.value(),
-                    Some(&package),
+                    Some(package),
                 )
             else {
                 continue;
@@ -302,7 +298,6 @@ struct Frontier<'a> {
     increments: HashSet<Span>,
     parameters: TypeParameterScope,
     types: StoredTargets,
-    extension_owners: Vec<ExtensionOwner>,
     blocks: Vec<Span>,
     locals: Vec<LocalDeprecation>,
 }
@@ -359,31 +354,6 @@ impl<'a> Visitor<'a> for Frontier<'a> {
                 let owner = n
                     .name()
                     .and_then(|name| self.model.resolve_extension(name.name()));
-                let mut members = Vec::new();
-                for member in n.members() {
-                    match member {
-                        ClassMember::Field(field) => {
-                            members.extend(field.declarators().map(|variable| {
-                                (variable.name().name().to_owned(), field.is_static())
-                            }))
-                        }
-                        ClassMember::Method(method) => {
-                            members.push((method.name().name().to_owned(), method.is_static()))
-                        }
-                        ClassMember::Getter(getter) => {
-                            members.push((getter.name().name().to_owned(), getter.is_static()))
-                        }
-                        ClassMember::Setter(setter) => {
-                            members.push((setter.name().name().to_owned(), setter.is_static()))
-                        }
-                        _ => {}
-                    }
-                }
-                self.extension_owners.push(ExtensionOwner {
-                    span: n.span(),
-                    identity: owner.clone(),
-                    members,
-                });
                 (owner, None)
             }
             TopLevelDecl::ExtensionType(n) => (self.model.resolve_name(n.name().name()), None),
@@ -764,8 +734,6 @@ impl ExcludedSpans {
 
 struct Uses<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    package_root: std::path::PathBuf,
-    same_package: HashMap<std::path::PathBuf, bool>,
     excluded: ExcludedSpans,
     writes: HashSet<Span>,
     reads: HashSet<Span>,
@@ -773,15 +741,9 @@ struct Uses<'a> {
     diagnostics: Vec<Diagnostic>,
     reported: HashSet<(usize, usize, String)>,
     locals: Vec<LocalDeprecation>,
-    extension_owners: Vec<ExtensionOwner>,
     cascade_targets: HashSet<Span>,
 }
 
-struct ExtensionOwner {
-    span: Span,
-    identity: Option<DeclarationIdentity>,
-    members: Vec<(String, bool)>,
-}
 
 struct Target<'a> {
     owner: DeclarationIdentity,
@@ -1057,15 +1019,7 @@ impl<'ctx> Uses<'ctx> {
         if self.excluded.contains(span) {
             return;
         }
-        let same_package = if let Some(&same_package) = self.same_package.get(path) {
-            same_package
-        } else {
-            let same_package = crate::cross_file::enclosing_package(path)
-                .is_some_and(|package| package.lib_root == self.package_root);
-            self.same_package.insert(path.to_owned(), same_package);
-            same_package
-        };
-        if !same_package {
+        if !self.ctx.in_same_package(path) {
             return;
         }
         push_deprecation(
@@ -1090,27 +1044,7 @@ impl<'ctx> Uses<'ctx> {
     where
         'ctx: 'node,
     {
-        if name == "call"
-            && (matches!(receiver, ResolvedType::Function { .. })
-                || matches!(receiver, ResolvedType::Interface { identity, .. }
-                    if identity.is_sdk("dart:core", "Function")))
-        {
-            return None;
-        }
-        let owner = if write {
-            state
-                .signatures
-                .resolved_writable_member_owner(receiver, name, &state.model)
-        } else {
-            state
-                .signatures
-                .resolved_readable_member_owner(receiver, name, &state.model)
-        }
-        .or_else(|| {
-            state
-                .signatures
-                .resolved_extension_access_owner(receiver, name, write, &state.model)
-        })?;
+        let owner = state.referenced_member_owner(receiver, name, write)?;
         let selector = MemberSelector::new(
             if write {
                 SelectorKind::Write
@@ -1141,323 +1075,37 @@ impl<'ctx> Uses<'ctx> {
         Span { start, end }
     }
 
-    fn extension(&self, name: QualifiedName<'_>) -> Option<DeclarationIdentity> {
-        SemanticModel::new(
-            self.ctx.file_path(),
-            self.ctx.parsed(),
-            self.ctx.identities()?,
-            self.ctx.types(),
-        )
-        .resolve_extension(name)
-    }
-
-    fn extension_member<'node>(
-        &self,
-        owner: &DeclarationIdentity,
-        name: &'node str,
-        span: Span,
-        write: bool,
-    ) -> Option<Target<'node>>
-    where
-        'ctx: 'node,
-    {
-        let selector = self
-            .ctx
-            .identities()?
-            .static_member_selector(owner, name, write)?;
-        Some(Target {
-            owner: owner.clone(),
-            selector: selector.into(),
-            name: name.into(),
-            span,
-        })
-    }
-
-    fn extension_reference(
-        &self,
-        object: Expr<'_>,
-        state: &SemanticState<'_>,
-    ) -> Option<DeclarationIdentity> {
-        let mut callee = object;
-        while let Expr::GenericInstantiation(instantiation) = callee {
-            callee = instantiation.target();
-        }
-        // A value or type in the current namespace shadows imported extensions.
-        match callee {
-            Expr::Ident(name)
-                if !state.environment.is_bound(name.name())
-                    && state.model.resolve_value(name.name()).is_none()
-                    && state.model.resolve_name(name.name()).is_none() =>
-            {
-                self.extension(name.name().into())
-            }
-            Expr::Field(access) => {
-                let field = access.field();
-                let Expr::Ident(prefix) = access.object().unparenthesized() else {
-                    return None;
-                };
-                if state.environment.is_bound(prefix.name()) {
-                    return None;
-                }
-                let name = QualifiedName::prefixed(prefix.name(), field.name());
-                if state.model.resolve_value(name).is_some()
-                    || state.model.resolve_name(name).is_some()
-                {
-                    return None;
-                }
-                self.extension(name)
-            }
-            _ => None,
-        }
-    }
-
-    fn extension_override(
-        &self,
-        object: Expr<'_>,
-        state: &SemanticState<'_>,
-    ) -> Option<DeclarationIdentity> {
-        let Expr::Call(call) = object.unparenthesized() else {
-            return None;
-        };
-        self.extension_reference(call.callee(), state)
-    }
-
-    /// Resolve a named constructor reference, retaining its complete qualifier.
-    fn constructor_reference<'node>(
-        &self,
-        node: Expr<'node>,
-        state: &SemanticState<'_>,
-    ) -> Option<Target<'node>> {
-        let Expr::Field(access) = node.unparenthesized() else {
-            return None;
-        };
-        let field = access.field();
-        let mut qualifier = access.object().unparenthesized();
-        while let Expr::GenericInstantiation(instantiation) = qualifier {
-            qualifier = instantiation.target().unparenthesized();
-        }
-        let qualified = match qualifier {
-            Expr::Ident(name) if !state.environment.is_bound(name.name()) => {
-                QualifiedName::from(name.name())
-            }
-            Expr::Field(access) => match access.object().unparenthesized() {
-                Expr::Ident(prefix) if !state.environment.is_bound(prefix.name()) => {
-                    QualifiedName::prefixed(prefix.name(), access.field().name())
-                }
-                _ => return None,
-            },
-            _ => return None,
-        };
-        let owner = state.model.unaliased(state.model.resolve_name(qualified)?);
-        state.signatures.constructor(&owner, field.name())?;
-        Some(constructor_target(owner, field.name(), node.span()))
-    }
-
     fn reference_target<'node>(
         &self,
         node: Expr<'node>,
-        state: &SemanticState<'_>,
+        state: &SemanticState<'node>,
         access: Option<bool>,
-    ) -> Option<Target<'node>>
-    where
-        'ctx: 'node,
-    {
-        if let Some(constructor) = self.constructor_reference(node, state) {
-            return Some(constructor);
+    ) -> Option<Target<'node>> {
+        let mut unwrapped = node.unparenthesized();
+        while let Expr::GenericInstantiation(instantiation) = unwrapped {
+            unwrapped = instantiation.target().unparenthesized();
         }
-        let mut node = node;
-        while let Expr::GenericInstantiation(instantiation) = node.unparenthesized() {
-            node = instantiation.target();
-        }
-        let write = access.unwrap_or_else(|| self.writes.contains(&node.span()));
-        match node.unparenthesized() {
-            Expr::Ident(id)
-                if !state.environment.is_bound(id.name())
-                    || state.environment.is_bound_in_root_scope(id.name()) =>
-            {
-                let extension = self.extension_owners.iter().find(|owner| {
-                    owner.span.contains(id.span())
-                });
-                if let Some(owner) = extension
-                    && let Some((_, is_static)) =
-                        owner.members.iter().find(|(name, _)| name == id.name())
-                {
-                    let owner = owner.identity.clone()?;
-                    let selector = if *is_static {
-                        self.ctx
-                            .identities()?
-                            .static_member_selector(&owner, id.name(), write)?
-                            .into()
-                    } else {
-                        MemberSelector::new(
-                            if write {
-                                SelectorKind::Write
-                            } else {
-                                SelectorKind::Read
-                            },
-                            false,
-                            id.name(),
-                        )
-                        .into()
-                    };
-                    return Some(Target {
-                        owner,
-                        selector,
-                        name: id.name().into(),
-                        span: id.span(),
-                    });
-                }
-                if let Some(receiver) = &state.enclosing_type
-                    && let Some(target) = self.member(receiver, id.name(), id.span(), state, write)
-                {
-                    return Some(target);
-                }
-                if extension.is_none()
-                    && let Some(ResolvedType::Interface { identity, .. }) = &state.enclosing_type
-                    && state
-                        .signatures
-                        .declared_member_facts(identity, id.name())
-                        .iter()
-                        .any(|fact| fact.is_static)
-                {
-                    return Some(Target {
-                        owner: identity.clone(),
-                        selector: self
-                            .ctx
-                            .identities()?
-                            .static_member_selector(identity, id.name(), write)?
-                            .into(),
-                        name: id.name().into(),
-                        span: id.span(),
-                    });
-                }
-                let value = state.model.resolve_value(id.name());
-                let owner = value
-                    .clone()
-                    .or_else(|| state.model.resolve_name(id.name()))
-                    .or_else(|| self.extension(id.name().into()))?;
-                Some(Target {
-                    owner,
-                    selector: MemberSelector::new(
-                        if write && value.is_some() {
-                            SelectorKind::Write
-                        } else {
-                            SelectorKind::Declaration
-                        },
-                        false,
-                        "",
-                    )
-                    .into(),
-                    name: id.name().into(),
-                    span: id.span(),
-                })
-            }
-            Expr::Field(access) => {
-                let object = access.object();
-                let field = access.field();
-                let span = if self.increments.contains(&node.span()) {
+        let write = access.unwrap_or_else(|| self.writes.contains(&unwrapped.span()));
+        let reference = state.referenced_declaration(node, write)?;
+        let constructor = reference.selector.kind == SelectorKind::Constructor;
+        let (name, span) = match unwrapped {
+            Expr::Ident(identifier) => (identifier.name(), identifier.span()),
+            Expr::Field(field) => (
+                field.field().name(),
+                if constructor || self.increments.contains(&unwrapped.span()) {
                     node.span()
                 } else {
-                    field.span()
-                };
-                if matches!(object.unparenthesized(), Expr::Super(_)) {
-                    let owner = state.signatures.resolved_super_member_owner(
-                        state.enclosing_type.as_ref()?,
-                        field.name(),
-                        write,
-                        &state.model,
-                    )?;
-                    return Some(Target {
-                        owner,
-                        selector: MemberSelector::new(
-                            if write {
-                                SelectorKind::Write
-                            } else {
-                                SelectorKind::Read
-                            },
-                            false,
-                            field.name(),
-                        )
-                        .into(),
-                        name: field.name().into(),
-                        span,
-                    });
-                }
-                if let Some(owner) = self.extension_reference(object, state)
-                    && let Some(target) = self.extension_member(&owner, field.name(), span, write)
-                {
-                    return Some(target);
-                }
-                if let Some(owner) = self.extension_override(object, state) {
-                    return Some(Target {
-                        owner,
-                        selector: MemberSelector::new(
-                            if write {
-                                SelectorKind::Write
-                            } else {
-                                SelectorKind::Read
-                            },
-                            false,
-                            field.name(),
-                        )
-                        .into(),
-                        name: field.name().into(),
-                        span,
-                    });
-                }
-                let mut qualifier = object;
-                while let Expr::GenericInstantiation(instantiation) = qualifier.unparenthesized() {
-                    qualifier = instantiation.target();
-                }
-                if let Expr::Ident(prefix) = qualifier.unparenthesized()
-                    && !state.environment.is_bound(prefix.name())
-                {
-                    let qualified = QualifiedName::prefixed(prefix.name(), field.name());
-                    let value = state.model.resolve_value(qualified);
-                    if let Some(owner) = value
-                        .clone()
-                        .or_else(|| state.model.resolve_name(qualified))
-                        .or_else(|| self.extension(qualified))
-                    {
-                        return Some(Target {
-                            owner,
-                            selector: MemberSelector::new(
-                                if write && value.is_some() {
-                                    SelectorKind::Write
-                                } else {
-                                    SelectorKind::Declaration
-                                },
-                                false,
-                                "",
-                            )
-                            .into(),
-                            name: field.name().into(),
-                            span,
-                        });
-                    }
-                    if let Some(owner) = state.model.resolve_name(prefix.name()) {
-                        let owner = state.model.unaliased(owner);
-                        let selector = self
-                            .ctx
-                            .identities()?
-                            .static_member_selector(&owner, field.name(), write)?
-                            .into();
-                        return Some(Target {
-                            owner,
-                            selector,
-                            name: field.name().into(),
-                            span,
-                        });
-                    }
-                }
-                let receiver =
-                    state.infer_access_receiver(object, field.name(), access.is_null_safe());
-                let mut target = self.member(&receiver, field.name(), node.span(), state, write)?;
-                target.span = span;
-                Some(target)
-            }
-            _ => None,
-        }
+                    field.field().span()
+                },
+            ),
+            _ => return None,
+        };
+        Some(Target {
+            owner: reference.owner,
+            selector: reference.selector.into(),
+            name: if constructor { "".into() } else { name.into() },
+            span,
+        })
     }
 
     fn arguments(&mut self, target: &Target, args: ArgList<'_>) {

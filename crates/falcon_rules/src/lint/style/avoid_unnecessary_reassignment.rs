@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::resolve::lexical_usage::local_declarations;
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
@@ -23,7 +22,7 @@ impl Rule for AvoidUnnecessaryReassignment {
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            references: local_declarations(program),
+            references: ctx.local_declarations(program),
             diagnostics: Vec::new(),
         }))
     }
@@ -31,7 +30,7 @@ impl Rule for AvoidUnnecessaryReassignment {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    references: HashMap<usize, NodeId>,
+    references: &'a HashMap<usize, NodeId>,
     diagnostics: Vec<Diagnostic>,
 }
 

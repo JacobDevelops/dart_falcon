@@ -5,7 +5,6 @@
 use std::collections::HashMap;
 
 use falcon_analyze::resolve::ResolvedType;
-use falcon_analyze::resolve::lexical_usage::local_declarations;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
@@ -22,7 +21,7 @@ impl Rule for AvoidUnusedAfterNullCheck {
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
-            declarations: local_declarations(program),
+            declarations: ctx.local_declarations(program),
             guards: Vec::new(),
             diags: Vec::new(),
         }))
@@ -40,7 +39,7 @@ struct Guard {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    declarations: HashMap<usize, NodeId>,
+    declarations: &'a HashMap<usize, NodeId>,
     guards: Vec<Guard>,
     diags: Vec<Diagnostic>,
 }

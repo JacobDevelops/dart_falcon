@@ -35,7 +35,7 @@ use falcon_syntax::cst::{
 };
 
 use crate::lint::expressions::identifier_name;
-use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
+use falcon_analyze::{BodyOwner, FunctionBodies};
 use crate::lint::support::null_assert_initializers::declaration_initializers;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState, returned_expressions};
 
@@ -53,7 +53,7 @@ impl Rule for NullCheckOnNullableTypeParameter {
         let collector = Collector {
             diagnostics: Vec::new(),
             ctx,
-            bodies: FunctionBodies::new(program),
+            bodies: ctx.function_bodies(program),
             contextual: declaration_initializers(program).iter().map(key).collect(),
             initializers: HashSet::new(),
             expected: HashMap::new(),
@@ -158,7 +158,7 @@ impl<'a> Visitor<'a> for Yields<'_, 'a> {
 struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    bodies: FunctionBodies<'a>,
+    bodies: &'a FunctionBodies<'a>,
     /// `x!` / `await x!` whose expected type is the walker's context type.
     contextual: HashSet<(usize, usize)>,
     /// `x!` / `await x!` initializing a local or `for` variable.

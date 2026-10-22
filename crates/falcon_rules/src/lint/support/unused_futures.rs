@@ -1,6 +1,6 @@
 //! Shared unused-Future detection and annotation exemptions.
 
-use crate::lint::function_bodies::FunctionBodies;
+use falcon_analyze::FunctionBodies;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Truth};
 use falcon_diagnostics::Diagnostic;
@@ -26,7 +26,7 @@ pub(crate) fn unused_futures<'a>(
         diagnostics: Vec::new(),
         ctx,
         rule,
-        bodies: FunctionBodies::new(program),
+        bodies: ctx.function_bodies(program),
         annotated_local_functions: HashSet::new(),
     };
     Box::new(collector)
@@ -36,7 +36,7 @@ struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
     rule: &'a UnusedFuturesRule,
-    bodies: FunctionBodies<'a>,
+    bodies: &'a FunctionBodies<'a>,
     annotated_local_functions: HashSet<Span>,
 }
 

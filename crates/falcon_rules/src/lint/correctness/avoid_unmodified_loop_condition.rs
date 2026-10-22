@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::resolve::ResolvedType;
-use falcon_analyze::resolve::lexical_usage::{LocalWrite, local_declarations};
+use falcon_analyze::resolve::lexical_usage::LocalWrite;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
@@ -34,7 +34,7 @@ impl Rule for AvoidUnmodifiedLoopCondition {
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
-            declarations: local_declarations(program),
+            declarations: ctx.local_declarations(program),
             writes: ctx.local_writes(program),
             captured: HashSet::new(),
             loops: Vec::new(),
@@ -53,7 +53,7 @@ struct Loop<'a> {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    declarations: HashMap<usize, NodeId>,
+    declarations: &'a HashMap<usize, NodeId>,
     writes: &'a [LocalWrite],
     captured: HashSet<NodeId>,
     loops: Vec<Loop<'a>>,

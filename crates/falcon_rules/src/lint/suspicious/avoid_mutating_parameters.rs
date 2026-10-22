@@ -4,7 +4,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::resolve::lexical_usage::local_declarations;
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
@@ -22,7 +21,7 @@ impl Rule for AvoidMutatingParameters {
     ) -> RulePreparation<'a> {
         RulePreparation::Structural(Box::new(Collector {
             ctx,
-            references: local_declarations(program),
+            references: ctx.local_declarations(program),
             parameters: HashSet::new(),
             writes: Vec::new(),
         }))
@@ -31,7 +30,7 @@ impl Rule for AvoidMutatingParameters {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    references: HashMap<usize, NodeId>,
+    references: &'a HashMap<usize, NodeId>,
     parameters: HashSet<NodeId>,
     writes: Vec<(NodeId, Span)>,
 }

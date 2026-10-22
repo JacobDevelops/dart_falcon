@@ -14,8 +14,8 @@ use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, parse_int};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::const_eval::ConstContexts;
-use crate::lint::const_eval::ConstructorConstContexts as ConstConstructorAsserts;
+use falcon_analyze::ConstContexts;
+
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
@@ -30,8 +30,7 @@ impl Rule for UseIsEvenRatherThanModulo {
         RulePreparation::Semantic(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-            contexts: ConstContexts::of(program),
-            asserts: ConstConstructorAsserts::new(program),
+            contexts: ctx.const_contexts(program),
         }))
     }
 }
@@ -39,8 +38,7 @@ impl Rule for UseIsEvenRatherThanModulo {
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    contexts: ConstContexts,
-    asserts: ConstConstructorAsserts,
+    contexts: &'a ConstContexts,
 }
 
 fn int_literal(expr: Expr<'_>) -> Option<i128> {
@@ -80,7 +78,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if int_literal(divisor) != Some(2)
             || !state.infer(left).interface("dart:core", "int")
             || self.contexts.contains(&span)
-            || self.asserts.in_const_constructor_assert(&span)
+            || self.contexts.in_const_constructor_assert(&span)
         {
             return;
         }

@@ -14,14 +14,11 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
-use falcon_analyze::{CrossFileRule, ProjectFile};
+use falcon_analyze::{AnalysisEnvironment, CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span};
 
-use super::{
-    ResolvedRef, canonical_package_path, enclosing_package, enclosing_pubspec,
-    resolve_directive_uri,
-};
+use super::{ResolvedRef, canonical_package_path, resolve_directive_uri};
 
 #[derive(Default)]
 pub struct NoImportCycles;
@@ -44,6 +41,8 @@ impl CrossFileRule for NoImportCycles {
         }
         let (paths, representatives): (Vec<PathBuf>, Vec<usize>) =
             representatives.into_iter().unzip();
+        let environment = AnalysisEnvironment::default();
+        let packages: Vec<_> = paths.iter().map(|path| environment.file_package(path)).collect();
         let by_path: HashMap<&Path, usize> = paths
             .iter()
             .enumerate()
@@ -52,7 +51,7 @@ impl CrossFileRule for NoImportCycles {
         let mut graph = vec![Vec::new(); paths.len()];
         for (index, &representative) in representatives.iter().enumerate() {
             let file = &files[representative];
-            let package = enclosing_package(&paths[index]);
+            let package = packages[index].identity();
             let program = file.program();
             let imports = program.imports().flat_map(|directive| {
                 std::iter::once(directive.uri()).chain(
@@ -70,7 +69,7 @@ impl CrossFileRule for NoImportCycles {
             });
             for uri in imports.chain(exports) {
                 let target =
-                    match resolve_directive_uri(&paths[index], &uri.value(), package.as_ref()) {
+                    match resolve_directive_uri(&paths[index], &uri.value(), package) {
                         Some(ResolvedRef::Path(path)) => by_path
                             .get(canonical_package_path(&path).as_path())
                             .copied(),
@@ -145,8 +144,8 @@ impl CrossFileRule for NoImportCycles {
                 .find(|&&(target, _)| target == cycle[1])
                 .map(|&(_, span)| span)
                 .unwrap();
-            let root = enclosing_pubspec(&paths[start])
-                .and_then(|manifest| manifest.parent().map(Path::to_path_buf));
+            let root = packages[start].metadata()
+                .and_then(|package| package.manifest.parent().map(Path::to_path_buf));
             let mut message = String::from("Remove a dependency to break this import/export cycle: `");
             for (index, &node) in cycle.iter().enumerate() {
                 if index > 0 {

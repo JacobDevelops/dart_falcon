@@ -2,7 +2,6 @@
 //! `ignored-annotations` replaces the default ["freezed", "Freezed", "unfreezed"].
 //! Annotation names match the final name segment exactly, including case.
 
-use falcon_analyze::resolve::lexical_usage::local_declarations;
 use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, Rule, RulePreparation,
     SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal, Truth,
@@ -49,7 +48,7 @@ impl Rule for AvoidReferencingSubclasses {
             signatures,
             ignored,
             owner: None,
-            references: local_declarations(program),
+            references: ctx.local_declarations(program),
             parameters: TypeParameterScope::default(),
             diagnostics: Vec::new(),
         }))
@@ -62,7 +61,7 @@ struct Collector<'a> {
     signatures: &'a SignatureIndex,
     ignored: &'a [String],
     owner: Option<DeclarationIdentity>,
-    references: HashMap<usize, NodeId>,
+    references: &'a HashMap<usize, NodeId>,
     parameters: TypeParameterScope,
     diagnostics: Vec<Diagnostic>,
 }

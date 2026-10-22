@@ -22,8 +22,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use falcon_analyze::{
-    CrossFileRule, CrossFileRuleRegistry, FileSuppressions, PackageIdentity, ProjectFile, Rule,
-    RuleRegistry, SemanticIndexes, canonical_or_lexical,
+    CrossFileRule, CrossFileRuleRegistry, FileSuppressions, ProjectFile, Rule, RuleRegistry,
+    SemanticIndexes,
 };
 use falcon_config::{
     ConfigError, ConfigPathSegment, FalconConfig, LoadedConfig, ResolvedSeverity, Rules,
@@ -493,46 +493,6 @@ pub fn run_cross_file(
     Ok(diagnostics)
 }
 
-pub fn package_identities<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Vec<PackageIdentity> {
-    let mut directories: Vec<_> = paths
-        .into_iter()
-        .filter_map(Path::parent)
-        .flat_map(Path::ancestors)
-        .collect();
-    directories.sort_unstable();
-    directories.dedup();
-    let mut packages: Vec<_> = directories
-        .into_iter()
-        .map(|directory| directory.join("pubspec.yaml"))
-        .filter(|manifest| manifest.is_file())
-        .map(|manifest| package_identity(&manifest))
-        .collect();
-    packages.sort_unstable_by(|left, right| left.lib_root.cmp(&right.lib_root));
-    packages.dedup_by(|left, right| left.lib_root == right.lib_root);
-    packages
-}
-
-fn package_identity(manifest: &Path) -> PackageIdentity {
-    let name = std::fs::read_to_string(manifest)
-        .ok()
-        .and_then(|source| package_name(&source))
-        .unwrap_or_default();
-    PackageIdentity {
-        name,
-        lib_root: canonical_or_lexical(&manifest.parent().unwrap().join("lib")),
-    }
-}
-
-fn package_name(source: &str) -> Option<String> {
-    match serde_yaml::from_str::<serde_yaml::Value>(source) {
-        Ok(manifest) => manifest.get("name")?.as_str().map(str::to_owned),
-        Err(_) => source.lines().find_map(|line| {
-            let value = line.strip_prefix("name:")?.trim();
-            serde_yaml::from_str::<String>(value).ok()
-        }),
-    }
-}
-
 /// Resolve per-path severities and discard diagnostics disabled by configuration.
 pub fn apply_severities(diags: &mut Vec<Diagnostic>, config: &FalconConfig) {
     diags.retain_mut(|diag| {
@@ -685,12 +645,18 @@ mod tests {
     use falcon_config::FalconConfig;
     #[test]
     fn package_identity_keeps_name_when_other_yaml_is_invalid() {
+        let root = tempfile::tempdir().unwrap();
+        let manifest = root.path().join("pubspec.yaml");
         for source in [
             "name: app\ndependencies: [\n",
             "name: 'app' # comment\ndependencies: [\n",
             "name: \"app\"\nversion: 1\nversion: 2\n",
         ] {
-            assert_eq!(super::package_name(source).as_deref(), Some("app"));
+            std::fs::write(&manifest, source).unwrap();
+            assert_eq!(
+                falcon_analyze::environment::packages::package_identity(&manifest).name,
+                "app",
+            );
         }
     }
 

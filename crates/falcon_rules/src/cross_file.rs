@@ -27,14 +27,17 @@ crate::declare_rules! {
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex};
-use std::time::SystemTime;
 
+use falcon_analyze::environment::packages::{
+    canonical_package_path, enclosing_pubspec, package_identity,
+};
 use falcon_analyze::{PackageIdentity, ProjectFile, canonical_or_lexical};
 use falcon_diagnostics::Span as DiagSpan;
 use falcon_syntax::cst::Program;
 use marked_yaml::{Node as MarkedNode, parse_yaml};
 use serde_yaml::Value;
+#[cfg(test)]
+use std::time::SystemTime;
 
 /// Unknown packages use a tolerant `lib/...` suffix instead of a concrete path.
 pub enum ResolvedRef {
@@ -44,53 +47,6 @@ pub enum ResolvedRef {
 
 fn slashed(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
-}
-
-/// Find the closest `pubspec.yaml` enclosing `path`.
-pub fn enclosing_pubspec(path: &Path) -> Option<PathBuf> {
-    let canon = canonical_or_lexical(path);
-    if canon.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml") && canon.is_file() {
-        return Some(canon);
-    }
-    let mut dir = canon.parent();
-    while let Some(d) = dir {
-        let pubspec = d.join("pubspec.yaml");
-        if pubspec.is_file() {
-            return Some(pubspec);
-        }
-        dir = d.parent();
-    }
-    None
-}
-
-/// Normalize package roots for virtual files without resolving their inner symlinks.
-pub fn canonical_package_path(path: &Path) -> PathBuf {
-    if let Ok(path) = std::fs::canonicalize(path) {
-        return path;
-    }
-    let path = canonical_or_lexical(path);
-    let Some(manifest) = enclosing_pubspec(&path) else {
-        return path;
-    };
-    let root = manifest.parent().unwrap();
-    let Ok(relative) = path.strip_prefix(root) else {
-        return path;
-    };
-    if let Ok(relative) = relative.strip_prefix("lib") {
-        canonical_lib_root(root).join(relative)
-    } else {
-        canonical_or_lexical(root).join(relative)
-    }
-}
-
-fn canonical_lib_root(root: &Path) -> PathBuf {
-    std::fs::canonicalize(root.join("lib"))
-        .unwrap_or_else(|_| canonical_or_lexical(root).join("lib"))
-}
-
-fn package_identity(manifest: &Path) -> PackageIdentity {
-    let root = canonical_or_lexical(manifest.parent().unwrap());
-    crate::package_identity(&root.join("pubspec.yaml"))
 }
 
 /// Locate a parsed YAML string in its original source using the same mapping keys
@@ -381,85 +337,6 @@ pub fn has_lib_component(path: &Path) -> bool {
     path.components().any(|c| c.as_os_str() == "lib")
 }
 
-struct CachedPackage {
-    modified: SystemTime,
-    length: u64,
-    #[cfg(unix)]
-    changed: (i64, i64),
-    name: String,
-}
-
-static PACKAGE_CACHE: LazyLock<Mutex<HashMap<PathBuf, CachedPackage>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// The package enclosing `path` (nearest `pubspec.yaml`), or `None` outside any
-/// package. Mirrors the analyzer's `RuleContext.package`.
-/// Parsed identities are shared between rules; manifest timestamp or length
-/// changes invalidate the bounded process-wide cache.
-pub fn enclosing_package(path: &Path) -> Option<PackageIdentity> {
-    let manifest = enclosing_pubspec(path)?;
-    let pubspec = canonical_or_lexical(&manifest);
-    let Ok(metadata) = std::fs::metadata(&pubspec) else {
-        return Some(package_identity(&manifest));
-    };
-    let Ok(modified) = metadata.modified() else {
-        return Some(package_identity(&manifest));
-    };
-    let length = metadata.len();
-    #[cfg(unix)]
-    let changed = {
-        use std::os::unix::fs::MetadataExt;
-        (metadata.ctime(), metadata.ctime_nsec())
-    };
-    let cached_name = {
-        let cache = PACKAGE_CACHE
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        cache.get(&pubspec).and_then(|entry| {
-            let valid = entry.modified == modified && entry.length == length;
-            #[cfg(unix)]
-            let valid = valid && entry.changed == changed;
-            valid.then(|| entry.name.clone())
-        })
-    };
-    if let Some(name) = cached_name {
-        return Some(PackageIdentity {
-            name,
-            // Resolve lib/ afresh: its symlink can change independently of pubspec.
-            lib_root: canonical_lib_root(manifest.parent()?),
-        });
-    }
-    let package = package_identity(&manifest);
-    let mut cache = PACKAGE_CACHE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    // Bound retained paths across long-running LSP sessions and test projects.
-    if cache.len() >= 256 {
-        cache.clear();
-    }
-    cache.insert(
-        pubspec,
-        CachedPackage {
-            modified,
-            length,
-            #[cfg(unix)]
-            changed,
-            name: package.name.clone(),
-        },
-    );
-    Some(package)
-}
-
-/// The enclosing package when `path` lies in that package's `lib/` directory.
-/// Mirrors the analyzer's `RuleContext.isInLibDir`: `None` for files outside
-/// any package or outside `lib/`.
-pub fn lib_dir_package(path: &Path) -> Option<PackageIdentity> {
-    let package = enclosing_package(path)?;
-    canonical_package_path(path)
-        .starts_with(&package.lib_root)
-        .then_some(package)
-}
-
 /// Directed reference graph over the file set: `adj[i]` lists the indices of the
 /// files that `files[i]` references via its imports/exports/parts (all URI kinds,
 /// including conditional). `canons` is the caller's canonical path per file (same
@@ -596,8 +473,30 @@ mod tests {
     use super::*;
     use falcon_dart_parser::parser::parse;
 
+    fn package_at(path: &Path, in_lib: bool) -> Option<PackageIdentity> {
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+            source: "".into(),
+            tree: parse("").tree,
+        });
+        let config = falcon_config::FalconConfig::default();
+        let context = falcon_analyze::AnalyzeContext::new(path, &config, &parsed);
+        if in_lib {
+            context.lib_dir_package().cloned()
+        } else {
+            context.package().cloned()
+        }
+    }
+
+    fn enclosing_package(path: &Path) -> Option<PackageIdentity> {
+        package_at(path, false)
+    }
+
+    fn lib_dir_package(path: &Path) -> Option<PackageIdentity> {
+        package_at(path, true)
+    }
+
     #[test]
-    fn enclosing_package_cache_tracks_manifest_changes() {
+    fn enclosing_package_discovery_tracks_manifest_changes() {
         let root = std::env::temp_dir().join(format!(
             "falcon-cached-package-{}-{}",
             std::process::id(),
@@ -612,7 +511,7 @@ mod tests {
         std::fs::write(&manifest, "name: first\n").unwrap();
         assert_eq!(enclosing_package(&source).unwrap().name, "first");
         assert_eq!(lib_dir_package(&source).unwrap().name, "first");
-        // A different length makes invalidation deterministic even on a coarse clock.
+        // Fresh discovery observes edits without a process-global cache.
         std::fs::write(&manifest, "name: second_package\n").unwrap();
         assert_eq!(enclosing_package(&source).unwrap().name, "second_package");
         assert!(lib_dir_package(&root.join("test/example.dart")).is_none());
@@ -696,7 +595,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn enclosing_package_cache_preserves_symlink_roots() {
+    fn enclosing_package_discovery_preserves_symlink_roots() {
         let root = std::env::temp_dir().join(format!(
             "falcon-cached-symlinks-{}-{}",
             std::process::id(),

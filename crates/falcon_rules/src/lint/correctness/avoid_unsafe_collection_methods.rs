@@ -35,9 +35,9 @@ impl Rule for AvoidUnsafeCollectionMethods {
             diagnostics: Vec::new(),
             escaped_lists: HashSet::new(),
             bounded_indexes: Vec::new(),
-            declarations: falcon_analyze::resolve::lexical_usage::local_declarations(program),
+            declarations: ctx.local_declarations(program),
             mutated: ctx.mutated_declarations(program),
-            bodies: crate::lint::function_bodies::FunctionBodies::new(program),
+            bodies: ctx.function_bodies(program),
             builders: Vec::new(),
         }))
     }
@@ -48,9 +48,9 @@ struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
     escaped_lists: HashSet<NodeId>,
     bounded_indexes: Vec<(Span, NodeId)>,
-    declarations: HashMap<usize, NodeId>,
+    declarations: &'a HashMap<usize, NodeId>,
     mutated: &'a HashSet<NodeId>,
-    bodies: crate::lint::function_bodies::FunctionBodies<'a>,
+    bodies: &'a falcon_analyze::FunctionBodies<'a>,
     builders: Vec<BuilderBounds>,
 }
 

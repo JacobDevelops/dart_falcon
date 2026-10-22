@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::resolve::lexical_usage::local_declarations;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
@@ -23,7 +22,7 @@ impl Rule for AvoidUnreachableForLoop {
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
-            declarations: local_declarations(program),
+            declarations: ctx.local_declarations(program),
             diags: Vec::new(),
         }))
     }
@@ -31,7 +30,7 @@ impl Rule for AvoidUnreachableForLoop {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    declarations: HashMap<usize, NodeId>,
+    declarations: &'a HashMap<usize, NodeId>,
     diags: Vec<Diagnostic>,
 }
 

@@ -1,9 +1,9 @@
 //! Shared package identity and build-body queries for Riverpod rules.
 
 use crate::lint::flutter::scoped_constructor_invocation;
-use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, RulePreparation, Truth};
+use falcon_analyze::{BodyOwner, FunctionBodies};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::{CascadeOp, ClassMember, Expr, Program, Span, TopLevelDecl};
 
@@ -144,7 +144,7 @@ pub(crate) fn prepare<'a>(
         rule,
         builds,
         consumer_builds: Vec::new(),
-        bodies: (!matches!(rule, BuildRule::ReadForMethods)).then(|| FunctionBodies::new(program)),
+        bodies: (!matches!(rule, BuildRule::ReadForMethods)).then(|| ctx.function_bodies(program)),
         diagnostics: Vec::new(),
     }))
 }
@@ -154,7 +154,7 @@ struct BuildCollector<'a> {
     rule: BuildRule,
     builds: Vec<Span>,
     consumer_builds: Vec<Span>,
-    bodies: Option<FunctionBodies<'a>>,
+    bodies: Option<&'a FunctionBodies<'a>>,
     diagnostics: Vec<Diagnostic>,
 }
 

@@ -30,7 +30,8 @@ use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, Ru
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::const_eval::{ConstContexts, constant_invocation, deferred_prefixes};
+use falcon_analyze::ConstContexts;
+use crate::lint::const_eval::{constant_invocation, deferred_prefixes};
 use falcon_analyze::invocation_type_args;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -44,7 +45,7 @@ impl Rule for PreferConstConstructors {
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
-            contexts: ConstContexts::of(program),
+            contexts: ctx.const_contexts(program),
             deferred_prefixes: deferred_prefixes(program),
             assignment_values: HashSet::new(),
             ctx,
@@ -54,7 +55,7 @@ impl Rule for PreferConstConstructors {
 }
 
 struct Collector<'a> {
-    contexts: ConstContexts,
+    contexts: &'a ConstContexts,
     deferred_prefixes: Vec<&'a str>,
     assignment_values: HashSet<Span>,
     ctx: &'a AnalyzeContext<'a>,

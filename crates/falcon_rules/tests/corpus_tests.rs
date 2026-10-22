@@ -851,7 +851,7 @@ fn cross_file_corpus_matches_expectations() {
                 })
                 .cloned()
                 .collect();
-            let packages = falcon_rules::package_identities(
+            let packages = falcon_analyze::package_identities(
                 fixture_sources.iter().map(|(path, _)| path.as_path()),
             );
             let (_, mut files, indexes) = falcon_analyze::analyze_sequential_collecting_resolving(
@@ -1025,7 +1025,7 @@ fn resolver_dependent_per_file_project_corpus() {
             falcon_analyze::ExternalLibraries::load(&environment, &external_inputs, |path| {
                 paths.iter().any(|local| local == path)
             });
-        let packages = falcon_rules::package_identities(paths.iter().map(PathBuf::as_path));
+        let packages = falcon_analyze::package_identities(paths.iter().map(PathBuf::as_path));
         let identities = IdentityIndex::build(
             &identity_sources,
             &source_refs,

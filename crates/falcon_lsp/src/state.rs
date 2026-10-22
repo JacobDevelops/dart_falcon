@@ -16,14 +16,14 @@ use falcon_analyze::{
     ExternalSources, IdentityIndex, IdentitySource, LibraryGrouping, LibrarySource,
     PackageIdentity, ParsedFile, ProjectFile, RuleRegistry, SemanticIndexes, SignatureIndex,
     TypeIndex, canonical_or_lexical, environment::ExternalTarget, group_libraries, import_path,
-    library_unit, syntax_error_diagnostics,
+    library_unit, package_identities, syntax_error_diagnostics,
 };
 use falcon_config::FalconConfig;
 use falcon_dart_parser::{lex_tree, parse_for_package};
 use falcon_diagnostics::Diagnostic;
 use falcon_rules::{
     apply_severities, build_cross_file_registry, build_registry, cross_file_requires_resolution,
-    load_config, load_or_default, package_identities, requires_resolution, run_cross_file,
+    load_config, load_or_default, requires_resolution, run_cross_file,
 };
 use falcon_syntax::{LanguageVersion, cst::Program};
 use tracing::{debug, warn};
@@ -383,7 +383,10 @@ impl LspState {
         let inputs_changed = self
             .environment_stamps
             .as_ref()
-            .is_some_and(|key| paths.iter().any(|path| key.affected_by(path)));
+            .is_some_and(|key| paths.iter().any(|path| key.affected_by(path)))
+            || paths
+                .iter()
+                .any(|path| self.environment.package_inputs_affected_by(path));
         let open = |path: &PathBuf| {
             self.documents
                 .values()

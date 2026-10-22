@@ -1,155 +1,16 @@
 use std::collections::{HashMap, HashSet};
 
+use falcon_analyze::constant_value::{class_has_primitive_equality, constant_operands_all};
 use falcon_analyze::{
-    ConstantValue, DeclarationIdentity, MemberFacts, MemberKind, NameIdentity, QualifiedName,
-    ResolvedType, SemanticModel, SignatureIndex, evaluate_constant,
-    evaluate_constant_with_local_values, evaluate_construction_with_local_values,
-    expression_segments, invocation_type_args, resolve_call_constructor,
+    ConstantValue, DeclarationIdentity, MemberKind, NameIdentity, QualifiedName, ResolvedType,
+    SemanticModel, SignatureIndex, evaluate_constant, evaluate_constant_with_local_values,
+    evaluate_construction_with_local_values, expression_segments, invocation_type_args,
+    resolve_call_constructor,
 };
-use falcon_syntax::cst::visit::{
-    Visitor, for_each_expr, walk_annotation, walk_arg_list, walk_enum_decl, walk_expr,
-    walk_field_decl, walk_formal_param, walk_local_var, walk_pattern, walk_program,
-    walk_switch_case, walk_top_level_decl,
-};
+use falcon_syntax::cst::visit::{Visitor, walk_arg_list, walk_expr};
 use falcon_syntax::cst::*;
 
 use falcon_analyze::semantic_scope::SemanticState;
-
-/// Source ranges that Dart evaluates in a constant context.
-#[derive(Default)]
-pub(crate) struct ConstructorConstContexts {
-    spans: Vec<Span>,
-    const_constructor_asserts: Vec<Span>,
-}
-
-impl ConstructorConstContexts {
-    pub(crate) fn new(program: Program<'_>) -> Self {
-        let mut contexts = Self::default();
-        contexts.visit_program(program);
-        contexts
-    }
-
-    /// Whether `span` lies inside a constant context.
-    pub(crate) fn contains(&self, span: &Span) -> bool {
-        self.spans.iter().any(|context| context.contains(*span))
-    }
-
-    /// Whether `span` lies inside an assert initializer of a `const` constructor.
-    pub(crate) fn in_const_constructor_assert(&self, span: &Span) -> bool {
-        self.const_constructor_asserts
-            .iter()
-            .any(|context| context.contains(*span))
-    }
-}
-
-impl<'a> Visitor<'a> for ConstructorConstContexts {
-    fn visit_program(&mut self, node: Program<'a>) {
-        for declaration in node.declarations() {
-            if let TopLevelDecl::Variable(variable) = declaration
-                && variable.keyword() == VarKeyword::Const
-            {
-                self.spans.extend(
-                    variable
-                        .declarators()
-                        .filter_map(|declarator| declarator.initializer())
-                        .map(|initializer| initializer.span()),
-                );
-            }
-        }
-        walk_program(self, node);
-    }
-
-    fn visit_field_decl(&mut self, node: FieldDecl<'a>) {
-        if node.keyword() == VarKeyword::Const {
-            self.spans.extend(
-                node.declarators()
-                    .filter_map(|declarator| declarator.initializer())
-                    .map(|initializer| initializer.span()),
-            );
-        }
-        walk_field_decl(self, node);
-    }
-
-    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) {
-        if node.keyword() == VarKeyword::Const {
-            self.spans.extend(
-                node.declarators()
-                    .filter_map(|declarator| declarator.initializer())
-                    .map(|initializer| initializer.span()),
-            );
-        }
-        walk_local_var(self, node);
-    }
-
-    fn visit_constructor(&mut self, node: ConstructorRef<'a>) {
-        if node.is_const {
-            for initializer in node.initializers {
-                if let ConstructorInitializer::Assert(assertion) = initializer {
-                    self.const_constructor_asserts.push(assertion.span());
-                }
-            }
-        }
-    }
-
-    fn visit_enum_decl(&mut self, node: EnumDecl<'a>) {
-        self.spans.extend(
-            node.variants()
-                .filter_map(|variant| variant.args())
-                .map(|args| args.span()),
-        );
-        walk_enum_decl(self, node);
-    }
-
-    fn visit_annotation(&mut self, node: Annotation<'a>) {
-        if let Some(args) = node.args() {
-            self.spans.push(args.span());
-        }
-        walk_annotation(self, node);
-    }
-
-    fn visit_formal_param(&mut self, node: FormalParam<'a>) {
-        if let Some(default) = node.default_value() {
-            self.spans.push(default.span());
-        }
-        walk_formal_param(self, node);
-    }
-
-    fn visit_pattern(&mut self, node: Pattern<'a>) {
-        self.spans.push(node.span());
-        walk_pattern(self, node);
-    }
-
-    fn visit_switch_case(&mut self, node: SwitchCase<'a>) {
-        for kind in node.cases() {
-            if let SwitchCaseKind::Expr(expression) = kind {
-                self.spans.push(expression.span());
-            }
-        }
-        walk_switch_case(self, node);
-    }
-
-    fn visit_expr(&mut self, node: Expr<'a>) {
-        let explicit = match node {
-            Expr::List(node) => node.is_const(),
-            Expr::Map(node) => node.is_const(),
-            Expr::Set(node) => node.is_const(),
-            Expr::Record(node) => node.is_const(),
-            Expr::New(node) => node.is_const(),
-            Expr::DotShorthand(node) => node.is_const(),
-            _ => false,
-        };
-        if explicit {
-            self.spans.push(node.span());
-        }
-        if let Expr::Call(call) = node
-            && matches!(call.callee().unparenthesized(),
-                Expr::DotShorthand(shorthand) if shorthand.is_const())
-        {
-            self.spans.push(call.span());
-        }
-        walk_expr(self, node);
-    }
-}
 
 pub(crate) fn arguments_potentially_constant<'a>(
     args: ArgList<'a>,
@@ -484,133 +345,6 @@ fn const_constructor(
     signatures.is_const_constructor(&identity, constructor)
 }
 
-/// Source ranges that are constant contexts: the operands of explicitly
-/// `const` expressions, `const` variable initializers, annotations, and
-/// enum-constant arguments. An expression strictly inside one of these is
-/// implicitly constant.
-pub(crate) struct ConstContexts {
-    /// Sorted by `(start, end)`. Widened roots may partially overlap
-    /// neighbours, so lookups do not assume nesting.
-    spans: Vec<Span>,
-    /// `max_end[i]` is the greatest `end` among `spans[..=i]`.
-    max_end: Vec<usize>,
-}
-
-impl ConstContexts {
-    pub(crate) fn of(program: Program<'_>) -> Self {
-        let mut collector = ConstContextCollector(Vec::new());
-        collector.visit_program(program);
-        let mut spans = collector.0;
-        spans.sort_unstable_by_key(|span| (span.start, span.end));
-        let max_end = spans
-            .iter()
-            .scan(0, |max, span| {
-                *max = span.end.max(*max);
-                Some(*max)
-            })
-            .collect();
-        Self { spans, max_end }
-    }
-
-    /// Whether `span` lies inside a constant context (a const expression's own
-    /// span does not count as inside itself).
-    pub(crate) fn contains(&self, span: &Span) -> bool {
-        // A context starting strictly before `span` differs from it, so it
-        // contains `span` iff it reaches `span.end`.
-        let before = self
-            .spans
-            .partition_point(|context| context.start < span.start);
-        if before > 0 && self.max_end[before - 1] >= span.end {
-            return true;
-        }
-        // Among contexts starting with `span`, the longest is last; it must
-        // strictly outreach `span` to differ from it.
-        let through = self
-            .spans
-            .partition_point(|context| context.start <= span.start);
-        through > before && self.spans[through - 1].end > span.end
-    }
-}
-
-struct ConstContextCollector(Vec<Span>);
-
-impl ConstContextCollector {
-    fn initializers<'a>(
-        &mut self,
-        keyword: VarKeyword,
-        declarators: AstChildren<'a, VarDeclarator<'a>>,
-    ) {
-        if keyword == VarKeyword::Const {
-            self.0.extend(
-                declarators
-                    .filter_map(|declarator| declarator.initializer())
-                    .map(|initializer| widen(initializer.span())),
-            );
-        }
-    }
-}
-
-/// Widens a root span by one byte on each side so the root expression itself
-/// counts as strictly inside the context.
-fn widen(span: Span) -> Span {
-    Span::new(span.start.saturating_sub(1), span.end + 1)
-}
-
-impl<'a> Visitor<'a> for ConstContextCollector {
-    fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
-        if let TopLevelDecl::Variable(variable) = node {
-            self.initializers(variable.keyword(), variable.declarators());
-        }
-        walk_top_level_decl(self, node);
-    }
-
-    fn visit_field_decl(&mut self, node: FieldDecl<'a>) {
-        self.initializers(node.keyword(), node.declarators());
-        walk_field_decl(self, node);
-    }
-
-    fn visit_local_var(&mut self, node: LocalVarDecl<'a>) {
-        self.initializers(node.keyword(), node.declarators());
-        walk_local_var(self, node);
-    }
-
-    fn visit_annotation(&mut self, node: Annotation<'a>) {
-        self.0.push(widen(node.span()));
-    }
-
-    fn visit_enum_decl(&mut self, node: EnumDecl<'a>) {
-        self.0
-            .extend(node.variants().map(|variant| widen(variant.span())));
-        walk_enum_decl(self, node);
-    }
-    fn visit_switch_case(&mut self, node: SwitchCase<'a>) {
-        for kind in node.cases() {
-            if let SwitchCaseKind::Expr(expression) = kind {
-                self.0.push(widen(expression.span()));
-            }
-        }
-        walk_switch_case(self, node);
-    }
-
-    fn visit_expr(&mut self, node: Expr<'a>) {
-        let explicit = match node {
-            Expr::New(node) => node.is_const(),
-            Expr::List(node) => node.is_const(),
-            Expr::Map(node) => node.is_const(),
-            Expr::Set(node) => node.is_const(),
-            Expr::Record(node) => node.is_const(),
-            // The invocation includes the shorthand's constant arguments.
-            Expr::Call(call) => matches!(call.callee().unparenthesized(),
-                Expr::DotShorthand(shorthand) if shorthand.is_const()),
-            _ => false,
-        };
-        if explicit {
-            self.0.push(node.span());
-        }
-        walk_expr(self, node);
-    }
-}
-
 /// The prefixes of the program's deferred imports: names through them are
 /// never constant.
 pub(crate) fn deferred_prefixes(program: Program<'_>) -> Vec<&str> {
@@ -748,8 +482,7 @@ impl ConstantExpressions<'_, '_> {
     /// The constant value of `expression`, using declaration-time values for
     /// `const` locals; `None` when it references any other local binding.
     fn value(&self, expression: Expr<'_>) -> Option<ConstantValue> {
-        let mut local = false;
-        for_each_expr(expression, &mut |node| match node {
+        let allowed = constant_operands_all(expression, |node| match node {
             Expr::Ident(identifier)
                 if self.state.environment.is_bound(identifier.name())
                     && self.state.local_constant(identifier.name()).is_none()
@@ -775,15 +508,14 @@ impl ConstantExpressions<'_, '_> {
                                     })
                         })) =>
             {
-                local = true;
+                false
             }
-            Expr::Field(field) if matches!(field.object().unparenthesized(), Expr::Ident(prefix) if self.is_deferred(prefix.name())) =>
-            {
-                local = true;
+            Expr::Field(field) if matches!(field.object().unparenthesized(), Expr::Ident(prefix) if self.is_deferred(prefix.name())) => {
+                false
             }
-            _ => {}
+            _ => true,
         });
-        if local {
+        if !allowed {
             return None;
         }
         evaluate_constant_with_local_values(
@@ -1045,10 +777,10 @@ impl ConstantExpressions<'_, '_> {
             ),
             Expr::New(construction) => matches!(
                 model.resolve_type(construction.dart_type()),
-                ResolvedType::Interface { identity, .. } if self.class_primitive(&identity)
+                ResolvedType::Interface { identity, .. } if class_has_primitive_equality(&identity, signatures)
             ),
             Expr::Call(call) => resolve_call_constructor(call.callee(), model, true)
-                .is_some_and(|(identity, _)| self.class_primitive(&identity)),
+                .is_some_and(|(identity, _)| class_has_primitive_equality(&identity, signatures)),
             Expr::Ident(_) | Expr::Field(_) => {
                 let Some(segments) = expression_segments(expression, false) else {
                     return false;
@@ -1102,27 +834,6 @@ impl ConstantExpressions<'_, '_> {
             | Expr::GenericInstantiation(_)
             | Expr::Error(_) => false,
         }
-    }
-
-    /// Whether instances of `identity` use `Object`'s `==`; unknown
-    /// hierarchies answer `false`.
-    fn class_primitive(&self, identity: &DeclarationIdentity) -> bool {
-        let signatures = &self.state.signatures;
-        if signatures.is_enum(identity) || *identity == DeclarationIdentity::OBJECT {
-            return true;
-        }
-        let concrete = |facts: &MemberFacts| {
-            !facts.is_static
-                && !facts.is_abstract
-                && facts.declaring_type != DeclarationIdentity::OBJECT
-        };
-        !signatures
-            .declared_member_facts(identity, "==")
-            .iter()
-            .any(concrete)
-            && signatures
-                .inherited_member_facts(identity, "==")
-                .is_some_and(|facts| !facts.iter().any(concrete))
     }
 }
 

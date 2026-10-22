@@ -30,8 +30,8 @@ impl Rule for AvoidConditionalHooks {
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
-            hooks: HookCalls::new(program),
-            contexts: HookContexts::new(program),
+            hooks: HookCalls::new(program, ctx),
+            contexts: HookContexts::new(program, ctx),
             candidates: Vec::new(),
         }))
     }

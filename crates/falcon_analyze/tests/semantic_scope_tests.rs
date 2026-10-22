@@ -1150,3 +1150,150 @@ fn rules_prepare_syntax_or_semantics_exactly_once() {
         );
     }
 }
+
+#[test]
+fn declaration_references_preserve_dispatch_and_lexical_shadowing() {
+    use falcon_analyze::{IdentityIndex, IdentitySource, MemberSelectorKind, TypeIndex};
+    use falcon_config::FalconConfig;
+    use std::path::PathBuf;
+
+    let source = r#"
+int? libraryValue;
+class Base {
+  Base.named();
+  int value = 0;
+  static int shared = 0;
+  int? libraryValue;
+  void own() { print(libraryValue); }
+}
+class Child extends Base {
+  Child() : super.named();
+  void use(Base base) {
+    print(base.value);
+    base.value = 1;
+    print(super.value);
+    print(Base.shared);
+    print(Base.named);
+    final shared = 3;
+    print(shared);
+    print(libraryValue);
+  }
+}
+extension Extra on Base {
+  int get extra => value;
+  void readLibrary() { print(libraryValue); }
+  int get getterOnly => 0;
+  void invalidWrite() { getterOnly = 1; }
+}
+void use(Base base) { print(base.extra); }
+extension on Base {
+  int get libraryValue => 0;
+  int get shared => 0;
+  void unnamed() { print(libraryValue); print(shared); }
+}
+"#;
+    let path = PathBuf::from("/project/lib/main.dart");
+    let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
+    assert!(errors.is_empty(), "{errors:?}");
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree,
+    });
+    let program = parsed.program();
+    let identities = IdentityIndex::from_project_files(
+        &[IdentitySource {
+            path: &path,
+            parsed: &parsed,
+            has_parse_errors: false,
+        }],
+        &[],
+    );
+    let types = TypeIndex::from_resolved_files(
+        [(
+            path.as_path(),
+            falcon_analyze::LibrarySource {
+                program,
+                has_parse_errors: false,
+                has_unresolved_parts: false,
+            },
+        )],
+        &identities,
+    );
+    let signatures = SignatureIndex::from_project_files(
+        &[(path.clone(), std::sync::Arc::clone(&parsed))],
+        &identities,
+        &types,
+    );
+    let config = FalconConfig::default();
+    let context = AnalyzeContext::new(&path, &config, &parsed)
+        .with_identities(&identities)
+        .with_types(&types)
+        .with_signatures(&signatures);
+    struct References<'s> {
+        source: &'s str,
+        observed: usize,
+    }
+    impl<'a> SemanticRuleVisitor<'a> for References<'_> {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            let span = node.span();
+            let text = &self.source[span.start..span.end];
+            let (owner, kind, is_static, name) = match text {
+                "base.value" | "super.value" => ("Base", MemberSelectorKind::Read, false, "value"),
+                "Base.shared" => ("Base", MemberSelectorKind::Field, true, "shared"),
+                "Base.named" => ("Base", MemberSelectorKind::Constructor, false, "named"),
+                "base.extra" => ("Extra", MemberSelectorKind::Read, false, "extra"),
+                "libraryValue" if matches!(node, Expr::Ident(_)) => {
+                    if state.constant_owner.is_none() && state.enclosing_type.is_some() {
+                        assert!(state.referenced_declaration(node, false).is_none());
+                        self.observed += 1;
+                        return;
+                    }
+                    let base = state.model.resolve_name("Base").unwrap();
+                    if state.constant_owner.as_ref() == Some(&base) {
+                        ("Base", MemberSelectorKind::Read, false, "libraryValue")
+                    } else {
+                        ("libraryValue", MemberSelectorKind::Declaration, false, "")
+                    }
+                }
+                "shared" if matches!(node, Expr::Ident(_)) => {
+                    assert!(state.referenced_declaration(node, false).is_none());
+                    self.observed += 1;
+                    return;
+                }
+                "getterOnly" if matches!(node, Expr::Ident(_)) => {
+                    assert!(state.referenced_declaration(node, true).is_none());
+                    self.observed += 1;
+                    return;
+                }
+                _ => return,
+            };
+            let reference = state.referenced_declaration(node, false).expect(text);
+            let expected_owner = state
+                .model
+                .resolve_value(owner)
+                .or_else(|| state.model.resolve_name(owner))
+                .or_else(|| state.model.resolve_extension(owner))
+                .expect("expected declaration in its value, type, or extension namespace");
+            assert_eq!(reference.owner, expected_owner, "{text}");
+            assert_eq!(reference.selector.kind, kind, "{text}");
+            assert_eq!(reference.selector.is_static, is_static, "{text}");
+            assert_eq!(reference.selector.name, name, "{text}");
+            if text == "base.value" {
+                let write = state.referenced_declaration(node, true).unwrap();
+                assert_eq!(write.owner, expected_owner);
+                assert_eq!(write.selector.kind, MemberSelectorKind::Write);
+            }
+            self.observed += 1;
+        }
+    }
+    let mut references = References {
+        source,
+        observed: 0,
+    };
+    visit_program(
+        &mut references,
+        program,
+        SemanticState::new(program, &context).unwrap(),
+    );
+    assert_eq!(references.observed, 13);
+}

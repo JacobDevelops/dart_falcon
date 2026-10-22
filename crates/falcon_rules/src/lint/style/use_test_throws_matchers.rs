@@ -83,7 +83,7 @@ fn expect_library(ctx: &AnalyzeContext<'_>) -> Option<LibraryId> {
         .and_then(|environment| environment.package_config(ctx.file_path()))
         .and_then(|config| config.resolve_package_uri("package:test_api/src/frontend/expect.dart"));
     let path = configured.or_else(|| {
-        let package = crate::cross_file::enclosing_package(ctx.file_path())?;
+        let package = ctx.package()?;
         (package.name == "test_api").then(|| package.lib_root.join("src/frontend/expect.dart"))
     })?;
     let identities = ctx.identities()?;

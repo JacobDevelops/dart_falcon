@@ -28,7 +28,7 @@ impl Rule for PreferMatchFileName {
             return RulePreparation::Diagnostics(Vec::new());
         };
         if crate::lint::declarations::has_test_file_suffix(ctx.file_path())
-            || crate::lint::declarations::in_test_directory(ctx.file_path())
+            || crate::lint::declarations::in_test_directory(ctx)
         {
             return RulePreparation::Diagnostics(Vec::new());
         }

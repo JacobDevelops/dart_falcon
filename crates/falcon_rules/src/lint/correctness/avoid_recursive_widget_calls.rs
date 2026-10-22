@@ -31,7 +31,7 @@ impl Rule for AvoidRecursiveWidgetCalls {
             signatures,
             target: None,
             building: false,
-            locals: falcon_analyze::resolve::lexical_usage::local_declarations(program),
+            locals: ctx.local_declarations(program),
             diagnostics: Vec::new(),
         }))
     }
@@ -42,7 +42,7 @@ struct Collector<'a> {
     signatures: &'a SignatureIndex,
     target: Option<DeclarationIdentity>,
     building: bool,
-    locals: std::collections::HashMap<usize, NodeId>,
+    locals: &'a std::collections::HashMap<usize, NodeId>,
     diagnostics: Vec<Diagnostic>,
 }
 falcon_analyze::structural_visitor! {

@@ -7,7 +7,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::resolve::lexical_usage::local_declarations;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
@@ -42,7 +41,8 @@ impl Rule for MoveVariableCloserToItsUsage {
         let options = crate::lint::options::get::<Options>(ctx, Self::NAME);
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
-            references: local_declarations(program),
+            references: ctx.local_declarations(program),
+            visited_references: HashSet::new(),
             candidates: Vec::new(),
             uses: HashMap::new(),
             ignore_const: options.ignore_const,
@@ -60,7 +60,8 @@ struct Candidate<'a> {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    references: HashMap<usize, NodeId>,
+    references: &'a HashMap<usize, NodeId>,
+    visited_references: HashSet<usize>,
     candidates: Vec<Candidate<'a>>,
     uses: HashMap<NodeId, Vec<Identifier<'a>>>,
     ignore_const: bool,
@@ -133,7 +134,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
 
     fn visit_expr(&mut self, node: Expr<'a>, _state: &SemanticState<'a>) {
         if let Expr::Ident(identifier) = node
-            && let Some(id) = self.references.remove(&identifier.span().start)
+            && let Some(&id) = self.references.get(&identifier.span().start)
+            && self.visited_references.insert(identifier.span().start)
         {
             self.uses.entry(id).or_default().push(identifier);
         }
@@ -143,7 +145,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         // The lexical index also contains constant-pattern names that the
         // semantic expression callbacks do not visit. Never move a declaration
         // unless every indexed reference was accounted for.
-        let unvisited: HashSet<_> = self.references.values().copied().collect();
+        let unvisited: HashSet<_> = self.references
+            .iter()
+            .filter(|(offset, _)| !self.visited_references.contains(*offset))
+            .map(|(_, id)| *id)
+            .collect();
         self.candidates.iter().filter_map(|candidate| {
             if unvisited.contains(&candidate.id) {
                 return None;

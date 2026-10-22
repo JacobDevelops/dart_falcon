@@ -35,7 +35,7 @@ use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::cst::*;
 
 
-use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
+use falcon_analyze::{BodyOwner, FunctionBodies};
 use falcon_analyze::resolve::lexical_usage::locally_bound_identifiers;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -51,7 +51,7 @@ impl Rule for UnnecessaryNullChecks {
         RulePreparation::Semantic(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-            bodies: FunctionBodies::new(program),
+            bodies: ctx.function_bodies(program),
             contextual: declaration_initializers(program),
             fixed: HashMap::new(),
             pattern_assignments: Vec::new(),
@@ -74,7 +74,7 @@ fn null_assert_initializers<'a>(
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    bodies: FunctionBodies<'a>,
+    bodies: &'a FunctionBodies<'a>,
     /// `x!` nodes whose context type is the walker's expected type.
     contextual: Vec<Span>,
     /// `x!` collection elements with the element type of their literal.

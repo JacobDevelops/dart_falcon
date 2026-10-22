@@ -220,8 +220,9 @@ impl SyntaxTree {
     }
 
     /// Canonical documentation groups attached to the following code token or EOF.
+    /// Includes documentation inside interpolation bodies.
     pub fn doc_blocks<'a>(&'a self, source: &'a str) -> impl Iterator<Item = DocBlock<'a>> + Clone {
-        let mut tokens = self.top_level_tokens(source);
+        let mut tokens = self.tokens(source);
         std::iter::from_fn(move || {
             let mut start = None;
             for token in tokens.by_ref() {
@@ -627,7 +628,7 @@ mod tests {
             tree.doc_blocks(&source)
                 .map(|block| block.tokens().map(|token| token.text()).collect::<Vec<_>>())
                 .collect::<Vec<_>>(),
-            [vec!["/// outer"], vec!["/// after"]]
+            [vec!["/// outer"], vec!["/** hidden */"], vec!["/// after"],]
         );
     }
 

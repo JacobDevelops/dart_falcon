@@ -36,7 +36,7 @@ impl Rule for AlwaysDeclareReturnTypes {
         let collector = Collector {
             ctx,
             diags: Vec::new(),
-            in_test_directory: in_test_directory(ctx.file_path()),
+            in_test_directory: in_test_directory(ctx),
         };
         RulePreparation::Structural(Box::new(collector))
     }
@@ -156,8 +156,8 @@ mod test_directories {
             let path = directory.path().join(relative);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, source).unwrap();
-            assert_eq!(is_test_file(&path), expected, "{relative}");
             let ctx = AnalyzeContext::new(&path, &config, &parsed);
+            assert_eq!(is_test_file(&ctx), expected, "{relative}");
             let diagnostics =
                 AlwaysDeclareReturnTypes
                     .analyze(AlwaysDeclareReturnTypes::NAME, program, &ctx);

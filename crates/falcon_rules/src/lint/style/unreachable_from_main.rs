@@ -16,6 +16,11 @@
 //! constructor invocations inside constant patterns do not count. Instance
 //! `toJson` methods are reachable with their container, because `dart:convert`
 //! calls them dynamically.
+//! Documentation references use the shared Dartdoc parser, excluding Markdown
+//! link display text and link definitions, inline and block code, and Dartdoc
+//! directives. Reference-style destination labels remain references.
+//! A block documentation comment replaces immediately preceding line docs,
+//! following the shared documentation grouping used by other rules.
 //!
 //! The candidates are the library's top-level declarations and the public
 //! constructors (except enum constructors), fields, methods, getters, setters,
@@ -51,7 +56,7 @@ use falcon_syntax::cst::visit::{
 use falcon_syntax::cst::*;
 
 use crate::lint::declarations::operator_token_span;
-use crate::lint::string_lit::{is_ident_body, is_simple_identifier};
+use crate::lint::string_lit::is_ident_body;
 use falcon_analyze::resolve::lexical_usage::locally_bound_identifiers;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState, visit_program};
 
@@ -92,7 +97,7 @@ struct Reachability<'a> {
     tables: Tables<'a>,
     ctx: &'a AnalyzeContext<'a>,
     diagnostics: Option<Vec<Diagnostic>>,
-    primary_types: ExpressionTypes,
+    primary_types: ExpressionTypes<'a>,
 }
 
 impl<'a> SemanticRuleVisitor<'a> for Reachability<'a> {
@@ -132,7 +137,7 @@ impl<'a> Reachability<'a> {
                 (sibling_state.as_ref(), &sibling_types)
             };
             let mut walker = RefWalker::new(tables, index, unit.parsed, &bound, &mut deps);
-            walker.semantic = state.map(|state| (state, &types.0));
+            walker.semantic = state.map(|state| (state, types));
             for declaration in unit.program.declarations() {
                 walker.visit_top_level_decl(declaration);
             }
@@ -389,7 +394,12 @@ impl<'a> Tables<'a> {
             tables.container_identities.reserve(tables.containers.len());
             for (container, declaration) in tables.containers.iter().enumerate() {
                 let label = &tables.decls[declaration.decl].label;
-                if let Some(identity) = model.resolve_name(label) {
+                let identity = if declaration.kind == ContainerKind::Extension {
+                    model.resolve_extension(label)
+                } else {
+                    model.resolve_name(label)
+                };
+                if let Some(identity) = identity {
                     tables
                         .container_identities
                         .entry(identity)
@@ -1103,56 +1113,17 @@ fn doc_start(source: &str, tree: &SyntaxTree, start: usize) -> usize {
     start
 }
 
-/// A `[name]`, `[Type.member]`, or `[new Type]` reference in a doc comment.
-struct DocReference<'s> {
-    at: usize,
-    is_new: bool,
-    segments: Vec<&'s str>,
-}
-
-/// Every reference in the `///` and `/** */` doc comments of `source`.
-fn doc_comment_references<'s>(source: &'s str, tree: &'s SyntaxTree) -> Vec<DocReference<'s>> {
-    let mut references = Vec::new();
-    let mut checked = 0;
-    let mut line_start = 0;
-    for comment in tree.comment_tokens(source).filter(|comment| {
-        if comment.kind() != falcon_syntax::TokenKind::DocComment {
-            return false;
-        }
-        if let Some(newline) = source[checked..comment.offset()].rfind('\n') {
-            line_start = checked + newline + 1;
-        }
-        checked = comment.offset();
-        source[line_start..comment.offset()].trim().is_empty()
-    }) {
-        let mut offset = comment.offset();
-        for line in comment.text().split_inclusive('\n') {
-            let mut cursor = 0;
-            while let Some(open) = line[cursor..].find('[') {
-                let open = cursor + open;
-                let Some(close) = line[open..].find(']') else {
-                    break;
-                };
-                let close = open + close;
-                let inner = line[open + 1..close].trim();
-                let (is_new, path) = match inner.strip_prefix("new ") {
-                    Some(rest) => (true, rest.trim()),
-                    None => (false, inner),
-                };
-                let segments: Vec<&str> = path.split('.').collect();
-                if segments.iter().all(|segment| is_simple_identifier(segment)) {
-                    references.push(DocReference {
-                        at: offset + open,
-                        is_new,
-                        segments,
-                    });
-                }
-                cursor = close + 1;
-            }
-            offset += line.len();
-        }
-    }
-    references
+fn attached_doc_references<'a>(
+    source: &'a str,
+    tree: &'a SyntaxTree,
+) -> impl Iterator<Item = crate::lint::doc_comments::Reference<'a>> + 'a {
+    tree.doc_blocks(source).flat_map(move |block| {
+        let start = doc_start(source, tree, block.next_token);
+        crate::lint::doc_comments::references(&block)
+            .0
+            .into_iter()
+            .filter(move |reference| reference.offset >= start)
+    })
 }
 
 /// Resolution of an unqualified name in expression context.
@@ -1165,10 +1136,19 @@ enum Lexical {
 }
 
 #[derive(Default)]
-struct ExpressionTypes(HashMap<Span, falcon_analyze::ResolvedType>);
+struct ExpressionTypes<'a>(
+    HashMap<Span, falcon_analyze::ResolvedType>,
+    HashMap<(Span, &'a str), falcon_analyze::DeclarationIdentity>,
+);
 
-impl<'a> SemanticRuleVisitor<'a> for ExpressionTypes {
+impl<'a> SemanticRuleVisitor<'a> for ExpressionTypes<'a> {
     fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        if let Expr::Field(field) = node
+            && let Some(reference) = state.referenced_declaration(node, false)
+                .or_else(|| state.referenced_declaration(node, true))
+        {
+            self.1.insert((field.object().span(), field.field().name()), reference.owner);
+        }
         let receiver = match node {
             Expr::Field(field) => field.object(),
             Expr::Index(index) => index.object(),
@@ -1204,7 +1184,7 @@ struct RefWalker<'t, 'a> {
     constant_pattern_depth: usize,
     semantic: Option<(
         &'t SemanticState<'a>,
-        &'t HashMap<Span, falcon_analyze::ResolvedType>,
+        &'t ExpressionTypes<'a>,
     )>,
 }
 
@@ -1478,7 +1458,7 @@ impl<'t, 'a> RefWalker<'t, 'a> {
         let Some((state, types)) = self.semantic else {
             return false;
         };
-        let Some(ty) = types.get(&receiver.span()) else {
+        let Some(ty) = types.0.get(&receiver.span()) else {
             return false;
         };
         if matches!(
@@ -1493,9 +1473,9 @@ impl<'t, 'a> RefWalker<'t, 'a> {
         {
             return true;
         }
-        if let Some(owner) = state
-            .signatures
-            .resolved_member_owner(ty, name, &state.model)
+        if let Some(owner) = types.1.get(&(receiver.span(), name)).cloned()
+            .or_else(|| state.referenced_member_owner(ty, name, false))
+            .or_else(|| state.referenced_member_owner(ty, name, true))
         {
             if let Some(container) = self.resolved_container(&owner) {
                 self.mark_members(container, name);
@@ -1684,10 +1664,13 @@ impl<'t, 'a> RefWalker<'t, 'a> {
         let unit_decls: Vec<DeclId> = (0..tables.decls.len())
             .filter(|&id| tables.decls[id].unit == self.unit)
             .collect();
-        for reference in doc_comment_references(self.source, self.tree) {
+        for reference in attached_doc_references(self.source, self.tree) {
+            let Some(parsed) = reference.parse() else {
+                continue;
+            };
             self.stack.extend(unit_decls.iter().copied().filter(|&id| {
                 let decl = &tables.decls[id];
-                decl.doc_start <= reference.at && reference.at < decl.end
+                decl.doc_start <= reference.offset && reference.offset < decl.end
             }));
             let owners = &self.stack;
             let Some(&innermost) = owners.iter().max_by_key(|&&id| tables.decls[id].doc_start)
@@ -1695,10 +1678,11 @@ impl<'t, 'a> RefWalker<'t, 'a> {
                 continue;
             };
             self.container = tables.decls[innermost].scope;
-            match reference.segments.as_slice() {
-                [name] if reference.is_new => self.constructor_reference(name, "new"),
-                [name] => self.reference(name),
-                [type_name, member] => {
+            let mut names = parsed.names.iter().map(|name| name.text);
+            match (names.next(), names.next(), names.next()) {
+                (Some(name), None, _) if parsed.new_keyword => self.constructor_reference(name, "new"),
+                (Some(name), None, _) => self.reference(name),
+                (Some(type_name), Some(member), None) => {
                     self.reference(type_name);
                     match tables.container_for(type_name) {
                         Some(container) if matches!(self.lexical(type_name), Lexical::TopLevel) => {
@@ -1707,8 +1691,8 @@ impl<'t, 'a> RefWalker<'t, 'a> {
                         _ => self.mark_any_member(member),
                     }
                 }
-                [.., member] => self.mark_any_member(member),
-                [] => {}
+                (_, _, Some(member)) => self.mark_any_member(member),
+                _ => {}
             }
             self.stack.clear();
         }
@@ -2037,7 +2021,8 @@ mod tests {
     use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
 
-    use super::{UnreachableFromMain, doc_comment_references, doc_start};
+    use super::{UnreachableFromMain, attached_doc_references, doc_start};
+    use crate::lint::doc_comments::references;
 
     fn parse(source: &str) -> std::sync::Arc<falcon_analyze::ParsedFile> {
         std::sync::Arc::new(falcon_analyze::ParsedFile {
@@ -2059,11 +2044,29 @@ mod tests {
 
     #[test]
     fn doc_comment_references_parse_names_members_and_constructors() {
-        let source = "/// See [A], [B.c], [new D] and [text](url).\n/** [E] */\nvoid f() {}\n";
+        let source = "/// See [A], [B.c], [new D] and [text].\nvoid f() {}\n/** [E] */\nvoid g() {}\n";
+        let markdown_link = "/// [text](url)\n";
+        let markdown_parsed = parse(markdown_link);
+        assert!(
+            markdown_parsed
+                .tree
+                .doc_blocks(markdown_link)
+                .flat_map(|block| references(&block).0)
+                .next()
+                .is_none()
+        );
         let parsed = parse(source);
-        let references: Vec<(bool, Vec<&str>)> = doc_comment_references(source, &parsed.tree)
-            .into_iter()
-            .map(|reference| (reference.is_new, reference.segments))
+        let references: Vec<(bool, Vec<&str>)> = parsed
+            .tree
+            .doc_blocks(source)
+            .flat_map(|block| references(&block).0)
+            .filter_map(|reference| reference.parse())
+            .map(|reference| {
+                (
+                    reference.new_keyword,
+                    reference.names.into_iter().map(|name| name.text).collect(),
+                )
+            })
             .collect();
         assert_eq!(
             references,
@@ -2128,10 +2131,23 @@ mod tests {
                       // [PlainOnly]\n/**/\n\
                       /// [Attached]\nvoid f() {}\n";
         let parsed = parse(source);
-        let references = doc_comment_references(source, &parsed.tree);
+        let references: Vec<_> = parsed
+            .tree
+            .doc_blocks(source)
+            .flat_map(|block| references(&block).0)
+            .collect();
         assert_eq!(references.len(), 1);
-        assert_eq!(references[0].segments, ["Attached"]);
-        assert_eq!(references[0].at, source.find("[Attached]").unwrap());
+        assert_eq!(
+            references[0]
+                .parse()
+                .unwrap()
+                .names
+                .into_iter()
+                .map(|name| name.text)
+                .collect::<Vec<_>>(),
+            ["Attached"]
+        );
+        assert_eq!(references[0].offset, source.find("[Attached]").unwrap() + 1);
     }
 
     #[test]
@@ -2149,7 +2165,11 @@ mod tests {
         let parsed = parse(source);
         let start = source.find("void main").unwrap();
         assert_eq!(doc_start(source, &parsed.tree, start), start);
-        assert!(doc_comment_references(source, &parsed.tree).is_empty());
+        assert!(
+            attached_doc_references(source, &parsed.tree)
+                .next()
+                .is_none()
+        );
     }
 
     #[test]
@@ -2157,10 +2177,23 @@ mod tests {
         let source = "void main() { print('''${() {\n\
                       /// [Helper]\nreturn 0;\n}()}'''); }\nclass Helper {}\n";
         let parsed = parse(source);
-        let references = doc_comment_references(source, &parsed.tree);
+        let references: Vec<_> = parsed
+            .tree
+            .doc_blocks(source)
+            .flat_map(|block| references(&block).0)
+            .collect();
         assert_eq!(references.len(), 1);
-        assert_eq!(references[0].segments, ["Helper"]);
-        assert_eq!(references[0].at, source.find("[Helper]").unwrap());
+        assert_eq!(
+            references[0]
+                .parse()
+                .unwrap()
+                .names
+                .into_iter()
+                .map(|name| name.text)
+                .collect::<Vec<_>>(),
+            ["Helper"]
+        );
+        assert_eq!(references[0].offset, source.find("[Helper]").unwrap() + 1);
         assert!(lint(source).is_empty());
     }
 

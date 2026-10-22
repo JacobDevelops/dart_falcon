@@ -5,8 +5,6 @@
 //! identities from `pubspec.yaml`, and checks every default and configurable
 //! import URI. Export directives are not imports and are intentionally ignored.
 
-use std::path::Path;
-
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -20,35 +18,22 @@ impl Rule for ImplementationImports {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(own_package) = source_package(ctx.file_path()) else {
+        let Some(own_package) = ctx.file_package().metadata()
+            .filter(|_| ctx.file_package().in_directory("lib"))
+            .and_then(|package| package.parsed_name()) else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let mut diags = Vec::new();
         for import in program.imports() {
-            check_uri(import.uri(), &own_package, ctx, &mut diags);
+            check_uri(import.uri(), own_package, ctx, &mut diags);
             for configurable in import.configurable_uris() {
-                check_uri(configurable.uri(), &own_package, ctx, &mut diags);
+                check_uri(configurable.uri(), own_package, ctx, &mut diags);
             }
         }
         RulePreparation::Diagnostics(diags)
     }
 }
 
-fn source_package(path: &Path) -> Option<String> {
-    let pubspec = crate::cross_file::enclosing_pubspec(path)?;
-    let root = pubspec.parent()?;
-    let canonical = falcon_analyze::canonical_or_lexical(path);
-    let relative = canonical.strip_prefix(root).ok()?;
-    if relative.components().next()?.as_os_str() != "lib" {
-        return None;
-    }
-    let source = std::fs::read_to_string(pubspec).ok()?;
-    let yaml: serde_yaml::Value = serde_yaml::from_str(&source).ok()?;
-    yaml.as_mapping()?
-        .get(serde_yaml::Value::String("name".to_string()))?
-        .as_str()
-        .map(str::to_string)
-}
 
 fn check_uri(uri: StringLitNode<'_>, own: &str, ctx: &AnalyzeContext, diags: &mut Vec<Diagnostic>) {
     let value = uri.value();

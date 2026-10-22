@@ -19,7 +19,7 @@ impl Rule for AvoidWebLibrariesInFlutter {
         if !program
             .imports()
             .any(|import| is_web_library(&import.uri().value()))
-            || !checks_web_imports(ctx.file_path())
+            || !ctx.file_package().metadata().is_some_and(|package| package.checks_flutter_web_imports())
         {
             return RulePreparation::Diagnostics(Vec::new());
         }
@@ -37,19 +37,6 @@ fn is_web_library(uri: &str) -> bool {
     matches!(uri, "dart:html" | "dart:js" | "dart:js_util")
 }
 
-fn checks_web_imports(path: &std::path::Path) -> bool {
-    let Some(manifest) = crate::cross_file::enclosing_pubspec(path) else {
-        return false;
-    };
-    let Some(yaml) = std::fs::read_to_string(manifest)
-        .ok()
-        .and_then(|source| serde_yaml::from_str::<serde_yaml::Value>(&source).ok())
-    else {
-        return false;
-    };
-    let flutter = &yaml["dependencies"]["flutter"];
-    !flutter.is_null() && yaml["flutter"]["plugin"]["platforms"]["web"].is_null()
-}
 
 #[cfg(test)]
 mod tests {

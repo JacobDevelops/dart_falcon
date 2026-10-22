@@ -931,7 +931,7 @@ fn test_default_output_matches_ordered_sequential_diagnostics() {
     assert!(falcon_rules::requires_resolution(&registry));
     let cross_file_registry = falcon_rules::build_cross_file_registry(&config);
     assert!(!cross_file_registry.is_empty());
-    let packages = falcon_rules::package_identities(files.iter().map(|(path, _)| path.as_path()));
+    let packages = falcon_analyze::package_identities(files.iter().map(|(path, _)| path.as_path()));
     let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
         files.iter().map(|(path, _)| path.as_path()),
         |_| None,
@@ -1300,7 +1300,7 @@ fn package_discovery_retains_invalid_and_unreadable_nested_manifest_boundaries()
     let nested_root = falcon_analyze::canonical_or_lexical(&nested_lib);
     for manifest in [b"name: [\n".as_slice(), &[0xff]] {
         fs::write(nested.join("pubspec.yaml"), manifest).unwrap();
-        let packages = falcon_rules::package_identities([
+        let packages = falcon_analyze::package_identities([
             outer_file.as_path(),
             nested_file.as_path(),
             nested_file.as_path(),
@@ -1332,7 +1332,7 @@ fn package_discovery_deduplicates_real_and_symlinked_package_paths() {
     std::os::unix::fs::symlink(&root, &link).unwrap();
     let real_file = lib.join("main.dart");
     let linked_file = link.join("lib/main.dart");
-    let packages = falcon_rules::package_identities([real_file.as_path(), linked_file.as_path()]);
+    let packages = falcon_analyze::package_identities([real_file.as_path(), linked_file.as_path()]);
     let discovered: Vec<_> = packages
         .iter()
         .filter(|package| package.name == "shared")

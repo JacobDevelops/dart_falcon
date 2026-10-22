@@ -22,7 +22,7 @@ use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, Truth}
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
+use falcon_analyze::{BodyOwner, FunctionBodies};
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
@@ -37,7 +37,7 @@ impl Rule for UnnecessaryAwaitInReturn {
         RulePreparation::Semantic(Box::new(Collector {
             diagnostics: Vec::new(),
             ctx,
-            bodies: FunctionBodies::new(program),
+            bodies: ctx.function_bodies(program),
             closure_returns: Vec::new(),
         }))
     }
@@ -46,7 +46,7 @@ impl Rule for UnnecessaryAwaitInReturn {
 struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    bodies: FunctionBodies<'a>,
+    bodies: &'a FunctionBodies<'a>,
     closure_returns: Vec<(Span, Option<ResolvedType>)>,
 }
 

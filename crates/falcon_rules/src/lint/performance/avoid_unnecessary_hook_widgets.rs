@@ -21,7 +21,7 @@ use falcon_syntax::cst::*;
 
 use crate::lint::flutter::scoped_constructor_invocation;
 use crate::lint::flutter_hooks::is_hook_widget;
-use crate::lint::function_bodies::FunctionBodies;
+use falcon_analyze::FunctionBodies;
 
 #[derive(Default)]
 pub struct AvoidUnnecessaryHookWidgets;
@@ -95,7 +95,7 @@ impl Rule for AvoidUnnecessaryHookWidgets {
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
             candidates,
-            bodies: FunctionBodies::new(program),
+            bodies: ctx.function_bodies(program),
             widget: DeclarationIdentity::flutter("Widget"),
         }))
     }
@@ -110,7 +110,7 @@ struct Candidate {
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     candidates: Vec<Candidate>,
-    bodies: FunctionBodies<'a>,
+    bodies: &'a FunctionBodies<'a>,
     widget: DeclarationIdentity,
 }
 

@@ -54,7 +54,6 @@ impl CrossFileRule for UnnecessaryNullable {
                 .with_signatures(&indexes.signatures);
             let mut nullability = ArgumentNullability {
                 values: HashMap::new(),
-                members: HashSet::new(),
                 loops: HashMap::new(),
             };
             Visitor::visit_program(&mut nullability, file.program());
@@ -354,20 +353,16 @@ struct CallCollector<'a, 'n> {
     declarations: &'n HashMap<&'a str, usize>,
 }
 
-struct ArgumentNullability<'a> {
+struct ArgumentNullability {
     values: HashMap<(usize, usize), bool>,
-    members: HashSet<&'a str>,
     loops: HashMap<(usize, usize), (Span, bool)>,
 }
 
-impl<'a> ArgumentNullability<'a> {
-    fn record(&mut self, expr: Expr<'a>, state: &SemanticState<'a>) {
+impl ArgumentNullability {
+    fn record<'a>(&mut self, expr: Expr<'a>, state: &SemanticState<'a>) {
         let span = expr.span();
-        let mut shadow = MemberReference {
-            names: &self.members,
-            found: false,
-        };
-        if state.enclosing_type.is_some() && !self.members.is_empty() {
+        let mut shadow = MemberDependency { state, found: false };
+        if state.enclosing_type.is_some() {
             shadow.visit_expr(expr);
         }
         self.values.insert(
@@ -376,7 +371,7 @@ impl<'a> ArgumentNullability<'a> {
         );
     }
 
-    fn record_loop(&mut self, header: ForHeader<'a>, is_await: bool) {
+    fn record_loop(&mut self, header: ForHeader<'_>, is_await: bool) {
         if let Some(ForInit::ForIn(initializer)) = header.init()
             && !initializer.declares_variable()
         {
@@ -388,7 +383,7 @@ impl<'a> ArgumentNullability<'a> {
         }
     }
 
-    fn record_arguments(&mut self, args: ArgList<'a>) {
+    fn record_arguments(&mut self, args: ArgList<'_>) {
         for value in args.positional().chain(args.named().map(|arg| arg.value())) {
             let span = value.span();
             self.values.insert((span.start, span.end), true);
@@ -396,7 +391,7 @@ impl<'a> ArgumentNullability<'a> {
     }
 }
 
-impl<'a> Visitor<'a> for ArgumentNullability<'a> {
+impl<'a> Visitor<'a> for ArgumentNullability {
     fn visit_stmt(&mut self, statement: Stmt<'a>) {
         if let Stmt::For(statement) = statement {
             self.record_loop(statement.header(), statement.is_await());
@@ -447,42 +442,23 @@ impl<'a> Visitor<'a> for ArgumentNullability<'a> {
         }
         walk_expr(self, expression);
     }
-    fn visit_class_member(&mut self, member: ClassMember<'a>) {
-        match member {
-            ClassMember::Method(method) => {
-                self.members.insert(method.name().name());
-            }
-            ClassMember::Getter(getter) => {
-                self.members.insert(getter.name().name());
-            }
-            ClassMember::Setter(setter) => {
-                self.members.insert(setter.name().name());
-            }
-            ClassMember::Field(field) => {
-                self.members.extend(
-                    field
-                        .declarators()
-                        .map(|declarator| declarator.name().name()),
-                );
-            }
-            _ => {}
-        }
-        falcon_syntax::cst::visit::walk_class_member(self, member);
-    }
 }
 
-struct MemberReference<'a> {
-    names: &'a HashSet<&'a str>,
+/// Member-dependent expressions stay conservative until inference can prove
+/// their dispatch independently of a same-named library declaration.
+struct MemberDependency<'s, 'a> {
+    state: &'s SemanticState<'a>,
     found: bool,
 }
 
-impl<'a> Visitor<'a> for MemberReference<'_> {
+impl<'a> Visitor<'a> for MemberDependency<'_, 'a> {
     fn visit_expr(&mut self, expr: Expr<'a>) {
         if self.found {
             return;
         }
-        if let Expr::Ident(identifier) = expr
-            && self.names.contains(identifier.name())
+        if matches!(expr, Expr::Ident(_))
+            && self.state.referenced_declaration(expr, false)
+                .is_some_and(|reference| !reference.selector.name.is_empty())
         {
             self.found = true;
         } else {
@@ -491,7 +467,7 @@ impl<'a> Visitor<'a> for MemberReference<'_> {
     }
 }
 
-impl<'a> SemanticRuleVisitor<'a> for ArgumentNullability<'a> {
+impl<'a> SemanticRuleVisitor<'a> for ArgumentNullability {
     fn visit_expr(&mut self, expr: Expr<'a>, state: &SemanticState<'a>) {
         let span = expr.span();
         if self.values.contains_key(&(span.start, span.end)) {
@@ -964,7 +940,7 @@ mod tests {
                 std::fs::write(path, source).unwrap();
             }
             let packages =
-                crate::package_identities(sources.iter().map(|(path, _)| path.as_path()));
+                falcon_analyze::package_identities(sources.iter().map(|(path, _)| path.as_path()));
             let (diagnostics, mut files, indexes) =
                 falcon_analyze::analyze_sequential_collecting_resolving(
                     &falcon_analyze::RuleRegistry::new(),

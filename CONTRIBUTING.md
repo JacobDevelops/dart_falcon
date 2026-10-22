@@ -154,6 +154,13 @@ empty rule descriptions and bad examples that produce no diagnostics.
 
    Use `ctx.local_writes(program)` or `ctx.mutated_declarations(program)` for mutation checks. They resolve declarations and handle shadowing; name-only write facts are not a substitute.
 
+   Reuse the context's lazy per-file `function_bodies(program)`,
+   `const_contexts(program)`, and `local_declarations(program)` indexes instead of
+   collecting them in each rule. Resolve package identity through the analysis
+   environment attached to the context, not filesystem discovery in a rule.
+   Semantic visitors should use `SemanticState::referenced_declaration` for
+   expression references rather than maintaining a second resolution engine.
+
    > **Construction gotcha:** `Expr::New` is emitted **only** for `new X(...)` and
    > `const X(...)`. A plain `X()` or a named constructor like `X.from()` parses as
    > a **`Call` chain**, not `Expr::New`. A rule that detects object construction

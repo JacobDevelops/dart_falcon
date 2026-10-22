@@ -13,12 +13,10 @@ pub(crate) mod doc_comments;
 pub(crate) mod expressions;
 pub(crate) mod flutter;
 pub(crate) mod flutter_hooks;
-pub(crate) mod function_bodies;
 pub(crate) mod inherited_members;
 pub(crate) mod lexical_usage;
 pub(crate) mod naming;
 pub(crate) mod options;
-pub(crate) mod package_layout;
 pub mod performance;
 #[cfg(test)]
 mod registry_tests;

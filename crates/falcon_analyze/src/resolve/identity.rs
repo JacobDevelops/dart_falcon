@@ -174,7 +174,7 @@ enum Combinators {
 
 /// SDK and package identities use static builtin or index-owned shared names.
 /// Without loaded external sources, index resolution falls back to allowlists.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DeclarationIdentity {
     Library {
         library: LibraryId,
@@ -1163,6 +1163,14 @@ impl IdentityIndex {
     /// The indexed file at `path`, normalizing its spelling.
     pub fn file(&self, path: &Path) -> Option<FileId> {
         self.file_canonical(path)
+            .or_else(|| {
+                // Relative CLI paths commonly name already indexed absolute paths.
+                // Preserve `..`: collapsing it lexically would bypass symlink semantics.
+                if path.is_absolute() {
+                    return None;
+                }
+                self.file_canonical(&std::path::absolute(path).ok()?)
+            })
             .or_else(|| self.file_canonical(&canonical_or_lexical(path)))
     }
 
@@ -3490,6 +3498,53 @@ mod tests {
             name: name.to_string(),
             lib_root: PathBuf::from(lib_root),
         }
+    }
+
+    #[test]
+    fn file_lookup_resolves_relative_paths_without_reopening_indexed_files() {
+        let cwd = std::env::current_dir().unwrap();
+        let directory = tempfile::tempdir_in(&cwd).unwrap();
+        let path = directory.path().join("main.dart");
+        std::fs::write(&path, "class Main {}").unwrap();
+        let canonical = path.canonicalize().unwrap();
+        let index = index(&[(canonical.to_str().unwrap(), "class Main {}")], &[]);
+        let expected = index.file(&canonical);
+        assert!(expected.is_some());
+        std::fs::remove_file(&path).unwrap();
+        let relative = path.strip_prefix(&cwd).unwrap();
+        assert_eq!(index.file(relative), expected);
+        assert_eq!(index.file(&Path::new(".").join(relative)), expected);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_lookup_preserves_symlink_parent_components() {
+        let cwd = std::env::current_dir().unwrap();
+        let directory = tempfile::tempdir_in(&cwd).unwrap();
+        let nested = directory.path().join("nested");
+        std::fs::create_dir_all(nested.join("child")).unwrap();
+        let outer = directory.path().join("main.dart");
+        let inner = nested.join("main.dart");
+        std::fs::write(&outer, "class Outer {}").unwrap();
+        std::fs::write(&inner, "class Inner {}").unwrap();
+        let alias = directory.path().join("alias");
+        std::os::unix::fs::symlink(nested.join("child"), &alias).unwrap();
+        let index = index(
+            &[
+                (outer.to_str().unwrap(), "class Outer {}"),
+                (inner.to_str().unwrap(), "class Inner {}"),
+            ],
+            &[],
+        );
+        let through_parent = alias.join("../main.dart");
+        let expected = index.file(&inner);
+        assert!(expected.is_some());
+        assert_ne!(expected, index.file(&outer));
+        assert_eq!(index.file(&through_parent), expected);
+        assert_eq!(
+            index.file(through_parent.strip_prefix(&cwd).unwrap()),
+            expected
+        );
     }
 
     #[cfg(unix)]

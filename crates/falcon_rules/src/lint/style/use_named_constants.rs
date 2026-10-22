@@ -24,7 +24,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::const_eval::ConstructorConstContexts as ConstContexts;
+use falcon_analyze::ConstContexts;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
@@ -39,7 +39,7 @@ impl Rule for UseNamedConstants {
         RulePreparation::Semantic(Box::new(Collector {
             diags: Vec::new(),
             ctx,
-            contexts: ConstContexts::new(program),
+            contexts: ctx.const_contexts(program),
             own_field_initializers: own_field_initializers(program),
             local_classes: local_classes(program),
         }))
@@ -85,7 +85,7 @@ fn local_classes(program: Program<'_>) -> Vec<&str> {
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
-    contexts: ConstContexts,
+    contexts: &'a ConstContexts,
     own_field_initializers: Vec<(&'a str, Span)>,
     local_classes: Vec<&'a str>,
 }
@@ -97,7 +97,7 @@ impl<'a> Collector<'a> {
         state: &SemanticState<'a>,
     ) -> Option<DeclarationIdentity> {
         if !matches!(node.unparenthesized(), Expr::New(new) if new.is_const())
-            && !self.contexts.contains(&node.span())
+            && !self.contexts.contains_including_explicit(&node.span())
         {
             return None;
         }

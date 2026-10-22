@@ -24,8 +24,8 @@ impl Rule for AvoidHooksOutsideBuild {
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
-            contexts: HookContexts::new(program),
-            calls: HookCalls::new(program),
+            contexts: HookContexts::new(program, ctx),
+            calls: HookCalls::new(program, ctx),
             candidates: Vec::new(),
         }))
     }

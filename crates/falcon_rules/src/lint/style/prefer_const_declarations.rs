@@ -29,7 +29,8 @@ use falcon_syntax::cst::visit::{
 use falcon_syntax::cst::*;
 use falcon_syntax::token::TokenKind;
 
-use crate::lint::const_eval::{ConstContexts, constant_in_context, deferred_prefixes};
+use falcon_analyze::ConstContexts;
+use crate::lint::const_eval::{constant_in_context, deferred_prefixes};
 use crate::lint::tokens::significant_tokens_in;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
@@ -50,7 +51,7 @@ impl Rule for PreferConstDeclarations {
         let checker = Checker {
             ctx,
             declarations,
-            contexts: ConstContexts::of(program),
+            contexts: ctx.const_contexts(program),
             deferred: deferred_prefixes(program),
         };
         RulePreparation::Semantic(Box::new(checker))
@@ -142,7 +143,7 @@ impl<'a> Visitor<'a> for Declarations {
 struct Checker<'a> {
     ctx: &'a AnalyzeContext<'a>,
     declarations: Declarations,
-    contexts: ConstContexts,
+    contexts: &'a ConstContexts,
     deferred: Vec<&'a str>,
 }
 

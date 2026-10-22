@@ -1,7 +1,7 @@
 //! Span index of function bodies, for rules that need the innermost enclosing
 //! function of a node the semantic walker hands them.
 //!
-//! [`falcon_analyze::semantic_scope`] reports expressions and statements without
+//! [`crate::semantic_scope`] reports expressions and statements without
 //! their enclosing declaration. Bodies nest strictly, so the innermost body
 //! containing a node is the containing entry with the greatest start offset.
 
@@ -13,7 +13,7 @@ use falcon_syntax::cst::*;
 
 /// The declaration form that owns a function body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BodyOwner {
+pub enum BodyOwner {
     TopLevelFunction,
     LocalFunction,
     Method,
@@ -24,17 +24,17 @@ pub(crate) enum BodyOwner {
     Closure,
 }
 
-pub(crate) struct FunctionBodyInfo<'a> {
-    pub(crate) owner: BodyOwner,
-    pub(crate) async_marker: AsyncMarker,
+pub struct FunctionBodyInfo<'a> {
+    pub owner: BodyOwner,
+    pub async_marker: AsyncMarker,
     /// The declared return type; closures and constructors never have one.
-    pub(crate) return_type: Option<DartType<'a>>,
-    pub(crate) span: Span,
+    pub return_type: Option<DartType<'a>>,
+    pub span: Span,
     /// The unparenthesized expression of an `=>` body.
-    pub(crate) arrow_expression: Option<Span>,
+    pub arrow_expression: Option<Span>,
 }
 
-pub(crate) struct FunctionBodies<'a> {
+pub struct FunctionBodies<'a> {
     /// Sorted by `(start, Reverse(end))`, collection order breaking ties.
     bodies: Vec<FunctionBodyInfo<'a>>,
     body_parents: Vec<Option<usize>>,
@@ -46,7 +46,7 @@ pub(crate) struct FunctionBodies<'a> {
 }
 
 impl<'a> FunctionBodies<'a> {
-    pub(crate) fn new(program: Program<'a>) -> Self {
+    pub fn new(program: Program<'a>) -> Self {
         let mut collector = Self {
             bodies: Vec::new(),
             body_parents: Vec::new(),
@@ -66,13 +66,13 @@ impl<'a> FunctionBodies<'a> {
     }
 
     /// The innermost function body containing `span`.
-    pub(crate) fn enclosing(&self, span: &Span) -> Option<&FunctionBodyInfo<'a>> {
+    pub fn enclosing(&self, span: &Span) -> Option<&FunctionBodyInfo<'a>> {
         innermost(&self.bodies, &self.body_parents, |info| info.span, span)
     }
 
     /// Whether a try-statement body or `finally` block lies between `span` and
     /// its innermost enclosing function body.
-    pub(crate) fn inside_try_block(&self, span: &Span) -> bool {
+    pub fn inside_try_block(&self, span: &Span) -> bool {
         let function_start = self.enclosing(span).map_or(0, |info| info.span.start);
         // Containing blocks nest, so the innermost one has the greatest start.
         innermost(&self.try_blocks, &self.try_parents, |block| *block, span)

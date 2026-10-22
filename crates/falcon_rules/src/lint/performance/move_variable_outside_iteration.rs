@@ -14,7 +14,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::resolve::lexical_usage::local_declarations;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
@@ -32,7 +31,7 @@ impl Rule for MoveVariableOutsideIteration {
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
-            references: local_declarations(program),
+            references: ctx.local_declarations(program),
             mutated: ctx.mutated_declarations(program),
             bindings: HashMap::new(),
             declaration_types: HashMap::new(),
@@ -55,7 +54,7 @@ struct Candidate {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    references: HashMap<usize, NodeId>,
+    references: &'a HashMap<usize, NodeId>,
     mutated: &'a HashSet<NodeId>,
     bindings: HashMap<NodeId, Binding<'a>>,
     declaration_types: HashMap<NodeId, ResolvedType>,

@@ -23,7 +23,7 @@ use falcon_syntax::cst::visit::{
 };
 use falcon_syntax::cst::*;
 
-use crate::lint::function_bodies::FunctionBodies;
+use falcon_analyze::FunctionBodies;
 use falcon_analyze::semantic_scope::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
 
 /// A resource type and the method that releases it.
@@ -55,7 +55,7 @@ impl LeakRule {
             rule: *self,
             program,
             ctx,
-            bodies: FunctionBodies::new(program),
+            bodies: ctx.function_bodies(program),
             references: References::new(program, ctx.source().len(), &model),
             candidates: Vec::new(),
             excluded_calls: Vec::new(),
@@ -231,7 +231,7 @@ struct LocalCandidates<'a> {
     rule: LeakRule,
     program: Program<'a>,
     ctx: &'a AnalyzeContext<'a>,
-    bodies: FunctionBodies<'a>,
+    bodies: &'a FunctionBodies<'a>,
     candidates: Vec<Candidate<'a>>,
     references: References<'a>,
     excluded_calls: Vec<(usize, usize)>,

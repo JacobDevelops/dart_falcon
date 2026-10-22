@@ -19,7 +19,7 @@ impl Rule for UseBuildContextSynchronously {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        if is_test_file(ctx.file_path()) {
+        if is_test_file(ctx) {
             return RulePreparation::Diagnostics(Vec::new());
         }
         let Some(semantics) = semantics::prepare(program, ctx) else {

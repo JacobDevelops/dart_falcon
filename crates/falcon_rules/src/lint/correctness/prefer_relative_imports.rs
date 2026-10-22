@@ -29,7 +29,7 @@ impl Rule for PreferRelativeImports {
         if program.imports().is_empty() {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        let Some(package) = crate::cross_file::lib_dir_package(ctx.file_path()) else {
+        let Some(package) = ctx.lib_dir_package() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         if package.name.is_empty() {

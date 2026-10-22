@@ -89,23 +89,10 @@ pub(crate) fn has_test_file_suffix(path: &std::path::Path) -> bool {
 }
 
 /// Whether a file is in one of the analyzer's package-root test directories.
-pub(crate) fn in_test_directory(path: &std::path::Path) -> bool {
-    let Some(pubspec) = crate::cross_file::enclosing_pubspec(path) else {
-        return false;
-    };
-    let Some(root) = pubspec.parent() else {
-        return false;
-    };
-    falcon_analyze::canonical_or_lexical(path)
-        .strip_prefix(root)
-        .is_ok_and(|relative| {
-            relative.components().next().is_some_and(|first| {
-                matches!(
-                    first.as_os_str().to_str(),
-                    Some("test" | "integration_test" | "test_driver" | "testing")
-                )
-            })
-        })
+pub(crate) fn in_test_directory(ctx: &falcon_analyze::AnalyzeContext<'_>) -> bool {
+    ["test", "integration_test", "test_driver", "testing"]
+        .into_iter()
+        .any(|directory| ctx.file_package().in_directory(directory))
 }
 
 pub(crate) fn members_of<'a>(

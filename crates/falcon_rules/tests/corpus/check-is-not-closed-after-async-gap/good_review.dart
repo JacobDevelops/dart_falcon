@@ -46,6 +46,53 @@ class CounterBloc extends Bloc<int, int> {
     service?.consume(await load());
     emit(6);
   }
+  Future<void> emitterBooleanGuard(Emitter<int> emit, bool ready) async {
+    await load();
+    if (emit.isDone == false && ready) emit(7);
+  }
+  Future<void> loopBarrier(bool ready) async {
+    while (ready) {
+      await load();
+    }
+    emit(8);
+  }
+  Future<void> branchBarrier(bool ready) async {
+    if (ready) {
+      await load();
+    }
+    emit(9);
+  }
+  Future<void> blockBarrier() async {
+    {
+      await load();
+    }
+    emit(10);
+  }
+  Future<void> catchBeforeGap() async {
+    try {
+      load();
+    } catch (error) {
+      emit(11);
+      await load();
+    }
+  }
+  Future<void> awaitedConditionScannerBoundary() async {
+    if (await ready()) emit(13);
+  }
+  Future<void> switchBodyScannerBoundary(int value) async {
+    switch (value) {
+      case 0:
+        await load();
+        emit(14);
+    }
+  }
+  Future<void> switchGuardScannerBoundary(int value) async {
+    switch (value) {
+      case 0 when await ready():
+        emit(15);
+    }
+  }
+  Future<bool> ready() async => true;
   Future<int> load() async => 1;
 }
 class Service { void consume(int value) {} }

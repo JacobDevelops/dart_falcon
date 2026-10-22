@@ -33,8 +33,8 @@ use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::bloc::own_member;
-use crate::lint::bloc::BlocTypes;
+use crate::lint::bloc::{BlocTypes, own_member};
+use crate::lint::support::async_state::{AsyncGapFacts, async_gap_spans_with_guard};
 
 #[derive(Default)]
 pub struct CheckIsNotClosedAfterAsyncGap;
@@ -47,11 +47,10 @@ impl Rule for CheckIsNotClosedAfterAsyncGap {
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
+            program,
             types: BlocTypes::new(program),
-            calls: Vec::new(),
-            awaits: Vec::new(),
+            calls: HashMap::new(),
             closed: HashSet::new(),
-            emitter_calls: HashMap::new(),
             done: HashMap::new(),
         }))
     }
@@ -59,11 +58,10 @@ impl Rule for CheckIsNotClosedAfterAsyncGap {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
+    program: Program<'a>,
     types: BlocTypes<'a>,
-    calls: Vec<CallExpr<'a>>,
-    awaits: Vec<Expr<'a>>,
+    calls: HashMap<NodeId, Option<Span>>,
     closed: HashSet<NodeId>,
-    emitter_calls: HashMap<NodeId, Span>,
     done: HashMap<NodeId, Span>,
 }
 
@@ -125,204 +123,35 @@ impl<'a> Collector<'a> {
                 })
                 .is_some_and(|call| own_member(call.callee(), "on", &self.types, state))
     }
-
-    fn condition_open(&self, expression: Expr<'a>, truth: bool, emitter: Option<Span>) -> bool {
-        let mut proof = GuardProof {
-            closed: &self.closed,
-            done: &self.done,
-            emitter,
-            values: [[false; 2]; 2],
-            count: 0,
-        };
-        visit::Visitor::visit_expr(&mut proof, expression);
-        proof.values[0][usize::from(truth)]
-    }
-
-    fn guarded(&self, statement: IfStmt<'a>, truth: bool, emitter: Option<Span>) -> bool {
-        matches!(statement.condition(), IfCondition::Expr(expression) if self.condition_open(expression, truth, emitter))
-    }
-
-    fn previous(&self, statement: Stmt<'a>, body: NodeId, emitter: Option<Span>) -> Evidence {
-        if let Stmt::If(branch) = statement {
-            if terminates(branch.then_branch()) && self.guarded(branch, false, emitter)
-                || branch.else_branch().is_some_and(terminates)
-                    && self.guarded(branch, true, emitter)
-            {
-                return Evidence::Guard;
-            }
-            return Evidence::Barrier;
-        }
-        if !matches!(
-            statement,
-            Stmt::Expr(_) | Stmt::LocalVar(_) | Stmt::Empty(_)
-        ) {
-            return Evidence::Barrier;
-        }
-        let mut result = Evidence::None;
-        for awaited in &self.awaits {
-            if statement.span().contains(awaited.span())
-                && function_body(awaited.syntax()) == Some(body)
-            {
-                if awaited
-                    .syntax()
-                    .ancestors()
-                    .take_while(|node| *node != statement.syntax())
-                    .any(uncertain_expression)
-                {
-                    return Evidence::Barrier;
-                }
-                result = Evidence::Gap;
-            }
-        }
-        result
-    }
-
-    fn violates(&self, call: CallExpr<'a>) -> bool {
-        let Some(body) = function_body(call.syntax()) else {
-            return false;
-        };
-        if self.awaits.iter().any(|awaited| {
-            call.args().span().contains(awaited.span())
-                && function_body(awaited.syntax()) == Some(body)
-                && !awaited
-                    .syntax()
-                    .ancestors()
-                    .take_while(|node| *node != call.syntax())
-                    .any(uncertain_expression)
-        }) {
-            return true;
-        }
-        let emitter = self.emitter_calls.get(&call.syntax().id()).copied();
-        let mut child = call.syntax();
-        while let Some(parent) = child.parent() {
-            if uncertain_expression(parent) {
-                return false;
-            }
-            if let Some(block) = Block::cast(parent) {
-                for statement in block
-                    .stmts()
-                    .rev()
-                    .filter(|statement| statement.span().end <= child.span().start)
-                {
-                    match self.previous(statement, body, emitter) {
-                        Evidence::Gap => return true,
-                        Evidence::Guard | Evidence::Barrier => return false,
-                        Evidence::None => {}
-                    }
-                }
-            }
-            if parent.id() == body {
-                return false;
-            }
-            if let Some(Stmt::If(branch)) = Stmt::cast(parent) {
-                let truth = branch.then_branch().syntax() == child;
-                if let IfCondition::Case(condition) = branch.condition()
-                    && (self.condition_open(condition.expr(), false, emitter)
-                        || self.condition_open(condition.expr(), true, emitter)
-                        || (truth
-                            && condition
-                                .guard()
-                                .is_some_and(|guard| self.condition_open(guard, true, emitter))))
-                {
-                    return false;
-                }
-                if (truth
-                    || branch
-                        .else_branch()
-                        .is_some_and(|statement| statement.syntax() == child))
-                    && self.guarded(branch, truth, emitter)
-                {
-                    return false;
-                }
-            } else if Stmt::cast(parent).is_some_and(|statement| {
-                matches!(
-                    statement,
-                    Stmt::For(_)
-                        | Stmt::While(_)
-                        | Stmt::DoWhile(_)
-                        | Stmt::TryCatch(_)
-                        | Stmt::Switch(_)
-                )
-            }) {
-                return false;
-            }
-            child = parent;
-        }
-        false
-    }
-}
-
-#[derive(Clone, Copy)]
-enum Evidence {
-    None,
-    Gap,
-    Guard,
-    Barrier,
-}
-
-
-fn function_body(node: SyntaxNode<'_>) -> Option<NodeId> {
-    node.ancestors()
-        .find(|ancestor| {
-            FunctionBody::cast(*ancestor).is_some()
-                && ancestor.parent().is_some_and(|parent| {
-                    MethodDecl::cast(parent).is_some()
-                        || ConstructorDecl::cast(parent).is_some()
-                        || FunctionDecl::cast(parent).is_some()
-                        || GetterDecl::cast(parent).is_some()
-                        || SetterDecl::cast(parent).is_some()
-                        || matches!(Expr::cast(parent), Some(Expr::FuncExpr(_)))
-                        || matches!(Stmt::cast(parent), Some(Stmt::LocalFunc(_)))
-                })
-        })
-        .map(|body| body.id())
-}
-
-fn uncertain_expression(node: SyntaxNode<'_>) -> bool {
-    matches!(
-        node.kind(),
-        NodeKind::IfElement
-            | NodeKind::ForElement
-            | NodeKind::MapIfElement
-            | NodeKind::MapForElement
-    ) || matches!(
-        Expr::cast(node),
-        Some(Expr::Conditional(_) | Expr::Switch(_))
-    ) || matches!(Expr::cast(node), Some(Expr::Binary(binary)) if matches!(binary.op(), BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce))
-        || matches!(Expr::cast(node), Some(Expr::Call(call)) if optional_receiver(call.callee()))
-        || matches!(Expr::cast(node), Some(Expr::Cascade(cascade)) if cascade.is_null_aware())
-}
-
-fn optional_receiver(expression: Expr<'_>) -> bool {
-    let mut optional = false;
-    visit::for_each_expr(expression, &mut |node| {
-        optional |= match node {
-            Expr::Field(field) => field.is_null_safe(),
-            Expr::Index(index) => index.is_null_safe(),
-            Expr::Cascade(cascade) => cascade.is_null_aware(),
-            _ => false,
-        };
-    });
-    optional
-}
-
-fn terminates(statement: Stmt<'_>) -> bool {
-    match statement {
-        Stmt::Return(_) | Stmt::Throw(_) | Stmt::Rethrow(_) => true,
-        Stmt::Block(block) => block.stmts().last().is_some_and(terminates),
-        _ => false,
-    }
 }
 
 impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
-        self.calls
-            .iter()
-            .filter(|call| self.violates(**call))
-            .map(|call| {
-                self.ctx.diagnostic("Check `isClosed` after the `await` before adding an event or emitting a state.", call.span())
-            })
-            .collect()
+        let Self {
+            ctx,
+            program,
+            calls,
+            closed,
+            done,
+            ..
+        } = *self;
+        async_gap_spans_with_guard(
+            program,
+            AsyncGapFacts::default(),
+            calls,
+            true,
+            |expression, emitter| {
+                (closed.contains(&expression)
+                    || emitter.as_ref().is_some_and(|binding| done.get(&expression) == Some(binding)))
+                .then_some(false)
+            },
+        )
+        .into_iter()
+        .map(|span| ctx.diagnostic(
+            "Check `isClosed` after the `await` before adding an event or emitting a state.",
+            span,
+        ))
+        .collect()
     }
 
     fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
@@ -337,84 +166,23 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             self.done.insert(node.syntax().id(), binding);
         }
-        match node {
-            Expr::Await(_) => self.awaits.push(node),
-            Expr::Call(call) => {
-                let emitter = self.emitter(call.callee(), state);
-                if !emitter
-                    && !own_member(call.callee(), "add", &self.types, state)
-                    && !own_member(call.callee(), "emit", &self.types, state)
-                {
-                    return;
-                }
-                if emitter
-                    && let Expr::Ident(identifier) = call.callee().unparenthesized()
-                    && let Some(binding) = state.environment.binding_declaration(identifier.name())
-                {
-                    self.emitter_calls.insert(call.syntax().id(), binding);
-                }
-                self.calls.push(call)
+        if let Expr::Call(call) = node {
+            let emitter = self.emitter(call.callee(), state);
+            if !emitter
+                && !own_member(call.callee(), "add", &self.types, state)
+                && !own_member(call.callee(), "emit", &self.types, state)
+            {
+                return;
             }
-            _ => {}
+            let binding = if emitter
+                && let Expr::Ident(identifier) = call.callee().unparenthesized()
+            {
+                state.environment.binding_declaration(identifier.name())
+            } else {
+                None
+            };
+            self.calls.insert(call.syntax().id(), binding);
         }
     }
 }
 
-/// Computes both truth-direction proofs using the exhaustive expression walker.
-/// Child summaries stay on the call stack; boolean guards need at most two.
-#[derive(Clone, Copy)]
-struct GuardProof<'s> {
-    closed: &'s HashSet<NodeId>,
-    done: &'s HashMap<NodeId, Span>,
-    emitter: Option<Span>,
-    values: [[bool; 2]; 2],
-    count: usize,
-}
-
-impl<'a> visit::Visitor<'a> for GuardProof<'_> {
-    fn visit_expr(&mut self, node: Expr<'a>) {
-        let mut children = Self {
-            values: [[false; 2]; 2],
-            count: 0,
-            ..*self
-        };
-        visit::walk_expr(&mut children, node);
-        let [left, right] = children.values;
-        let value = if self.closed.contains(&node.syntax().id())
-            || self
-                .emitter
-                .is_some_and(|binding| self.done.get(&node.syntax().id()) == Some(&binding))
-        {
-            [true, false]
-        } else {
-            match node {
-                Expr::Paren(_) => left,
-                Expr::Unary(unary) if unary.op() == UnaryOp::Bang => [left[1], left[0]],
-                Expr::Binary(binary) if binary.op() == BinaryOp::And => {
-                    [false, left[1] || right[1]]
-                }
-                Expr::Binary(binary) if binary.op() == BinaryOp::Or => [left[0] || right[0], false],
-                Expr::Binary(binary) if matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq) => {
-                    let comparison = match (
-                        binary.left().unparenthesized(),
-                        binary.right().unparenthesized(),
-                    ) {
-                        (_, Expr::BoolLit(value)) => Some((left, value.value())),
-                        (Expr::BoolLit(value), _) => Some((right, value.value())),
-                        _ => None,
-                    };
-                    comparison.map_or([false; 2], |(subject, value)| {
-                        let polarity = value == (binary.op() == BinaryOp::EqEq);
-                        [
-                            subject[usize::from(!polarity)],
-                            subject[usize::from(polarity)],
-                        ]
-                    })
-                }
-                _ => [false; 2],
-            }
-        };
-        self.values[self.count.min(1)] = value;
-        self.count += 1;
-    }
-}

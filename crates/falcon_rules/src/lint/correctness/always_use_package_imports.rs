@@ -27,7 +27,7 @@ impl Rule for AlwaysUsePackageImports {
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         if program.imports().is_empty()
-            || crate::cross_file::lib_dir_package(ctx.file_path()).is_none()
+            || ctx.lib_dir_package().is_none()
         {
             return RulePreparation::Diagnostics(Vec::new());
         }

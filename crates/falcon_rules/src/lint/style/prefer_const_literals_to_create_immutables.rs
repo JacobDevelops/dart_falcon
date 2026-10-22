@@ -28,7 +28,8 @@ use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedType, Rule, Ru
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::const_eval::{ConstContexts, constant_in_context, deferred_prefixes};
+use falcon_analyze::ConstContexts;
+use crate::lint::const_eval::{constant_in_context, deferred_prefixes};
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
@@ -41,7 +42,7 @@ impl Rule for PreferConstLiteralsToCreateImmutables {
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
-            contexts: ConstContexts::of(program),
+            contexts: ctx.const_contexts(program),
             deferred: deferred_prefixes(program),
             ctx,
             diags: Vec::new(),
@@ -50,7 +51,7 @@ impl Rule for PreferConstLiteralsToCreateImmutables {
 }
 
 struct Collector<'a> {
-    contexts: ConstContexts,
+    contexts: &'a ConstContexts,
     deferred: Vec<&'a str>,
     ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,

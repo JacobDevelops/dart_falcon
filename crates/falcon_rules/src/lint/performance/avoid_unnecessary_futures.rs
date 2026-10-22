@@ -14,7 +14,7 @@ use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::function_bodies::{BodyOwner, FunctionBodies};
+use falcon_analyze::{BodyOwner, FunctionBodies};
 
 #[derive(Default)]
 pub struct AvoidUnnecessaryFutures;
@@ -27,7 +27,7 @@ impl Rule for AvoidUnnecessaryFutures {
     ) -> RulePreparation<'a> {
         RulePreparation::Semantic(Box::new(Collector {
             ctx,
-            bodies: FunctionBodies::new(program),
+            bodies: ctx.function_bodies(program),
             candidates: HashMap::new(),
             unsafe_bodies: HashSet::new(),
         }))
@@ -36,7 +36,7 @@ impl Rule for AvoidUnnecessaryFutures {
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
-    bodies: FunctionBodies<'a>,
+    bodies: &'a FunctionBodies<'a>,
     candidates: HashMap<usize, Span>,
     unsafe_bodies: HashSet<usize>,
 }

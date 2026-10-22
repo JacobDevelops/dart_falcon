@@ -10,8 +10,7 @@ use std::collections::HashSet;
 use falcon_analyze::constant_value::evaluate_stable_constant_with_local_values_in_context;
 use falcon_analyze::semantic_scope::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, ConstantDeclaration, ConstantValue, DeclarationIdentity, ResolvedType, Rule,
-    RulePreparation,
+    AnalyzeContext, ConstantValue, DeclarationIdentity, ResolvedType, Rule, RulePreparation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -68,7 +67,7 @@ fn constant(
 
 fn cover_key(
     value: ConstantValue,
-    owner: &ConstantDeclaration,
+    owner: &DeclarationIdentity,
     covered: &mut HashSet<String>,
 ) -> bool {
     match value {
@@ -86,7 +85,7 @@ fn cover_key(
 fn cover_element(
     element: MapElement<'_>,
     key_type: &ResolvedType,
-    owner: &ConstantDeclaration,
+    owner: &DeclarationIdentity,
     state: &SemanticState<'_>,
     ctx: &AnalyzeContext<'_>,
     covered: &mut HashSet<String>,
@@ -197,23 +196,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         let Some(values) = state.signatures.enum_value_names(identity) else {
             return;
         };
-        let owner = match identity {
-            DeclarationIdentity::Library { library, name } => {
-                ConstantDeclaration::Project(*library, name.clone())
-            }
-            DeclarationIdentity::Sdk { library, name } => {
-                ConstantDeclaration::Sdk(library.clone(), name.clone())
-            }
-            DeclarationIdentity::Package {
-                package,
-                name,
-                copy,
-            } => ConstantDeclaration::Package(package.clone(), name.clone(), *copy),
-        };
         let mut covered = HashSet::new();
         if !map
             .elements()
-            .all(|element| cover_element(element, key_type, &owner, state, self.ctx, &mut covered))
+            .all(|element| cover_element(element, key_type, identity, state, self.ctx, &mut covered))
         {
             return;
         }
