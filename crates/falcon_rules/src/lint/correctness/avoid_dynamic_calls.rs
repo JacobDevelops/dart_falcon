@@ -392,6 +392,48 @@ mod tests {
     }
 
     #[test]
+    fn unresolved_inherited_member_types_do_not_report_dynamic_calls() {
+        for source in [
+            r"
+class A { var x = missing(); }
+class B extends A { get x => 1; }
+void f(B b) { b.x.foo(); final y = b.x; y.bar(); }
+",
+            r"
+abstract class I1 {
+  var x = C().x;
+}
+abstract class I2 {
+  set x(int v);
+}
+class C implements I1, I2 {
+  get x => 0;
+  set x(v) {}
+}
+void use(C c, I1 i) {
+  c.x.foo();
+  i.x.bar();
+  c.x = 'a';
+}
+",
+        ] {
+            let path = Path::new("/project/lib/test.dart");
+            let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+            assert!(errors.is_empty(), "{errors:?}");
+            let parsed = Arc::new(ParsedFile {
+                source: source.into(),
+                tree,
+            });
+            let program = parsed.program();
+            let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
+            let config = FalconConfig::default();
+            let ctx = indexes.context(path, &config, &parsed);
+            let diagnostics = AvoidDynamicCalls.analyze(AvoidDynamicCalls::NAME, program, &ctx);
+            assert!(diagnostics.is_empty(), "{source}\n{diagnostics:?}");
+        }
+    }
+
+    #[test]
     fn dynamic_result_context_preserves_inferred_accumulator_type() {
         let source = r"
 import 'expect.dart';
