@@ -6,44 +6,9 @@ Every hardening item and rule row below must be resolved before falcon 1.0; ther
 
 Engine fixes from the October 2026 audit plus the 1.0 workflow features. Every item blocks 1.0. Items are grouped into batches sized for one agent: each batch says what code it owns and what it waits on. Batches in the same stage can run in parallel unless a batch says otherwise. Each fix lands with a regression test built from its repro.
 
-### Stage 4: rule internals
+### Stage 5: start now
 
-Batches 12 and 13 can run in parallel; 14 runs after 12 because both move code out of `use_build_context_synchronously`.
-
-#### 12. Shared rule helpers
-
-Owns rule files' helper exports, a new `lint` support module, and `falcon_syntax` helper methods.
-
-- [ ] **Rule files aren't libraries.** About 25 rule files export helpers to other rules (`use_build_context_synchronously`, `always_specify_types`, `conditional_uri_does_not_exist`, …). Move helpers to a support module, keep group directories rule-only, drop the `#[path]` include, and add a ratchet against rule-to-rule imports.
-- [ ] **One resolved predicate per concept.** 8 `@override` detectors with 3 meanings, 6 `@deprecated` detectors (half name-only), drifted test-package lists, 13 copies of span containment. Add `has_override`, `deprecation`, `Span::contains`/`contains_offset` and route the test-package checks through `test_assertions`.
-- [ ] **Syntax helpers instead of rule copies.** `BinaryOp`/`AssignOp::operator_name`, `TopLevelDecl::type_params`, and arity from the indexes instead of the table in `always_specify_types.rs:116-140`.
-- [ ] **Resolved names instead of spelling.** `avoid_returning_widgets`, `member_ordering`, `avoid_returning_null_for_void` and `avoid_catches_without_on_clauses` match `Widget`/`State`/`Future` by name.
-- [ ] **Small rule cleanups.** Remove the parallel declarations iterator and its `expect` in `prefer_const_constructors_in_immutables`; replace guarded `unwrap`s with slice patterns; add a helper for the ~60 identical `prepare` bodies; interval lookup in `deprecated_member_use_from_same_package`.
-
-#### 13. Rule tests and docs
-
-Owns rule `#[cfg(test)]` modules, `crates/falcon_rules/tests/`, rule messages and `//!` docs, and `prefer_iterable_every`'s matching.
-
-- [ ] **Rule test support.** 19 files hand-build identity harnesses and 12 build SDK trees. Add a shared `#[cfg(test)]` support module, move misplaced tests to the rule they test, and move `lint/semantic_scope_tests.rs` to `falcon_analyze`.
-- [ ] **Corpus checks messages in-process.** `cargo test` ignores `msg:` and only reads top-level fixtures; only the xtask harness compares messages. Check them in both and fix the CONTRIBUTING wording.
-- [ ] **Message style.** 61 messages lack terminal punctuation and code is quoted three ways. Messages are full sentences ending in a full stop, with code in backticks; enforce it in a meta test.
-- [ ] **User-facing module docs.** Several `//!` docs read as fix logs and docgen publishes them; `unnecessary_nullable`'s doc is stale and `prefer_iterable_every`'s describes the wrong semantics.
-- [ ] **Fix `prefer-iterable-every` semantics.** The port flags the negated `!where(pred).isEmpty`, which is `any(pred)` and overlaps `prefer-iterable-any`, and suggests `.every()` with the wrong predicate. Match the non-negated `where(pred).isEmpty` (`every(!pred)`) instead, keep the `where(pred).length == length` case, and update the corpus. Ship it separately from other changes, with a changeset.
-
-#### 14. Shared analysis for rules
-
-Owns `AnalyzeContext` caches, `semantic_scope.rs` queries, `const_eval.rs`, `ConstantDeclaration` in `constant_value.rs`, the derives on `DeclarationIdentity`, `cross_file.rs` package helpers, and the rules migrated onto them. After batch 12.
-
-- [ ] **Cache shared per-file facts.** `FunctionBodies`, const contexts and `local_declarations` are re-walked by 16-20 rules per file. Cache them on `AnalyzeContext`.
-- [ ] **One constant-context definition.** `const_eval.rs` has two `ConstContexts` that disagree; one is a linear scan per expression.
-- [ ] **Delete `ConstantDeclaration`.** It mirrors `DeclarationIdentity` with five hand-written conversions; derive `Ord` on `DeclarationIdentity` instead. `const_eval` should reuse the evaluator's custom-`==` check and constant walk.
-- [ ] **Package identity from the analysis environment.** Per-file rules do filesystem IO through the global `PACKAGE_CACHE` (`cross_file.rs:379-446`), and package discovery exists three times. Resolve it once per file into the context.
-- [ ] **One async-gap engine.** `check_is_not_closed_after_async_gap` reimplements a straight-line model next to the `use_build_context_synchronously` engine. Parameterise the shared engine by guard.
-- [ ] **Shared reference resolution.** `unreachable_from_main`, `deprecated_member_use_from_same_package`, `use_late_for_private_fields_and_variables` and `unnecessary_nullable` each carry their own engine. Add `SemanticState::referenced_declaration` and migrate them; `unreachable_from_main` also moves to the shared doc-reference parser.
-
-### Stage 5: analysis core
-
-Can run alongside stage 4 except where a batch touches rule files. Batch 15 goes first; 16 and 17 then work in separate modules.
+Batch 15 goes first; 16 and 17 then work in separate modules.
 
 #### 15. Split `resolve/semantic.rs`
 
