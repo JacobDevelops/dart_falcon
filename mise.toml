@@ -11,7 +11,7 @@ cargo-make    = "latest"
 taplo         = "latest"
 cargo-nextest = { version = "latest", version_prefix = "cargo-nextest-" }
 cargo-watch   = "latest"
-knope         = "latest"
+knope         = { version = "0.23.1", version_prefix = "knope/v" }
 hyperfine     = "2.0.0"
 
 [tool_alias]
