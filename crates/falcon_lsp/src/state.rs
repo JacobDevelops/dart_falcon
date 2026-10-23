@@ -1629,49 +1629,46 @@ impl LspState {
                     parsed: Arc::clone(&doc.parsed),
                     has_parse_errors: doc.has_parse_errors,
                 });
-            } else {
-                match falcon_analyze::read_source(path) {
-                    Ok(source) => {
-                        let (tree, has_parse_errors) = if is_dart {
-                            let package_version = self.environment.package_language_version(path);
-                            let result = try_parse_for_package(&source, package_version);
-                            #[cfg(test)]
-                            let result = self.inject_parser_failure(path, result);
-                            let parsed = match result {
-                                Ok(parsed) => parsed,
-                                Err(error) => {
-                                    worker_failure = Some((
-                                        normalized.clone(),
-                                        std::io::Error::other(format!(
-                                            "parsing {}: {error}",
-                                            path.display()
-                                        )),
-                                    ));
-                                    complete = false;
-                                    break;
-                                }
-                            };
-                            (parsed.tree, !parsed.errors.is_empty())
-                        } else {
-                            (lex_tree(&source), false)
-                        };
-                        files.push(ProjectFile {
-                            path: normalized,
-                            parsed: Arc::new(ParsedFile {
-                                source: source.into_boxed_str(),
-                                tree,
-                            }),
-                            has_parse_errors,
-                        });
-                    }
-                    Err(e) => {
-                        warn!("failed to read {}: {}", path.display(), e);
-                        if falcon_analyze::is_source_too_large(&e) {
-                            complete = false;
-                        }
-                    }
-                }
+                continue;
             }
+            let source = match falcon_analyze::read_source(path) {
+                Ok(source) => source,
+                Err(e) => {
+                    warn!("failed to read {}: {}", path.display(), e);
+                    if falcon_analyze::is_source_too_large(&e) {
+                        complete = false;
+                    }
+                    continue;
+                }
+            };
+            let (tree, has_parse_errors) = if is_dart {
+                let package_version = self.environment.package_language_version(path);
+                let result = try_parse_for_package(&source, package_version);
+                #[cfg(test)]
+                let result = self.inject_parser_failure(path, result);
+                let parsed = match result {
+                    Ok(parsed) => parsed,
+                    Err(error) => {
+                        worker_failure = Some((
+                            normalized.clone(),
+                            std::io::Error::other(format!("parsing {}: {error}", path.display())),
+                        ));
+                        complete = false;
+                        break;
+                    }
+                };
+                (parsed.tree, !parsed.errors.is_empty())
+            } else {
+                (lex_tree(&source), false)
+            };
+            files.push(ProjectFile {
+                path: normalized,
+                parsed: Arc::new(ParsedFile {
+                    source: source.into_boxed_str(),
+                    tree,
+                }),
+                has_parse_errors,
+            });
         }
         if matches!(view, ProjectView::Semantic) {
             for (path, doc) in open_by_path {
