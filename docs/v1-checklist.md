@@ -51,6 +51,12 @@ Owns a new `cargo xtask e2e` and its CI jobs. Independent of the engine; can sta
 
 - [ ] **e2e OSS corpus.** Run falcon over pinned, shallow clones of large Dart/Flutter repos (immich, AppFlowy, flutter/packages, flame, LocalSend, bloc, riverpod, Wonderous, flutter/samples, dart-lang/sdk `tests/language`). Catch panics and parser/internal errors, snapshot diagnostic counts, and smoke-test migration of common `analysis_options.yaml` presets. A fast subset runs in PR CI and the full set nightly.
 
+#### 27. Remaining recursive walkers
+
+Owns the rule and analysis helpers listed below. Can start any time.
+
+- [ ] **Long chains in the remaining walkers.** `falcon check` survives 100,000-operand `+`, `&&`, `||`, `??` and string chains as initializers, arguments and statements, but these walkers still recurse once per operand. Default on: parameter defaults (`default_syntax.rs` `SyntaxCollector`), `==`/`!=` operands in `async_semantics.rs` `BoundNames`, the async-gap fallback in `async_state.rs` `Tree`, switch guards in `avoid_duplicate_switch_case_conditions.rs` `GuardProof`, `kDebugMode` branches in `avoid_print`, `Target` annotation arguments in `library_annotations`, generator bodies in `null_check_on_nullable_type_parameter`, sibling parts in `prefer_final_fields`, and dispose bodies in `controller_disposal.rs`. Default off: `support/constants.rs`, `const_eval.rs`, `logical_operands.rs`, `unnecessary_nullable`, `avoid_complex_arithmetic_expressions`, `move_variable_outside_iteration`, `cascade_invocations`, `prefer_moving_to_variable`, `deprecated_member_use_from_same_package`, `prefer_foreach`, `avoid_catches_without_on_clauses`, `avoid_redundant_argument_values`, `avoid_types_on_closure_parameters`, `prefer_int_literals`, `unreachable_from_main` and `use_late_for_private_fields_and_variables`. Route each through `walk_expr_chain`, and extend `tests/long_expression_chains.rs` with one 100,000-operand case per shape, run with the rule enabled.
+
 ### Stage 7: last
 
 #### 26. Clippy pedantic
