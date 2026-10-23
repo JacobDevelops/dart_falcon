@@ -105,7 +105,10 @@ jobs:
         with:
           tools: ${{ matrix.tools }}
           snapshot: ${{ matrix.snapshot }}
+      # mbx 1.26 no longer exempts the newest target from size gc; keep it until the step's binaries have run.
       - run: ${{ matrix.run }}
+        env:
+          MBX_TARGET_KEEP: ${{ github.workspace }}
       # Automatic gc runs at most hourly, so enforce MBX_GC_MAX_TOTAL_SIZE before saving.
       - name: Trim compiler snapshot
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.setup.outputs.cache-hit != 'true'
