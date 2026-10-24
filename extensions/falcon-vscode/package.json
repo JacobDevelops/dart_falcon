@@ -2,7 +2,7 @@
   "name": "falcon-vscode",
   "displayName": "Falcon Dart Linter",
   "description": "Fast Dart lint diagnostics from the falcon language server",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "publisher": "jacobsanderson",
   "license": "MIT",
   "icon": "icon.png",
@@ -21,7 +21,7 @@
     "jsonValidation": [
       {
         "fileMatch": "falcon.json",
-        "url": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v0.4.3/schema/falcon.schema.json"
+        "url": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v0.4.4/schema/falcon.schema.json"
       }
     ],
     "languages": [

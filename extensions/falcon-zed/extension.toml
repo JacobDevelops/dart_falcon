@@ -1,6 +1,6 @@
 id             = "falcon"
 name           = "Falcon Dart Linter"
-version        = "0.4.3"
+version        = "0.4.4"
 schema_version = 1
 authors        = [ "Jacob Sanderson <jacob@jacobdevelops.com>" ]
 description    = "Fast Dart lint diagnostics from the falcon language server"

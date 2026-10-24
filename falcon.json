@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v0.4.3/schema/falcon.schema.json",
+  "$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v0.4.4/schema/falcon.schema.json",
   "files": {
     "includes": [
       "**",
