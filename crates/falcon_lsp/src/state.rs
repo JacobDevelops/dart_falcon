@@ -2080,6 +2080,18 @@ impl LspState {
             }
             match falcon_analyze::read_source(path) {
                 Ok(source) => {
+                    if let Some(cached) = self.disk_files.get_mut(path)
+                        && cached.language_version == language_version
+                        && cached.parsed.source.as_ref() == source
+                    {
+                        cached.stamp = stamp;
+                        files.push(ProjectFile {
+                            path: path.to_path_buf(),
+                            parsed: Arc::clone(&cached.parsed),
+                            has_parse_errors: cached.has_parse_errors,
+                        });
+                        continue;
+                    }
                     self.disk_parse_count += 1;
                     let result = try_parse_for_package(&source, language_version);
                     #[cfg(test)]
@@ -2376,6 +2388,18 @@ impl LspState {
                     continue;
                 }
             };
+            if let Some(cached) = self.disk_files.get_mut(path)
+                && cached.language_version == language_version
+                && cached.parsed.source.as_ref() == source
+            {
+                cached.stamp = stamp;
+                files.push(ProjectFile {
+                    path: normalized.clone(),
+                    parsed: Arc::clone(&cached.parsed),
+                    has_parse_errors: cached.has_parse_errors,
+                });
+                continue;
+            }
             let (tree, has_parse_errors) = if *is_dart {
                 let package_version = language_version;
                 self.disk_parse_count += 1;

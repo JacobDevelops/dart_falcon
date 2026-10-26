@@ -28,10 +28,23 @@ fn snapshot_rebuild_revalidates_disk_parses_without_a_watcher_event() {
     assert_eq!(state.disk_parse_count, parses);
     assert!(Arc::ptr_eq(&cached, &state.disk_files[&closed].parsed));
 
-    std::fs::write(&closed, "class ChangedWithoutAnEvent {}").unwrap();
-    state.change(&uri, "void anotherName() {}".into(), Some(3));
+    let modified = std::fs::metadata(&closed).unwrap().modified().unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&closed)
+        .unwrap()
+        .set_modified(modified + std::time::Duration::from_secs(2))
+        .unwrap();
+    state.change(&uri, "void afterTouch() {}".into(), Some(3));
     state.analyze(&uri);
     assert_eq!(state.disk_read_count, reads + 1);
+    assert_eq!(state.disk_parse_count, parses);
+    assert!(Arc::ptr_eq(&cached, &state.disk_files[&closed].parsed));
+
+    std::fs::write(&closed, "class ChangedWithoutAnEvent {}").unwrap();
+    state.change(&uri, "void anotherName() {}".into(), Some(4));
+    state.analyze(&uri);
+    assert_eq!(state.disk_read_count, reads + 2);
     assert_eq!(state.disk_parse_count, parses + 1);
     assert_eq!(
         state.disk_files[&closed].parsed.source.as_ref(),
