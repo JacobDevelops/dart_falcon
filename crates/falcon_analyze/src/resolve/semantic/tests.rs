@@ -1771,6 +1771,7 @@ extension NonNullable on Value {
   String measure() => '';
 }
 Holder? holder = throw 0;
+Items? items = throw 0;
 final nullableField = holder?.maybe.size;
 final nonNullableField = holder?.present.size;
 final ownShorting = holder?.maybe?.size;
@@ -1778,6 +1779,12 @@ final parenthesizedField = (holder?.present).size;
 final nullableCall = holder?.maybeCall().measure();
 final parenthesizedCall = (holder?.presentCall()).measure();
 final nullableIndex = holder?.items[0].size;
+final assertedField = holder?.maybe!.size;
+final repeatedAssertion = holder?.maybe!!.size;
+final parenthesizedAssertion = (holder?.maybe)!.size;
+final assertedIndex = holder?.items[0]!.size;
+final ownIndexShorting = items?[0]!.size;
+final parenthesizedIndex = (items?[0])!.size;
 "#,
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
@@ -1789,6 +1796,12 @@ final nullableIndex = holder?.items[0].size;
                 ("nullableCall", "int", true),
                 ("parenthesizedCall", "int", false),
                 ("nullableIndex", "int", true),
+                ("assertedField", "String", true),
+                ("repeatedAssertion", "String", true),
+                ("parenthesizedAssertion", "String", false),
+                ("assertedIndex", "String", true),
+                ("ownIndexShorting", "String", true),
+                ("parenthesizedIndex", "String", false),
             ] {
                 let identity = model.resolve_value(name).unwrap();
                 let ty = signatures.value_type(&identity).unwrap();
@@ -3420,7 +3433,9 @@ fn bound_static_access_heads_use_instance_types_and_lexical_lookup() {
         "class Root { static int value = 1; } \
          class Other { Other get child => this; String get value => ''; } \
          dynamic direct(Other Root) => Root.value; \
-         dynamic nested(Other Root) => Root.child.value;",
+         dynamic nested(Other Root) => Root.child.value; \
+         dynamic deeper(Other Root) => Root.child.child.value; \
+         dynamic wrapped(Other Root) => ((Root).child).child.value;",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
             let scope = TypeParameterScope::default();
@@ -3451,6 +3466,87 @@ fn bound_static_access_heads_use_instance_types_and_lexical_lookup() {
                         )
                         .interface("dart:core", "String")
                 );
+            }
+        },
+    );
+}
+
+#[test]
+fn bounded_static_qualifiers_preserve_field_and_getter_types() {
+    with_model(
+        "class Root { static int value = 1; static int get count => 2; } \
+         extension Tools on Object { static int value = 1; static int get count => 2; } \
+         dynamic field() => Root.value; \
+         dynamic wrappedField() => (Root).value; \
+         dynamic getter() => Root.count; \
+         dynamic wrappedGetter() => (Root).count; \
+         dynamic extensionField() => Tools.value; \
+         dynamic wrappedExtensionField() => (Tools).value; \
+         dynamic extensionGetter() => Tools.count; \
+         dynamic wrappedExtensionGetter() => (Tools).count;",
+        |program, model| {
+            let signatures = SignatureIndex::from_program(program, model);
+            let scope = TypeParameterScope::default();
+            for declaration in program.declarations().skip(2) {
+                let TopLevelDecl::Function(function) = declaration else {
+                    panic!("expected function");
+                };
+                let Some(FunctionBody::Arrow(body)) = function.body() else {
+                    panic!("expected arrow body");
+                };
+                assert!(
+                    TypeEnvironment::new()
+                        .infer_with_signatures(body.expr(), model, &signatures, &scope)
+                        .interface("dart:core", "int"),
+                    "{}",
+                    function.name().name(),
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn declaration_qualifiers_bound_names_without_losing_generic_wrappers() {
+    with_model(
+        "import 'dart:core' as core; class Local<T> {} \
+         final direct = Local; \
+         final prefixed = core.List; \
+         final wrapped = (core).List; \
+         final generic = Local<int>; \
+         final genericPrefix = core.List<int>; \
+         final genericHead = (Local<int>).value; \
+         final tooDeep = core.List.member; \
+         final tooDeepGeneric = (core.List<int>).member;",
+        |program, _| {
+            let local = Some(QualifiedName::from("Local"));
+            let prefixed = Some(QualifiedName::prefixed("core", "List"));
+            for (declaration, (without_generics, with_generics)) in
+                program.declarations().skip(1).zip([
+                    (local, local),
+                    (prefixed, prefixed),
+                    (prefixed, prefixed),
+                    (None, local),
+                    (None, prefixed),
+                    (None, Some(QualifiedName::prefixed("Local", "value"))),
+                    (None, None),
+                    (None, None),
+                ])
+            {
+                let TopLevelDecl::Variable(variable) = declaration else {
+                    panic!("expected variable");
+                };
+                let initializer = variable
+                    .declarators()
+                    .next()
+                    .unwrap()
+                    .initializer()
+                    .unwrap();
+                assert_eq!(
+                    expression_qualified_name(initializer, false),
+                    without_generics,
+                );
+                assert_eq!(expression_qualified_name(initializer, true), with_generics,);
             }
         },
     );

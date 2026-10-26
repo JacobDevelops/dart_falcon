@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 use falcon_analyze::{AnalyzeContext, NameIdentity, QualifiedName, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::cst::visit::{Visitor, walk_expr};
+use falcon_syntax::cst::visit::{Visitor, walk_expr_chain};
 use falcon_syntax::cst::*;
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
@@ -62,12 +62,14 @@ fn mentions(expr: Expr<'_>, name: &str) -> bool {
     }
     impl<'a> Visitor<'a> for Finder<'_> {
         fn visit_expr(&mut self, node: Expr<'a>) {
-            if let Expr::Ident(identifier) = node
-                && identifier.name() == self.name
-            {
-                self.found = true;
-            }
-            walk_expr(self, node);
+            walk_expr_chain(self, node, |finder, node| {
+                if let Expr::Ident(identifier) = node
+                    && identifier.name() == finder.name
+                {
+                    finder.found = true;
+                }
+                true
+            });
         }
     }
     let mut finder = Finder { name, found: false };

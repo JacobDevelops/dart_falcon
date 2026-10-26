@@ -44,7 +44,7 @@ use falcon_analyze::{
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::TokenKind;
 use falcon_syntax::cst::visit::{
-    Visitor, walk_annotation, walk_class_member, walk_dart_type, walk_expr, walk_formal_param,
+    Visitor, walk_annotation, walk_class_member, walk_dart_type, walk_expr_chain, walk_formal_param,
     walk_function_decl, walk_method_decl, walk_stmt, walk_top_level_decl,
 };
 use falcon_syntax::cst::*;
@@ -663,41 +663,43 @@ impl<'a> Visitor<'a> for Frontier<'a> {
         self.declaration = previous;
     }
     fn visit_expr(&mut self, node: Expr<'a>) {
-        if self.in_metadata
-            && let Expr::Ident(identifier) = node
-            && self.parameters.lookup(identifier.name()).is_none()
-            && let Some(owner) = self
-                .model
-                .resolve_value(identifier.name())
-                .or_else(|| self.model.resolve_name(identifier.name()))
-        {
-            self.types.push(Target {
-                owner,
-                selector: MemberSelector::DECLARATION.into(),
-                name: identifier.name().into(),
-                span: identifier.span(),
-            });
-        }
-        match node {
-            Expr::Assign(assignment) => {
-                self.writes.insert(assignment.target().span());
-                if assignment.op() != AssignOp::Eq {
-                    self.reads.insert(assignment.target().span());
+        walk_expr_chain(self, node, |visitor, node| {
+            if visitor.in_metadata
+                && let Expr::Ident(identifier) = node
+                && visitor.parameters.lookup(identifier.name()).is_none()
+                && let Some(owner) = visitor
+                    .model
+                    .resolve_value(identifier.name())
+                    .or_else(|| visitor.model.resolve_name(identifier.name()))
+            {
+                visitor.types.push(Target {
+                    owner,
+                    selector: MemberSelector::DECLARATION.into(),
+                    name: identifier.name().into(),
+                    span: identifier.span(),
+                });
+            }
+            match node {
+                Expr::Assign(assignment) => {
+                    visitor.writes.insert(assignment.target().span());
+                    if assignment.op() != AssignOp::Eq {
+                        visitor.reads.insert(assignment.target().span());
+                    }
                 }
+                Expr::Unary(unary) if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) => {
+                    visitor.writes.insert(unary.operand().span());
+                    visitor.reads.insert(unary.operand().span());
+                    visitor.increments.insert(unary.operand().span());
+                }
+                Expr::PostfixIncDec(postfix) => {
+                    visitor.writes.insert(postfix.operand().span());
+                    visitor.reads.insert(postfix.operand().span());
+                    visitor.increments.insert(postfix.operand().span());
+                }
+                _ => {}
             }
-            Expr::Unary(unary) if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) => {
-                self.writes.insert(unary.operand().span());
-                self.reads.insert(unary.operand().span());
-                self.increments.insert(unary.operand().span());
-            }
-            Expr::PostfixIncDec(postfix) => {
-                self.writes.insert(postfix.operand().span());
-                self.reads.insert(postfix.operand().span());
-                self.increments.insert(postfix.operand().span());
-            }
-            _ => {}
-        }
-        walk_expr(self, node);
+            true
+        });
     }
 }
 

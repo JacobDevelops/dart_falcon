@@ -96,6 +96,33 @@ pub fn expression_segments<'a>(
     }
 }
 
+/// Borrow a declaration qualifier without flattening arbitrary receiver chains.
+pub(super) fn expression_qualified_name<'a>(
+    expression: Expr<'a>,
+    allow_generic_instantiation: bool,
+) -> Option<QualifiedName<'a>> {
+    let mut current = expression;
+    let mut name = None;
+    loop {
+        match current.unparenthesized() {
+            Expr::Ident(head) => {
+                return Some(match name {
+                    Some(name) => QualifiedName::prefixed(head.name(), name),
+                    None => head.name().into(),
+                });
+            }
+            Expr::Field(field) if name.is_none() => {
+                name = Some(field.field().name());
+                current = field.object();
+            }
+            Expr::GenericInstantiation(instantiation) if allow_generic_instantiation => {
+                current = instantiation.target();
+            }
+            _ => return None,
+        }
+    }
+}
+
 /// Resolve a constructor call's callee, borrowing its constructor name.
 ///
 /// Constant evaluation permits generic-instantiation wrappers; lexical lint
@@ -793,6 +820,13 @@ impl TypeEnvironment {
                 .signatures
                 .super_receiver(&self.receiver(), name, context.model)
                 .unwrap_or(ResolvedType::UNKNOWN)
+        } else if matches!(
+            object,
+            Expr::Field(_) | Expr::Index(_) | Expr::NullAssert(_)
+        ) {
+            let (ty, reached) =
+                self.infer_selector_chain(object, context, expected, |_| None, |_, _, _| {});
+            reached.unwrap_or(ty)
         } else {
             let inference = queries::context_copy(context);
             if null_shorted(object) {
@@ -857,8 +891,10 @@ impl TypeEnvironment {
         signatures: &SignatureIndex,
         lookup: &impl Fn(&str) -> Option<ResolvedType>,
     ) -> Option<ResolvedType> {
-        let segments = expression_segments(object, false)?;
-        self.static_access_segments(&segments, name, model, signatures, lookup)
+        let qualifier = expression_qualified_name(object, false)?;
+        let segments = [qualifier.prefix.unwrap_or(qualifier.name), qualifier.name];
+        let len = if qualifier.prefix.is_some() { 2 } else { 1 };
+        self.static_access_segments(&segments[..len], name, model, signatures, lookup)
     }
 
     pub(super) fn static_access_segments(
@@ -1083,11 +1119,11 @@ impl TypeEnvironment {
         expected: Option<&ResolvedType>,
         cached_receiver: &mut Option<ResolvedType>,
     ) -> Option<ResolvedType> {
-        if self.invocation_unshadowed(target, context)
+        if let Some((identity, name)) = resolve_call_constructor(target, context.model, true)
+            && self.invocation_unshadowed(target, context)
             && matches!(target, Expr::Field(_))
             && expression_segments(target, true)
                 .is_some_and(|segments| context.model.resolve_dotted(&segments).is_none())
-            && let Some((identity, name)) = resolve_call_constructor(target, context.model, true)
             && let Some(ty) =
                 self.constructor_tearoff(identity, name, explicit.clone(), context, expected)
         {

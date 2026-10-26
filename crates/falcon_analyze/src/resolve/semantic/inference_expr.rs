@@ -1,6 +1,6 @@
 use super::*;
 use crate::resolve::semantic::ResolvedTypeKind;
-use falcon_syntax::cst::BinaryExpr;
+use falcon_syntax::cst::{BinaryExpr, ConditionalExpr};
 
 impl TypeEnvironment {
     /// Infers an expression with a downward result context and lexical lookup.
@@ -21,6 +21,83 @@ impl TypeEnvironment {
             argument_fallback: None,
         };
         self.infer_in_context(expr, context, expected, None)
+    }
+
+    /// Reuses branch results only when their promotion state matches the caller.
+    pub(crate) fn infer_conditional_chain<'a>(
+        &self,
+        conditional: ConditionalExpr<'a>,
+        context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
+        cached: impl Fn(Expr<'a>) -> Option<ResolvedType>,
+        publish: impl FnMut(Expr<'a>, &ResolvedType),
+    ) -> ResolvedType {
+        self.infer_conditional_context(conditional, context, None, cached, publish)
+    }
+
+    fn infer_conditional_context<'a>(
+        &self,
+        conditional: ConditionalExpr<'a>,
+        context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
+        expected: Option<&ResolvedType>,
+        cached: impl Fn(Expr<'a>) -> Option<ResolvedType>,
+        mut publish: impl FnMut(Expr<'a>, &ResolvedType),
+    ) -> ResolvedType {
+        enum Pending<'a> {
+            Then(ConditionalExpr<'a>, TypeEnvironment),
+            Else(ConditionalExpr<'a>, TypeEnvironment, ResolvedType),
+        }
+        let mut pending = Vec::new();
+        let mut expression = Expr::Conditional(conditional);
+        let mut environment = self.clone();
+        loop {
+            let mut result = loop {
+                let node = expression.unparenthesized();
+                if environment.same_flow_state(self)
+                    && let Some(ty) = cached(node)
+                {
+                    break ty;
+                }
+                let Expr::Conditional(conditional) = node else {
+                    break environment.infer_with_context(
+                        node,
+                        context.model,
+                        context.signatures,
+                        context.type_parameters,
+                        expected,
+                        context.lookup,
+                    );
+                };
+                let before = environment.clone();
+                self.flow(context.model, context.signatures, context.type_parameters)
+                    .assume_condition(&mut environment, conditional.condition(), true);
+                pending.push(Pending::Then(conditional, before));
+                expression = conditional.then_expr();
+            };
+            loop {
+                match pending.pop() {
+                    Some(Pending::Then(conditional, before)) => {
+                        environment = before.clone();
+                        self.flow(context.model, context.signatures, context.type_parameters)
+                            .assume_condition(&mut environment, conditional.condition(), false);
+                        expression = conditional.else_expr();
+                        pending.push(Pending::Else(conditional, before, result));
+                        break;
+                    }
+                    Some(Pending::Else(conditional, before, then_type)) => {
+                        result = contextual_join(
+                            &[then_type, result],
+                            expected,
+                            context.signatures,
+                            context.model,
+                        );
+                        if before.same_flow_state(self) {
+                            publish(Expr::Conditional(conditional), &result);
+                        }
+                    }
+                    None => return result,
+                }
+            }
+        }
     }
 
     /// Cached prefixes must come from the same flow state and lexical context.
@@ -161,6 +238,170 @@ impl TypeEnvironment {
         ty
     }
 
+    /// Infers selector receivers bottom-up, retaining the reached branch separately
+    /// from the nullable result of a null-shorted chain.
+    pub(crate) fn infer_selector_chain<'a>(
+        &self,
+        expression: Expr<'a>,
+        context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
+        expected: Option<&ResolvedType>,
+        cached: impl Fn(Expr<'a>) -> Option<(ResolvedType, Option<ResolvedType>)>,
+        mut publish: impl FnMut(Expr<'a>, &ResolvedType, Option<&ResolvedType>),
+    ) -> (ResolvedType, Option<ResolvedType>) {
+        struct Selector<'a> {
+            expression: Expr<'a>,
+            shorted: bool,
+            receiver_dot_shorthand: bool,
+            expected: Option<ResolvedType>,
+            argument_fallback: bool,
+        }
+        let mut spine = Vec::new();
+        let mut operand = expression;
+        loop {
+            let child = match operand {
+                Expr::Field(field) => field.object(),
+                Expr::Index(index) => index.object(),
+                Expr::NullAssert(assertion) => assertion.operand(),
+                _ => break,
+            };
+            spine.push(Selector {
+                expression: operand,
+                shorted: false,
+                receiver_dot_shorthand: false,
+                expected: None,
+                argument_fallback: false,
+            });
+            operand = child;
+        }
+        let operand_shorted = null_shorted(operand);
+        let mut shorted = operand_shorted;
+        let operand_dot_shorthand = expression_has_dot_shorthand_base(operand);
+        let mut dot_shorthand = operand_dot_shorthand;
+        for selector in spine.iter_mut().rev() {
+            shorted |= match selector.expression {
+                Expr::Field(field) => field.is_null_safe(),
+                Expr::Index(index) => index.is_null_safe(),
+                _ => false,
+            };
+            selector.receiver_dot_shorthand = dot_shorthand;
+            dot_shorthand &= matches!(selector.expression, Expr::Field(_));
+            selector.shorted = shorted;
+        }
+        let mut downward = expected.cloned();
+        let mut argument_fallback = context.argument_fallback.is_some();
+        let mut prefix = None;
+        let mut active = spine.len();
+        for (index, selector) in spine.iter_mut().enumerate() {
+            if downward.is_none()
+                && let Some(ty) = cached(selector.expression)
+            {
+                prefix = Some(ty);
+                active = index;
+                break;
+            }
+            selector.expected = downward;
+            selector.argument_fallback = argument_fallback;
+            downward = match selector.expression {
+                Expr::Field(_) => selector
+                    .expected
+                    .clone()
+                    .filter(|_| selector.receiver_dot_shorthand),
+                Expr::Index(_) => None,
+                Expr::NullAssert(_) => {
+                    argument_fallback = false;
+                    selector.expected.as_ref().map(|ty| ty.with_nullable(true))
+                }
+                _ => unreachable!("selector spine"),
+            };
+        }
+        spine.truncate(active);
+        let mut leaf_context = queries::context_copy(context);
+        if !argument_fallback {
+            leaf_context.argument_fallback = None;
+        }
+        let (mut ty, mut reached, mut child_shorted) = match prefix {
+            Some((ty, reached)) => {
+                let shorted = reached.is_some();
+                let reached = reached.unwrap_or_else(|| ty.clone());
+                (ty, reached, shorted)
+            }
+            None => {
+                let reached = self.infer_unshorted(
+                    operand,
+                    queries::context_copy(&leaf_context),
+                    downward.as_ref(),
+                    None,
+                );
+                let ty = self.contextual_callable_type(
+                    reached.clone(),
+                    &leaf_context,
+                    downward.as_ref(),
+                );
+                (
+                    if operand_shorted {
+                        ty.with_nullable(true)
+                    } else {
+                        ty
+                    },
+                    reached,
+                    operand_shorted,
+                )
+            }
+        };
+        for selector in spine.into_iter().rev() {
+            let mut context = queries::context_copy(context);
+            if !selector.argument_fallback {
+                context.argument_fallback = None;
+            }
+            reached = match selector.expression {
+                Expr::Field(field) => {
+                    let receiver = (!matches!(field.object(), Expr::Super(_)))
+                        .then(|| if child_shorted { reached } else { ty.clone() });
+                    self.infer_unshorted(
+                        selector.expression,
+                        queries::context_copy(&context),
+                        selector.expected.as_ref(),
+                        receiver,
+                    )
+                }
+                Expr::Index(index) => {
+                    let receiver = if matches!(index.object(), Expr::Super(_)) {
+                        self.receiver_type(index.object(), "[]", &context, None)
+                    } else if child_shorted {
+                        reached
+                    } else {
+                        ty.clone()
+                    };
+                    let receiver = if index.is_null_safe() {
+                        receiver.non_null()
+                    } else {
+                        receiver
+                    };
+                    operator_return_type(&receiver, "[]", context.signatures, context.model)
+                }
+                Expr::NullAssert(_) => ty.non_null(),
+                _ => unreachable!("selector spine"),
+            };
+            ty = self.contextual_callable_type(
+                reached.clone(),
+                &context,
+                selector.expected.as_ref(),
+            );
+            if selector.shorted {
+                ty = ty.with_nullable(true);
+            }
+            if selector.expected.is_none() {
+                publish(
+                    selector.expression,
+                    &ty,
+                    selector.shorted.then_some(&reached),
+                );
+            }
+            child_shorted = selector.shorted;
+        }
+        (ty, child_shorted.then_some(reached))
+    }
+
     pub fn infer_constant_name(
         &self,
         mut names: falcon_syntax::cst::PatternNames<'_>,
@@ -298,6 +539,13 @@ impl TypeEnvironment {
         expected: Option<&ResolvedType>,
         receiver: Option<ResolvedType>,
     ) -> ResolvedType {
+        if receiver.is_none()
+            && matches!(expr, Expr::Field(_) | Expr::Index(_) | Expr::NullAssert(_))
+        {
+            return self
+                .infer_selector_chain(expr, &context, expected, |_| None, |_, _, _| {})
+                .0;
+        }
         let ty = self.infer_unshorted(expr, queries::context_copy(&context), expected, receiver);
         let ty = self.contextual_callable_type(ty, &context, expected);
         if null_shorted(expr) {
@@ -419,11 +667,10 @@ impl TypeEnvironment {
                 return ty;
             }
             if unknown_receiver
-                && let Some(segments) = expression_segments(expr, true)
-                && segments
-                    .first()
-                    .is_some_and(|name| !self.is_bound(name) && lookup(name).is_none())
-                && model.resolve_dotted(&segments).is_some()
+                && let Some(name) = expression_qualified_name(expr, true)
+                && !self.is_bound(name.prefix.unwrap_or(name.name))
+                && lookup(name.prefix.unwrap_or(name.name)).is_none()
+                && model.resolve_name(name).is_some()
             {
                 return model.core_type("Type", false);
             }
@@ -658,8 +905,8 @@ impl TypeEnvironment {
                         Some(self.tearoff_type(signature, &owner, type_args, &context, expected))
                     })
                     .unwrap_or_else(|| {
-                        if expression_segments(target, true)
-                            .is_some_and(|segments| model.resolve_dotted(&segments).is_some())
+                        if expression_qualified_name(target, true)
+                            .is_some_and(|name| model.resolve_name(name).is_some())
                         {
                             model.core_type("Type", false)
                         } else {
@@ -1124,24 +1371,7 @@ impl TypeEnvironment {
                 }
             }
             Expr::Conditional(conditional) => {
-                let condition = conditional.condition();
-                let then_expr = conditional.then_expr();
-                let else_expr = conditional.else_expr();
-                let flow = self.flow(model, signatures, type_parameters);
-                let branch = |truth: bool, branch: Expr<'_>| {
-                    let mut environment = self.clone();
-                    flow.assume_condition(&mut environment, condition, truth);
-                    environment.infer_with_context(
-                        branch,
-                        model,
-                        signatures,
-                        type_parameters,
-                        expected,
-                        lookup,
-                    )
-                };
-                let types = [branch(true, then_expr), branch(false, else_expr)];
-                contextual_join(&types, expected, signatures, model)
+                self.infer_conditional_context(conditional, &context, expected, |_| None, |_, _| {})
             }
             Expr::Switch(switch) => {
                 let subject = switch.subject();

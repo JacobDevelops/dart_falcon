@@ -10,7 +10,7 @@ use falcon_analyze::{SemanticRuleVisitor, SemanticState, visit_program};
 use falcon_analyze::{AnalyzeContext, CrossFileRule, ProjectFile, SemanticIndexes};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
-use falcon_syntax::cst::visit::{Visitor, walk_expr, walk_function_body};
+use falcon_syntax::cst::visit::{Visitor, walk_expr_chain, walk_function_body};
 use falcon_syntax::cst::*;
 
 #[derive(Default)]
@@ -64,6 +64,7 @@ impl CrossFileRule for UnnecessaryNullable {
             let mut collector = CallCollector {
                 calls: Vec::new(),
                 tear_offs: HashSet::new(),
+                callee: None,
                 nullability: &nullability.values,
                 declarations: &decl_count,
             };
@@ -350,6 +351,8 @@ struct CallCollector<'a, 'n> {
     calls: Vec<CallInfo<'a>>,
     /// Names used as bare values (tear-offs), not as a call callee.
     tear_offs: HashSet<&'a str>,
+    /// The direct callee is not a tear-off, even through parentheses.
+    callee: Option<Span>,
     nullability: &'n HashMap<(usize, usize), bool>,
     declarations: &'n HashMap<&'a str, usize>,
 }
@@ -417,25 +420,26 @@ impl<'a> Visitor<'a> for ArgumentNullability {
     }
 
     fn visit_expr(&mut self, expression: Expr<'a>) {
-        let mut add = |value: Expr<'a>| {
-            let span = value.span();
-            self.values.insert((span.start, span.end), true);
-        };
-        match expression {
-            Expr::Assign(assignment) => add(assignment.value()),
-            Expr::Call(call) => self.record_arguments(call.args()),
-            Expr::Cascade(cascade) => {
-                for section in cascade.sections() {
-                    for operation in section.ops() {
-                        if let CascadeOp::Call(call) = operation {
-                            self.record_arguments(call.args());
+        walk_expr_chain(self, expression, |visitor, expression| {
+            match expression {
+                Expr::Assign(assignment) => {
+                    let span = assignment.value().span();
+                    visitor.values.insert((span.start, span.end), true);
+                }
+                Expr::Call(call) => visitor.record_arguments(call.args()),
+                Expr::Cascade(cascade) => {
+                    for section in cascade.sections() {
+                        for operation in section.ops() {
+                            if let CascadeOp::Call(call) = operation {
+                                visitor.record_arguments(call.args());
+                            }
                         }
                     }
                 }
+                _ => {}
             }
-            _ => {}
-        }
-        walk_expr(self, expression);
+            true
+        });
     }
 }
 
@@ -448,17 +452,20 @@ struct MemberDependency<'s, 'a> {
 
 impl<'a> Visitor<'a> for MemberDependency<'_, 'a> {
     fn visit_expr(&mut self, expr: Expr<'a>) {
-        if self.found {
-            return;
-        }
-        if matches!(expr, Expr::Ident(_))
-            && self.state.referenced_declaration(expr, false)
-                .is_some_and(|reference| !reference.selector.name.is_empty())
-        {
-            self.found = true;
-        } else {
-            walk_expr(self, expr);
-        }
+        walk_expr_chain(self, expr, |visitor, expr| {
+            if visitor.found {
+                return false;
+            }
+            if matches!(expr, Expr::Ident(_))
+                && visitor.state.referenced_declaration(expr, false)
+                    .is_some_and(|reference| !reference.selector.name.is_empty())
+            {
+                visitor.found = true;
+                false
+            } else {
+                true
+            }
+        });
     }
 }
 
@@ -486,86 +493,75 @@ impl<'a> SemanticRuleVisitor<'a> for ArgumentNullability {
 
 impl<'a> Visitor<'a> for CallCollector<'a, '_> {
     fn visit_expr(&mut self, node: Expr<'a>) {
-        match node {
-            Expr::Call(call) => {
-                let callee = call.callee();
-                let args = call.args();
-                if let Some(name) = callee_name(callee) {
-                    self.calls.push(call_info(name, args, self));
-                }
-                // Recurse into the callee's receiver (but not the callee name
-                // itself) and the arguments.
-                match callee.unparenthesized() {
-                    Expr::Ident(_) | Expr::DotShorthand(_) => {}
-                    Expr::Field(field) => self.visit_expr(field.object()),
-                    other => self.visit_expr(other),
-                }
-                for a in args.positional() {
-                    self.visit_expr(a);
-                }
-                for a in args.named() {
-                    self.visit_expr(a.value());
-                }
+        walk_expr_chain(self, node, |visitor, node| {
+            if visitor.callee == Some(node.span()) {
+                visitor.callee = None;
+                return matches!(node, Expr::Field(_));
             }
-            Expr::Cascade(cascade) => {
-                self.visit_expr(cascade.object());
-                for section in cascade.sections() {
-                    for op in section.ops() {
-                        match op {
-                            CascadeOp::Call(call) => {
-                                let args = call.args();
-                                self.calls.push(call_info(call.name().name(), args, self));
-                                for a in args.positional() {
-                                    self.visit_expr(a);
-                                }
-                                for a in args.named() {
-                                    self.visit_expr(a.value());
-                                }
-                            }
-                            CascadeOp::Invoke(call) => {
-                                for argument in call.args().positional() {
-                                    self.visit_expr(argument);
-                                }
-                                for argument in call.args().named() {
-                                    self.visit_expr(argument.value());
-                                }
-                            }
-                            CascadeOp::Index(index) => {
-                                self.visit_expr(index.index());
-                            }
-                            CascadeOp::Assign(assign) => {
-                                self.visit_expr(assign.target());
-                                self.visit_expr(assign.value());
-                            }
-                            CascadeOp::IndexAssign(assign) => {
-                                self.visit_expr(assign.target());
-                                self.visit_expr(assign.value());
-                            }
-                            CascadeOp::Field(field)
-                                if self.declarations.contains_key(field.name().name()) =>
-                            {
-                                self.tear_offs.insert(field.name().name());
-                            }
-                            CascadeOp::Field(_) | CascadeOp::NullAssert(_) => {}
-                        }
+            match node {
+                Expr::Call(call) => {
+                    let callee = call.callee().unparenthesized();
+                    if let Some(name) = callee_name(callee) {
+                        visitor.calls.push(call_info(name, call.args(), visitor));
+                    }
+                    // Visit the receiver and arguments, but not the callee name
+                    // as a tear-off.
+                    if matches!(callee, Expr::Ident(_) | Expr::DotShorthand(_) | Expr::Field(_)) {
+                        visitor.callee = Some(callee.span());
                     }
                 }
-            }
-            Expr::DotShorthand(shorthand)
-                if self.declarations.contains_key(shorthand.name().name()) =>
-            {
-                self.tear_offs.insert(shorthand.name().name());
-            }
-            Expr::Field(field) => {
-                if self.declarations.contains_key(field.field().name()) {
-                    self.tear_offs.insert(field.field().name());
+                Expr::DotShorthand(shorthand)
+                    if visitor.declarations.contains_key(shorthand.name().name()) =>
+                {
+                    visitor.tear_offs.insert(shorthand.name().name());
                 }
-                self.visit_expr(field.object());
+                Expr::Field(field) => {
+                    if visitor.declarations.contains_key(field.field().name()) {
+                        visitor.tear_offs.insert(field.field().name());
+                    }
+                }
+                Expr::Ident(id) => {
+                    visitor.tear_offs.insert(id.name());
+                }
+                _ => {}
             }
-            Expr::Ident(id) => {
-                self.tear_offs.insert(id.name());
+            true
+        });
+    }
+
+    fn visit_cascade_op(&mut self, operation: CascadeOp<'a>) {
+        match operation {
+            CascadeOp::Call(call) => {
+                let args = call.args();
+                self.calls.push(call_info(call.name().name(), args, self));
+                for argument in args.positional() {
+                    self.visit_expr(argument);
+                }
+                for argument in args.named() {
+                    self.visit_expr(argument.value());
+                }
             }
-            _ => walk_expr(self, node),
+            CascadeOp::Invoke(call) => {
+                for argument in call.args().positional() {
+                    self.visit_expr(argument);
+                }
+                for argument in call.args().named() {
+                    self.visit_expr(argument.value());
+                }
+            }
+            CascadeOp::Index(index) => self.visit_expr(index.index()),
+            CascadeOp::Assign(assign) => {
+                self.visit_expr(assign.target());
+                self.visit_expr(assign.value());
+            }
+            CascadeOp::IndexAssign(assign) => {
+                self.visit_expr(assign.target());
+                self.visit_expr(assign.value());
+            }
+            CascadeOp::Field(field) if self.declarations.contains_key(field.name().name()) => {
+                self.tear_offs.insert(field.name().name());
+            }
+            CascadeOp::Field(_) | CascadeOp::NullAssert(_) => {}
         }
     }
 }
@@ -639,34 +635,36 @@ impl<'a> Visitor<'a> for NullAssignFinder<'a, '_> {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
-        if let Expr::Assign(assign) = node {
-            match assign.target().unparenthesized() {
-                Expr::Ident(id) => {
-                    if !matches!(assign.op(), AssignOp::Eq | AssignOp::NullCoalesceEq)
-                        || self
-                            .nullability
-                            .get(&(assign.value().span().start, assign.value().span().end))
-                            .copied()
-                            .unwrap_or(true)
-                    {
-                        self.names.insert(id.name());
+        walk_expr_chain(self, node, |visitor, node| {
+            if let Expr::Assign(assign) = node {
+                match assign.target().unparenthesized() {
+                    Expr::Ident(id) => {
+                        if !matches!(assign.op(), AssignOp::Eq | AssignOp::NullCoalesceEq)
+                            || visitor
+                                .nullability
+                                .get(&(assign.value().span().start, assign.value().span().end))
+                                .copied()
+                                .unwrap_or(true)
+                        {
+                            visitor.names.insert(id.name());
+                        }
                     }
+                    Expr::Field(_) | Expr::Index(_) => {}
+                    target => PatternWrites(&mut visitor.names).visit_expr(target),
                 }
-                Expr::Field(_) | Expr::Index(_) => {}
-                target => PatternWrites(&mut self.names).visit_expr(target),
             }
-        }
-        let increment_target = match node {
-            Expr::Unary(unary) if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) => {
-                Some(unary.operand())
+            let increment_target = match node {
+                Expr::Unary(unary) if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) => {
+                    Some(unary.operand())
+                }
+                Expr::PostfixIncDec(increment) => Some(increment.operand()),
+                _ => None,
+            };
+            if let Some(Expr::Ident(identifier)) = increment_target.map(Expr::unparenthesized) {
+                visitor.names.insert(identifier.name());
             }
-            Expr::PostfixIncDec(increment) => Some(increment.operand()),
-            _ => None,
-        };
-        if let Some(Expr::Ident(identifier)) = increment_target.map(Expr::unparenthesized) {
-            self.names.insert(identifier.name());
-        }
-        walk_expr(self, node);
+            true
+        });
     }
 }
 
@@ -700,7 +698,7 @@ mod tests {
 
     #[test]
     fn property_reads_only_record_declared_callable_names() {
-        let source = "class C { int _field = 1; void _method(int? value) {} void use(C c) { c._field; c.._field; c._method; c.._method; } }";
+        let source = "void _top(int? value) {} class C { int _field = 1; void _method(int? value) {} void _called(int? value) {} void use(C c) { c._field; c.._field; c._method; c.._method; c._called(1); (c._called)(2); c.._called(3); _top(4); (_top)(5); } }";
         let file = ProjectFile {
             path: "test.dart".into(),
             parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
@@ -717,11 +715,16 @@ mod tests {
         let mut collector = CallCollector {
             calls: Vec::new(),
             tear_offs: HashSet::new(),
+            callee: None,
             nullability: &nullability,
             declarations: &declarations,
         };
         collector.visit_program(file.program());
         assert_eq!(collector.tear_offs, HashSet::from(["_method", "c"]));
+        assert_eq!(
+            collector.calls.iter().map(|call| call.name).collect::<Vec<_>>(),
+            ["_called", "_called", "_called", "_top", "_top"]
+        );
     }
 
     #[test]

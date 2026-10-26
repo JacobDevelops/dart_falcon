@@ -4,6 +4,7 @@ use crate::lint::const_eval::{constant_in_context, deferred_prefixes};
 use falcon_analyze::SemanticState;
 use falcon_analyze::{AnalyzeContext, ConstantValue};
 use falcon_analyze::{ConstantContext, evaluate_constant};
+use falcon_syntax::cst::visit::walk_expr_chain;
 use falcon_syntax::cst::*;
 pub(crate) fn constant_value(
     expression: Expr<'_>,
@@ -25,20 +26,20 @@ pub(crate) fn constant_value(
         }
         impl<'a> falcon_syntax::cst::visit::Visitor<'a> for InstanceReferences<'_> {
             fn visit_expr(&mut self, node: Expr<'a>) {
-                if let Expr::Ident(identifier) = node {
-                    self.found |= self.extension.members().any(|member| match member {
-                        ClassMember::Getter(getter) => {
-                            !getter.is_static() && getter.name().name() == identifier.name()
-                        }
-                        ClassMember::Method(method) => {
-                            !method.is_static() && method.name().name() == identifier.name()
-                        }
-                        _ => false,
-                    });
-                }
-                if !self.found {
-                    falcon_syntax::cst::visit::walk_expr(self, node);
-                }
+                walk_expr_chain(self, node, |visitor, node| {
+                    if let Expr::Ident(identifier) = node {
+                        visitor.found |= visitor.extension.members().any(|member| match member {
+                            ClassMember::Getter(getter) => {
+                                !getter.is_static() && getter.name().name() == identifier.name()
+                            }
+                            ClassMember::Method(method) => {
+                                !method.is_static() && method.name().name() == identifier.name()
+                            }
+                            _ => false,
+                        });
+                    }
+                    !visitor.found
+                });
             }
         }
         let mut references = InstanceReferences {
@@ -82,37 +83,41 @@ fn has_runtime_allocation(
     }
     impl<'a> falcon_syntax::cst::visit::Visitor<'a> for Allocations<'_, 'a> {
         fn visit_expr(&mut self, node: Expr<'a>) {
-            let allocation = match node {
-                Expr::List(node) => Some(node.is_const()),
-                Expr::Map(node) => Some(node.is_const()),
-                Expr::Set(node) => Some(node.is_const()),
-                Expr::Record(node) => Some(node.is_const()),
-                Expr::New(node) => Some(node.is_const()),
-                Expr::Call(call)
-                    if matches!(call.callee().unparenthesized(),
-                        Expr::DotShorthand(node) if node.is_const()) =>
-                {
-                    Some(true)
+            walk_expr_chain(self, node, |visitor, node| {
+                let allocation = match node {
+                    Expr::List(node) => Some(node.is_const()),
+                    Expr::Map(node) => Some(node.is_const()),
+                    Expr::Set(node) => Some(node.is_const()),
+                    Expr::Record(node) => Some(node.is_const()),
+                    Expr::New(node) => Some(node.is_const()),
+                    Expr::Call(call)
+                        if matches!(call.callee().unparenthesized(),
+                            Expr::DotShorthand(node) if node.is_const()) =>
+                    {
+                        Some(true)
+                    }
+                    Expr::Call(call)
+                        if falcon_analyze::resolve_call_constructor(
+                            call.callee(),
+                            &visitor.state.model,
+                            true,
+                        )
+                        .is_some() =>
+                    {
+                        Some(false)
+                    }
+                    _ => None,
+                };
+                match allocation {
+                    Some(false) => {
+                        visitor.found = true;
+                        false
+                    }
+                    // Explicit const allocations also make their contents constant.
+                    Some(true) => false,
+                    None => !visitor.found,
                 }
-                Expr::Call(call)
-                    if falcon_analyze::resolve_call_constructor(
-                        call.callee(),
-                        &self.state.model,
-                        true,
-                    )
-                    .is_some() =>
-                {
-                    Some(false)
-                }
-                _ => None,
-            };
-            match allocation {
-                Some(false) => self.found = true,
-                // Explicit const allocations also make their contents constant.
-                Some(true) => {}
-                None if !self.found => falcon_syntax::cst::visit::walk_expr(self, node),
-                None => {}
-            }
+            });
         }
     }
     let mut allocations = Allocations {

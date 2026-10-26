@@ -50,7 +50,7 @@ use std::collections::{HashMap, HashSet};
 use falcon_analyze::{AnalyzeContext, QualifiedName, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{
-    Visitor, walk_annotation, walk_class_member, walk_dart_type, walk_expr, walk_pattern,
+    Visitor, walk_annotation, walk_class_member, walk_dart_type, walk_expr, walk_expr_chain, walk_pattern,
     walk_stmt, walk_top_level_decl,
 };
 use falcon_syntax::cst::*;
@@ -1850,119 +1850,122 @@ impl<'a> Visitor<'a> for RefWalker<'_, 'a> {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
-        let parameter_depth = match node {
-            Expr::FuncExpr(function) => self.push_type_parameters(function.type_params()),
-            _ => self.type_parameters.len(),
-        };
-        match node {
-            Expr::Ident(identifier) if !self.bound.contains(&identifier.span().start) => {
-                self.reference(identifier.name());
+        walk_expr_chain(self, node, |this, node| {
+            if let Expr::FuncExpr(function) = node {
+                let parameter_depth = this.push_type_parameters(function.type_params());
+                walk_expr(this, node);
+                this.type_parameters.truncate(parameter_depth);
+                return false;
             }
-            Expr::Field(field) => self.member_access(field.object(), field.field().name()),
-            Expr::Call(call) => {
-                self.visit_type_arguments(call.type_args());
-                if let Expr::Ident(type_name) = call.callee().unparenthesized()
-                    && self.named_container(type_name).is_some()
-                {
-                    self.constructor_reference(type_name.name(), "new");
+            match node {
+                Expr::Ident(identifier) if !this.bound.contains(&identifier.span().start) => {
+                    this.reference(identifier.name());
                 }
-            }
-            Expr::New(new) => {
-                if let DartType::Named(named) = new.dart_type()
-                    && let Some((type_name, name)) =
-                        self.constructor_target(named.segments(), new.constructor_name())
-                {
-                    self.constructor_reference(type_name, name);
-                }
-            }
-            Expr::DotShorthand(shorthand) => {
-                let name = shorthand.name().name();
-                self.mark_any_member(name);
-                let tables = self.tables;
-                for (container, declaration) in tables.containers.iter().enumerate() {
-                    if declaration.constructors.contains(name) {
-                        self.mark_constructor(container, name);
+                Expr::Field(field) => this.member_access(field.object(), field.field().name()),
+                Expr::Call(call) => {
+                    this.visit_type_arguments(call.type_args());
+                    if let Expr::Ident(type_name) = call.callee().unparenthesized()
+                        && this.named_container(type_name).is_some()
+                    {
+                        this.constructor_reference(type_name.name(), "new");
                     }
                 }
-            }
-            Expr::Binary(binary) => {
-                if let Some(operator) = binary.op().operator_name().filter(|_| !matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq)) {
-                    self.instance_member(binary.left(), operator);
+                Expr::New(new) => {
+                    if let DartType::Named(named) = new.dart_type()
+                        && let Some((type_name, name)) =
+                            this.constructor_target(named.segments(), new.constructor_name())
+                    {
+                        this.constructor_reference(type_name, name);
+                    }
                 }
-            }
-            Expr::Unary(unary) => {
-                let operator = match unary.op() {
-                    UnaryOp::Minus => Some("unary-"),
-                    UnaryOp::Tilde => Some("~"),
-                    UnaryOp::PlusPlus => Some("+"),
-                    UnaryOp::MinusMinus => Some("-"),
-                    UnaryOp::Bang => None,
-                };
-                if let Some(operator) = operator {
-                    self.instance_member(unary.operand(), operator);
-                }
-            }
-            Expr::PostfixIncDec(postfix) => self.instance_member(
-                postfix.operand(),
-                match postfix.op() {
-                    PostfixIncDec::Increment => "+",
-                    PostfixIncDec::Decrement => "-",
-                },
-            ),
-            Expr::Assign(assign) => {
-                if let Some(operator) = assign.op().operator_name() {
-                    self.instance_member(assign.target(), operator);
-                }
-                if let Expr::Index(index) = assign.target().unparenthesized() {
-                    self.instance_member(index.object(), "[]=");
-                }
-            }
-            Expr::Index(index) => self.instance_member(index.object(), "[]"),
-            Expr::Cascade(cascade) => {
-                let object = cascade.object();
-                for operation in cascade.sections().flat_map(|section| section.ops()) {
-                    match operation {
-                        CascadeOp::NullAssert(_) => {}
-                        CascadeOp::Field(field) => {
-                            self.instance_member(object, field.name().name())
-                        }
-                        CascadeOp::Call(call) => {
-                            self.visit_type_arguments(call.type_args());
-                            self.instance_member(object, call.name().name());
-                        }
-                        // Like ordinary function-expression invocations, an implicit
-                        // `call` names no element, so it references no member.
-                        CascadeOp::Invoke(invoke) => self.visit_type_arguments(invoke.type_args()),
-                        CascadeOp::Index(_) => self.mark_any_member("[]"),
-                        CascadeOp::Assign(assign) => {
-                            // A named cascade assignment writes the receiver member.
-                            if let Expr::Ident(name) = assign.target().unparenthesized() {
-                                self.instance_member(object, name.name());
-                            }
-                            if let Some(operator) = assign.op().operator_name() {
-                                self.mark_any_member(operator);
-                            }
-                        }
-                        CascadeOp::IndexAssign(assign) => {
-                            self.instance_member(object, "[]=");
-                            if assign.op() != AssignOp::Eq {
-                                self.instance_member(object, "[]");
-                            }
-                            if let Some(operator) = assign.op().operator_name() {
-                                self.mark_any_member(operator);
-                            }
+                Expr::DotShorthand(shorthand) => {
+                    let name = shorthand.name().name();
+                    this.mark_any_member(name);
+                    let tables = this.tables;
+                    for (container, declaration) in tables.containers.iter().enumerate() {
+                        if declaration.constructors.contains(name) {
+                            this.mark_constructor(container, name);
                         }
                     }
                 }
+                Expr::Binary(binary) => {
+                    if let Some(operator) = binary.op().operator_name().filter(|_| !matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq)) {
+                        this.instance_member(binary.left(), operator);
+                    }
+                }
+                Expr::Unary(unary) => {
+                    let operator = match unary.op() {
+                        UnaryOp::Minus => Some("unary-"),
+                        UnaryOp::Tilde => Some("~"),
+                        UnaryOp::PlusPlus => Some("+"),
+                        UnaryOp::MinusMinus => Some("-"),
+                        UnaryOp::Bang => None,
+                    };
+                    if let Some(operator) = operator {
+                        this.instance_member(unary.operand(), operator);
+                    }
+                }
+                Expr::PostfixIncDec(postfix) => this.instance_member(
+                    postfix.operand(),
+                    match postfix.op() {
+                        PostfixIncDec::Increment => "+",
+                        PostfixIncDec::Decrement => "-",
+                    },
+                ),
+                Expr::Assign(assign) => {
+                    if let Some(operator) = assign.op().operator_name() {
+                        this.instance_member(assign.target(), operator);
+                    }
+                    if let Expr::Index(index) = assign.target().unparenthesized() {
+                        this.instance_member(index.object(), "[]=");
+                    }
+                }
+                Expr::Index(index) => this.instance_member(index.object(), "[]"),
+                Expr::Cascade(cascade) => {
+                    let object = cascade.object();
+                    for operation in cascade.sections().flat_map(|section| section.ops()) {
+                        match operation {
+                            CascadeOp::NullAssert(_) => {}
+                            CascadeOp::Field(field) => {
+                                this.instance_member(object, field.name().name())
+                            }
+                            CascadeOp::Call(call) => {
+                                this.visit_type_arguments(call.type_args());
+                                this.instance_member(object, call.name().name());
+                            }
+                            // Like ordinary function-expression invocations, an implicit
+                            // `call` names no element, so it references no member.
+                            CascadeOp::Invoke(invoke) => this.visit_type_arguments(invoke.type_args()),
+                            CascadeOp::Index(_) => this.mark_any_member("[]"),
+                            CascadeOp::Assign(assign) => {
+                                // A named cascade assignment writes the receiver member.
+                                if let Expr::Ident(name) = assign.target().unparenthesized() {
+                                    this.instance_member(object, name.name());
+                                }
+                                if let Some(operator) = assign.op().operator_name() {
+                                    this.mark_any_member(operator);
+                                }
+                            }
+                            CascadeOp::IndexAssign(assign) => {
+                                this.instance_member(object, "[]=");
+                                if assign.op() != AssignOp::Eq {
+                                    this.instance_member(object, "[]");
+                                }
+                                if let Some(operator) = assign.op().operator_name() {
+                                    this.mark_any_member(operator);
+                                }
+                            }
+                        }
+                    }
+                }
+                Expr::List(list) => this.visit_type_arguments(list.type_arg()),
+                Expr::Set(set) => this.visit_type_arguments(set.type_arg()),
+                Expr::Map(map) => this.visit_type_arguments(map.type_args()),
+                Expr::GenericInstantiation(generic) => this.visit_type_arguments(generic.type_args()),
+                _ => {}
             }
-            Expr::List(list) => self.visit_type_arguments(list.type_arg()),
-            Expr::Set(set) => self.visit_type_arguments(set.type_arg()),
-            Expr::Map(map) => self.visit_type_arguments(map.type_args()),
-            Expr::GenericInstantiation(generic) => self.visit_type_arguments(generic.type_args()),
-            _ => {}
-        }
-        walk_expr(self, node);
-        self.type_parameters.truncate(parameter_depth);
+            true
+        });
     }
 
     fn visit_pattern(&mut self, node: Pattern<'a>) {

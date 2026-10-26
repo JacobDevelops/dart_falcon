@@ -23,7 +23,7 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::TokenKind;
-use falcon_syntax::cst::visit::{Visitor, for_each_expr, walk_expr, walk_stmt};
+use falcon_syntax::cst::visit::{Visitor, for_each_expr, walk_expr_chain, walk_stmt};
 use falcon_syntax::cst::*;
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
@@ -206,29 +206,31 @@ impl<'a> Visitor<'a> for ValidUse<'_, 'a> {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
-        let future_error = match node {
-            Expr::New(new) => {
-                (new.constructor_name().is_some_and(|name| name.name() == "error")
-                    && self.state.model.resolve_type_in(new.dart_type(), &self.state.type_parameters)
-                        .interface("dart:async", "Future"))
-                    .then_some(new.args())
+        walk_expr_chain(self, node, |this, node| {
+            let future_error = match node {
+                Expr::New(new) => {
+                    (new.constructor_name().is_some_and(|name| name.name() == "error")
+                        && this.state.model.resolve_type_in(new.dart_type(), &this.state.type_parameters)
+                            .interface("dart:async", "Future"))
+                        .then_some(new.args())
+                }
+                _ => None,
+            };
+            if let Some(args) = future_error {
+                this.check_arguments(args);
             }
-            _ => None,
-        };
-        if let Some(args) = future_error {
-            self.check_arguments(args);
-        }
-        match node {
-            Expr::Throw(throw) if self.mentions_exception(throw.expr()) => {
-                self.has_valid_use = true;
+            match node {
+                Expr::Throw(throw) if this.mentions_exception(throw.expr()) => {
+                    this.has_valid_use = true;
+                }
+                Expr::Call(call)
+                    if this.forwards_error(call.callee(), call.type_args(), call.args()) =>
+                {
+                    this.check_arguments(call.args());
+                }
+                _ => {}
             }
-            Expr::Call(call)
-                if self.forwards_error(call.callee(), call.type_args(), call.args()) =>
-            {
-                self.check_arguments(call.args());
-            }
-            _ => {}
-        }
-        walk_expr(self, node);
+            true
+        });
     }
 }

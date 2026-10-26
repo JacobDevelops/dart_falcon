@@ -83,14 +83,11 @@ impl TypeEnvironment {
         expression: Expr<'_>,
         context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
     ) -> Option<DeclarationIdentity> {
+        let qualifier = expression_qualified_name(expression, true)?;
         if !self.invocation_unshadowed(expression, context) {
             return None;
         }
-        context
-            .model
-            .resolve_extension(QualifiedName::from_segments(&expression_segments(
-                expression, true,
-            )?)?)
+        context.model.resolve_extension(qualifier)
     }
 
     pub(super) fn invocation_unshadowed(
@@ -181,12 +178,12 @@ impl TypeEnvironment {
                                 kind: ResolvedTypeKind::Unknown
                             }
                         ) || ty.interface("dart:core", "Type")
-                    }) && let Some(segments) = expression_segments(object, true)
-                        && let [prefix] = segments.as_slice()
-                        && !self.is_bound(prefix)
-                        && (context.lookup)(prefix).is_none()
-                        && let Some(identity) =
-                            model.resolve_value(QualifiedName::prefixed(prefix, field.name()))
+                    }) && let Some(qualifier) = expression_qualified_name(object, true)
+                        && qualifier.prefix.is_none()
+                        && !self.is_bound(qualifier.name)
+                        && (context.lookup)(qualifier.name).is_none()
+                        && let Some(identity) = model
+                            .resolve_value(QualifiedName::prefixed(qualifier.name, field.name()))
                         && let Some(signature) = signatures.function(&identity)
                     {
                         return Some((signature, FxHashMap::default()));
@@ -212,13 +209,13 @@ impl TypeEnvironment {
                     signatures
                         .resolved_member(receiver, field.name(), model)
                         .or_else(|| {
+                            let qualifier = expression_qualified_name(object, true)?;
                             if !self.invocation_unshadowed(object, context) {
                                 return None;
                             }
-                            let segments = expression_segments(object, true)?;
-                            let identity = model.resolve_dotted(&segments).or_else(|| {
-                                model.resolve_extension(QualifiedName::from_segments(&segments)?)
-                            })?;
+                            let identity = model
+                                .resolve_name(qualifier)
+                                .or_else(|| model.resolve_extension(qualifier))?;
                             Some((
                                 signatures.member(&identity, field.name())?,
                                 FxHashMap::default(),

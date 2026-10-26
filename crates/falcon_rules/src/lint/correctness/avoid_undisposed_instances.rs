@@ -11,6 +11,9 @@
 //! proper-controller-dispose. Subscription and sink release obligations remain
 //! with cancel-subscriptions and close-sinks.
 
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
+
 use crate::lint::support::controller_disposal::{constructed_identity, has_dispose};
 use falcon_analyze::{
     AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel, SignatureIndex,
@@ -34,8 +37,8 @@ impl Rule for AvoidUndisposedInstances {
             ctx,
             model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
             signatures,
-            retained: Vec::new(),
-            barriers: Vec::new(),
+            retained: BinaryHeap::new(),
+            barriers: BinaryHeap::new(),
             locals: ctx.local_declarations(program),
             diagnostics: Vec::new(),
         }))
@@ -46,19 +49,19 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     model: SemanticModel<'a>,
     signatures: &'a SignatureIndex,
-    retained: Vec<Span>,
-    barriers: Vec<Span>,
+    retained: BinaryHeap<Reverse<(usize, usize)>>,
+    barriers: BinaryHeap<Reverse<(usize, usize)>>,
     locals: &'a std::collections::HashMap<usize, NodeId>,
     diagnostics: Vec<Diagnostic>,
 }
 
 impl Collector<'_> {
     fn retained(&self, span: Span) -> bool {
-        let enclosing_size = |spans: &[Span]| {
+        let enclosing_size = |spans: &BinaryHeap<Reverse<(usize, usize)>>| {
             spans
                 .iter()
-                .filter(|outer| outer.contains(span))
-                .map(|outer| outer.end - outer.start)
+                .filter(|Reverse((end, start))| *start <= span.start && span.end <= *end)
+                .map(|Reverse((end, start))| end - start)
                 .min()
         };
         match (
@@ -77,53 +80,75 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diagnostics }
 
     fn visit_var_declarator(&mut self, node: VarDeclarator<'a>) -> StructuralTraversal {
-        if let Some(value) = node.initializer() { self.retained.push(value.span()); }
+        if let Some(value) = node.initializer() {
+            let span = value.span();
+            self.retained.push(Reverse((span.end, span.start)));
+        }
         StructuralTraversal::Continue
     }
 
     fn visit_constructor_initializer(&mut self, node: ConstructorInitializer<'a>) -> StructuralTraversal {
         if let ConstructorInitializer::FieldInit(field) = node {
-            self.retained.push(field.value().span());
+            let span = field.value().span();
+            self.retained.push(Reverse((span.end, span.start)));
         }
         StructuralTraversal::Continue
     }
 
     fn visit_arg_list(&mut self, node: ArgList<'a>) -> StructuralTraversal {
-        self.retained.push(node.span());
+        let span = node.span();
+        self.retained.push(Reverse((span.end, span.start)));
         StructuralTraversal::Continue
     }
 
     fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::Return(statement) = node && let Some(value) = statement.value() {
-            self.retained.push(value.span());
+            let span = value.span();
+            self.retained.push(Reverse((span.end, span.start)));
         }
         StructuralTraversal::Continue
     }
 
     fn visit_function_body(&mut self, node: FunctionBody<'a>) -> StructuralTraversal {
-        if let FunctionBody::Arrow(arrow) = node { self.retained.push(arrow.expr().span()); }
+        if let FunctionBody::Arrow(arrow) = node {
+            let span = arrow.expr().span();
+            self.retained.push(Reverse((span.end, span.start)));
+        }
         StructuralTraversal::Continue
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
-        self.retained.retain(|span| span.end > node.span().start);
-        self.barriers.retain(|span| span.end > node.span().start);
-        match node {
-            Expr::Call(call) => self.barriers.push(call.callee().span()),
-            Expr::Field(field) => self.barriers.push(field.object().span()),
-            Expr::FuncExpr(_) | Expr::StringLit(_) => self.barriers.push(node.span()),
-            _ => {}
+        let span = node.span();
+        // Expire by end position without rescanning every enclosing receiver.
+        for spans in [&mut self.retained, &mut self.barriers] {
+            while spans.peek().is_some_and(|Reverse((end, _))| *end <= span.start) {
+                spans.pop();
+            }
         }
-        if let Expr::Assign(assignment) = node { self.retained.push(assignment.value().span()); }
+        let barrier = match node {
+            Expr::Call(call) => Some(call.callee().span()),
+            Expr::Field(field) => Some(field.object().span()),
+            Expr::FuncExpr(_) | Expr::StringLit(_) => Some(span),
+            _ => None,
+        };
+        if let Some(span) = barrier {
+            self.barriers.push(Reverse((span.end, span.start)));
+        }
+        if let Expr::Assign(assignment) = node {
+            let span = assignment.value().span();
+            self.retained.push(Reverse((span.end, span.start)));
+        }
         if let Expr::Call(call) = node
             && let Expr::Field(field) = call.callee().unparenthesized()
             && field.field().name() == "dispose"
         {
-            self.retained.push(field.object().span());
+            let span = field.object().span();
+            self.retained.push(Reverse((span.end, span.start)));
         }
         if let Expr::Cascade(cascade) = node
-            && (self.retained.contains(&node.span()) || cascade.sections().any(|section| section.ops().any(|operation| matches!(operation, CascadeOp::Call(call) if call.name().name() == "dispose")))) {
-            self.retained.push(cascade.object().span());
+            && (self.retained.iter().any(|entry| *entry == Reverse((span.end, span.start))) || cascade.sections().any(|section| section.ops().any(|operation| matches!(operation, CascadeOp::Call(call) if call.name().name() == "dispose")))) {
+            let span = cascade.object().span();
+            self.retained.push(Reverse((span.end, span.start)));
         }
         if !matches!(node, Expr::Call(_) | Expr::New(_)) || self.retained(node.span()) {
             return StructuralTraversal::Continue;
@@ -141,4 +166,69 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         StructuralTraversal::Continue
     }
 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn retention_barriers_and_expiry_preserve_exact_diagnostics() {
+        let source = r#"
+class Disposable {
+  Disposable.discarded();
+  Disposable.kept();
+  Disposable.argument();
+  Disposable.receiver();
+  Disposable.disposed();
+  Disposable.cascade();
+  Disposable.closure();
+  Disposable.arrow();
+  Disposable.interpolation();
+  Disposable.after();
+  Disposable get next => this;
+  void dispose() {}
+}
+void consume(Object value) {}
+void f() {
+  new Disposable.discarded();
+  final kept = new Disposable.kept();
+  consume(new Disposable.argument());
+  final receiver = (new Disposable.receiver()).next;
+  (new Disposable.disposed()).dispose();
+  new Disposable.cascade()..dispose();
+  final closure = () { new Disposable.closure(); };
+  final arrow = () => new Disposable.arrow();
+  '${new Disposable.interpolation()}';
+  new Disposable.after();
+}
+"#;
+        let diagnostics = crate::lint::test_support::diagnostics(
+            "avoid-undisposed-instances",
+            &AvoidUndisposedInstances,
+            Path::new("/project/lib/test.dart"),
+            source,
+            false,
+        );
+        let actual: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| (diagnostic.span.start, diagnostic.span.end))
+            .collect();
+        // The retained closure initializer equals its function-expression barrier:
+        // retention wins equal-size ties, including constructors in its block body.
+        let expected: Vec<_> = [
+            "new Disposable.discarded()",
+            "new Disposable.receiver()",
+            "new Disposable.interpolation()",
+            "new Disposable.after()",
+        ]
+        .into_iter()
+        .map(|expression| {
+            let start = source.find(expression).unwrap();
+            (start, start + expression.len())
+        })
+        .collect();
+        assert_eq!(actual, expected);
+    }
 }

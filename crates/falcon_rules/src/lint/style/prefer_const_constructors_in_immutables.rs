@@ -438,6 +438,38 @@ class Other implements External { const Other(); }
     }
 
     #[test]
+    fn preserves_implicit_const_equality_in_initializers() {
+        let source = r"
+import 'package:meta/meta.dart';
+class E { const E(); }
+@immutable
+class FieldInitializer {
+  final bool same = E() == E();
+  FieldInitializer();
+}
+@immutable
+class ConstructorInitializer {
+  final bool same;
+  ConstructorInitializer() : same = E() == E();
+}
+";
+        let diagnostics = span_test_support::analyze(
+            PreferConstConstructorsInImmutables::NAME,
+            &PreferConstConstructorsInImmutables,
+            Path::new("test.dart"),
+            source,
+            &FalconConfig::default(),
+        );
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
+                .collect::<Vec<_>>(),
+            ["FieldInitializer", "ConstructorInitializer"]
+        );
+    }
+
+    #[test]
     fn reports_ordinary_constructors_before_the_primary_constructor() {
         let source = r"
 // @dart = 3.13

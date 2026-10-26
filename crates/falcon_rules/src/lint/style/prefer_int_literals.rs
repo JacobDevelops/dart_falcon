@@ -23,7 +23,7 @@
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation, SemanticModel};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{
-    Visitor, walk_class_member, walk_constructor_decl, walk_expr, walk_field_decl,
+    Visitor, walk_class_member, walk_constructor_decl, walk_expr, walk_expr_chain, walk_field_decl,
     walk_function_decl, walk_getter_decl, walk_local_var, walk_method_decl, walk_stmt,
     walk_top_level_decl,
 };
@@ -202,21 +202,23 @@ impl<'a> Visitor<'a> for DeclaredContexts<'a, '_> {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
-        match node {
-            Expr::FuncExpr(_) => {
-                self.in_function(None, None, |this| walk_expr(this, node));
-                return;
-            }
-            Expr::List(list) if self.declares_double(list.type_arg()) => {
-                for element in list.elements() {
-                    if let CollectionElement::Expr(expr) = element {
-                        self.check(expr);
+        walk_expr_chain(self, node, |this, node| {
+            match node {
+                Expr::FuncExpr(_) => {
+                    this.in_function(None, None, |this| walk_expr(this, node));
+                    return false;
+                }
+                Expr::List(list) if this.declares_double(list.type_arg()) => {
+                    for element in list.elements() {
+                        if let CollectionElement::Expr(expr) = element {
+                            this.check(expr);
+                        }
                     }
                 }
+                _ => {}
             }
-            _ => {}
-        }
-        walk_expr(self, node);
+            true
+        });
     }
 }
 

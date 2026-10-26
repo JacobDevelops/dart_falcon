@@ -88,22 +88,22 @@ impl<'a> Collector<'a> {
 
     fn is_dynamic(&mut self, mut expr: Expr<'a>, state: &SemanticState<'a>) -> bool {
         let mut receivers = Vec::new();
-        let dynamic = loop {
+        let mut dynamic = loop {
             if let Some(&dynamic) = self.dynamic_receivers.get(&expr.syntax().id()) {
                 break dynamic;
             }
-            receivers.push(expr.syntax().id());
-            if matches!(state.infer(expr).view(), ResolvedTypeView::Dynamic) {
-                break true;
-            }
+            receivers.push(expr);
             let Some(receiver) = dynamic_receiver(expr) else {
                 break false;
             };
             expr = receiver;
         };
-        // Receiver paths run before surrounding operations, so each cached use shares its flow.
-        for receiver in receivers {
-            self.dynamic_receivers.insert(receiver, dynamic);
+        // Infer inner receivers first: once dynamic, every surrounding operation
+        // on this spine propagates it without reinferring overlapping subtrees.
+        // Receiver paths share the current flow with their surrounding operations.
+        for receiver in receivers.into_iter().rev() {
+            dynamic = dynamic || matches!(state.infer(receiver).view(), ResolvedTypeView::Dynamic);
+            self.dynamic_receivers.insert(receiver.syntax().id(), dynamic);
         }
         dynamic
     }
@@ -384,6 +384,37 @@ mod tests {
             false,
         );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn receiver_spines_preserve_dynamic_transitions_and_exact_spans() {
+        let source = "class Box { dynamic value; Box(this.value); }\nvoid f(dynamic d, Box box) { d.a.b; box.value.a.b; (d as Object).toString(); }";
+        let diagnostics = crate::lint::test_support::diagnostics(
+            AvoidDynamicCalls::NAME,
+            &AvoidDynamicCalls,
+            Path::new("/project/lib/test.dart"),
+            source,
+            false,
+        );
+        let mut spans: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| (diagnostic.span.start, diagnostic.span.end))
+            .collect();
+        spans.sort_unstable();
+        let mut expected: Vec<_> = ["d.a", "d", "box.value.a", "box.value"]
+            .into_iter()
+            .map(|receiver| {
+                let chain = if receiver.starts_with("box") {
+                    "box.value.a.b"
+                } else {
+                    "d.a.b"
+                };
+                let start = source.find(chain).unwrap();
+                (start, start + receiver.len())
+            })
+            .collect();
+        expected.sort_unstable();
+        assert_eq!(spans, expected, "{diagnostics:?}");
     }
 
     #[test]

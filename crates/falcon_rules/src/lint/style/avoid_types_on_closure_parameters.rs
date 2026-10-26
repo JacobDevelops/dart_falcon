@@ -167,15 +167,18 @@ impl<'a> Visitor<'a> for ReturnedClosures<'_, '_> {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
-        let Expr::FuncExpr(closure) = node else {
-            return visitor::walk_expr(self, node);
-        };
-        let frame = if closure.async_marker() == AsyncMarker::Async {
-            ReturnFrame::AsyncClosure(node.syntax().id())
-        } else {
-            ReturnFrame::Declared(false)
-        };
-        self.with_frame(frame, |v| visitor::walk_expr(v, node));
+        visitor::walk_expr_chain(self, node, |this, node| {
+            let Expr::FuncExpr(closure) = node else {
+                return true;
+            };
+            let frame = if closure.async_marker() == AsyncMarker::Async {
+                ReturnFrame::AsyncClosure(node.syntax().id())
+            } else {
+                ReturnFrame::Declared(false)
+            };
+            this.with_frame(frame, |v| visitor::walk_expr(v, node));
+            false
+        });
     }
 }
 

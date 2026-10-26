@@ -105,6 +105,12 @@ pub trait SemanticRuleVisitor<'a> {
     }
 }
 
+struct InferredExpression {
+    ty: ResolvedType,
+    /// Present when a null-shorted selector has a distinct reached branch.
+    reached: Option<ResolvedType>,
+}
+
 pub struct SemanticState<'a> {
     pub model: SemanticModel<'a>,
     // Only the single-file fallback owns signatures.
@@ -131,7 +137,7 @@ pub struct SemanticState<'a> {
     writes: &'a FlowWrites,
     private_field_promotion: bool,
     inference_depth: std::cell::Cell<usize>,
-    inference_cache: std::cell::RefCell<HashMap<NodeId, ResolvedType>>,
+    inference_cache: std::cell::RefCell<HashMap<NodeId, InferredExpression>>,
     inference_environment: std::cell::RefCell<Option<TypeEnvironment>>,
     pub inside_cascade: bool,
 }
@@ -534,37 +540,76 @@ impl<'a> SemanticState<'a> {
                 *self.inference_environment.borrow_mut() = Some(self.environment.clone());
             }
             let key = expression.syntax().id();
-            if let Some(ty) = self.inference_cache.borrow().get(&key).cloned() {
-                return ty;
+            if let Some(cached) = self.inference_cache.borrow().get(&key) {
+                return cached.ty.clone();
             }
-            let ty = if let Expr::Binary(binary) = expression {
-                self.environment
-                    .infer_binary_chain(
-                        binary,
-                        &InferenceContext {
-                            model: &self.model,
-                            signatures: &self.signatures,
-                            type_parameters: &self.type_parameters,
-                            lookup: &|name| self.implicit_member_type(name),
-                            argument_fallback: None,
-                        },
-                        |prefix| {
-                            self.inference_cache
-                                .borrow()
-                                .get(&prefix.syntax().id())
-                                .cloned()
-                        },
-                        |prefix, ty| {
-                            self.inference_cache
-                                .borrow_mut()
-                                .insert(prefix.syntax().id(), ty.clone());
-                        },
-                    )
-                    .unwrap_or_else(|| self.infer_with_context(expression, None))
-            } else {
-                self.infer_with_context(expression, None)
+            let lookup = |name: &str| self.implicit_member_type(name);
+            let context = InferenceContext {
+                model: &self.model,
+                signatures: &self.signatures,
+                type_parameters: &self.type_parameters,
+                lookup: &lookup,
+                argument_fallback: None,
             };
-            self.inference_cache.borrow_mut().insert(key, ty.clone());
+            let cached = |prefix: Expr<'a>| {
+                self.inference_cache
+                    .borrow()
+                    .get(&prefix.syntax().id())
+                    .map(|cached| cached.ty.clone())
+            };
+            let publish = |prefix: Expr<'a>, ty: &ResolvedType| {
+                self.inference_cache.borrow_mut().insert(
+                    prefix.syntax().id(),
+                    InferredExpression {
+                        ty: ty.clone(),
+                        reached: None,
+                    },
+                );
+            };
+            let ty = match expression {
+                Expr::Binary(binary) => self
+                    .environment
+                    .infer_binary_chain(binary, &context, cached, publish),
+                Expr::Conditional(conditional) => Some(self.environment.infer_conditional_chain(
+                    conditional,
+                    &context,
+                    cached,
+                    publish,
+                )),
+                Expr::Field(_) | Expr::Index(_) | Expr::NullAssert(_) => Some(
+                    self.environment
+                        .infer_selector_chain(
+                            expression,
+                            &context,
+                            None,
+                            |prefix| {
+                                self.inference_cache
+                                    .borrow()
+                                    .get(&prefix.syntax().id())
+                                    .map(|cached| (cached.ty.clone(), cached.reached.clone()))
+                            },
+                            |prefix, ty, reached| {
+                                self.inference_cache.borrow_mut().insert(
+                                    prefix.syntax().id(),
+                                    InferredExpression {
+                                        ty: ty.clone(),
+                                        reached: reached.cloned(),
+                                    },
+                                );
+                            },
+                        )
+                        .0,
+                ),
+                _ => None,
+            }
+            .unwrap_or_else(|| self.infer_with_context(expression, None));
+            self.inference_cache
+                .borrow_mut()
+                .entry(key)
+                .or_insert_with(|| InferredExpression {
+                    ty: ty.clone(),
+                    reached: None,
+                });
             ty
         })
     }
@@ -653,13 +698,24 @@ impl<'a> SemanticState<'a> {
     /// The static type of a member access's receiver: `super` is the
     /// superclass, `x!` the non-nullable type of `x`, anything else
     /// [`Self::infer`].
-    pub fn infer_receiver(&self, object: Expr<'a>) -> ResolvedType {
-        match object {
-            Expr::Paren(node) => self.infer_receiver(node.expr()),
-            Expr::Super(_) => self.superclass.clone().unwrap_or(ResolvedType::UNKNOWN),
-            Expr::NullAssert(node) => self.infer_receiver(node.operand()).non_null(),
-            other => self.infer(other),
+    pub fn infer_receiver(&self, mut object: Expr<'a>) -> ResolvedType {
+        let mut asserted = false;
+        loop {
+            object = match object {
+                Expr::Paren(node) => node.expr(),
+                Expr::NullAssert(node) => {
+                    asserted = true;
+                    node.operand()
+                }
+                _ => break,
+            };
         }
+        let ty = if matches!(object, Expr::Super(_)) {
+            self.superclass.clone().unwrap_or(ResolvedType::UNKNOWN)
+        } else {
+            self.infer(object)
+        };
+        if asserted { ty.non_null() } else { ty }
     }
 
     pub fn infer_access_receiver(
@@ -668,6 +724,25 @@ impl<'a> SemanticState<'a> {
         name: &str,
         is_null_safe: bool,
     ) -> ResolvedType {
+        if matches!(
+            object,
+            Expr::Field(_) | Expr::Index(_) | Expr::NullAssert(_)
+        ) {
+            return self.inference_query(|| {
+                let ty = self.infer(object);
+                let reached = self
+                    .inference_cache
+                    .borrow()
+                    .get(&object.syntax().id())
+                    .and_then(|cached| cached.reached.clone())
+                    .unwrap_or(ty);
+                if is_null_safe {
+                    reached.non_null()
+                } else {
+                    reached
+                }
+            });
+        }
         self.environment.infer_access_receiver(
             object,
             name,
@@ -1387,6 +1462,62 @@ enum CallableParams<'a> {
 }
 
 impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
+    fn visit_selector_chain(&mut self, root: Expr<'a>) {
+        let mut spine = Vec::new();
+        let mut operand = root;
+        loop {
+            let child = match operand {
+                Expr::Field(field) => field.object(),
+                Expr::Index(index) => index.object(),
+                Expr::NullAssert(assertion) => assertion.operand(),
+                _ => break,
+            };
+            spine.push((operand, false));
+            operand = child;
+        }
+        let mut dot_shorthand = crate::expression_has_dot_shorthand_base(operand);
+        for (expression, receiver_dot_shorthand) in spine.iter_mut().rev() {
+            *receiver_dot_shorthand = dot_shorthand;
+            dot_shorthand &= matches!(expression, Expr::Field(_));
+        }
+        for (expression, receiver_dot_shorthand) in &spine {
+            self.visitor.visit_expr(*expression, &self.state);
+            let expected = match expression {
+                Expr::Field(_) => self
+                    .state
+                    .expected()
+                    .filter(|expected| {
+                        !matches!(expected.kind, ResolvedTypeKind::Unknown)
+                            && *receiver_dot_shorthand
+                    })
+                    .cloned(),
+                Expr::Index(_) => Some(ResolvedType::UNKNOWN),
+                Expr::NullAssert(_) => Some(
+                    self.state
+                        .expected()
+                        .map(|ty| ty.with_nullable(true))
+                        .unwrap_or(ResolvedType::UNKNOWN),
+                ),
+                _ => unreachable!("selector spine"),
+            };
+            self.state.expected.push(expected);
+        }
+        self.visit_expr(operand);
+        for (expression, _) in spine.into_iter().rev() {
+            if let Expr::Index(index) = expression {
+                self.visit_expr(index.index());
+            }
+            self.state.expected.pop();
+            FlowContext {
+                model: &self.state.model,
+                signatures: &self.state.signatures,
+                type_parameters: &self.state.type_parameters,
+                field_promotions: self.state.private_field_promotion,
+            }
+            .finish_expression(&mut self.state.environment, expression, None);
+        }
+    }
+
     fn visit_binary_chain(&mut self, root: BinaryExpr<'a>) {
         enum Pending<'a> {
             Left {
@@ -1624,6 +1755,70 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         self.chain_result = evaluated;
     }
 
+    fn visit_conditional_chain(&mut self, root: ConditionalExpr<'a>) {
+        enum Pending<'a> {
+            Enter(Expr<'a>),
+            Condition(ConditionalExpr<'a>),
+            Then(ConditionalExpr<'a>, TypeEnvironment),
+            Else(ConditionalExpr<'a>, TypeEnvironment),
+            Finish(Expr<'a>),
+        }
+        let mut pending = vec![Pending::Enter(Expr::Conditional(root))];
+        while let Some(next) = pending.pop() {
+            match next {
+                Pending::Enter(Expr::Conditional(conditional)) => {
+                    self.visitor
+                        .visit_expr(Expr::Conditional(conditional), &self.state);
+                    self.state.expected.push(None);
+                    pending.push(Pending::Condition(conditional));
+                    pending.push(Pending::Enter(conditional.condition()));
+                }
+                Pending::Enter(Expr::Paren(paren)) => {
+                    self.visitor.visit_expr(Expr::Paren(paren), &self.state);
+                    pending.push(Pending::Finish(Expr::Paren(paren)));
+                    pending.push(Pending::Enter(paren.expr()));
+                }
+                Pending::Enter(expression) => self.visit_expr(expression),
+                Pending::Condition(conditional) => {
+                    self.state.expected.pop();
+                    let before = self.state.environment.clone();
+                    self.assume_condition(conditional.condition(), true);
+                    pending.push(Pending::Then(conditional, before));
+                    // Expression branches own no bindings, so nested ternaries need no extra scope.
+                    pending.push(Pending::Enter(conditional.then_expr()));
+                }
+                Pending::Then(conditional, before) => {
+                    let then_environment = std::mem::replace(&mut self.state.environment, before);
+                    self.assume_condition(conditional.condition(), false);
+                    pending.push(Pending::Else(conditional, then_environment));
+                    pending.push(Pending::Enter(conditional.else_expr()));
+                }
+                Pending::Else(conditional, then_environment) => {
+                    FlowContext::join_branches(
+                        &mut self.state.environment,
+                        then_environment,
+                        matches!(conditional.then_expr(), Expr::Throw(_)),
+                        matches!(conditional.else_expr(), Expr::Throw(_)),
+                    );
+                    pending.push(Pending::Finish(Expr::Conditional(conditional)));
+                }
+                Pending::Finish(expression) => {
+                    FlowContext {
+                        model: &self.state.model,
+                        signatures: &self.state.signatures,
+                        type_parameters: &self.state.type_parameters,
+                        field_promotions: self.state.private_field_promotion,
+                    }
+                    .finish_expression(
+                        &mut self.state.environment,
+                        expression,
+                        None,
+                    );
+                }
+            }
+        }
+    }
+
     fn with_fresh_environment(&mut self, f: impl FnOnce(&mut Self)) {
         let saved = std::mem::replace(
             &mut self.state.environment,
@@ -1842,10 +2037,6 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         self.state.expected.push(expected);
         f(self);
         self.state.expected.pop();
-    }
-
-    fn without_expected(&mut self, f: impl FnOnce(&mut Self)) {
-        self.with_context(None, f);
     }
 
     fn with_cleared_expected(&mut self, f: impl FnOnce(&mut Self)) {
@@ -3844,10 +4035,21 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
-        if let Expr::Binary(binary) = node {
+        if matches!(
+            node,
+            Expr::Binary(_)
+                | Expr::Conditional(_)
+                | Expr::Field(_)
+                | Expr::Index(_)
+                | Expr::NullAssert(_)
+        ) {
             let depth = self.state.inference_depth.get();
             self.state.inference_depth.set(depth + 1);
-            self.visit_binary_chain(binary);
+            match node {
+                Expr::Binary(binary) => self.visit_binary_chain(binary),
+                Expr::Conditional(conditional) => self.visit_conditional_chain(conditional),
+                _ => self.visit_selector_chain(node),
+            }
             self.state.inference_depth.set(depth);
             if depth == 0 {
                 self.state.inference_cache.borrow_mut().clear();
@@ -3930,22 +4132,6 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                     }
                 }
             }
-            Expr::Field(n) => {
-                let object = n.object();
-                let expected = self
-                    .state
-                    .expected()
-                    .filter(|expected| {
-                        !matches!(
-                            expected,
-                            ResolvedType {
-                                kind: ResolvedTypeKind::Unknown
-                            }
-                        ) && crate::expression_has_dot_shorthand_base(object)
-                    })
-                    .cloned();
-                self.with_context(expected, |walker| walker.visit_expr(object));
-            }
             Expr::New(n) => {
                 let dart_type = n.dart_type();
                 let constructor_name = n.constructor_name();
@@ -4005,19 +4191,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                     self.visit_function(callable, true);
                 }
             }
-            Expr::Conditional(n) => {
-                let condition = n.condition();
-                let then_expr = n.then_expr();
-                let else_expr = n.else_expr();
-                self.without_expected(|walker| walker.visit_expr(condition));
-                self.visit_branches(
-                    condition,
-                    |walker| walker.visit_expr(then_expr),
-                    |walker| walker.visit_expr(else_expr),
-                    matches!(then_expr, Expr::Throw(_)),
-                    matches!(else_expr, Expr::Throw(_)),
-                );
-            }
+            Expr::Conditional(_) => unreachable!("conditional chain handled above"),
             Expr::Assign(n) if matches!(n.op(), AssignOp::NullCoalesceEq) => {
                 let target = n.target();
                 let value = n.value();
@@ -4362,15 +4536,6 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                 // control never reaches its end.
                 self.state.environment = before;
                 FlowContext::join_paths(&mut self.state.environment, ends, depth, false);
-            }
-            Expr::NullAssert(n) => {
-                let operand = n.operand();
-                let expected = self
-                    .state
-                    .expected()
-                    .map(|ty| ty.with_nullable(true))
-                    .unwrap_or(ResolvedType::UNKNOWN);
-                self.with_expected(expected, |walker| walker.visit_expr(operand));
             }
             _ => self.with_expected(ResolvedType::UNKNOWN, |walker| walk_expr(walker, node)),
         }

@@ -68,19 +68,21 @@ fn arithmetic<'a>(node: Expr<'a>, state: &SemanticState<'a>) -> bool {
 }
 
 fn operations<'a>(expression: Expr<'a>, state: &SemanticState<'a>) -> usize {
-    use falcon_syntax::cst::visit::{Visitor, walk_expr};
+    use falcon_syntax::cst::visit::{Visitor, walk_expr_chain};
     struct Operations<'s, 'a> {
         count: usize,
         state: &'s SemanticState<'a>,
     }
     impl<'a> Visitor<'a> for Operations<'_, 'a> {
         fn visit_expr(&mut self, node: Expr<'a>) {
-            if arithmetic(node, self.state) {
-                self.count += 1;
-                walk_expr(self, node);
-            } else if matches!(node, Expr::Paren(_) | Expr::Unary(_)) {
-                walk_expr(self, node);
-            }
+            walk_expr_chain(self, node, |counter, node| {
+                if arithmetic(node, counter.state) {
+                    counter.count += 1;
+                    true
+                } else {
+                    matches!(node, Expr::Paren(_) | Expr::Unary(_))
+                }
+            });
         }
     }
     let mut counter = Operations { count: 0, state };

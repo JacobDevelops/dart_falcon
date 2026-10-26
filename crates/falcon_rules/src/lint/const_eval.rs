@@ -6,7 +6,7 @@ use falcon_analyze::{
     evaluate_construction, expression_segments, invocation_type_args, resolve_call_constructor,
 };
 use falcon_analyze::{class_has_primitive_equality, constant_operands_all};
-use falcon_syntax::cst::visit::{Visitor, walk_arg_list, walk_expr};
+use falcon_syntax::cst::visit::{Visitor, walk_arg_list, walk_expr_chain};
 use falcon_syntax::cst::*;
 
 use falcon_analyze::SemanticState;
@@ -58,6 +58,7 @@ pub(crate) fn potentially_constant_with_shadowed<'a>(
         signatures,
         initializer: false,
         valid: true,
+        failed_binaries: HashSet::new(),
     };
     checker.visit_expr(expr);
     checker.valid
@@ -90,6 +91,7 @@ pub(crate) fn initializer_potentially_constant<'a>(
         signatures,
         initializer: true,
         valid: true,
+        failed_binaries: HashSet::new(),
     };
     checker.visit_expr(expr);
     checker.valid
@@ -106,34 +108,76 @@ struct PotentiallyConstant<'a, 'model, 'tree> {
     /// invocations are not implicitly const and only `.length` is readable.
     initializer: bool,
     valid: bool,
+    failed_binaries: HashSet<(usize, usize)>,
 }
 
 impl<'tree> Visitor<'tree> for PotentiallyConstant<'_, '_, 'tree> {
     fn visit_expr(&mut self, node: Expr<'tree>) {
+        walk_expr_chain(self, node, Self::enter_expr);
+    }
+}
+
+impl<'tree> PotentiallyConstant<'_, '_, 'tree> {
+    fn evaluates_constant(&mut self, node: Expr<'tree>) -> bool {
+        let evaluates = |expression| {
+            !(self.initializer && has_non_const_collection(expression))
+                && evaluate_constant(
+                    expression,
+                    ConstantContext {
+                        owner: Some(self.owner),
+                        fields: Some(self.fields),
+                        ..ConstantContext::new(self.model, self.signatures)
+                    },
+                )
+                .is_some()
+        };
+        if evaluates(node) {
+            return true;
+        }
+        let Expr::Binary(mut binary) = node else {
+            return false;
+        };
+        let mut spine = vec![binary];
+        while let Expr::Binary(left) = binary.left().unparenthesized() {
+            spine.push(left);
+            binary = left;
+        }
+        // Each enclosing binary needs its prefix's value and contains its non-const collections.
+        let mut failed = 0;
+        let mut succeeded = spine.len();
+        while failed + 1 < succeeded {
+            let middle = failed + (succeeded - failed) / 2;
+            if evaluates(Expr::Binary(spine[middle])) {
+                succeeded = middle;
+            } else {
+                failed = middle;
+            }
+        }
+        for binary in &spine[..=failed] {
+            let span = binary.span();
+            self.failed_binaries.insert((span.start, span.end));
+        }
+        false
+    }
+
+    fn enter_expr(&mut self, node: Expr<'tree>) -> bool {
         if matches!(node, Expr::Paren(_)) {
-            falcon_syntax::cst::visit::walk_expr(self, node);
-            return;
+            return true;
         }
         if !self.valid {
-            return;
+            return false;
         }
-        if !matches!(node, Expr::Call(_) | Expr::New(_))
-            && !(self.initializer && has_non_const_collection(node))
-            && evaluate_constant(
-                node,
-                ConstantContext {
-                    owner: Some(self.owner),
-                    fields: Some(self.fields),
-                    ..ConstantContext::new(self.model, self.signatures)
-                },
-            )
-            .is_some()
+        let span = node.span();
+        let binary_fails = matches!(node, Expr::Binary(_))
+            && self.failed_binaries.contains(&(span.start, span.end));
+        if !binary_fails
+            && !matches!(node, Expr::Call(_) | Expr::New(_))
+            && self.evaluates_constant(node)
         {
-            return;
+            return false;
         }
         if self.initializer {
-            self.visit_initializer_expr(node);
-            return;
+            return self.visit_initializer_expr(node);
         }
         match node {
             Expr::IntLit(_)
@@ -166,7 +210,7 @@ impl<'tree> Visitor<'tree> for PotentiallyConstant<'_, '_, 'tree> {
             Expr::New(construction) if construction.is_const() => {
                 self.visit_arguments(construction.args())
             }
-            Expr::Field(field) if field.field().name() == "length" => walk_expr(self, node),
+            Expr::Field(field) if field.field().name() == "length" => return true,
             // A constant type literal receiver does not make an unresolved
             // member read constant (for example, `C.staticFinal`).
             Expr::Field(_) => self.valid = self.constant_member(node),
@@ -179,18 +223,17 @@ impl<'tree> Visitor<'tree> for PotentiallyConstant<'_, '_, 'tree> {
             | Expr::List(_)
             | Expr::Map(_)
             | Expr::Set(_)
-            | Expr::Record(_) => walk_expr(self, node),
+            | Expr::Record(_) => return true,
             _ => self.valid = false,
         }
+        false
     }
-}
 
-impl<'tree> PotentiallyConstant<'_, '_, 'tree> {
     fn visit_arguments(&mut self, args: ArgList<'tree>) {
         walk_arg_list(self, args);
     }
 
-    fn visit_initializer_expr(&mut self, node: Expr<'tree>) {
+    fn visit_initializer_expr(&mut self, node: Expr<'tree>) -> bool {
         match node.unparenthesized() {
             Expr::IntLit(_)
             | Expr::DoubleLit(_)
@@ -202,7 +245,7 @@ impl<'tree> PotentiallyConstant<'_, '_, 'tree> {
                     || (!self.shadowed.contains(identifier.name())
                         && self.type_literal_or_tear_off(identifier.name()));
             }
-            Expr::Field(field) if field.field().name() == "length" => walk_expr(self, node),
+            Expr::Field(field) if field.field().name() == "length" => return true,
             Expr::Field(_) => self.valid = self.constant_member(node),
             Expr::Call(call) => {
                 self.valid = matches!(call.callee().unparenthesized(), Expr::Ident(name)
@@ -240,9 +283,10 @@ impl<'tree> PotentiallyConstant<'_, '_, 'tree> {
             | Expr::Conditional(_)
             | Expr::Is(_)
             | Expr::As(_)
-            | Expr::Record(_) => walk_expr(self, node),
+            | Expr::Record(_) => return true,
             _ => self.valid = false,
         }
+        false
     }
 
     /// Whether `name` denotes a type (a constant type literal) or a top-level
@@ -318,14 +362,17 @@ fn has_non_const_collection(expr: Expr<'_>) -> bool {
     struct Finder(bool);
     impl<'a> Visitor<'a> for Finder {
         fn visit_expr(&mut self, node: Expr<'a>) {
-            match node {
-                Expr::List(list) => self.0 |= !list.is_const(),
-                Expr::Map(map) => self.0 |= !map.is_const(),
-                Expr::Set(set) => self.0 |= !set.is_const(),
-                Expr::Record(record) if record.is_const() => {}
-                Expr::New(construction) if construction.is_const() => {}
-                _ => walk_expr(self, node),
-            }
+            walk_expr_chain(self, node, |visitor, node| {
+                match node {
+                    Expr::List(list) => visitor.0 |= !list.is_const(),
+                    Expr::Map(map) => visitor.0 |= !map.is_const(),
+                    Expr::Set(set) => visitor.0 |= !set.is_const(),
+                    Expr::Record(record) if record.is_const() => {}
+                    Expr::New(construction) if construction.is_const() => {}
+                    _ => return true,
+                }
+                false
+            });
         }
     }
     let mut finder = Finder(false);

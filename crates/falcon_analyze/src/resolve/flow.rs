@@ -955,6 +955,20 @@ impl FlowContext<'_, '_> {
             }
             Expr::NullAssert(assertion) => {
                 let operand = assertion.operand();
+                // Match the identities promotion can actually store before
+                // inferring an otherwise unused selector/assertion prefix.
+                let promotable = match operand.unparenthesized() {
+                    Expr::Ident(_) => true,
+                    Expr::Field(field) => {
+                        !field.is_null_safe()
+                            && self.field_promotions
+                            && matches!(field.object(), Expr::Ident(_) | Expr::This(_))
+                    }
+                    _ => false,
+                };
+                if !promotable {
+                    return;
+                }
                 let ty = self.infer(environment, operand).non_null();
                 self.promote(environment, operand, ty);
             }

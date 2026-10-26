@@ -47,7 +47,7 @@ use falcon_analyze::{
     AnalyzeContext, DeclarationIdentity, LibraryId, MemberKind, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
-use falcon_syntax::cst::visit::{Visitor, for_each_stmt_list, walk_expr};
+use falcon_syntax::cst::visit::{Visitor, for_each_stmt_list, walk_expr_chain};
 use falcon_syntax::cst::*;
 
 use crate::lint::const_eval::mentions_type_parameter;
@@ -627,49 +627,51 @@ struct Finder<'f, 's, 'a> {
 
 impl<'a> Visitor<'a> for Finder<'_, '_, 'a> {
     fn visit_expr(&mut self, node: Expr<'a>) {
-        match node {
-            Expr::Ident(identifier) => {
-                let declaration = self.scope.locals.get(&identifier.span().start).copied();
-                self.critical.names.push((identifier.name(), declaration));
-                if let Some(owner) = self.owner
-                    && declaration.is_none()
-                {
-                    self.critical.owner_referenced |=
-                        self.scope.unqualified_in_owner(identifier.name(), owner);
-                }
-            }
-            Expr::FuncExpr(_) => {
-                self.critical.closure = true;
-                if self.owner.is_some() {
-                    return;
-                }
-            }
-            Expr::Field(field) => {
-                if let Some(owner) = self.owner {
-                    self.critical.owner_referenced |= self.scope.member_of_owner(
-                        Some(field.object()),
-                        field.field().name(),
-                        owner,
-                    );
-                }
-            }
-            Expr::Cascade(cascade) => {
-                if let Some(owner) = self.owner {
-                    for op in cascade.sections().flat_map(|section| section.ops()) {
-                        let name = match op {
-                            CascadeOp::Field(field) => field.name(),
-                            CascadeOp::Call(call) => call.name(),
-                            _ => continue,
-                        };
-                        self.critical.owner_referenced |=
-                            self.scope
-                                .member_of_owner(Some(cascade.object()), name.name(), owner);
+        walk_expr_chain(self, node, |finder, node| {
+            match node {
+                Expr::Ident(identifier) => {
+                    let declaration = finder.scope.locals.get(&identifier.span().start).copied();
+                    finder.critical.names.push((identifier.name(), declaration));
+                    if let Some(owner) = finder.owner
+                        && declaration.is_none()
+                    {
+                        finder.critical.owner_referenced |=
+                            finder.scope.unqualified_in_owner(identifier.name(), owner);
                     }
                 }
+                Expr::FuncExpr(_) => {
+                    finder.critical.closure = true;
+                    if finder.owner.is_some() {
+                        return false;
+                    }
+                }
+                Expr::Field(field) => {
+                    if let Some(owner) = finder.owner {
+                        finder.critical.owner_referenced |= finder.scope.member_of_owner(
+                            Some(field.object()),
+                            field.field().name(),
+                            owner,
+                        );
+                    }
+                }
+                Expr::Cascade(cascade) => {
+                    if let Some(owner) = finder.owner {
+                        for op in cascade.sections().flat_map(|section| section.ops()) {
+                            let name = match op {
+                                CascadeOp::Field(field) => field.name(),
+                                CascadeOp::Call(call) => call.name(),
+                                _ => continue,
+                            };
+                            finder.critical.owner_referenced |=
+                                finder.scope
+                                    .member_of_owner(Some(cascade.object()), name.name(), owner);
+                        }
+                    }
+                }
+                _ => {}
             }
-            _ => {}
-        }
-        walk_expr(self, node);
+            true
+        });
     }
 }
 

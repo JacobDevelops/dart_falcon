@@ -594,55 +594,58 @@ struct NonConstantFinder<'a, 'm> {
 }
 impl<'a> cst_visit::Visitor<'a> for NonConstantFinder<'_, '_> {
     fn visit_expr(&mut self, node: cst::Expr<'a>) {
-        if let cst::Expr::Ident(identifier) = node {
-            let name = identifier.name();
-            let constant = matches!(self.caller.map(ResolvedType::view),
-                Some(ResolvedTypeView::Interface { identity, .. })
-                    if self.state.signatures.declaration(identity).is_some_and(|facts|
-                        facts.static_consts.iter().any(|field| field.name == name)));
-            let bound = self.state.environment.is_bound(name)
-                && self.state.local_constant(name).is_none()
-                && !(constant && self.state.environment.is_bound_in_root_scope(name));
-            let member = self.caller.is_some_and(|receiver| {
-                matches!(receiver.view(), ResolvedTypeView::Interface { identity, .. }
-                    if !self.state.signatures.declared_member_facts(identity, name).is_empty())
-                    || self
-                        .state
-                        .signatures
-                        .resolved_readable_member_owner(receiver, name, &self.state.model)
-                        .is_some()
-            });
-            if bound || (member && !constant) {
-                self.found = true;
+        cst_visit::walk_expr_chain(self, node, |this, node| {
+            if let cst::Expr::Ident(identifier) = node {
+                let name = identifier.name();
+                let constant = matches!(this.caller.map(ResolvedType::view),
+                    Some(ResolvedTypeView::Interface { identity, .. })
+                        if this.state.signatures.declaration(identity).is_some_and(|facts|
+                            facts.static_consts.iter().any(|field| field.name == name)));
+                let bound = this.state.environment.is_bound(name)
+                    && this.state.local_constant(name).is_none()
+                    && !(constant && this.state.environment.is_bound_in_root_scope(name));
+                let member = this.caller.is_some_and(|receiver| {
+                    matches!(receiver.view(), ResolvedTypeView::Interface { identity, .. }
+                        if !this.state.signatures.declared_member_facts(identity, name).is_empty())
+                        || this
+                            .state
+                            .signatures
+                            .resolved_readable_member_owner(receiver, name, &this.state.model)
+                            .is_some()
+                });
+                if bound || (member && !constant) {
+                    this.found = true;
+                }
+                return false;
             }
-            return;
-        }
-        let (is_container, is_const) = match node {
-            cst::Expr::List(value) => (true, value.is_const()),
-            cst::Expr::Map(value) => (true, value.is_const()),
-            cst::Expr::Set(value) => (true, value.is_const()),
-            cst::Expr::Record(value) => (true, value.is_const()),
-            cst::Expr::New(value) => (true, value.is_const()),
-            _ => (false, false),
-        };
-        if is_container {
-            // Unlike other collections, a record literal is not itself nonconstant;
-            // descend into its fields to check the contained expressions.
-            if !is_const && !self.constant_context && !matches!(node, cst::Expr::Record(_)) {
-                self.found = true;
-                return;
+            let (is_container, is_const) = match node {
+                cst::Expr::List(value) => (true, value.is_const()),
+                cst::Expr::Map(value) => (true, value.is_const()),
+                cst::Expr::Set(value) => (true, value.is_const()),
+                cst::Expr::Record(value) => (true, value.is_const()),
+                cst::Expr::New(value) => (true, value.is_const()),
+                _ => (false, false),
+            };
+            if is_container {
+                // Unlike other collections, a record literal is not itself nonconstant;
+                // descend into its fields to check the contained expressions.
+                if !is_const && !this.constant_context && !matches!(node, cst::Expr::Record(_)) {
+                    this.found = true;
+                    return false;
+                }
+                let previous = this.constant_context;
+                this.constant_context |= is_const;
+                cst_visit::walk_expr(this, node);
+                this.constant_context = previous;
+                return false;
             }
-            let previous = self.constant_context;
-            self.constant_context |= is_const;
-            cst_visit::walk_expr(self, node);
-            self.constant_context = previous;
-            return;
-        }
-        match node {
-            cst::Expr::Call(_) if !self.constant_context => self.found = true,
-            cst::Expr::FuncExpr(_) | cst::Expr::This(_) => self.found = true,
-            _ => cst_visit::walk_expr(self, node),
-        }
+            match node {
+                cst::Expr::Call(_) if !this.constant_context => this.found = true,
+                cst::Expr::FuncExpr(_) | cst::Expr::This(_) => this.found = true,
+                _ => return true,
+            }
+            false
+        });
     }
 }
 

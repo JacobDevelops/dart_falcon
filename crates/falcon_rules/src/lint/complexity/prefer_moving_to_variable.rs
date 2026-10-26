@@ -188,36 +188,38 @@ struct ChainProbe<'a, 'model> {
 
 impl<'a> Visitor<'a> for ChainProbe<'_, '_> {
     fn visit_expr(&mut self, node: Expr<'a>) {
-        // Follow only the receiver/callee spine, never argument expressions.
-        if self.next != Some(node.span()) || !self.valid {
-            return;
-        }
-        self.next = match node {
-            Expr::Field(field) => Some(field.object().span()),
-            Expr::GenericInstantiation(instantiation) => Some(instantiation.target().span()),
-            Expr::Call(call) => {
-                let callee = call.callee();
-                self.has_call = true;
-                self.valid = matches!(callee.unparenthesized(), Expr::Field(field) if field.field().name() != "new")
-                    && !self.model.is_some_and(|model| {
-                        falcon_analyze::resolve_call_constructor(callee, model, true).is_some_and(
-                            |(identity, name)| {
-                                !self.signatures.is_some_and(|signatures| {
-                                    signatures.member(&identity, name).is_some()
-                                        && signatures.constructor(&identity, name).is_none()
-                                })
-                            },
-                        )
-                    });
-                Some(callee.span())
+        falcon_syntax::cst::visit::walk_expr_chain(self, node, |probe, node| {
+            // Follow only the receiver/callee spine, never argument expressions.
+            if probe.next != Some(node.span()) || !probe.valid {
+                return false;
             }
-            Expr::Ident(_) | Expr::This(_) | Expr::Super(_) => None,
-            _ => {
-                self.valid = false;
-                None
-            }
-        };
-        falcon_syntax::cst::visit::walk_expr(self, node);
+            probe.next = match node {
+                Expr::Field(field) => Some(field.object().span()),
+                Expr::GenericInstantiation(instantiation) => Some(instantiation.target().span()),
+                Expr::Call(call) => {
+                    let callee = call.callee();
+                    probe.has_call = true;
+                    probe.valid = matches!(callee.unparenthesized(), Expr::Field(field) if field.field().name() != "new")
+                        && !probe.model.is_some_and(|model| {
+                            falcon_analyze::resolve_call_constructor(callee, model, true).is_some_and(
+                                |(identity, name)| {
+                                    !probe.signatures.is_some_and(|signatures| {
+                                        signatures.member(&identity, name).is_some()
+                                            && signatures.constructor(&identity, name).is_none()
+                                    })
+                                },
+                            )
+                        });
+                    Some(callee.span())
+                }
+                Expr::Ident(_) | Expr::This(_) | Expr::Super(_) => None,
+                _ => {
+                    probe.valid = false;
+                    None
+                }
+            };
+            true
+        });
     }
 }
 

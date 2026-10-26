@@ -272,12 +272,21 @@ impl<'a> SemanticRuleVisitor<'a> for LocalCandidates<'a> {
             .map(|(_, receiver)| receiver)
             .or(state.enclosing_type.as_ref());
         let static_owner = if let Expr::Field(access) = node {
-            falcon_analyze::expression_segments(access.object(), false).and_then(|segments| {
-                let head = segments.first()?;
-                if state.environment.is_bound(head) {
+            // Dotted declaration owners have at most a prefix and type name.
+            // Reject longer receiver chains before collecting their segments.
+            let segments = match access.object().unparenthesized() {
+                Expr::Ident(head) => Some(([head.name(), ""], 1)),
+                Expr::Field(field) => match field.object().unparenthesized() {
+                    Expr::Ident(head) => Some(([head.name(), field.field().name()], 2)),
+                    _ => None,
+                },
+                _ => None,
+            };
+            segments.and_then(|(segments, len)| {
+                if state.environment.is_bound(segments[0]) {
                     return None;
                 }
-                let identity = state.model.resolve_dotted(&segments)?;
+                let identity = state.model.resolve_dotted(&segments[..len])?;
                 state
                     .signatures
                     .declared_member_facts(&identity, access.field().name())

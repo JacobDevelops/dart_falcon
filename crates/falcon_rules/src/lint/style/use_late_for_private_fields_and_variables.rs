@@ -36,7 +36,7 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{
-    Visitor, walk_expr, walk_field_decl, walk_local_var, walk_top_level_decl,
+    Visitor, walk_expr_chain, walk_field_decl, walk_local_var, walk_top_level_decl,
 };
 use falcon_syntax::cst::*;
 
@@ -669,12 +669,14 @@ impl<'a> Visitor<'a> for Mentions<'_, '_> {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
-        match node {
-            Expr::Field(field) => self.record(field.field()),
-            Expr::DotShorthand(shorthand) => self.record(shorthand.name()),
-            _ => {}
-        }
-        walk_expr(self, node);
+        walk_expr_chain(self, node, |this, node| {
+            match node {
+                Expr::Field(field) => this.record(field.field()),
+                Expr::DotShorthand(shorthand) => this.record(shorthand.name()),
+                _ => {}
+            }
+            true
+        });
     }
 }
 

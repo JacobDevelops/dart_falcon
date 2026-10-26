@@ -1477,6 +1477,243 @@ fn optional_binary_chains_visit_every_operand_on_the_normal_stack() {
 }
 
 #[test]
+fn conditional_callbacks_preserve_branch_context_types_and_flow_joins() {
+    use falcon_analyze::{IdentityIndex, IdentitySource};
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    let source = r#"
+void f(bool flag, Object? value, int? n) {
+  int result = value is int ? value : flag ? 2 : 3;
+  Object promoted = value != null ? flag ? value : value : 1;
+  n != null ? n : (n = 2);
+  expectInt(n);
+  flag ? (n = null) : 1;
+  expectNullable(n);
+  n != null ? n : throw 0;
+  expectInt(n);
+}
+"#;
+    let result = parse(source);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let parsed = Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: result.tree,
+    });
+    let path = Path::new("/project/main.dart");
+    let identities = IdentityIndex::from_project_files(
+        &[IdentitySource {
+            path,
+            parsed: &parsed,
+            has_parse_errors: false,
+        }],
+        &[],
+    );
+    let config = FalconConfig::default();
+    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
+    #[derive(Default)]
+    struct Observed {
+        typed: usize,
+        calls: usize,
+        contexts: Vec<(String, Option<ResolvedType>)>,
+    }
+    impl<'a> SemanticRuleVisitor<'a> for Observed {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            let text = node.syntax().text();
+            if matches!(text, "value is int ? value : flag ? 2 : 3" | "flag ? 2 : 3") {
+                let integer = state.model.core_type("int", false);
+                assert_eq!(state.infer(node), integer);
+                self.contexts
+                    .push((text.to_owned(), state.expected().cloned()));
+                self.typed += 1;
+            }
+            if text == "flag ? value : value" {
+                assert_eq!(state.infer(node), state.model.core_type("Object", false));
+                self.typed += 1;
+            }
+            let Expr::Call(call) = node else {
+                return;
+            };
+            let Expr::Ident(name) = call.callee() else {
+                return;
+            };
+            let nullable = match name.name() {
+                "expectInt" => false,
+                "expectNullable" => true,
+                _ => return,
+            };
+            assert_eq!(
+                state.infer(call.args().positional().next().unwrap()),
+                state.model.core_type("int", nullable),
+                "{}",
+                name.name(),
+            );
+            self.calls += 1;
+        }
+    }
+    let program = parsed.program();
+    let state = SemanticState::new(program, &context).unwrap();
+    let integer = state.model.core_type("int", false);
+    let mut observed = Observed::default();
+    visit_program(&mut observed, program, state);
+    assert_eq!(observed.typed, 3);
+    assert_eq!(observed.calls, 3);
+    assert_eq!(
+        observed.contexts,
+        [
+            (
+                "value is int ? value : flag ? 2 : 3".into(),
+                Some(integer.clone())
+            ),
+            ("flag ? 2 : 3".into(), Some(integer)),
+        ],
+    );
+}
+
+#[test]
+fn selector_callbacks_preserve_preorder_context_and_receiver_types() {
+    use falcon_analyze::{IdentityIndex, IdentitySource};
+    use falcon_config::FalconConfig;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    let source = r#"
+class Box {
+  Box get child => this;
+  Box operator [](int index) => this;
+}
+void f(Box? box, int index) {
+  Box result = box!!.child[index].child;
+}
+void g(Box? box, int index) {
+  Box? result = box?.child[index]!.child;
+}
+"#;
+    let result = parse(source);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let parsed = Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: result.tree,
+    });
+    let path = Path::new("/project/main.dart");
+    let identities = IdentityIndex::from_project_files(
+        &[IdentitySource {
+            path,
+            parsed: &parsed,
+            has_parse_errors: false,
+        }],
+        &[],
+    );
+    let config = FalconConfig::default();
+    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
+    #[derive(Default)]
+    struct Observed(Vec<(String, Option<ResolvedType>)>, usize);
+    impl<'a> SemanticRuleVisitor<'a> for Observed {
+        fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
+            let Stmt::LocalVar(declaration) = node else {
+                return;
+            };
+            let Some(initializer) = declaration
+                .declarators()
+                .next()
+                .and_then(|declarator| declarator.initializer())
+            else {
+                return;
+            };
+            if initializer.syntax().text() != "box?.child[index]!.child" {
+                return;
+            }
+            let box_type =
+                ResolvedType::interface_identity(state.model.resolve_name("Box").unwrap());
+            // Statement callbacks have no enclosing expression inference
+            // lifetime: the helper must retain its own reached-type cache.
+            assert_eq!(
+                state.infer_access_receiver(initializer, "child", false),
+                box_type
+            );
+            assert_eq!(state.infer(initializer), box_type.with_nullable(true));
+            self.1 += 1;
+        }
+
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            let text = node.syntax().text();
+            if !matches!(
+                text,
+                "box!!.child[index].child"
+                    | "box!!.child[index]"
+                    | "box!!.child"
+                    | "box!!"
+                    | "box!"
+                    | "box"
+                    | "index"
+                    | "box?.child[index]!.child"
+                    | "box?.child[index]!"
+                    | "box?.child[index]"
+                    | "box?.child"
+            ) {
+                return;
+            }
+            let expected_type = if text == "index" {
+                state.model.core_type("int", false)
+            } else {
+                ResolvedType::interface_identity(state.model.resolve_name("Box").unwrap())
+                    .with_nullable(text == "box" || text.starts_with("box?."))
+            };
+            assert_eq!(state.infer(node), expected_type, "{text}");
+            if matches!(text, "box!" | "box!!") {
+                assert_eq!(state.infer_receiver(node), expected_type);
+            }
+            if matches!(node, Expr::Field(_) | Expr::Index(_) | Expr::NullAssert(_)) {
+                let reached = if text.starts_with("box?.") {
+                    expected_type.non_null()
+                } else {
+                    expected_type.clone()
+                };
+                assert_eq!(
+                    state.infer_access_receiver(node, "child", false),
+                    reached,
+                    "{text}"
+                );
+                assert_eq!(
+                    state.infer_access_receiver(node, "child", true),
+                    reached.non_null(),
+                    "{text}",
+                );
+            }
+            self.0.push((text.into(), state.expected().cloned()));
+        }
+    }
+    let program = parsed.program();
+    let state = SemanticState::new(program, &context).unwrap();
+    let box_type = ResolvedType::interface_identity(state.model.resolve_name("Box").unwrap());
+    let mut observed = Observed::default();
+    visit_program(&mut observed, program, state);
+    assert_eq!(observed.1, 1);
+    assert_eq!(
+        observed.0,
+        [
+            ("box!!.child[index].child".into(), Some(box_type.clone())),
+            ("box!!.child[index]".into(), None),
+            ("box!!.child".into(), Some(ResolvedType::UNKNOWN)),
+            ("box!!".into(), None),
+            ("box!".into(), Some(ResolvedType::UNKNOWN)),
+            ("box".into(), Some(ResolvedType::UNKNOWN)),
+            ("index".into(), Some(ResolvedType::UNKNOWN)),
+            (
+                "box?.child[index]!.child".into(),
+                Some(box_type.with_nullable(true))
+            ),
+            ("box?.child[index]!".into(), None),
+            ("box?.child[index]".into(), Some(ResolvedType::UNKNOWN)),
+            ("box?.child".into(), Some(ResolvedType::UNKNOWN)),
+            ("box".into(), None),
+            ("index".into(), Some(ResolvedType::UNKNOWN)),
+        ],
+    );
+}
+
+#[test]
 fn optional_binary_callbacks_keep_preorder_context_and_write_promotions() {
     use falcon_analyze::{IdentityIndex, IdentitySource};
     use falcon_config::FalconConfig;
