@@ -173,7 +173,8 @@ falls back to watching every directory under the project separately.
 1. A maintainer pushes a tag `vX.Y.Z`.
 2. CI (`.github/workflows/release.yml`) cross-builds all four platform binaries
    on Linux with `cargo-zigbuild` (static musl for Linux, zig-linked macOS).
-3. The binaries are packaged as `falcon-X.Y.Z-<system>.tar.gz` plus a
+3. macOS runners optionally sign and notarise the Darwin binaries. The binaries
+   are packaged as `falcon-X.Y.Z-<system>.tar.gz` plus a
    versionless `falcon-<system>.tar.gz` copy for `releases/latest/download/`
    links, checksummed into `SHA256SUMS`, given a build provenance attestation,
    and attached to a GitHub Release.
@@ -188,9 +189,21 @@ releases continue unchanged.
   password as `MINISIGN_PASSWORD` (empty for an unencrypted key). Keep the secret
   key offline too, and distribute the public key through a trusted channel.
   Releases then include `.minisig` signatures for every archive and `SHA256SUMS`.
-  Verify them with `minisign -Vm <asset> -P <trusted-public-key>`. These detached
-  signatures are not Apple Developer ID signing or notarisation; macOS archives
-  remain unnotarised.
+  Verify them with `minisign -Vm <asset> -P <trusted-public-key>`.
+- **macOS signing and notarisation:** export a **Developer ID Application**
+  certificate with its private key as a password-protected `.p12` file. Store
+  its base64-encoded contents as `APPLE_CERTIFICATE_P12` and the export password
+  as `APPLE_CERTIFICATE_PASSWORD`. Set `APPLE_ID` to the Apple Developer account
+  email, `APPLE_TEAM_ID` to its team ID, and `APPLE_APP_PASSWORD` to an
+  app-specific password for that account. All five secrets must be nonempty to
+  enable these steps; otherwise macOS signing and notarisation are skipped.
+  CI imports the certificate into a temporary keychain, signs each Darwin
+  binary with the hardened runtime and a timestamp, and waits for Apple's
+  notarisation service to accept a zip of it before publishing. The release
+  tarballs contain the signed binaries. Bare CLI binaries cannot have a ticket
+  stapled to them, so the zip is only a submission container; users may need
+  network access for macOS to check the notarisation ticket. Minisign archive
+  signatures remain an independent option.
 - **Homebrew:** create the public repository `JacobDevelops/homebrew-tap` with
   an initial commit. Set `HOMEBREW_TAP_TOKEN` to a fine-grained PAT with
   **Contents: read and write** on that tap repository. The single Actions variable

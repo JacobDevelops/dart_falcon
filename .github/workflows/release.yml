@@ -61,8 +61,6 @@ jobs:
           - { target: aarch64-unknown-linux-musl, platform: aarch64-linux }
           - { target: x86_64-apple-darwin, platform: x86_64-darwin }
           - { target: aarch64-apple-darwin, platform: aarch64-darwin }
-    env:
-      RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -76,14 +74,86 @@ jobs:
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-zigbuild
-      - name: Build and package
+      - name: Build
+        run: |
+          set -euo pipefail
+          cargo zigbuild --release --locked -p dart_falcon --target "${{ matrix.target }}"
+          mkdir -p stage
+          install -m755 "target/${{ matrix.target }}/release/falcon" stage/falcon
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: binary-${{ matrix.platform }}
+          path: stage/falcon
+          if-no-files-found: error
+
+  package:
+    name: Package ${{ matrix.platform }}
+    needs: [resolve, build]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - { platform: x86_64-linux, runner: ubuntu-latest }
+          - { platform: aarch64-linux, runner: ubuntu-latest }
+          - { platform: x86_64-darwin, runner: macos-latest }
+          - { platform: aarch64-darwin, runner: macos-latest }
+    env:
+      RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+      NOTARIZE_MACOS: ${{ secrets.APPLE_CERTIFICATE_P12 != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '' }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: binary-${{ matrix.platform }}
+          path: stage
+      - name: Restore executable permission
+        run: chmod 755 stage/falcon
+      - name: Sign and notarise macOS binary
+        if: runner.os == 'macOS' && env.NOTARIZE_MACOS == 'true'
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          certificate="$RUNNER_TEMP/signing.p12"
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          submission="$RUNNER_TEMP/notarization.zip"
+          result="$RUNNER_TEMP/notarization.json"
+          trap 'security delete-keychain "$keychain" >/dev/null 2>&1 || :; rm -f "$certificate" "$submission" "$result"' EXIT
+          printf '%s' "$APPLE_CERTIFICATE_P12" | base64 -D > "$certificate"
+          password="$(openssl rand -base64 32)"
+          security create-keychain -p "$password" "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
+          identity=""
+          while IFS= read -r line; do
+            case "$line" in
+              *'"Developer ID Application:'*)
+                identity="${line#*\"}"
+                identity="${identity%%\"*}"
+                break
+                ;;
+            esac
+          done < <(security find-identity -v -p codesigning "$keychain")
+          if [ -z "$identity" ]; then
+            echo "Certificate must include a Developer ID Application signing identity and private key" >&2
+            exit 1
+          fi
+          codesign --force --options runtime --timestamp --sign "$identity" --keychain "$keychain" stage/falcon
+          codesign --verify --strict --verbose stage/falcon
+          ditto -c -k --keepParent stage/falcon "$submission"
+          xcrun notarytool submit "$submission" --wait --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --output-format json > "$result" || { cat "$result"; exit 1; }
+          cat "$result"
+          jq -e '.status == "Accepted"' "$result" > /dev/null
+      - name: Package
         run: |
           set -euo pipefail
           VERSION="${RELEASE_TAG#v}"
-          cargo zigbuild --release --locked -p dart_falcon --target "${{ matrix.target }}"
-          mkdir -p stage dist
-          install -m755 "target/${{ matrix.target }}/release/falcon" stage/falcon
-          tar -C stage -czf "dist/falcon-${VERSION}-${{ matrix.platform }}.tar.gz" falcon
+          mkdir -p dist
+          COPYFILE_DISABLE=1 tar -C stage -czf "dist/falcon-${VERSION}-${{ matrix.platform }}.tar.gz" falcon
           # Versionless copy so `releases/latest/download/falcon-<platform>.tar.gz` always resolves.
           cp "dist/falcon-${VERSION}-${{ matrix.platform }}.tar.gz" "dist/falcon-${{ matrix.platform }}.tar.gz"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -94,7 +164,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    needs: [resolve, build]
+    needs: [resolve, package]
     runs-on: ubuntu-latest
     permissions:
       contents: write
