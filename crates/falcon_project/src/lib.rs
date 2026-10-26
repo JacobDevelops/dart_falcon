@@ -37,12 +37,82 @@ pub fn load_project_config(
     explicit: Option<&Path>,
     start_dir: &Path,
 ) -> Result<LoadedConfig, ConfigError> {
-    let workspace = discover_workspace(start_dir)
-        .or_else(|| explicit.and_then(Path::parent).and_then(discover_workspace));
-    let base = workspace
-        .as_ref()
-        .map_or(start_dir, |workspace| workspace.root.as_path());
-    let mut loaded = match explicit {
+    let workspace = discover_workspace(start_dir);
+    load_project_config_impl(
+        explicit,
+        start_dir,
+        workspace.as_ref(),
+        workspace.as_ref(),
+        Err,
+    )
+}
+
+/// Load a project while retaining valid configurations when individual members fail.
+///
+/// Returned member errors include the configuration file path and retain their
+/// structured key path. A failed member inherits the nearest valid configuration.
+///
+/// # Errors
+/// Returns an error if the base configuration cannot be read or validated.
+pub fn load_project_config_with_errors(
+    explicit: Option<&Path>,
+    start_dir: &Path,
+) -> Result<(LoadedConfig, Vec<ConfigError>), ConfigError> {
+    let workspace = discover_workspace(start_dir);
+    let mut errors = Vec::new();
+    let loaded = load_project_config_impl(
+        explicit,
+        start_dir,
+        workspace.as_ref(),
+        workspace.as_ref(),
+        |error| {
+            errors.push(error);
+            Ok(())
+        },
+    )?;
+    Ok((loaded, errors))
+}
+
+/// Load configuration for an already selected subset of workspace members.
+///
+/// Base discovery follows the caller's start workspace or directory, falling back
+/// to the input workspace when no configuration is found there. Home configuration
+/// paths bind to the input workspace. Only supplied members load their nearest configuration.
+/// Pass the unfiltered start-directory workspace to preserve cwd membership
+/// without repeating discovery.
+///
+/// # Errors
+/// Returns configuration read, parse, and validation errors.
+pub fn load_workspace_config(
+    explicit: Option<&Path>,
+    start_dir: &Path,
+    workspace: Option<&Workspace>,
+    start_workspace: Option<&Workspace>,
+) -> Result<LoadedConfig, ConfigError> {
+    load_project_config_impl(explicit, start_dir, start_workspace, workspace, Err)
+}
+
+fn load_project_config_impl(
+    explicit: Option<&Path>,
+    start_dir: &Path,
+    start_workspace: Option<&Workspace>,
+    workspace: Option<&Workspace>,
+    mut member_error: impl FnMut(ConfigError) -> Result<(), ConfigError>,
+) -> Result<LoadedConfig, ConfigError> {
+    let explicit_workspace = if workspace.is_none() {
+        explicit.and_then(Path::parent).and_then(discover_workspace)
+    } else {
+        None
+    };
+    let workspace = workspace.or(explicit_workspace.as_ref());
+    let discovery_base = start_workspace.map_or(start_dir, |workspace| workspace.root.as_path());
+    let base = workspace.map_or(discovery_base, |workspace| workspace.root.as_path());
+    let discovered = if explicit.is_none() {
+        falcon_config::find_config(discovery_base)
+    } else {
+        None
+    };
+    let mut loaded = match explicit.or(discovered.as_deref()) {
         Some(path) => {
             let mut loaded = falcon_rules::load_config(path)?;
             if falcon_config::is_home_config(path) {
@@ -65,7 +135,10 @@ pub fn load_project_config(
                 let owner = directory
                     .ancestors()
                     .find(|ancestor| ancestor.join("pubspec.yaml").is_file());
-                let covered = workspace.packages.iter().any(|package| {
+                // Membership must be checked before CLI selection: an unselected
+                // member's cwd config is not a nonmember local configuration.
+                let members = &start_workspace.unwrap_or(workspace).packages;
+                let covered = members.iter().any(|package| {
                     package.root != workspace.root
                         && owner.map_or_else(
                             || directory.starts_with(&package.root),
@@ -77,7 +150,7 @@ pub fn load_project_config(
                 }
             }
         }
-        for package in workspace.packages {
+        for package in &workspace.packages {
             for directory in package.root.ancestors() {
                 if directory == workspace.root {
                     break;
@@ -91,9 +164,16 @@ pub fn load_project_config(
         }
         let mut configs = Vec::with_capacity(paths.len());
         for path in paths {
-            let package = falcon_rules::load_config(&path).map_err(|error| {
-                ConfigError(format!("{}: {}", path.display(), error.0), error.1)
-            })?;
+            let package = match falcon_rules::load_config(&path) {
+                Ok(package) => package,
+                Err(error) => {
+                    member_error(ConfigError(
+                        format!("{}: {}", path.display(), error.0),
+                        error.1,
+                    ))?;
+                    continue;
+                }
+            };
             loaded.warnings.extend(
                 package
                     .warnings

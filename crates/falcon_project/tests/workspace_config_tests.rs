@@ -1,6 +1,9 @@
 use falcon_analyze::AnalysisEnvironment;
 use falcon_config::ResolvedSeverity;
-use falcon_project::{ProjectAnalysis, analyze_sources, load_project_config, walk_project};
+use falcon_project::{
+    ProjectAnalysis, analyze_sources, load_project_config, load_project_config_with_errors,
+    walk_project,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -221,6 +224,111 @@ fn malformed_member_configuration_is_not_silently_ignored() {
                 .to_string()
         )
     );
+}
+
+#[test]
+fn tolerant_loading_retains_root_and_valid_members_with_qualified_errors() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    workspace(root);
+    write(
+        root,
+        "falcon.json",
+        r#"{"max-errors":7,"linter":{"enabled":false}}"#,
+    );
+    let bad = write(
+        root,
+        "packages/a/falcon.json",
+        r#"{"linter":{"enabld":false}}"#,
+    );
+    write(
+        root,
+        "packages/b/falcon.json",
+        r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-dynamic":"error"}}}}"#,
+    );
+    let (loaded, errors) = load_project_config_with_errors(None, root).unwrap();
+    assert_eq!(loaded.config.max_errors, Some(7));
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].to_string().contains(&bad.display().to_string()));
+    assert!(errors[0].to_string().contains("enabld"));
+    assert!(!errors[0].1.is_empty());
+    for (member, expected) in [("a", None), ("b", Some(ResolvedSeverity::Error))] {
+        assert_eq!(
+            loaded.config.resolve_rule_for(
+                &root
+                    .join(format!("packages/{member}/main.dart"))
+                    .to_string_lossy(),
+                "suspicious",
+                "avoid-dynamic",
+                false,
+                &[],
+            ),
+            expected,
+        );
+    }
+}
+
+#[test]
+fn tolerant_loading_still_rejects_invalid_base_configuration() {
+    let temp = tempfile::tempdir().unwrap();
+    workspace(temp.path());
+    write(temp.path(), "falcon.json", "{");
+    assert!(load_project_config_with_errors(None, temp.path()).is_err());
+}
+
+#[test]
+fn selected_workspace_binds_discovered_home_config_to_input_root() {
+    const CHILD: &str = "FALCON_SELECTED_WORKSPACE_HOME_CONFIG_TEST";
+    if std::env::var_os(CHILD).is_none() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("project");
+        workspace(&root);
+        write(&root, "falcon.json", r#"{"linter":{"enabled":false}}"#);
+        write(
+            temp.path(),
+            ".falcon.json",
+            r#"{"files":{"includes":["packages/**"]}}"#,
+        );
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "selected_workspace_binds_discovered_home_config_to_input_root",
+            ])
+            .current_dir(temp.path())
+            .env("HOME", temp.path())
+            .env(CHILD, &root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        return;
+    }
+    let root = PathBuf::from(std::env::var_os(CHILD).unwrap())
+        .canonicalize()
+        .unwrap();
+    let workspace = falcon_project::discover_workspace(&root).unwrap();
+    let cwd = std::env::current_dir().unwrap();
+    let config = falcon_project::load_workspace_config(None, &cwd, Some(&workspace), None)
+        .unwrap()
+        .config;
+    assert_eq!(config.root_dir(), Some(root.as_path()));
+    assert!(
+        config
+            .files
+            .includes
+            .admits(&root.join("packages/a/lib/main.dart").to_string_lossy(),)
+    );
+    assert!(
+        !config
+            .files
+            .includes
+            .admits(&cwd.join("packages/a/lib/main.dart").to_string_lossy(),)
+    );
+    assert!(config.is_rule_enabled_anywhere("suspicious", "avoid-dynamic", true, &[]));
 }
 
 #[test]
