@@ -5,6 +5,7 @@ use std::path::PathBuf;
 mod bench_compare;
 mod codegen;
 mod docgen;
+mod e2e;
 mod homebrew;
 mod perf_lock;
 mod schema;
@@ -37,6 +38,8 @@ enum Task {
     BenchCompare(bench_compare::Options),
     /// Generate a Homebrew formula from release archive checksums.
     Homebrew(homebrew::Options),
+    /// Check pinned OSS projects and migration presets against diagnostic snapshots.
+    E2e(e2e::Options),
     /// Generate the configuration schema.
     Schema {
         #[arg(long)]
@@ -89,6 +92,7 @@ fn main() {
             bench_compare::run(&options).map_err(|error| error.to_string())
         }
         Task::Homebrew(options) => homebrew::run(&options),
+        Task::E2e(options) => e2e::run(&options).map_err(|error| error.to_string()),
         Task::Schema { check } => {
             schema::run(check);
             Ok(())

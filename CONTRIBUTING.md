@@ -58,6 +58,26 @@ dependencies outside timing, and writes the website's benchmark data. See
 [the benchmark methodology](docs/benchmarks.md) for scenarios, pinned projects,
 cache handling, limitations, and reproduction options.
 
+`cargo xtask e2e --fast` builds release falcon and checks a small pinned OSS
+corpus; `cargo xtask e2e` runs all projects, including Dart SDK language tests.
+The fast subset runs in PR CI and the full set runs nightly. Checkouts live in
+`target/e2e` and are shallow-fetched at the exact revisions in
+`xtask/e2e-corpus.json`. The runner rejects crashes and parser/internal errors,
+compares per-rule counts with `xtask/e2e-snapshots.json`, and smoke-tests
+migration of lints, flutter_lints, and very_good_analysis presets found upstream.
+Use `cargo xtask e2e --update` after reviewing intentional diagnostic changes;
+updating snapshots never accepts parser/internal errors in real projects.
+The SDK entry allows syntax errors because its language tests include intentional
+negative cases; their counts are still snapshotted. Failure repros are written to
+`target/e2e/<project>-errors.txt`. No Dart or Flutter install is needed:
+checks run without an SDK or downloaded package dependencies.
+
+Pass a manifest id, for example `cargo xtask e2e --update riverpod`, to run
+one project. Each completed update is saved immediately, so separate queued
+invocations can build the snapshot incrementally. Each falcon check has a
+five-minute timeout and uses four analysis threads. The bloc entry excludes
+Mason templates, which are not Dart source.
+
 `cargo xtask perf-lock` checks the median release-binary runtime against a budget
 on the private mobile corpus; set `JFIT_PATH` or pass `--corpus <path>`.
 Use `--runs <n>` and `--budget-ms <ms>` to select the sample count and budget,

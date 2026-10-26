@@ -1,0 +1,13 @@
+[
+  {"id":"immich","url":"https://github.com/immich-app/immich.git","revision":"2576ee28cfb790e99ddf401a129e1d9a18713121","subpath":"mobile","fast":false},
+  {"id":"appflowy","url":"https://github.com/AppFlowy-IO/AppFlowy.git","revision":"5cf3a365dec0d59f64bad1ee4bb1050471a39b93","subpath":"frontend","fast":false},
+  {"id":"flutter-packages","url":"https://github.com/flutter/packages.git","revision":"ae20ca6bc95abcc6e97814b948e5157887ec76d1","fast":false},
+  {"id":"flame","url":"https://github.com/flame-engine/flame.git","revision":"1385181ff608e661457bee1346632219b7b300ff","fast":false},
+  {"id":"localsend","url":"https://github.com/localsend/localsend.git","revision":"cfd699125f2aa4c69f48fd274cf4bb1876a5e08d","subpath":"app","fast":true},
+  {"id":"bloc","url":"https://github.com/felangel/bloc.git","revision":"b9be1e252ee24ffbe9f2fb629edc7624b2cfbf05","excludes":["bricks/**/__brick__/**"],"fast":true},
+  {"id":"riverpod","url":"https://github.com/rrousselGit/riverpod.git","revision":"33af1e81224f18a6ade77bf71c34776cf7af2c12","fast":false},
+  {"id":"wonderous","url":"https://github.com/gskinnerTeam/flutter-wonderous-app.git","revision":"747b945a7e5239356bf2664261aa2f3b020b8898","fast":true},
+  {"id":"flutter-samples","url":"https://github.com/flutter/samples.git","revision":"21c71902bb2c7da3cce328ba5946cba2f35a660a","fast":false},
+  {"id":"dart-sdk-language","url":"https://github.com/dart-lang/sdk.git","revision":"203af6d3e0f0d988ebc0bbcc4acaa910fa4b90cf","subpath":"tests/language","sparse":true,"allow_syntax_errors":true,"fast":false},
+  {"id":"very-good-analysis","url":"https://github.com/VeryGoodOpenSource/very_good_analysis.git","revision":"75da38c0ff29228a7283c6c44f10ed799e91717e","fast":false}
+]

@@ -8,6 +8,41 @@ use std::{
     process::Command,
 };
 
+pub(crate) fn prepare_checkout(
+    checkout: &Path,
+    repository: &str,
+    revision: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let run = |command: &mut Command| -> Result<String, Box<dyn std::error::Error>> {
+        let output = command.output()?;
+        if !output.status.success() {
+            return Err(format!("{command:?}: {}", String::from_utf8_lossy(&output.stderr)).into());
+        }
+        Ok(String::from_utf8(output.stdout)?.trim().to_owned())
+    };
+    fs::create_dir_all(checkout)?;
+    if !checkout.join(".git").exists() {
+        run(Command::new("git").arg("init").arg(checkout))?;
+    }
+    let actual = run(Command::new("git")
+        .arg("-C")
+        .arg(checkout)
+        .args(["rev-parse", "HEAD"]));
+    if actual.as_deref().ok() != Some(revision) {
+        run(Command::new("git")
+            .arg("-C")
+            .arg(checkout)
+            .args(["fetch", "--depth", "1", repository, revision]))?;
+        run(Command::new("git").arg("-C").arg(checkout).args([
+            "checkout",
+            "--force",
+            "--detach",
+            "FETCH_HEAD",
+        ]))?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct DiagnosticJson {
     pub(crate) rule: String,

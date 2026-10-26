@@ -1,3 +1,4 @@
+use crate::support::prepare_checkout;
 use clap::Args;
 use falcon_rules::meta::{RULE_METADATA, RuleKind, RuleSource};
 use serde_json::{Value, json};
@@ -99,34 +100,6 @@ fn recorded_command(executable: &Path, args: &[String], project: &Path) -> Strin
         }))
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-fn prepare_checkout(checkout: &Path, repository: &str, revision: &str) -> Result<()> {
-    fs::create_dir_all(checkout)?;
-    if !checkout.join(".git").exists() {
-        output(Command::new("git").arg("init").arg(checkout))?;
-    }
-    let actual = text(
-        Command::new("git")
-            .arg("-C")
-            .arg(checkout)
-            .args(["rev-parse", "HEAD"]),
-    );
-    if actual.as_deref().ok() != Some(revision) {
-        output(
-            Command::new("git")
-                .arg("-C")
-                .arg(checkout)
-                .args(["fetch", "--depth", "1", repository, revision]),
-        )?;
-        output(Command::new("git").arg("-C").arg(checkout).args([
-            "checkout",
-            "--force",
-            "--detach",
-            "FETCH_HEAD",
-        ]))?;
-    }
-    Ok(())
 }
 
 fn entries(root: &Path) -> impl Iterator<Item = walkdir::Result<walkdir::DirEntry>> {
