@@ -14,6 +14,33 @@ fn run_check(options: CheckOptions) -> i32 {
 }
 
 #[test]
+fn non_json_reports_render_paths_beneath_regular_files() {
+    let temp = tempdir().unwrap();
+    let file = temp.path().join("main.dart");
+    fs::write(&file, "void main() {}\n").unwrap();
+    let path = file.join("x");
+    for format in [
+        OutputFormat::Text,
+        OutputFormat::Sarif,
+        OutputFormat::Gitlab,
+        OutputFormat::Checkstyle,
+        OutputFormat::Sonar,
+        OutputFormat::Html,
+    ] {
+        let output = collect_check(&CheckOptions {
+            paths: vec![path.clone()],
+            format,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(output.exit_code, 1);
+        assert_eq!(output.diagnostics.len(), 1);
+        let report = falcon_cli::report::render(format, &output.diagnostics, temp.path());
+        assert!(report.contains("main.dart/x"), "{format:?}: {report}");
+    }
+}
+
+#[test]
 fn oversized_sources_abort_before_partial_workspace_analysis() {
     for name in ["oversized.dart", "pubspec.yaml"] {
         let temp = tempdir().unwrap();

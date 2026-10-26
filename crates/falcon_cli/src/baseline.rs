@@ -170,7 +170,7 @@ fn checked_fingerprint<'a>(
 /// An invalid span hashes an empty snippet; baseline capture/application reject such spans.
 ///
 /// # Panics
-/// Panics if path resolution fails (for example, an unavailable cwd or denied permissions).
+/// Panics if absolute path resolution fails, for example when a relative path's cwd is unavailable.
 pub fn fingerprint(diagnostic: &Diagnostic, source: &str, root: &Path) -> String {
     fingerprint_with_path(
         diagnostic,
@@ -215,10 +215,10 @@ fn flagged_snippet<'a>(diagnostic: &Diagnostic, source: &'a str) -> Option<&'a s
 }
 
 /// Resolve cwd-relative paths and canonicalize existing files and roots.
-/// Nonexistent synthetic paths use absolute lexical normalization.
+/// Unresolvable paths use absolute lexical normalization.
 ///
 /// # Panics
-/// Panics if path resolution fails (for example, an unavailable cwd or denied permissions).
+/// Panics if absolute path resolution fails, for example when a relative path's cwd is unavailable.
 /// Baseline capture and application return that error instead.
 pub(crate) fn relative_path(path: &str, root: &Path) -> String {
     try_relative_path(path, root).expect("cannot resolve diagnostic path")
@@ -229,11 +229,7 @@ fn resolve_path(path: &Path) -> Result<PathBuf, String> {
         .map_err(|error| format!("Cannot resolve baseline path {}: {error}", path.display()))?;
     match absolute.canonicalize() {
         Ok(canonical) => Ok(canonical),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(normalize_path(&absolute)),
-        Err(error) => Err(format!(
-            "Cannot resolve baseline path {}: {error}",
-            path.display()
-        )),
+        Err(_) => Ok(normalize_path(&absolute)),
     }
 }
 
