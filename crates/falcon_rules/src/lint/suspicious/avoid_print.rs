@@ -7,7 +7,7 @@ use crate::lint::declarations::members_of;
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::cst::visit::{Visitor, walk_expr};
+use falcon_syntax::cst::visit::{Visitor, walk_expr_chain};
 use falcon_syntax::cst::*;
 
 #[derive(Default)]
@@ -129,12 +129,14 @@ struct DebugCalls<'a>(&'a mut Vec<Span>);
 
 impl<'a> Visitor<'a> for DebugCalls<'_> {
     fn visit_expr(&mut self, node: Expr<'a>) {
-        if let Expr::Call(call) = node
-            && matches!(call.callee().unparenthesized(), Expr::Ident(identifier) if identifier.name() == "print")
-        {
-            self.0.push(call.span());
-        }
-        walk_expr(self, node);
+        walk_expr_chain(self, node, |visitor, node| {
+            if let Expr::Call(call) = node
+                && matches!(call.callee().unparenthesized(), Expr::Ident(identifier) if identifier.name() == "print")
+            {
+                visitor.0.push(call.span());
+            }
+            true
+        });
     }
 
     fn visit_function_body(&mut self, _node: FunctionBody<'a>) {}

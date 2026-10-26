@@ -214,8 +214,10 @@ impl<'a> Written<'a> {
 
 impl<'a> Visitor<'a> for Written<'a> {
     fn visit_expr(&mut self, node: Expr<'a>) {
-        self.record_expr(node);
-        visitor::walk_expr(self, node);
+        visitor::walk_expr_chain(self, node, |visitor, expression| {
+            visitor.record_expr(expression);
+            true
+        });
     }
 }
 

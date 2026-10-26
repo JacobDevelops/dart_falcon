@@ -7,7 +7,7 @@ use falcon_analyze::{
     StructuralTraversal, Truth, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::cst::visit::{Visitor, walk_expr, walk_stmt};
+use falcon_syntax::cst::visit::{Visitor, walk_expr_chain, walk_expr_chain_with_exit, walk_stmt};
 use falcon_syntax::cst::*;
 pub(crate) const TIMER_RELEASE: crate::lint::resource_leaks::Release =
     crate::lint::resource_leaks::Release {
@@ -559,12 +559,14 @@ impl<'a> Visitor<'a> for EarlyExit {
         }
     }
     fn visit_expr(&mut self, expression: Expr<'a>) {
-        match expression {
-            Expr::Throw(_) => self.0 = true,
-            Expr::FuncExpr(_) => {}
-            _ if !self.0 => walk_expr(self, expression),
-            _ => {}
-        }
+        walk_expr_chain(self, expression, |visitor, expression| match expression {
+            Expr::Throw(_) => {
+                visitor.0 = true;
+                false
+            }
+            Expr::FuncExpr(_) => false,
+            _ => !visitor.0,
+        });
     }
 }
 
@@ -580,6 +582,7 @@ impl<'a> Visitor<'a> for EagerReleases<'_> {
             stopped: false,
             cascade_reached: 0,
             cascade_unreachable: 0,
+            frames: Vec::new(),
         }
         .visit_expr(expression);
     }
@@ -591,6 +594,14 @@ struct EagerReleaseScope<'a> {
     stopped: bool,
     cascade_reached: u8,
     cascade_unreachable: u8,
+    frames: Vec<EagerReleaseFrame>,
+}
+
+struct EagerReleaseFrame {
+    expression: Span,
+    only: Option<Span>,
+    cascade_reached: u8,
+    cascade_unreachable: u8,
 }
 
 impl EagerReleaseScope<'_> {
@@ -599,22 +610,25 @@ impl EagerReleaseScope<'_> {
         exits.visit_expr(expression);
         self.stopped |= exits.0;
     }
-}
 
-impl<'a> Visitor<'a> for EagerReleaseScope<'_> {
-    fn visit_expr(&mut self, expression: Expr<'a>) {
+    fn enter_expr(&mut self, expression: Expr<'_>) -> bool {
         if self.stopped {
-            return;
+            return false;
         }
         if self.only.is_some_and(|span| span != expression.span()) {
             self.note_exits(expression);
-            return;
+            return false;
         }
         if matches!(expression, Expr::FuncExpr(_)) {
-            return;
+            return false;
         }
         self.releases.insert(expression.span());
-        let outer = self.only;
+        self.frames.push(EagerReleaseFrame {
+            expression: expression.span(),
+            only: self.only,
+            cascade_reached: std::mem::take(&mut self.cascade_reached),
+            cascade_unreachable: std::mem::take(&mut self.cascade_unreachable),
+        });
         self.only = match expression {
             Expr::Call(call) if null_short_circuits(call.callee()) => Some(call.callee().span()),
             Expr::Index(index) if index.is_null_safe() || null_short_circuits(index.object()) => {
@@ -638,20 +652,35 @@ impl<'a> Visitor<'a> for EagerReleaseScope<'_> {
             Expr::Switch(switch) => Some(switch.subject().span()),
             _ => None,
         };
-        let outer_cascade = (
-            std::mem::take(&mut self.cascade_reached),
-            std::mem::take(&mut self.cascade_unreachable),
-        );
-        walk_expr(self, expression);
-        self.only = outer;
+        true
+    }
+
+    fn exit_expr(&mut self, expression: Expr<'_>) {
+        // Pruned expressions also receive an exit, but did not enter a scope.
+        if !self
+            .frames
+            .last()
+            .is_some_and(|frame| frame.expression == expression.span())
+        {
+            return;
+        }
+        let outer = self.frames.pop().unwrap();
+        self.only = outer.only;
         self.stopped |= matches!(expression, Expr::Throw(_));
         let release_unreachable = self.cascade_unreachable & !self.cascade_reached != 0;
-        (self.cascade_reached, self.cascade_unreachable) = outer_cascade;
+        self.cascade_reached = outer.cascade_reached;
+        self.cascade_unreachable = outer.cascade_unreachable;
         // Calls must reach their invocation; cascades may already have released
         // their receiver before a later section throws.
         if self.stopped && (!matches!(expression, Expr::Cascade(_)) || release_unreachable) {
             self.releases.remove(&expression.span());
         }
+    }
+}
+
+impl<'a> Visitor<'a> for EagerReleaseScope<'_> {
+    fn visit_expr(&mut self, expression: Expr<'a>) {
+        walk_expr_chain_with_exit(self, expression, Self::enter_expr, Self::exit_expr);
     }
 
     fn visit_element<E: Element<'a>>(&mut self, element: E) {

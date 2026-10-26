@@ -125,50 +125,51 @@ struct GuardProof<'s, 'a> {
 
 impl<'a> falcon_syntax::cst::visit::Visitor<'a> for GuardProof<'_, 'a> {
     fn visit_expr(&mut self, expression: Expr<'a>) {
-        if !self.repeatable {
-            return;
-        }
-        self.repeatable = match expression {
-            Expr::Paren(_) => true,
-            Expr::Ident(identifier) => {
-                self.state
-                    .environment
-                    .binding_declaration(identifier.name())
-                    .is_some()
-                    && !self.state.is_own_field(identifier.name())
-                    && self.state.is_variable_read(identifier.name())
-                    && primitive(expression, self.state)
+        falcon_syntax::cst::visit::walk_expr_chain(self, expression, |proof, expression| {
+            if !proof.repeatable {
+                return false;
             }
-            Expr::IntLit(_) | Expr::DoubleLit(_) | Expr::BoolLit(_) | Expr::NullLit(_) => true,
-            Expr::StringLit(string) => string.interpolations().next().is_none(),
-            Expr::Field(field) if !field.is_null_safe() => {
-                matches!(field.field().name(), "length" | "isEmpty" | "isNotEmpty")
-                    && matches!(field.object().unparenthesized(), Expr::Ident(_))
-                    && self
+            proof.repeatable = match expression {
+                Expr::Paren(_) => true,
+                Expr::Ident(identifier) => {
+                    proof
                         .state
-                        .infer(field.object())
-                        .interface("dart:core", "String")
-            }
-            Expr::Unary(unary) if unary.op() == UnaryOp::Bang => self
-                .state
-                .infer(unary.operand())
-                .interface("dart:core", "bool"),
-            Expr::Binary(binary) => matches!(
-                binary.op(),
-                BinaryOp::And
-                    | BinaryOp::Or
-                    | BinaryOp::EqEq
-                    | BinaryOp::NotEq
-                    | BinaryOp::Lt
-                    | BinaryOp::LtEq
-                    | BinaryOp::Gt
-                    | BinaryOp::GtEq
-            ),
-            _ => false,
-        };
-        if self.repeatable {
-            falcon_syntax::cst::visit::walk_expr(self, expression);
-        }
+                        .environment
+                        .binding_declaration(identifier.name())
+                        .is_some()
+                        && !proof.state.is_own_field(identifier.name())
+                        && proof.state.is_variable_read(identifier.name())
+                        && primitive(expression, proof.state)
+                }
+                Expr::IntLit(_) | Expr::DoubleLit(_) | Expr::BoolLit(_) | Expr::NullLit(_) => true,
+                Expr::StringLit(string) => string.interpolations().next().is_none(),
+                Expr::Field(field) if !field.is_null_safe() => {
+                    matches!(field.field().name(), "length" | "isEmpty" | "isNotEmpty")
+                        && matches!(field.object().unparenthesized(), Expr::Ident(_))
+                        && proof
+                            .state
+                            .infer(field.object())
+                            .interface("dart:core", "String")
+                }
+                Expr::Unary(unary) if unary.op() == UnaryOp::Bang => proof
+                    .state
+                    .infer(unary.operand())
+                    .interface("dart:core", "bool"),
+                Expr::Binary(binary) => matches!(
+                    binary.op(),
+                    BinaryOp::And
+                        | BinaryOp::Or
+                        | BinaryOp::EqEq
+                        | BinaryOp::NotEq
+                        | BinaryOp::Lt
+                        | BinaryOp::LtEq
+                        | BinaryOp::Gt
+                        | BinaryOp::GtEq
+                ),
+                _ => false,
+            };
+            proof.repeatable
+        });
     }
 }
 

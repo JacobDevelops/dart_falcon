@@ -8,8 +8,8 @@ use super::async_semantics as semantics;
 use falcon_analyze::{AnalyzeContext, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{
-    Visitor, walk_block, walk_catch_clause, walk_element, walk_expr, walk_function_body, walk_stmt,
-    walk_switch_case, walk_switch_expr_arm,
+    Visitor, walk_block, walk_catch_clause, walk_element, walk_expr_chain_with_exit,
+    walk_function_body, walk_stmt, walk_switch_case, walk_switch_expr_arm,
 };
 use falcon_syntax::cst::*;
 use std::collections::{HashMap, HashSet};
@@ -372,13 +372,11 @@ fn optional_receiver(expression: Expr<'_>) -> bool {
     optional
 }
 
-impl<'a> Visitor<'a> for Tree<'a> {
-    fn visit_expr(&mut self, node: Expr<'a>) {
+impl<'a> Tree<'a> {
+    fn enter_expr(&mut self, node: Expr<'a>) -> bool {
         if self.conservative && conservative_expression(node) {
             self.enter(expr(node), Kind::Uncertain, node.span());
-            walk_expr(self, node);
-            self.leave();
-            return;
+            return true;
         }
         let kind = match node {
             Expr::Paren(_) => Kind::Revisit,
@@ -399,7 +397,14 @@ impl<'a> Visitor<'a> for Tree<'a> {
             _ => Kind::Any,
         };
         self.enter(expr(node), kind, node.span());
-        walk_expr(self, node);
+        true
+    }
+
+    fn exit_expr(&mut self, node: Expr<'a>) {
+        if self.conservative && matches!(self.nodes[&expr(node)].kind, Kind::Uncertain) {
+            self.leave();
+            return;
+        }
         match node {
             Expr::Call(n) => self.group(
                 Key(n.args().syntax().id(), 9),
@@ -462,6 +467,12 @@ impl<'a> Visitor<'a> for Tree<'a> {
         };
         self.nodes.get_mut(&expr(node)).unwrap().exit_override = override_exit;
         self.leave();
+    }
+}
+
+impl<'a> Visitor<'a> for Tree<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>) {
+        walk_expr_chain_with_exit(self, node, Self::enter_expr, Self::exit_expr);
     }
     fn visit_stmt(&mut self, node: Stmt<'a>) {
         if self.conservative
@@ -1148,6 +1159,7 @@ impl<G> AsyncStateVisitor<'_, G> {
 mod tests {
     use super::*;
     use falcon_dart_parser::parse;
+    use falcon_syntax::cst::visit::walk_expr;
 
     fn conservative_reports(body: &str) -> Vec<String> {
         let source = format!("Future<void> f() async {{ {body} }}");

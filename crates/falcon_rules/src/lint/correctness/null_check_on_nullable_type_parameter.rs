@@ -30,7 +30,7 @@ use std::collections::{HashMap, HashSet};
 use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::{
-    visit::{Visitor, walk_expr, walk_stmt},
+    visit::{Visitor, walk_expr_chain, walk_stmt},
     *,
 };
 
@@ -149,9 +149,9 @@ impl<'a> Visitor<'a> for Yields<'_, 'a> {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) {
-        if !matches!(node, Expr::FuncExpr(_)) {
-            walk_expr(self, node);
-        }
+        walk_expr_chain(self, node, |_, expression| {
+            !matches!(expression, Expr::FuncExpr(_))
+        });
     }
 }
 

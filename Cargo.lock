@@ -303,6 +303,7 @@ dependencies = [
  "falcon_diagnostics",
  "falcon_project",
  "falcon_rules",
+ "serde_json",
  "tempfile",
  "tikv-jemallocator",
 ]

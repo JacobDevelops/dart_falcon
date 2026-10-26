@@ -7,7 +7,7 @@ use falcon_analyze::{
     StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
-use falcon_syntax::cst::visit::{Visitor, walk_expr};
+use falcon_syntax::cst::visit::{Visitor, walk_expr_chain};
 use falcon_syntax::cst::*;
 
 #[derive(Default)]
@@ -180,14 +180,17 @@ struct LibraryTargetFinder(bool);
 
 impl<'a> Visitor<'a> for LibraryTargetFinder {
     fn visit_expr(&mut self, node: Expr<'a>) {
-        if matches!(node, Expr::Field(field)
-            if field.field().name() == "library"
-                && matches!(field.object(), Expr::Ident(name) if name.name() == "TargetKind"))
-        {
-            self.0 = true;
-        } else {
-            walk_expr(self, node);
-        }
+        walk_expr_chain(self, node, |finder, node| {
+            if matches!(node, Expr::Field(field)
+                if field.field().name() == "library"
+                    && matches!(field.object(), Expr::Ident(name) if name.name() == "TargetKind"))
+            {
+                finder.0 = true;
+                false
+            } else {
+                true
+            }
+        });
     }
 }
 

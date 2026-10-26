@@ -102,23 +102,8 @@ impl SyntaxCollector {
             self.complete = false;
         }
     }
-}
 
-impl<'a> Visitor<'a> for SyntaxCollector {
-    fn visit_annotation(&mut self, annotation: Annotation<'a>) {
-        self.tokens.push(Token::Annotation);
-        self.count(annotation.name().count());
-        self.count(annotation.type_args().len());
-        self.flag(annotation.constructor_name().is_some());
-        self.flag(annotation.args().is_some());
-        if let Some(args) = annotation.args() {
-            self.args(args);
-        }
-        visitor::walk_annotation(self, annotation);
-        self.tokens.push(Token::End);
-    }
-
-    fn visit_expr(&mut self, expr: Expr<'a>) {
+    fn enter_expr(&mut self, expr: Expr<'_>) -> bool {
         // Analyzer toSource omits record `const` and trailing commas, so a
         // one-positional-field record has the same spelling as parentheses.
         let parenthesized = matches!(expr, Expr::Paren(_))
@@ -194,7 +179,7 @@ impl<'a> Visitor<'a> for SyntaxCollector {
             Expr::GenericInstantiation(value) => self.count(value.type_args().len()),
             Expr::Error(_) | Expr::FuncExpr(_) | Expr::Cascade(_) | Expr::Switch(_) => {
                 self.complete = false;
-                return;
+                return false;
             }
             Expr::StringLit(_)
             | Expr::NullLit(_)
@@ -208,8 +193,34 @@ impl<'a> Visitor<'a> for SyntaxCollector {
             | Expr::Throw(_)
             | Expr::NullAssert(_) => {}
         }
-        visitor::walk_expr(self, expr);
+        true
+    }
+}
+
+impl<'a> Visitor<'a> for SyntaxCollector {
+    fn visit_annotation(&mut self, annotation: Annotation<'a>) {
+        self.tokens.push(Token::Annotation);
+        self.count(annotation.name().count());
+        self.count(annotation.type_args().len());
+        self.flag(annotation.constructor_name().is_some());
+        self.flag(annotation.args().is_some());
+        if let Some(args) = annotation.args() {
+            self.args(args);
+        }
+        visitor::walk_annotation(self, annotation);
         self.tokens.push(Token::End);
+    }
+
+    fn visit_expr(&mut self, expr: Expr<'a>) {
+        visitor::walk_expr_chain_with_exit(self, expr, Self::enter_expr, |this, expr| {
+            // Unsupported forms were pruned without a closing token.
+            if !matches!(
+                expr,
+                Expr::Error(_) | Expr::FuncExpr(_) | Expr::Cascade(_) | Expr::Switch(_)
+            ) {
+                this.tokens.push(Token::End);
+            }
+        });
     }
 
     fn visit_identifier(&mut self, identifier: Identifier<'a>) {

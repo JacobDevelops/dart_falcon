@@ -16,7 +16,7 @@ use falcon_analyze::{
     ResolvedType, ResolvedTypeView, Truth, TypeRelation, evaluate_constant, expression_segments,
     resolve_call_constructor,
 };
-use falcon_syntax::cst::visit::{Visitor, walk_expr};
+use falcon_syntax::cst::visit::{Visitor, walk_expr_chain};
 use falcon_syntax::cst::*;
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
@@ -324,11 +324,14 @@ pub(crate) fn constant_bool<'a>(
     }
     impl<'a> Visitor<'a> for BoundNames<'_, '_> {
         fn visit_expr(&mut self, expression: Expr<'a>) {
-            if let Expr::Ident(identifier) = expression {
-                self.found |= self.state.environment.is_bound(identifier.name());
-            } else if !self.found {
-                walk_expr(self, expression);
-            }
+            walk_expr_chain(self, expression, |this, expression| {
+                if let Expr::Ident(identifier) = expression {
+                    this.found |= this.state.environment.is_bound(identifier.name());
+                    false
+                } else {
+                    !this.found
+                }
+            });
         }
     }
     let mut names = BoundNames {
