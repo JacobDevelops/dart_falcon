@@ -1433,16 +1433,12 @@ fn workspace_reports_include_member_configs_clean_counts_and_lsp_parity() {
                 &output.packages,
             )
         };
-        let json: serde_json::Value =
+        let json: Vec<serde_json::Value> =
             serde_json::from_str(&render(OutputFormat::Json, &output.diagnostics)).unwrap();
-        assert_eq!(json["diagnostics"][0]["package"], "flagged");
-        assert_eq!(json["diagnostics"][0]["rule"], "avoid-dynamic");
-        assert_eq!(json["diagnostics"][0]["severity"], "error");
-        let packages = json["packages"].as_array().unwrap();
-        for package in packages {
-            assert_eq!(package["total_files"], 1);
-            assert!(!std::path::Path::new(package["root"].as_str().unwrap()).is_absolute());
-        }
+        assert_eq!(json.len(), 1);
+        assert_eq!(json[0]["package"], "flagged");
+        assert_eq!(json[0]["rule"], "avoid-dynamic");
+        assert_eq!(json[0]["severity"], "error");
         let text = render(OutputFormat::Text, &output.diagnostics);
         assert!(text.contains("Package flagged:"));
         assert!(text.contains("Package clean:"));
@@ -1454,17 +1450,36 @@ fn workspace_reports_include_member_configs_clean_counts_and_lsp_parity() {
         assert_eq!(text.matches("avoid-dynamic").count(), 1);
 
         // Display limits must not suppress clean members or change full counts.
-        let truncated: serde_json::Value =
+        let truncated: Vec<serde_json::Value> =
             serde_json::from_str(&render(OutputFormat::Json, &[])).unwrap();
-        assert_eq!(truncated["diagnostics"].as_array().unwrap().len(), 0);
-        assert_eq!(truncated["packages"], json["packages"]);
+        assert!(truncated.is_empty());
+        let truncated_text = render(OutputFormat::Text, &[]);
+        assert_eq!(
+            truncated_text.split_once("Package summary:\n").unwrap().1,
+            summary
+        );
         let sarif: serde_json::Value =
             serde_json::from_str(&render(OutputFormat::Sarif, &output.diagnostics)).unwrap();
         assert_eq!(
             sarif["runs"][0]["results"][0]["properties"]["package"],
             "flagged"
         );
-        assert_eq!(sarif["runs"][0]["properties"]["packages"], json["packages"]);
+        let packages = sarif["runs"][0]["properties"]["packages"]
+            .as_array()
+            .unwrap();
+        assert_eq!(packages.len(), 2);
+        for package in packages {
+            assert_eq!(package["total_files"], 1);
+            assert!(!std::path::Path::new(package["root"].as_str().unwrap()).is_absolute());
+        }
+        assert_eq!(
+            packages.iter().find(|p| p["name"] == "flagged").unwrap()["errors"],
+            1
+        );
+        assert_eq!(
+            packages.iter().find(|p| p["name"] == "clean").unwrap()["errors"],
+            0
+        );
 
         let mut lsp = LspState::new_with_sdk_locator(Some(config_path), |_| None);
         for (name, expected) in [("flagged", 1), ("clean", 0)] {
@@ -1541,7 +1556,7 @@ fn member_only_reports_omit_unselected_siblings_and_nested_nonmembers() {
             &output.packages,
         ))
         .unwrap();
-    let nested = report["diagnostics"]
+    let nested = report
         .as_array()
         .unwrap()
         .iter()
@@ -1654,18 +1669,9 @@ fn explicit_workspace_stdout_counts_after_baseline_before_print_limit() {
         let (report, exit) = report.split_once("FALCON_REPORT_END:").unwrap();
         assert!(exit.starts_with('1'), "{stdout}");
         if format == "json" {
-            let report: serde_json::Value = serde_json::from_str(report).unwrap();
-            assert_eq!(report["diagnostics"].as_array().unwrap().len(), 1);
-            assert_eq!(report["diagnostics"][0]["package"], "flagged");
-            let packages = report["packages"].as_array().unwrap();
-            assert_eq!(
-                packages.iter().find(|p| p["name"] == "flagged").unwrap()["errors"],
-                2
-            );
-            assert_eq!(
-                packages.iter().find(|p| p["name"] == "clean").unwrap()["errors"],
-                0
-            );
+            let report: Vec<serde_json::Value> = serde_json::from_str(report).unwrap();
+            assert_eq!(report.len(), 1);
+            assert_eq!(report[0]["package"], "flagged");
         } else {
             assert!(report.contains("Package flagged:"));
             let summary = report.split_once("Package summary:\n").unwrap().1;

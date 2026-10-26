@@ -69,12 +69,12 @@ packages/core/pubspec.yaml    # name: core; resolution: workspace
 
 Package identity comes from each member's own `pubspec.yaml`, including for
 `package:` imports used by cross-file rules. Text reports include a per-package
-summary, including clean packages. JSON reports attach package names to findings
-and include per-package file and severity counts. Summaries count all remaining
-findings after baseline filtering, even when `--max-errors` limits printed
-diagnostics.
-Workspace JSON uses an object with `diagnostics` and `packages` arrays;
-single-project JSON retains its diagnostic-array format.
+summary, including clean packages, with file and severity counts. Summaries count
+all remaining findings after baseline filtering, even when `--max-errors` limits
+printed diagnostics.
+JSON reports always use a diagnostic array. Workspace findings additionally carry
+a `package` field containing the member name, or `null` for findings outside the
+workspace packages. SARIF reports retain package identities and per-package summaries.
 
 ## Editor autocomplete (`$schema`)
 

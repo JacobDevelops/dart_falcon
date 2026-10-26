@@ -199,11 +199,7 @@ pub fn render_with_packages(
                 entry
             })
             .collect();
-        // Keep diagnostic fields unchanged; the summary follows the findings.
-        let mut report = serde_json::Map::new();
-        report.insert("diagnostics".into(), entries.into());
-        report.insert("packages".into(), package_values(packages, root).into());
-        return json_string(report.into());
+        return json_string(entries.into());
     }
     render_impl(format, diagnostics, root, packages)
 }
@@ -597,9 +593,71 @@ mod tests {
             &summaries,
         ))
         .unwrap();
-        assert_eq!(report["diagnostics"][0]["package"], "nested");
-        assert_eq!(report["packages"][1]["root"], "packages/nested");
-        assert_eq!(report["packages"][2]["total_files"], 0);
+        let entries = report
+            .as_array()
+            .expect("workspace JSON is a diagnostic array");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["package"], "nested");
+        let text = render_with_packages(ReportFormat::Text, &diagnostics, root, &summaries);
+        assert!(text.contains("Package summary:"));
+        assert!(text.contains("empty: 0 files, 0 errors, 0 warnings, 0 infos"));
+        let sarif: Value = serde_json::from_str(&render_with_packages(
+            ReportFormat::Sarif,
+            &diagnostics,
+            root,
+            &summaries,
+        ))
+        .unwrap();
+        assert_eq!(
+            sarif["runs"][0]["properties"]["packages"][1]["root"],
+            "packages/nested"
+        );
+        assert_eq!(
+            sarif["runs"][0]["properties"]["packages"][2]["total_files"],
+            0
+        );
+    }
+
+    #[test]
+    fn workspace_json_preserves_findings_and_empty_array_contract() {
+        let root = Path::new("/workspace");
+        let packages = [falcon_project::WorkspacePackage {
+            name: "app".into(),
+            root: root.join("app"),
+        }];
+        let diagnostics = [
+            diagnostic(&packages[0].root),
+            Diagnostic::new(
+                "internal-error",
+                Severity::Error,
+                "Analysis failed.",
+                "/outside/bad.dart",
+                Span { start: 0, end: 0 },
+            ),
+        ];
+        let summaries = summarize_packages(&packages, std::iter::empty(), &diagnostics);
+        let report: Vec<Value> = serde_json::from_str(&render_with_packages(
+            ReportFormat::Json,
+            &diagnostics,
+            root,
+            &summaries,
+        ))
+        .unwrap();
+        let mut expected: Vec<Value> = diagnostics
+            .iter()
+            .map(|diagnostic| serde_json::to_value(diagnostic).unwrap())
+            .collect();
+        expected[0]["package"] = json!("app");
+        expected[1]["package"] = Value::Null;
+        assert_eq!(report, expected);
+        let empty: Vec<Value> = serde_json::from_str(&render_with_packages(
+            ReportFormat::Json,
+            &[],
+            root,
+            &summaries,
+        ))
+        .unwrap();
+        assert!(empty.is_empty());
     }
 
     #[test]
