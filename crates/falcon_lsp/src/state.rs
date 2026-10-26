@@ -268,6 +268,22 @@ impl FileStamp {
     }
 }
 
+/// Coarse mtimes can hide same-size config edits, so the stamp includes the contents.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ConfigStamp {
+    file: FileStamp,
+    contents: Vec<u8>,
+}
+
+impl ConfigStamp {
+    fn read(path: &Path) -> Option<Self> {
+        Some(Self {
+            file: FileStamp::read(path)?,
+            contents: std::fs::read(path).ok()?,
+        })
+    }
+}
+
 struct CachedDiskFile {
     parsed: Arc<ParsedFile>,
     has_parse_errors: bool,
@@ -345,7 +361,7 @@ pub struct LspState {
     disk_files: HashMap<PathBuf, CachedDiskFile>,
     /// Quiet-boundary stamps include rejected reads, not just cached syntax.
     fallback_stamps: HashMap<PathBuf, Option<FileStamp>>,
-    fallback_config_stamps: HashMap<PathBuf, Option<FileStamp>>,
+    fallback_config_stamps: HashMap<PathBuf, Option<ConfigStamp>>,
     fallback_dependency_watches: HashMap<PathBuf, Vec<DiscoveryWatch>>,
     project_paths: Option<Vec<(PathBuf, bool)>>,
     project_path_patterns: Vec<String>,
@@ -678,7 +694,7 @@ impl LspState {
             }
         }
         for (path, stamp) in &mut self.fallback_config_stamps {
-            let current = FileStamp::read(path);
+            let current = ConfigStamp::read(path);
             if current != *stamp {
                 *stamp = current;
                 changed.push(path.clone());
@@ -2625,7 +2641,7 @@ fn load_from(
 fn rule_config_stamps<'a>(
     roots: impl Iterator<Item = &'a Path>,
     explicit: Option<&'a Path>,
-) -> HashMap<PathBuf, Option<FileStamp>> {
+) -> HashMap<PathBuf, Option<ConfigStamp>> {
     let mut stamps = HashMap::new();
     let mut visited = HashSet::new();
     for root in roots.chain(explicit.and_then(Path::parent)) {
@@ -2636,7 +2652,7 @@ fn rule_config_stamps<'a>(
             for name in ["falcon.json", ".falcon.json"] {
                 stamps
                     .entry(ancestor.join(name))
-                    .or_insert_with_key(|path| FileStamp::read(path));
+                    .or_insert_with_key(|path| ConfigStamp::read(path));
             }
         }
         if let Some(workspace) = falcon_project::discover_workspace(root) {
@@ -2647,7 +2663,7 @@ fn rule_config_stamps<'a>(
                     }
                     stamps
                         .entry(directory.join("falcon.json"))
-                        .or_insert_with_key(|path| FileStamp::read(path));
+                        .or_insert_with_key(|path| ConfigStamp::read(path));
                 }
             }
         }
@@ -2655,13 +2671,13 @@ fn rule_config_stamps<'a>(
     if let Some(path) = explicit {
         stamps
             .entry(path.to_path_buf())
-            .or_insert_with(|| FileStamp::read(path));
+            .or_insert_with(|| ConfigStamp::read(path));
     }
     if let Some(home) = std::env::var_os("HOME") {
         let path = PathBuf::from(home).join(".falcon.json");
         stamps
             .entry(path.clone())
-            .or_insert_with(|| FileStamp::read(&path));
+            .or_insert_with(|| ConfigStamp::read(&path));
     }
     stamps
 }
