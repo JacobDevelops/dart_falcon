@@ -22,6 +22,14 @@ impl SignatureIndex {
         self.flow_writes.get(&Some(file))
     }
 
+    /// Replace body-local flow facts while retaining unchanged declaration indexes.
+    pub fn refresh_file_body(&mut self, file: FileId, program: Program<'_>) {
+        self.flow_writes.insert(
+            Some(file),
+            Arc::new(super::flow_writes::FlowWrites::program(program)),
+        );
+    }
+
     pub(super) fn member_entry(
         &self,
         identity: &DeclarationIdentity,

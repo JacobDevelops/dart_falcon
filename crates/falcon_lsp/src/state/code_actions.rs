@@ -120,6 +120,12 @@ impl LspState {
             return Ok(Vec::new());
         }
         let document = &self.documents[uri.as_str()];
+        let root_index = self.root_index(&document.path);
+        let config = if root_index == 0 {
+            &self.config
+        } else {
+            &self.additional_root_configs[root_index - 1].config
+        };
         let source = document.text();
         let diagnostics = &document.last_diagnostics;
         let lines = LineIndex::new(source);
@@ -134,7 +140,7 @@ impl LspState {
                 }
                 let Some(fix) = &diagnostic.fix else { continue };
                 let Some(kind) =
-                    effective_fix_kind(&self.config, &document.path, diagnostic.rule, fix.kind)
+                    effective_fix_kind(config, &document.path, diagnostic.rule, fix.kind)
                 else {
                     continue;
                 };
@@ -224,7 +230,7 @@ impl LspState {
             if !document.has_parse_errors
                 && !diagnostics.iter().any(|diagnostic| {
                     diagnostic.fix.as_ref().is_some_and(|fix| {
-                        effective_fix_kind(&self.config, &document.path, diagnostic.rule, fix.kind)
+                        effective_fix_kind(config, &document.path, diagnostic.rule, fix.kind)
                             .is_some_and(|kind| include_unsafe || kind == FixKind::Safe)
                     })
                 })
@@ -305,7 +311,13 @@ impl LspState {
                 "Falcon cannot fix without a valid semantic snapshot: {error}"
             ));
         }
-        let analysis = ProjectAnalysis::new(&self.config);
+        let root_index = self.root_index(&document.path);
+        let config = if root_index == 0 {
+            &self.config
+        } else {
+            &self.additional_root_configs[root_index - 1].config
+        };
+        let analysis = ProjectAnalysis::new(config);
         let external = self
             .external_indexes
             .as_ref()
@@ -316,7 +328,7 @@ impl LspState {
             });
         let outcome = fix_file_with_context(
             &analysis,
-            &self.config,
+            config,
             &mut self.environment,
             &document.path,
             document.text(),
