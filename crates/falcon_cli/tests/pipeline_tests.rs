@@ -1344,3 +1344,335 @@ fn package_discovery_deduplicates_real_and_symlinked_package_paths() {
         falcon_analyze::canonical_or_lexical(&lib)
     );
 }
+
+#[test]
+fn workspace_reports_include_member_configs_clean_counts_and_lsp_parity() {
+    for workspace in ["pub", "melos", "melos7"] {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        if workspace == "melos" {
+            fs::write(root.join("melos.yaml"), "packages:\n  - packages/*\n").unwrap();
+        } else {
+            fs::write(
+                root.join("pubspec.yaml"),
+                if workspace == "melos7" {
+                    "workspace:\n  - packages/flagged\n  - packages/clean\nmelos:\n  useRootAsPackage: false\n"
+                } else {
+                    "workspace:\n  - packages/flagged\n  - packages/clean\n"
+                },
+            )
+            .unwrap();
+        }
+        let config_path = root.join("falcon.json");
+        fs::write(
+            &config_path,
+            r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false}}}"#,
+        )
+        .unwrap();
+        let source = "dynamic value = 1;\n";
+        for (name, level) in [("flagged", "error"), ("clean", "off")] {
+            let package = root.join("packages").join(name);
+            fs::create_dir_all(package.join("lib")).unwrap();
+            fs::write(
+                package.join("pubspec.yaml"),
+                format!("name: {name}\nresolution: workspace\n"),
+            )
+            .unwrap();
+            fs::write(package.join("lib/main.dart"), source).unwrap();
+            fs::write(
+                package.join("falcon.json"),
+                serde_json::json!({
+                    "linter": { "rules": {
+                        "recommended": false,
+                        "suspicious": { "avoid-dynamic": level }
+                    }},
+                    "cross-file": { "rules": { "recommended": false } }
+                })
+                .to_string(),
+            )
+            .unwrap();
+        }
+        let output = collect_check(&CheckOptions {
+            paths: vec![root.to_path_buf()],
+            config_path: Some(config_path.clone()),
+            max_errors: Some(0),
+            quiet: true,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(output.total_files, 2);
+        assert_eq!(output.diagnostics.len(), 1);
+        assert_eq!(output.diagnostics[0].rule, "avoid-dynamic");
+        assert_eq!(output.exit_code, 1);
+        assert_eq!(output.packages.len(), 2);
+        let clean = output.packages.iter().find(|p| p.name == "clean").unwrap();
+        let flagged = output
+            .packages
+            .iter()
+            .find(|p| p.name == "flagged")
+            .unwrap();
+        assert_eq!(
+            (clean.total_files, clean.errors, clean.warnings, clean.infos),
+            (1, 0, 0, 0)
+        );
+        assert_eq!(
+            (
+                flagged.total_files,
+                flagged.errors,
+                flagged.warnings,
+                flagged.infos
+            ),
+            (1, 1, 0, 0)
+        );
+
+        let render = |format, diagnostics: &[falcon_diagnostics::Diagnostic]| {
+            falcon_cli::report::render_with_packages(
+                format,
+                diagnostics,
+                &output.root,
+                &output.packages,
+            )
+        };
+        let json: serde_json::Value =
+            serde_json::from_str(&render(OutputFormat::Json, &output.diagnostics)).unwrap();
+        assert_eq!(json["diagnostics"][0]["package"], "flagged");
+        assert_eq!(json["diagnostics"][0]["rule"], "avoid-dynamic");
+        assert_eq!(json["diagnostics"][0]["severity"], "error");
+        let packages = json["packages"].as_array().unwrap();
+        for package in packages {
+            assert_eq!(package["total_files"], 1);
+            assert!(!std::path::Path::new(package["root"].as_str().unwrap()).is_absolute());
+        }
+        let text = render(OutputFormat::Text, &output.diagnostics);
+        assert!(text.contains("Package flagged:"));
+        assert!(text.contains("Package clean:"));
+        let (groups, summary) = text.split_once("Package summary:\n").unwrap();
+        assert!(groups.contains("avoid-dynamic"));
+        assert!(!summary.contains("avoid-dynamic"));
+        assert!(summary.contains("flagged: 1 files, 1 errors, 0 warnings, 0 infos"));
+        assert!(summary.contains("clean: 1 files, 0 errors, 0 warnings, 0 infos"));
+        assert_eq!(text.matches("avoid-dynamic").count(), 1);
+
+        // Display limits must not suppress clean members or change full counts.
+        let truncated: serde_json::Value =
+            serde_json::from_str(&render(OutputFormat::Json, &[])).unwrap();
+        assert_eq!(truncated["diagnostics"].as_array().unwrap().len(), 0);
+        assert_eq!(truncated["packages"], json["packages"]);
+        let sarif: serde_json::Value =
+            serde_json::from_str(&render(OutputFormat::Sarif, &output.diagnostics)).unwrap();
+        assert_eq!(
+            sarif["runs"][0]["results"][0]["properties"]["package"],
+            "flagged"
+        );
+        assert_eq!(sarif["runs"][0]["properties"]["packages"], json["packages"]);
+
+        let mut lsp = LspState::new_with_sdk_locator(Some(config_path), |_| None);
+        for (name, expected) in [("flagged", 1), ("clean", 0)] {
+            let path = root.join("packages").join(name).join("lib/main.dart");
+            let uri = format!("file://{}", path.display());
+            let diagnostics = lsp.open(&uri, source.to_string(), Some(1));
+            assert_eq!(
+                diagnostics
+                    .iter()
+                    .filter(|d| d.rule == "avoid-dynamic")
+                    .count(),
+                expected,
+                "{name}, workspace={workspace}",
+            );
+        }
+    }
+}
+
+fn workspace_report_fixture(root: &std::path::Path) {
+    fs::write(
+        root.join("pubspec.yaml"),
+        "workspace:\n  - packages/flagged\n  - packages/clean\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("falcon.json"),
+        r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-dynamic":"error"}}},"cross-file":{"rules":{"recommended":false}}}"#,
+    )
+    .unwrap();
+    for name in ["flagged", "clean"] {
+        let package = root.join("packages").join(name);
+        fs::create_dir_all(package.join("lib")).unwrap();
+        fs::write(
+            package.join("pubspec.yaml"),
+            format!("name: {name}\nresolution: workspace\n"),
+        )
+        .unwrap();
+        fs::write(
+            package.join("lib/main.dart"),
+            if name == "flagged" {
+                "dynamic existing = 1;\n"
+            } else {
+                "int existing = 1;\n"
+            },
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn member_only_reports_omit_unselected_siblings_and_nested_nonmembers() {
+    let temp = tempdir().unwrap();
+    workspace_report_fixture(temp.path());
+    let member = temp.path().join("packages/flagged");
+    let nested = member.join("example");
+    fs::create_dir_all(nested.join("lib")).unwrap();
+    fs::write(nested.join("pubspec.yaml"), "name: example\n").unwrap();
+    fs::write(nested.join("lib/main.dart"), "dynamic nested = 1;\n").unwrap();
+    let output = collect_check(&CheckOptions {
+        paths: vec![member.join("lib/../")],
+        config_path: Some(temp.path().join("falcon.json")),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(output.packages.len(), 1);
+    assert_eq!(output.packages[0].name, "flagged");
+    assert_eq!(output.packages[0].total_files, 1);
+    assert_eq!(output.packages[0].errors, 1);
+    let report: serde_json::Value =
+        serde_json::from_str(&falcon_cli::report::render_with_packages(
+            OutputFormat::Json,
+            &output.diagnostics,
+            &output.root,
+            &output.packages,
+        ))
+        .unwrap();
+    let nested = report["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|diagnostic| {
+            diagnostic["file_path"]
+                .as_str()
+                .unwrap()
+                .contains("example")
+        })
+        .unwrap();
+    assert!(nested["package"].is_null());
+    let text = falcon_cli::report::render_with_packages(
+        OutputFormat::Text,
+        &output.diagnostics,
+        &output.root,
+        &output.packages,
+    );
+    assert!(text.contains("Outside workspace packages:"));
+    assert!(text.rfind("avoid-dynamic").unwrap() < text.find("Package summary:\n").unwrap());
+    assert!(!text.ends_with('\n'));
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_workspace_inputs_retain_package_attribution() {
+    let temp = tempdir().unwrap();
+    let workspace = temp.path().join("workspace");
+    fs::create_dir_all(&workspace).unwrap();
+    workspace_report_fixture(&workspace);
+    let link = temp.path().join("link");
+    std::os::unix::fs::symlink(&workspace, &link).unwrap();
+    let output = collect_check(&CheckOptions {
+        paths: vec![link.clone()],
+        config_path: Some(link.join("falcon.json")),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(
+        output.packages.iter().map(|p| p.total_files).sum::<usize>(),
+        2
+    );
+    assert_eq!(output.packages.iter().map(|p| p.errors).sum::<usize>(), 1);
+}
+
+// Re-executing this test isolates cwd and captures the actual printing path
+// without mutating the parent test process's global environment.
+#[test]
+fn workspace_report_subprocess_entrypoint() {
+    let Some(root) = std::env::var_os("FALCON_WORKSPACE_REPORT_TEST") else {
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    let format = match std::env::var("FALCON_WORKSPACE_REPORT_FORMAT")
+        .unwrap()
+        .as_str()
+    {
+        "json" => OutputFormat::Json,
+        "text" => OutputFormat::Text,
+        _ => unreachable!(),
+    };
+    println!("FALCON_REPORT_START");
+    let exit_code = run_check(CheckOptions {
+        paths: vec![root.clone()],
+        format,
+        baseline: Some(root.join("baseline.json")),
+        max_errors: Some(if format == OutputFormat::Json { 1 } else { 0 }),
+        ..Default::default()
+    });
+    println!("FALCON_REPORT_END:{exit_code}");
+}
+
+#[test]
+fn explicit_workspace_stdout_counts_after_baseline_before_print_limit() {
+    let workspace = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    workspace_report_fixture(workspace.path());
+    let baseline = workspace.path().join("baseline.json");
+    collect_check(&CheckOptions {
+        paths: vec![workspace.path().to_path_buf()],
+        config_path: Some(workspace.path().join("falcon.json")),
+        write_baseline: Some(baseline),
+        ..Default::default()
+    })
+    .unwrap();
+    fs::write(
+        workspace.path().join("packages/flagged/lib/main.dart"),
+        "dynamic existing = 1;\ndynamic introduced = 2;\ndynamic another = 3;\n",
+    )
+    .unwrap();
+    for format in ["json", "text"] {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "workspace_report_subprocess_entrypoint",
+                "--nocapture",
+            ])
+            .current_dir(outside.path())
+            .env("HOME", outside.path())
+            .env("FALCON_WORKSPACE_REPORT_TEST", workspace.path())
+            .env("FALCON_WORKSPACE_REPORT_FORMAT", format)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let report = stdout.split_once("FALCON_REPORT_START\n").unwrap().1;
+        let (report, exit) = report.split_once("FALCON_REPORT_END:").unwrap();
+        assert!(exit.starts_with('1'), "{stdout}");
+        if format == "json" {
+            let report: serde_json::Value = serde_json::from_str(report).unwrap();
+            assert_eq!(report["diagnostics"].as_array().unwrap().len(), 1);
+            assert_eq!(report["diagnostics"][0]["package"], "flagged");
+            let packages = report["packages"].as_array().unwrap();
+            assert_eq!(
+                packages.iter().find(|p| p["name"] == "flagged").unwrap()["errors"],
+                2
+            );
+            assert_eq!(
+                packages.iter().find(|p| p["name"] == "clean").unwrap()["errors"],
+                0
+            );
+        } else {
+            assert!(report.contains("Package flagged:"));
+            let summary = report.split_once("Package summary:\n").unwrap().1;
+            assert!(summary.contains("flagged: 1 files, 2 errors, 0 warnings, 0 infos"));
+            assert!(summary.contains("clean: 1 files, 0 errors, 0 warnings, 0 infos"));
+            assert!(report.contains("Package clean:"));
+            assert!(!report.contains("avoid-dynamic"));
+        }
+    }
+}

@@ -225,13 +225,16 @@ fn enclosing_block_scalar(source: &str, value_start: usize) -> Option<DiagSpan> 
     }
 }
 
-/// Missing package names leave URI resolution in tolerant suffix-matching mode.
-pub fn detect_package(files: &[ProjectFile]) -> Option<PackageIdentity> {
-    let pubspec = files
+/// Distinct package identities in the analyzed set, from the shared snapshot.
+pub fn project_packages(file_packages: &[falcon_analyze::FilePackage]) -> Vec<PackageIdentity> {
+    let mut seen = HashSet::new();
+    file_packages
         .iter()
-        .find_map(|file| enclosing_pubspec(&file.path))?;
-    let package = package_identity(&pubspec);
-    (!package.name.is_empty()).then_some(package)
+        .filter_map(|package| package.identity())
+        .filter(|package| !package.name.is_empty())
+        .filter(|package| seen.insert((package.name.as_str(), package.lib_root.as_path())))
+        .cloned()
+        .collect()
 }
 
 fn project_pubspecs(files: &[ProjectFile]) -> Vec<PathBuf> {
@@ -248,30 +251,27 @@ fn project_pubspecs(files: &[ProjectFile]) -> Vec<PathBuf> {
 pub fn resolve_directive_uri(
     from_file: &Path,
     uri: &str,
-    pkg: Option<&PackageIdentity>,
+    own_package: Option<&PackageIdentity>,
+    packages: &[PackageIdentity],
 ) -> Option<ResolvedRef> {
     if uri.starts_with("dart:") {
         return None;
     }
     if let Some(rest) = uri.strip_prefix("package:") {
-        let mut parts = rest.splitn(2, '/');
-        let pkg_name = parts.next().unwrap_or("");
-        let sub = parts.next().unwrap_or("");
-        if sub.is_empty() {
-            return None;
+        if let Some(package) = own_package
+            && rest
+                .split_once('/')
+                .is_some_and(|(name, _)| name == package.name)
+        {
+            return falcon_analyze::import_path(from_file, uri, std::slice::from_ref(package))
+                .map(ResolvedRef::Path);
         }
-        match pkg {
-            Some(pkg) if pkg_name == pkg.name => {
-                return Some(ResolvedRef::Path(canonical_or_lexical(
-                    &pkg.lib_root.join(sub),
-                )));
-            }
-            // Known local package: a `package:` URI naming a *different* package
-            // cannot denote a file in this package, so it is not a local edge.
-            Some(_) => return None,
-            // No pubspec: match tolerantly on the `lib/<sub>` suffix.
-            None => return Some(ResolvedRef::Suffix(format!("lib/{sub}"))),
+        if packages.is_empty() {
+            // No known package: preserve tolerant fixture/pubspec-less matching.
+            let (_, sub) = rest.split_once('/')?;
+            return (!sub.is_empty()).then(|| ResolvedRef::Suffix(format!("lib/{sub}")));
         }
+        return falcon_analyze::import_path(from_file, uri, packages).map(ResolvedRef::Path);
     }
     let from_dir = from_file.parent().unwrap_or_else(|| Path::new(""));
     Some(ResolvedRef::Path(canonical_package_path(
@@ -346,7 +346,8 @@ pub fn has_lib_component(path: &Path) -> bool {
 pub fn build_reference_graph(
     files: &[ProjectFile],
     canons: &[PathBuf],
-    pkg: Option<&PackageIdentity>,
+    file_packages: &[falcon_analyze::FilePackage],
+    packages: &[PackageIdentity],
 ) -> Vec<Vec<usize>> {
     let mut by_path: HashMap<&Path, usize> = HashMap::with_capacity(canons.len());
     for (i, c) in canons.iter().enumerate() {
@@ -357,7 +358,7 @@ pub fn build_reference_graph(
     let mut adj = vec![Vec::new(); files.len()];
     for (i, f) in files.iter().enumerate() {
         for uri in program_reference_uris(f.program()) {
-            match resolve_directive_uri(&canons[i], &uri, pkg) {
+            match resolve_directive_uri(&canons[i], &uri, file_packages[i].identity(), packages) {
                 Some(ResolvedRef::Path(p)) => {
                     if let Some(&j) = by_path.get(p.as_path()) {
                         adj[i].push(j);
@@ -627,7 +628,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn detect_package_keeps_symlinked_lib_identity() {
+    fn project_packages_keeps_symlinked_lib_identity() {
         let root = std::env::temp_dir().join(format!(
             "falcon-package-{}-{}",
             std::process::id(),
@@ -644,17 +645,23 @@ mod tests {
         std::os::unix::fs::symlink(&sources, package_root.join("lib")).unwrap();
         let falcon_dart_parser::ParseResult { tree, errors } = parse("");
         assert!(errors.is_empty());
-        let package = detect_package(&[ProjectFile {
+        let files = [ProjectFile {
             path: package_root.join("test.dart"),
             parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
                 source: "".into(),
                 tree,
             }),
             has_parse_errors: false,
-        }]);
+        }];
+        let environment = falcon_analyze::AnalysisEnvironment::default();
+        let file_packages: Vec<_> = files
+            .iter()
+            .map(|file| environment.file_package(&file.path))
+            .collect();
+        let packages = project_packages(&file_packages);
         let expected_root = canonical_or_lexical(&sources);
         std::fs::remove_dir_all(root).unwrap();
-        let package = package.unwrap();
+        let package = &packages[0];
         assert_eq!(package.name, "pkg");
         assert_eq!(package.lib_root, expected_root);
     }

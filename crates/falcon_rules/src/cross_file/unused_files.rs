@@ -23,7 +23,7 @@ use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::cst::{FunctionKind, Program, TopLevelDecl};
 
 use super::{
-    build_reference_graph, canonical_package_path, detect_package, has_lib_component, is_under_lib,
+    build_reference_graph, canonical_package_path, has_lib_component, is_under_lib, project_packages,
 };
 
 #[derive(Default)]
@@ -32,17 +32,21 @@ pub struct UnusedFiles;
 impl CrossFileRule for UnusedFiles {
     fn prepare_project(
         &self,
-        _environment: &falcon_analyze::AnalysisEnvironment,
+        environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         _config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
     ) -> Vec<Diagnostic> {
-        let pkg = detect_package(files);
+        let file_packages: Vec<_> = files
+            .iter()
+            .map(|file| environment.file_package(&file.path))
+            .collect();
+        let packages = project_packages(&file_packages);
         let canons: Vec<PathBuf> = files
             .iter()
             .map(|f| canonical_package_path(&f.path))
             .collect();
-        let adj = build_reference_graph(files, &canons, pkg.as_ref());
+        let adj = build_reference_graph(files, &canons, &file_packages, &packages);
 
         // Two spellings of one real file must share reachability, so both the
         // BFS and the flag check below go through the first index seen for a
@@ -60,7 +64,7 @@ impl CrossFileRule for UnusedFiles {
         let mut reachable = vec![false; files.len()];
         let mut queue = VecDeque::new();
         for (i, f) in files.iter().enumerate() {
-            if is_root(f.program(), &canons[i], pkg.as_ref()) && !reachable[repr[i]] {
+            if is_root(f.program(), &canons[i], file_packages[i].identity()) && !reachable[repr[i]] {
                 reachable[repr[i]] = true;
                 queue.push_back(repr[i]);
             }
@@ -77,10 +81,11 @@ impl CrossFileRule for UnusedFiles {
         let mut diags = Vec::new();
         for (i, f) in files.iter().enumerate() {
             let canon = &canons[i];
+            let pkg = file_packages[i].identity();
             // Only files under lib/ are candidates. Without a pubspec the rule's
             // documented scope still applies: require a `lib/` path component so
             // test/bin/tool files aren't flagged.
-            if !is_under_lib(canon, pkg.as_ref()) {
+            if !is_under_lib(canon, pkg) {
                 continue;
             }
             if pkg.is_none() && !has_lib_component(canon) {
@@ -291,6 +296,82 @@ mod tests {
         std::fs::create_dir_all(d.join("lib/src")).unwrap();
         std::fs::write(d.join("pubspec.yaml"), "name: app\n").unwrap();
         d
+    }
+
+    #[test]
+    fn duplicate_package_names_resolve_each_own_library() {
+        let root = tempfile::tempdir().unwrap();
+        let mut files = Vec::new();
+        let mut expected = Vec::new();
+        for directory in ["first/example", "second/example"] {
+            let package = root.path().join(directory);
+            std::fs::create_dir_all(package.join("lib/src")).unwrap();
+            std::fs::write(package.join("pubspec.yaml"), "name: example\n").unwrap();
+            files.push(pf(
+                package.join("lib/example.dart").to_str().unwrap(),
+                "export 'package:example/src/live.dart';",
+            ));
+            files.push(pf(package.join("lib/src/live.dart").to_str().unwrap(), "class Live {}"));
+            let dead = package.join("lib/src/dead.dart");
+            files.push(pf(dead.to_str().unwrap(), "class Dead {}"));
+            expected.push(dead.to_string_lossy().into_owned());
+        }
+        expected.sort();
+        assert_eq!(flagged(&files), expected);
+    }
+
+    #[test]
+    fn workspace_packages_resolve_own_and_sibling_names_independent_of_file_order() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("pubspec.yaml"), "name: workspace_root\n").unwrap();
+        let alpha = root.path().join("packages/first_directory");
+        let beta = root.path().join("packages/second_directory");
+        for (directory, name) in [(&alpha, "alpha"), (&beta, "beta")] {
+            std::fs::create_dir_all(directory.join("lib/src")).unwrap();
+            std::fs::write(directory.join("pubspec.yaml"), format!("name: {name}\n")).unwrap();
+        }
+        let mut files = vec![
+            pf(
+                alpha.join("lib/alpha.dart").to_str().unwrap(),
+                "import 'package:alpha/src/live.dart';\nimport 'package:beta/src/shared.dart';\n",
+            ),
+            pf(
+                beta.join("lib/beta.dart").to_str().unwrap(),
+                "export 'package:beta/src/live.dart';\n",
+            ),
+            pf(
+                alpha.join("lib/src/live.dart").to_str().unwrap(),
+                "void alphaLive() {}",
+            ),
+            pf(
+                beta.join("lib/src/live.dart").to_str().unwrap(),
+                "void betaLive() {}",
+            ),
+            pf(
+                beta.join("lib/src/shared.dart").to_str().unwrap(),
+                "import 'package:alpha/src/transitive.dart';\n",
+            ),
+            pf(
+                alpha.join("lib/src/transitive.dart").to_str().unwrap(),
+                "void transitive() {}",
+            ),
+            pf(
+                alpha.join("lib/src/shared.dart").to_str().unwrap(),
+                "void deadAlpha() {}",
+            ),
+            pf(
+                beta.join("lib/src/dead.dart").to_str().unwrap(),
+                "void deadBeta() {}",
+            ),
+        ];
+        let mut expected = vec![
+            alpha.join("lib/src/shared.dart").to_string_lossy().into_owned(),
+            beta.join("lib/src/dead.dart").to_string_lossy().into_owned(),
+        ];
+        expected.sort();
+        assert_eq!(flagged(&files), expected);
+        files.reverse();
+        assert_eq!(flagged(&files), expected);
     }
 
     // A `package:` import of a DIFFERENT package must not create a local edge:

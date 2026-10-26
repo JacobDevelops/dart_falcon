@@ -143,6 +143,7 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
                     ctx.file_path(),
                     &uri.value(),
                     Some(package),
+                    std::slice::from_ref(package),
                 )
             else {
                 continue;

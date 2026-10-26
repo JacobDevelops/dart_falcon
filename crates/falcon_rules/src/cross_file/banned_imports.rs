@@ -121,7 +121,7 @@ impl CrossFileRule for BannedImports {
                 for uri in uris {
                     let value = uri.value();
                     let target = if !value.contains(':') || value.starts_with("package:") {
-                        match resolve_directive_uri(&file.path, &value, Some(package)) {
+                        match resolve_directive_uri(&file.path, &value, Some(package), std::slice::from_ref(package)) {
                             Some(ResolvedRef::Path(path)) => package_relative(&path, root, package),
                             _ => None,
                         }

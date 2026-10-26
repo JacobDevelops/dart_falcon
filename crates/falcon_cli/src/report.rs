@@ -2,12 +2,227 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use falcon_diagnostics::{Diagnostic, Severity, byte_to_line_col};
 use serde_json::{Value, json};
 
 use crate::analyze_pipeline::OutputFormat;
+
+/// Counts for a workspace member, including members with no findings.
+#[derive(Debug)]
+pub struct PackageSummary {
+    pub name: String,
+    pub root: PathBuf,
+    pub total_files: usize,
+    pub errors: usize,
+    pub warnings: usize,
+    pub infos: usize,
+}
+
+struct PackageAttribution<'a> {
+    packages: &'a [PackageSummary],
+    cwd: PathBuf,
+    paths: HashMap<PathBuf, Option<usize>>,
+    directories: HashMap<PathBuf, Option<usize>>,
+}
+
+impl<'a> PackageAttribution<'a> {
+    fn new(packages: &'a [PackageSummary], capacity: usize) -> Self {
+        Self {
+            packages,
+            cwd: std::env::current_dir().expect("report paths require a working directory"),
+            paths: HashMap::with_capacity(capacity),
+            directories: HashMap::with_capacity(capacity),
+        }
+    }
+
+    fn index(&mut self, path: &Path) -> Option<usize> {
+        if let Some(index) = self.paths.get(path) {
+            return *index;
+        }
+        let absolute = if path.is_absolute() {
+            falcon_analyze::canonical_or_lexical(path)
+        } else {
+            falcon_analyze::canonical_or_lexical(&self.cwd.join(path))
+        };
+        let directory = if absolute.is_dir() {
+            absolute.as_path()
+        } else {
+            absolute.parent()?
+        };
+        let index = *self
+            .directories
+            .entry(directory.to_path_buf())
+            .or_insert_with(|| {
+                // A nested, non-member pubspec is a package boundary too.
+                if let Some(package_root) = directory
+                    .ancestors()
+                    .find(|ancestor| ancestor.join("pubspec.yaml").is_file())
+                {
+                    self.packages
+                        .iter()
+                        .position(|package| package.root == package_root)
+                } else {
+                    self.packages
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, package)| absolute.starts_with(&package.root))
+                        .max_by_key(|(_, package)| package.root.components().count())
+                        .map(|(index, _)| index)
+                }
+            });
+        self.paths.insert(path.to_path_buf(), index);
+        index
+    }
+}
+
+/// Initialize selected member file counts and optional unbaselined findings.
+pub fn summarize_packages<'a>(
+    packages: &[falcon_project::WorkspacePackage],
+    files: impl IntoIterator<Item = &'a Path>,
+    diagnostics: &[Diagnostic],
+) -> Vec<PackageSummary> {
+    let mut summaries: Vec<_> = packages
+        .iter()
+        .map(|package| PackageSummary {
+            name: package.name.clone(),
+            root: falcon_analyze::canonical_or_lexical(&package.root),
+            total_files: 0,
+            errors: 0,
+            warnings: 0,
+            infos: 0,
+        })
+        .collect();
+    let mut attribution = PackageAttribution::new(&summaries, summaries.len());
+    let mut file_counts = vec![0; summaries.len()];
+    for path in files {
+        if let Some(index) = attribution.index(path) {
+            // Counts are applied after releasing the attribution's shared borrow.
+            file_counts[index] += 1;
+        }
+    }
+    drop(attribution);
+    for (summary, count) in summaries.iter_mut().zip(file_counts) {
+        summary.total_files = count;
+    }
+    count_package_diagnostics(&mut summaries, diagnostics);
+    summaries
+}
+
+pub(crate) fn count_package_diagnostics(
+    summaries: &mut [PackageSummary],
+    diagnostics: &[Diagnostic],
+) {
+    if summaries.is_empty() || diagnostics.is_empty() {
+        return;
+    }
+    let mut attribution = PackageAttribution::new(summaries, diagnostics.len());
+    let indices: Vec<_> = diagnostics
+        .iter()
+        .map(|diagnostic| attribution.index(Path::new(&diagnostic.file_path)))
+        .collect();
+    for (diagnostic, index) in diagnostics.iter().zip(indices) {
+        if let Some(index) = index {
+            let summary = &mut summaries[index];
+            match diagnostic.severity {
+                Severity::Error => summary.errors += 1,
+                Severity::Warning => summary.warnings += 1,
+                Severity::Info => summary.infos += 1,
+            }
+        }
+    }
+}
+
+/// Render workspace metadata without changing legacy single-project reports.
+pub fn render_with_packages(
+    format: OutputFormat,
+    diagnostics: &[Diagnostic],
+    root: &Path,
+    packages: &[PackageSummary],
+) -> String {
+    if packages.is_empty() {
+        return render(format, diagnostics, root);
+    }
+    if !matches!(format, OutputFormat::Text | OutputFormat::Json) {
+        return render_impl(format, diagnostics, root, packages);
+    }
+    let mut attribution = PackageAttribution::new(packages, diagnostics.len());
+    let indices: Vec<_> = diagnostics
+        .iter()
+        .map(|diagnostic| attribution.index(Path::new(&diagnostic.file_path)))
+        .collect();
+    if format == OutputFormat::Text {
+        let mut counts = vec![0; packages.len() + 1];
+        for index in &indices {
+            counts[index.unwrap_or(packages.len())] += 1;
+        }
+        let mut groups: Vec<Vec<&Diagnostic>> =
+            counts.into_iter().map(Vec::with_capacity).collect();
+        for (diagnostic, index) in diagnostics.iter().zip(indices) {
+            groups[index.unwrap_or(packages.len())].push(diagnostic);
+        }
+        let mut output = String::new();
+        for (index, package) in packages.iter().enumerate() {
+            writeln!(output, "Package {}:", package.name).unwrap();
+            for diagnostic in &groups[index] {
+                writeln!(output, "{}", diagnostic.format_text()).unwrap();
+            }
+        }
+        let outside = &groups[packages.len()];
+        if !outside.is_empty() {
+            output.push_str("Outside workspace packages:\n");
+            for diagnostic in outside {
+                writeln!(output, "{}", diagnostic.format_text()).unwrap();
+            }
+        }
+        output.push_str("Package summary:\n");
+        for package in packages {
+            writeln!(
+                output,
+                "  {}: {} files, {} errors, {} warnings, {} infos",
+                package.name, package.total_files, package.errors, package.warnings, package.infos,
+            )
+            .unwrap();
+        }
+        output.pop();
+        return output;
+    }
+    if format == OutputFormat::Json {
+        let entries: Vec<_> = diagnostics
+            .iter()
+            .zip(&indices)
+            .map(|(diagnostic, index)| {
+                let mut entry =
+                    serde_json::to_value(diagnostic).expect("diagnostics are JSON serializable");
+                entry["package"] = json!(index.map(|index| packages[index].name.as_str()));
+                entry
+            })
+            .collect();
+        // Keep diagnostic fields unchanged; the summary follows the findings.
+        let mut report = serde_json::Map::new();
+        report.insert("diagnostics".into(), entries.into());
+        report.insert("packages".into(), package_values(packages, root).into());
+        return json_string(report.into());
+    }
+    render_impl(format, diagnostics, root, packages)
+}
+
+fn package_values(packages: &[PackageSummary], root: &Path) -> Vec<Value> {
+    packages
+        .iter()
+        .map(|package| {
+            json!({
+                "name": package.name,
+                "root": crate::baseline::relative_path(&package.root.to_string_lossy(), root),
+                "total_files": package.total_files,
+                "errors": package.errors,
+                "warnings": package.warnings,
+                "infos": package.infos,
+            })
+        })
+        .collect()
+}
 
 /// Render diagnostics without changing their order or the original diagnostics.
 ///
@@ -18,6 +233,15 @@ use crate::analyze_pipeline::OutputFormat;
 /// GitLab and Sonar paths are relative to the invocation directory; other report
 /// paths and all baseline fingerprints use the supplied configuration root.
 pub fn render(format: OutputFormat, diagnostics: &[Diagnostic], root: &Path) -> String {
+    render_impl(format, diagnostics, root, &[])
+}
+
+fn render_impl(
+    format: OutputFormat,
+    diagnostics: &[Diagnostic],
+    root: &Path,
+    packages: &[PackageSummary],
+) -> String {
     match format {
         OutputFormat::Text => return crate::output::format_text(diagnostics),
         OutputFormat::Json => return crate::output::format_json(diagnostics),
@@ -67,7 +291,7 @@ pub fn render(format: OutputFormat, diagnostics: &[Diagnostic], root: &Path) -> 
         })
         .collect();
     match format {
-        OutputFormat::Sarif => json_string(sarif(&entries, root)),
+        OutputFormat::Sarif => json_string(sarif(&entries, root, packages)),
         OutputFormat::Gitlab => json_string(gitlab(&entries)),
         OutputFormat::Checkstyle => checkstyle(&entries),
         OutputFormat::Sonar => json_string(sonar(&entries)),
@@ -88,8 +312,14 @@ fn json_string(value: Value) -> String {
     serde_json::to_string_pretty(&value).expect("report values are JSON serializable")
 }
 
-fn sarif(entries: &[Entry<'_>], root: &Path) -> Value {
+fn sarif(entries: &[Entry<'_>], root: &Path, packages: &[PackageSummary]) -> Value {
     let mut rules = BTreeMap::new();
+    let capacity = if packages.is_empty() {
+        0
+    } else {
+        entries.len()
+    };
+    let mut attribution = PackageAttribution::new(packages, capacity);
     let results: Vec<_> = entries
         .iter()
         .map(|entry| {
@@ -110,7 +340,7 @@ fn sarif(entries: &[Entry<'_>], root: &Path) -> Value {
                 Severity::Warning => "warning",
                 Severity::Info => "note",
             };
-            json!({
+            let mut result = json!({
                 "ruleId": diagnostic.rule,
                 "level": level,
                 "message": { "text": diagnostic.message },
@@ -124,10 +354,17 @@ fn sarif(entries: &[Entry<'_>], root: &Path) -> Value {
                         "region": { "startLine": entry.line, "startColumn": entry.col },
                     },
                 }],
-            })
+            });
+            if !packages.is_empty() {
+                let package = attribution
+                    .index(Path::new(&diagnostic.file_path))
+                    .map(|index| packages[index].name.as_str());
+                result["properties"] = json!({ "package": package });
+            }
+            result
         })
         .collect();
-    json!({
+    let mut report = json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
         "runs": [{
@@ -140,7 +377,11 @@ fn sarif(entries: &[Entry<'_>], root: &Path) -> Value {
             "originalUriBaseIds": { "%SRCROOT%": { "uri": root_uri(root) } },
             "results": results,
         }],
-    })
+    });
+    if !packages.is_empty() {
+        report["runs"][0]["properties"] = json!({ "packages": package_values(packages, root) });
+    }
+    report
 }
 
 fn gitlab(entries: &[Entry<'_>]) -> Value {
@@ -318,6 +559,57 @@ mod tests {
     use crate::analyze_pipeline::OutputFormat as ReportFormat;
     use falcon_diagnostics::Span;
     use serde_json::Value;
+
+    #[test]
+    fn package_counts_use_deepest_member_and_retain_empty_members() {
+        let root = Path::new("/workspace");
+        let packages = [
+            falcon_project::WorkspacePackage {
+                name: "root".into(),
+                root: root.to_path_buf(),
+            },
+            falcon_project::WorkspacePackage {
+                name: "nested".into(),
+                root: root.join("packages/nested"),
+            },
+            falcon_project::WorkspacePackage {
+                name: "empty".into(),
+                root: root.join("packages/empty"),
+            },
+        ];
+        let diagnostics = [diagnostic(&packages[1].root)];
+        let files = [
+            root.join("lib/root.dart"),
+            packages[1].root.join("lib/main.dart"),
+        ];
+        let summaries =
+            summarize_packages(&packages, files.iter().map(PathBuf::as_path), &diagnostics);
+        assert_eq!(summaries[0].total_files, 1);
+        assert_eq!(summaries[0].warnings, 0);
+        assert_eq!(summaries[1].total_files, 1);
+        assert_eq!(summaries[1].warnings, 1);
+        assert_eq!(summaries[2].total_files, 0);
+        assert_eq!(summaries[2].warnings, 0);
+        let report: Value = serde_json::from_str(&render_with_packages(
+            ReportFormat::Json,
+            &diagnostics,
+            root,
+            &summaries,
+        ))
+        .unwrap();
+        assert_eq!(report["diagnostics"][0]["package"], "nested");
+        assert_eq!(report["packages"][1]["root"], "packages/nested");
+        assert_eq!(report["packages"][2]["total_files"], 0);
+    }
+
+    #[test]
+    fn reports_without_workspace_keep_legacy_json_contract() {
+        let diagnostics = [diagnostic(Path::new("/project"))];
+        assert_eq!(
+            render_with_packages(ReportFormat::Json, &diagnostics, Path::new("/project"), &[]),
+            crate::output::format_json(&diagnostics),
+        );
+    }
 
     fn diagnostic(root: &Path) -> Diagnostic {
         let mut diagnostic = Diagnostic::new(

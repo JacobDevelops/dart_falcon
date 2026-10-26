@@ -18,7 +18,7 @@ use falcon_analyze::{AnalysisEnvironment, CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span};
 
-use super::{ResolvedRef, canonical_package_path, resolve_directive_uri};
+use super::{ResolvedRef, canonical_package_path, project_packages, resolve_directive_uri};
 
 #[derive(Default)]
 pub struct NoImportCycles;
@@ -42,7 +42,8 @@ impl CrossFileRule for NoImportCycles {
         }
         let (paths, representatives): (Vec<PathBuf>, Vec<usize>) =
             representatives.into_iter().unzip();
-        let packages: Vec<_> = paths.iter().map(|path| environment.file_package(path)).collect();
+        let file_packages: Vec<_> = files.iter().map(|file| environment.file_package(&file.path)).collect();
+        let packages = project_packages(&file_packages);
         let by_path: HashMap<&Path, usize> = paths
             .iter()
             .enumerate()
@@ -51,7 +52,6 @@ impl CrossFileRule for NoImportCycles {
         let mut graph = vec![Vec::new(); paths.len()];
         for (index, &representative) in representatives.iter().enumerate() {
             let file = &files[representative];
-            let package = packages[index].identity();
             let program = file.program();
             let imports = program.imports().flat_map(|directive| {
                 std::iter::once(directive.uri()).chain(
@@ -69,7 +69,7 @@ impl CrossFileRule for NoImportCycles {
             });
             for uri in imports.chain(exports) {
                 let target =
-                    match resolve_directive_uri(&paths[index], &uri.value(), package) {
+                    match resolve_directive_uri(&paths[index], &uri.value(), file_packages[representative].identity(), &packages) {
                         Some(ResolvedRef::Path(path)) => by_path
                             .get(canonical_package_path(&path).as_path())
                             .copied(),
@@ -144,7 +144,7 @@ impl CrossFileRule for NoImportCycles {
                 .find(|&&(target, _)| target == cycle[1])
                 .map(|&(_, span)| span)
                 .unwrap();
-            let root = packages[start].metadata()
+            let root = file_packages[representatives[start]].metadata()
                 .and_then(|package| package.manifest.parent().map(canonical_package_path));
             let mut message = String::from("Remove a dependency to break this import/export cycle: `");
             for (index, &node) in cycle.iter().enumerate() {
@@ -312,6 +312,25 @@ mod tests {
                 .message
                 .contains("`lib/a.dart` -> `lib/b.dart` -> `lib/a.dart`")
         );
+    }
+
+    #[test]
+    fn sibling_package_imports_form_a_cycle() {
+        let root = tempfile::tempdir().unwrap();
+        let alpha = root.path().join("first");
+        let beta = root.path().join("second");
+        for (directory, name) in [(&alpha, "alpha"), (&beta, "beta")] {
+            std::fs::create_dir_all(directory.join("lib")).unwrap();
+            std::fs::write(directory.join("pubspec.yaml"), format!("name: {name}\n")).unwrap();
+        }
+        let files = [
+            file(alpha.join("lib/a.dart").to_str().unwrap(), "import 'package:beta/b.dart';"),
+            file(beta.join("lib/b.dart").to_str().unwrap(), "export 'package:alpha/a.dart';"),
+        ];
+        let findings = diagnostics(&files);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert!(findings[0].message.contains("a.dart"), "{findings:?}");
+        assert!(findings[0].message.contains("b.dart"), "{findings:?}");
     }
 
     #[test]

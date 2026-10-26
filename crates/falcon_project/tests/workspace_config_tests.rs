@@ -412,3 +412,57 @@ fn ignored_melos_package_retains_its_local_configuration() {
         Some(ResolvedSeverity::Error)
     );
 }
+
+#[test]
+fn explicit_home_configuration_binds_to_start_directory_not_process_directory() {
+    const CHILD: &str = "FALCON_TEST_PROJECT_EXPLICIT_HOME_ROOT";
+    if std::env::var_os(CHILD).is_none() {
+        let temp = tempfile::tempdir().unwrap();
+        write(
+            temp.path(),
+            ".falcon.json",
+            r#"{"files":{"includes":["lib/**"]}}"#,
+        );
+        let project = temp.path().join("project");
+        fs::create_dir_all(project.join("other")).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "explicit_home_configuration_binds_to_start_directory_not_process_directory",
+            ])
+            .env(CHILD, "1")
+            .env("HOME", temp.path())
+            .current_dir(project)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        return;
+    }
+    let process_directory = std::env::current_dir().unwrap();
+    let start = process_directory.join("other");
+    let home_config = process_directory.parent().unwrap().join(".falcon.json");
+    let config = load_project_config(Some(&home_config), &start)
+        .unwrap()
+        .config;
+    assert_eq!(
+        config.root_dir(),
+        Some(start.canonicalize().unwrap().as_path())
+    );
+    assert!(
+        config
+            .files
+            .includes
+            .admits(&start.join("lib/main.dart").to_string_lossy())
+    );
+    assert!(
+        !config
+            .files
+            .includes
+            .admits(&process_directory.join("lib/main.dart").to_string_lossy())
+    );
+}

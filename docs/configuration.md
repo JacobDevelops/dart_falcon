@@ -40,6 +40,42 @@ produce cross-file findings that assume a missing file or declaration. Editors
 supporting relative file-watch patterns also watch package manifests above the
 workspace root.
 
+## Monorepos
+
+Run `falcon check` from a workspace root to analyze its packages together. falcon
+detects pub workspaces from the root `pubspec.yaml` `workspace` list and member
+`resolution: workspace` declarations. It also detects `melos.yaml` `packages`
+globs and Melos 7's `melos` section in the root `pubspec.yaml`.
+
+Each member uses its nearest `falcon.json`. A member configuration replaces,
+rather than merges with, the workspace configuration; there is no `extends`
+setting. Members without their own configuration use the workspace configuration.
+An explicit `--config` selects the base configuration, but member configurations
+still apply. File filters and overrides in a member configuration resolve from
+that configuration's directory. The language server uses the same package
+configuration selection as the CLI.
+Run-wide settings (`baseline`, `max-errors`, and `error-on-warnings`) come from
+the base configuration or their CLI overrides.
+
+For example, a pub workspace can contain:
+
+```text
+pubspec.yaml                  # workspace: [packages/app, packages/core]
+falcon.json                   # fallback configuration
+packages/app/pubspec.yaml     # name: app; resolution: workspace
+packages/app/falcon.json      # app-specific configuration
+packages/core/pubspec.yaml    # name: core; resolution: workspace
+```
+
+Package identity comes from each member's own `pubspec.yaml`, including for
+`package:` imports used by cross-file rules. Text reports include a per-package
+summary, including clean packages. JSON reports attach package names to findings
+and include per-package file and severity counts. Summaries count all remaining
+findings after baseline filtering, even when `--max-errors` limits printed
+diagnostics.
+Workspace JSON uses an object with `diagnostics` and `packages` arrays;
+single-project JSON retains its diagnostic-array format.
+
 ## Editor autocomplete (`$schema`)
 
 Point the top-level `$schema` at the published JSON schema to get rule-name

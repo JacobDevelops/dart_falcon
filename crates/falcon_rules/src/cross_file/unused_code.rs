@@ -19,7 +19,7 @@ use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use falcon_syntax::cst::*;
 
-use super::{canonical_package_path, detect_package, is_under_lib, resolve_directive_uri};
+use super::{canonical_package_path, has_lib_component, is_under_lib, project_packages, resolve_directive_uri};
 
 #[derive(Default)]
 pub struct UnusedCode;
@@ -39,12 +39,13 @@ struct Candidate<'a> {
 impl CrossFileRule for UnusedCode {
     fn prepare_project(
         &self,
-        _environment: &falcon_analyze::AnalysisEnvironment,
+        environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         _config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
     ) -> Vec<Diagnostic> {
-        let pkg = detect_package(files);
+        let file_packages: Vec<_> = files.iter().map(|file| environment.file_package(&file.path)).collect();
+        let packages = project_packages(&file_packages);
 
         // name → set of file indices that mention it. Usage is detected by a
         // lexer identifier scan (not a syntax-tree walk): it never misses a reference —
@@ -60,12 +61,15 @@ impl CrossFileRule for UnusedCode {
 
         // Files re-exported by another file: treat every public member as used
         // (the export surfaces the whole file's API).
-        let exported = collect_exported_files(files, pkg.as_ref());
+        let exported = collect_exported_files(files, &file_packages, &packages);
 
         let mut diags = Vec::new();
         for (idx, f) in files.iter().enumerate() {
             let canon = canonical_package_path(&f.path);
-            if !is_under_lib(&canon, pkg.as_ref()) {
+            let package = file_packages[idx].identity();
+            if !is_under_lib(&canon, package)
+                || (!packages.is_empty() && package.is_none() && !has_lib_component(&canon))
+            {
                 continue;
             }
             if exported.contains(&canon) {
@@ -171,13 +175,14 @@ fn candidates<'a>(program: Program<'a>) -> Vec<Candidate<'a>> {
 /// Files that appear as the target of an `export` directive anywhere in the set.
 fn collect_exported_files(
     files: &[ProjectFile],
-    pkg: Option<&falcon_analyze::PackageIdentity>,
+    file_packages: &[falcon_analyze::FilePackage],
+    packages: &[falcon_analyze::PackageIdentity],
 ) -> super::ReferenceSet {
     let mut refs = super::ReferenceSet::default();
-    for f in files {
+    for (index, f) in files.iter().enumerate() {
         let from = canonical_package_path(&f.path);
         for exp in f.program().exports() {
-            if let Some(r) = resolve_directive_uri(&from, &exp.uri().value(), pkg) {
+            if let Some(r) = resolve_directive_uri(&from, &exp.uri().value(), file_packages[index].identity(), packages) {
                 refs.insert(r);
             }
         }
@@ -261,6 +266,81 @@ mod tests {
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(diagnostics[0].file_path, dead.to_string_lossy());
         assert!(diagnostics[0].message.contains("`Unused`"));
+    }
+
+    #[test]
+    fn standalone_pubspec_less_file_keeps_unused_declaration_analysis() {
+        use falcon_analyze::{CrossFileRuleAnalysis, ProjectFile};
+
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("standalone.dart");
+        let source = "class UnusedStandalone {}";
+        let parsed = falcon_dart_parser::parse(source);
+        let files = [ProjectFile {
+            path: path.clone(),
+            parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
+                source: source.into(),
+                tree: parsed.tree,
+            }),
+            has_parse_errors: false,
+        }];
+        let diagnostics = super::UnusedCode.analyze_project(
+            "unused-code",
+            &falcon_analyze::AnalysisEnvironment::default(),
+            &files,
+            &falcon_config::FalconConfig::default(),
+            None,
+        );
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].file_path, path.to_string_lossy());
+        assert!(diagnostics[0].message.contains("`UnusedStandalone`"));
+    }
+
+    #[test]
+    fn sibling_exports_and_package_lib_scopes_preserve_unowned_scripts() {
+        use falcon_analyze::{CrossFileRuleAnalysis, ProjectFile};
+
+        let root = tempfile::tempdir().unwrap();
+        let alpha = root.path().join("alpha");
+        let beta = root.path().join("beta");
+        for (directory, name) in [(&alpha, "alpha"), (&beta, "beta")] {
+            std::fs::create_dir_all(directory.join("lib/src")).unwrap();
+            std::fs::write(directory.join("pubspec.yaml"), format!("name: {name}\n")).unwrap();
+        }
+        let sources = [
+            (alpha.join("lib/alpha.dart"), "export 'package:beta/src/api.dart';"),
+            (beta.join("lib/src/api.dart"), "class ExportedApi {}"),
+            (alpha.join("lib/src/dead.dart"), "class DeadAlpha {}"),
+            (beta.join("lib/src/dead.dart"), "class DeadBeta {}"),
+            (beta.join("bin/helper.dart"), "class PackageScriptHelper {}"),
+            (root.path().join("scripts/release.dart"), "class UnownedScriptHelper {}"),
+        ];
+        let files: Vec<_> = sources.into_iter().map(|(path, source)| {
+            let parsed = falcon_dart_parser::parse(source);
+            ProjectFile {
+                path,
+                parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
+                    source: source.into(),
+                    tree: parsed.tree,
+                }),
+                has_parse_errors: false,
+            }
+        }).collect();
+        let diagnostics = super::UnusedCode.analyze_project(
+            "unused-code",
+            &falcon_analyze::AnalysisEnvironment::default(),
+            &files,
+            &falcon_config::FalconConfig::default(),
+            None,
+        );
+        let mut actual: Vec<_> = diagnostics.iter().map(|diagnostic| diagnostic.file_path.clone()).collect();
+        actual.sort();
+        let mut expected = vec![
+            alpha.join("lib/src/dead.dart").to_string_lossy().into_owned(),
+            beta.join("lib/src/dead.dart").to_string_lossy().into_owned(),
+        ];
+        expected.sort();
+        assert_eq!(actual, expected);
     }
 
     #[test]

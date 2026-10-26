@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::output;
 use clap::{Args, ValueEnum};
 use falcon_analyze::{AnalysisEnvironment, DartSdk, PackageConfig, SdkLocator};
 use falcon_diagnostics::{Diagnostic, Severity, Span, UNMATCHED_PATH_DIAGNOSTIC_ID};
@@ -95,6 +94,8 @@ pub struct CheckOutput {
     pub max_errors: Option<usize>,
     /// Root used for portable report and baseline paths.
     pub root: PathBuf,
+    /// Workspace member counts, computed before diagnostic print limits.
+    pub packages: Vec<crate::report::PackageSummary>,
 }
 
 /// Run analysis and collect results without printing diagnostics.
@@ -123,19 +124,42 @@ fn collect_check_impl(
     options: &CheckOptions,
     sdk_locator: Option<SdkLocator>,
 ) -> Result<CheckOutput, String> {
-    let start_dir = if options.config_path.is_none() {
-        std::env::current_dir().map_err(|e| format!("failed to get current directory: {e}"))?
-    } else {
-        PathBuf::from(".")
-    };
-    let loaded = load_project_config(options.config_path.as_deref(), &start_dir)
-        .map_err(|e| e.to_string())?;
+    let cwd =
+        std::env::current_dir().map_err(|e| format!("failed to get current directory: {e}"))?;
+    let input_workspace = options.paths.iter().find_map(|path| {
+        let path = falcon_analyze::canonical_or_lexical(path);
+        let directory = if path.is_dir() {
+            path.as_path()
+        } else {
+            path.parent()?
+        };
+        falcon_project::discover_workspace(directory)
+    });
+    let cwd_workspace = falcon_project::discover_workspace(&cwd);
+    let start_dir = input_workspace
+        .as_ref()
+        .map_or(&cwd, |workspace| &workspace.root);
+    // Explicit inputs select workspace members, not a different default config.
+    // Preserve normal cwd config precedence while loading the input's member configs.
+    let cwd_config = input_workspace.as_ref().and_then(|_| {
+        let base = cwd_workspace
+            .as_ref()
+            .map_or(cwd.as_path(), |workspace| workspace.root.as_path());
+        falcon_config::find_config(base)
+    });
+    let loaded = load_project_config(
+        options.config_path.as_deref().or(cwd_config.as_deref()),
+        start_dir,
+    )
+    .map_err(|e| e.to_string())?;
     for warning in loaded.warnings {
         eprintln!("warning: {warning}");
     }
     let config = loaded.config;
-    let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
     let root = config.root_dir().unwrap_or(&cwd).to_path_buf();
+    let workspace = input_workspace
+        .or(cwd_workspace)
+        .or_else(|| falcon_project::discover_workspace(&root));
     let error_on_warnings = options.error_on_warnings || config.error_on_warnings;
     let default_paths;
     let paths = if options.paths.is_empty() {
@@ -144,6 +168,32 @@ fn collect_check_impl(
     } else {
         &options.paths
     };
+    let workspace = workspace.map(|mut workspace| {
+        let inputs: Vec<_> = paths
+            .iter()
+            .map(|path| falcon_analyze::canonical_or_lexical(path))
+            .collect();
+        workspace.packages.retain(|package| {
+            inputs.iter().any(|input| {
+                if package.root.starts_with(input) {
+                    return true;
+                }
+                if !input.starts_with(&package.root) {
+                    return false;
+                }
+                let directory = if input.is_dir() {
+                    input.as_path()
+                } else {
+                    input.parent().unwrap_or(input)
+                };
+                directory
+                    .ancestors()
+                    .find(|ancestor| ancestor.join("pubspec.yaml").is_file())
+                    .is_some_and(|nearest| nearest == package.root)
+            })
+        });
+        workspace
+    });
 
     let mut cli_filter;
     let filter = if options.exclude_patterns.is_empty() {
@@ -162,6 +212,13 @@ fn collect_check_impl(
     let walked = walk_project(paths, filter, true)?;
     let mut files = walked.files;
     let mut manifests = walked.manifests;
+    let mut packages = workspace.as_ref().map_or_else(Vec::new, |workspace| {
+        crate::report::summarize_packages(
+            &workspace.packages,
+            files.iter().map(|(path, _)| path.as_path()),
+            &[],
+        )
+    });
     let mut unmatched = Vec::new();
     if !options.no_errors_on_unmatched {
         // Ancestor manifests support cross-file analysis but do not select an
@@ -199,12 +256,14 @@ fn collect_check_impl(
     }
     if files.is_empty() && manifests.is_empty() {
         crate::adoption::apply_baseline(options, &config, &root, &mut unmatched, &HashMap::new())?;
+        crate::report::count_package_diagnostics(&mut packages, &unmatched);
         return Ok(CheckOutput {
             exit_code: i32::from(!unmatched.is_empty()),
             diagnostics: unmatched,
             total_files: 0,
             max_errors,
             root,
+            packages,
         });
     }
     // Package configurations give every file its language version; resolving
@@ -274,6 +333,7 @@ fn collect_check_impl(
         };
         crate::adoption::apply_baseline(options, &config, &root, &mut diagnostics, &sources)?;
     }
+    crate::report::count_package_diagnostics(&mut packages, &diagnostics);
     let exit_code = if pipeline_failed || has_unmatched {
         1
     } else if diagnostics.iter().any(|diagnostic| {
@@ -290,6 +350,7 @@ fn collect_check_impl(
         exit_code,
         max_errors,
         root,
+        packages,
     })
 }
 
@@ -322,15 +383,14 @@ fn run_check_impl(options: CheckOptions, sdk_locator: Option<SdkLocator>) -> i32
         .min(result.diagnostics.len());
     let printed = &result.diagnostics[..print_count];
     if !options.quiet {
-        match options.format {
-            OutputFormat::Text => {
-                let text = output::format_text(printed);
-                if !text.is_empty() {
-                    println!("{}", text);
-                }
-            }
-            OutputFormat::Json => println!("{}", output::format_json(printed)),
-            format => println!("{}", crate::report::render(format, printed, &result.root)),
+        let rendered = crate::report::render_with_packages(
+            options.format,
+            printed,
+            &result.root,
+            &result.packages,
+        );
+        if !rendered.is_empty() {
+            println!("{rendered}");
         }
     }
 
