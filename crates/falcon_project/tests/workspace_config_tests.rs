@@ -481,6 +481,75 @@ fn explicit_member_run_wide_settings_warn_once_even_at_their_defaults() {
 }
 
 #[test]
+fn explicit_member_base_applies_run_wide_settings_without_ignored_setting_warnings() {
+    for key in ["max-errors", "max_errors"] {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        workspace(root);
+        write(root, "falcon.json", r#"{"max-errors":2}"#);
+        write(
+            root,
+            "packages/a/falcon.json",
+            &format!(
+                r#"{{
+                    "{key}":7,
+                    "error-on-warnings":true,
+                    "baseline":"member-baseline.json",
+                    "files":{{"includes":["lib/**","["]}},
+                    "linter":{{"rules":{{"recommended":false,"suspicious":{{"avoid-dynamic":"error"}}}}}}
+                }}"#
+            ),
+        );
+        // Resolve aliases before deciding whether a member is also the explicit base.
+        let explicit = root.join("packages/a/../a/falcon.json");
+        let loaded = load_project_config(Some(&explicit), root).unwrap();
+        assert_eq!(loaded.config.max_errors, Some(7));
+        assert!(loaded.config.error_on_warnings);
+        assert_eq!(
+            loaded.config.baseline.as_deref(),
+            Some(Path::new("member-baseline.json"))
+        );
+        assert!(
+            loaded
+                .warnings
+                .iter()
+                .all(|warning| !warning.contains("ignores run-wide setting")),
+            "{key}: {:?}",
+            loaded.warnings
+        );
+        assert!(
+            loaded
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("invalid path pattern"))
+        );
+        if key == "max_errors" {
+            assert!(loaded.warnings.iter().any(|warning| {
+                warning.contains("deprecated") && warning.contains("max_errors")
+            }));
+        }
+        let file = root.join("packages/a/lib/main.dart");
+        assert_eq!(
+            loaded.config.resolve_rule_for(
+                &file.to_string_lossy(),
+                "suspicious",
+                "avoid-dynamic",
+                false,
+                &[],
+            ),
+            Some(ResolvedSeverity::Error)
+        );
+        assert!(
+            !loaded
+                .config
+                .files
+                .includes
+                .admits(&root.join("packages/a/test/main.dart").to_string_lossy())
+        );
+    }
+}
+
+#[test]
 fn absent_member_run_wide_settings_do_not_warn() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();

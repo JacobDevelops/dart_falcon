@@ -167,8 +167,12 @@ fn load_project_config_impl(
             }
         }
         let mut configs = Vec::with_capacity(paths.len());
+        let explicit_base = explicit.and_then(|path| std::fs::canonicalize(path).ok());
         for path in paths {
-            let package = match load_member_config(&path) {
+            let is_explicit_base = explicit_base
+                .as_ref()
+                .is_some_and(|base| std::fs::canonicalize(&path).is_ok_and(|path| path == *base));
+            let package = match load_member_config(&path, is_explicit_base) {
                 Ok(package) => package,
                 Err(error) => {
                     member_error(ConfigError(
@@ -191,7 +195,7 @@ fn load_project_config_impl(
     Ok(loaded)
 }
 
-fn load_member_config(path: &Path) -> Result<LoadedConfig, ConfigError> {
+fn load_member_config(path: &Path, is_explicit_base: bool) -> Result<LoadedConfig, ConfigError> {
     let content = std::fs::read_to_string(path)
         .map_err(|error| ConfigError::new(format!("failed to read config file: {error}")))?;
     let value: serde_json::Value = serde_json::from_str(&content)
@@ -199,7 +203,7 @@ fn load_member_config(path: &Path) -> Result<LoadedConfig, ConfigError> {
     let mut loaded = falcon_config::deserialize_config_value(&value, path)
         .and_then(falcon_rules::canonicalize_loaded_config)?;
     for key in ["max-errors", "max_errors", "error-on-warnings", "baseline"] {
-        if value.get(key).is_some() {
+        if !is_explicit_base && value.get(key).is_some() {
             loaded.warnings.push(format!(
                 "member configuration ignores run-wide setting `{key}`; \
                  set it in the base configuration or use a CLI override"

@@ -3,7 +3,7 @@
 falcon reads `falcon.json`. Discovery order (first match wins):
 
 1. `falcon.json` in the current directory
-2. `falcon.json` at the enclosing git root
+2. `falcon.json` at the nearest enclosing Git or Jujutsu repository root (`.git` or `.jj`)
 3. `~/.falcon.json`
 
 If no config is found, falcon enables its own recommended set: 215 recommended
@@ -67,6 +67,8 @@ the base configuration or their CLI overrides. When a member configuration
 explicitly sets one of these keys (including the legacy `max_errors` spelling),
 the CLI warns on stderr once per key and configuration file that the setting is
 ignored, even when its value is `null` or `false`. Omitting these keys does not warn.
+A member file selected as the explicit `--config` base supplies these run-wide
+settings and does not warn that they are ignored.
 
 For example, a pub workspace can contain:
 
@@ -299,10 +301,12 @@ directory. The same current-directory base applies to `--write-baseline <path>`.
 Without a path, `--write-baseline` writes to the configured `baseline` path, or
 to `falcon-baseline.json` in the anchored project root when none is configured.
 
-Baseline fingerprints use paths relative to the pub/Melos workspace root when
-present, otherwise the configuration root, otherwise the nearest Git root (or
-the current directory outside a project). Running from a subdirectory therefore
-preserves baseline matches within the same project.
+Baseline fingerprints use paths relative to the nearest repository root containing
+`.git` or `.jj`, otherwise the pub/Melos workspace root, otherwise the configuration
+root (or the current directory outside a project). Running from a subdirectory
+therefore preserves baseline matches within the same project, including a pub
+workspace nested below the repository root.
+
 Syntax errors and malformed suppression directives are never baselined. They
 remain reported with their normal exit policy while baseline writing records
 the lint findings; operational failures still prevent overwriting a baseline.

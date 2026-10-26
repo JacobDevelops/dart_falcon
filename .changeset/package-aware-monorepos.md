@@ -7,4 +7,4 @@ Cross-file checks now resolve imports and exports across workspace packages: unu
 
 Keep current-directory configuration discovery consistent for default and explicit input paths. Load only selected workspace members' configurations in the CLI; the language server reports malformed member configurations while retaining the base and other valid member configurations.
 
-Warn once per member configuration and explicitly set run-wide option when `max-errors` (or `max_errors`), `error-on-warnings`, or `baseline` is ignored, including explicit default values. Omitted options do not warn.
+Warn once per member configuration and explicitly set run-wide option when `max-errors` (or `max_errors`), `error-on-warnings`, or `baseline` is ignored, including explicit default values. Omitted options do not warn. A member file selected as the explicit base applies its run-wide settings without false ignored-setting warnings.
