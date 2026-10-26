@@ -42,6 +42,22 @@ gh attestation verify falcon-x86_64-linux.tar.gz --repo JacobDevelops/dart_falco
 
 The mise GitHub backend runs these checks automatically.
 
+The checksum manifest comes from the same GitHub release as the archive. Matching
+it checks integrity, not publisher authenticity if both assets are replaced.
+Provenance verification is a separate check, as shown above.
+
+When Minisign signatures are published, download the archive's matching
+`.minisig` and obtain the publisher's public key through an independent trusted
+channel before extracting:
+
+```sh
+minisign -Vm falcon-x86_64-linux.tar.gz -P <trusted-public-key>
+```
+
+Substitute your platform's archive name. The same command can verify `SHA256SUMS`
+against `SHA256SUMS.minisig`. No publisher public key is distributed with the
+launcher yet; signatures are optional and the launcher does not verify them.
+
 ## Dart pub
 
 On Linux and macOS, install falcon from pub.dev:
@@ -54,9 +70,11 @@ The first invocation downloads the matching native binary for Linux or macOS
 on x86_64 or arm64. Make sure Dart's pub cache `bin` directory is on your
 `PATH` to run `falcon`.
 
-The pub launcher verifies the release's SHA256 checksum before installing the
-binary into a versioned user cache. It supports updating the native binary
-without reactivating the Dart package:
+The pub launcher checks the archive's SHA256 checksum against `SHA256SUMS`
+downloaded from the same GitHub release before installing into a versioned user
+cache. This is an integrity check, not publisher authentication. It does not
+verify Minisign signatures or GitHub provenance attestations. It supports
+updating the native binary without reactivating the Dart package:
 
 ```sh
 falcon self-update          # latest GitHub Release
@@ -201,8 +219,9 @@ releases continue unchanged.
 
 - **Archive signing:** create a Minisign key pair (`minisign -G`). Store the
   complete secret key file as the Actions secret `MINISIGN_SECRET_KEY` and its
-  password as `MINISIGN_PASSWORD` (empty for an unencrypted key). Keep the secret
-  key offline too, and distribute the public key through a trusted channel.
+  nonempty password as `MINISIGN_PASSWORD`. Configure both secrets or neither;
+  partial configuration fails the release before building. Keep the secret key
+  offline too, and distribute the public key through a trusted channel.
   Releases then include `.minisig` signatures for every archive and `SHA256SUMS`.
   Verify them with `minisign -Vm <asset> -P <trusted-public-key>`.
 - **macOS signing and notarisation:** export a **Developer ID Application**
@@ -211,7 +230,8 @@ releases continue unchanged.
   as `APPLE_CERTIFICATE_PASSWORD`. Set `APPLE_ID` to the Apple Developer account
   email, `APPLE_TEAM_ID` to its team ID, and `APPLE_APP_PASSWORD` to an
   app-specific password for that account. All five secrets must be nonempty to
-  enable these steps; otherwise macOS signing and notarisation are skipped.
+  enable these steps. With none set, signing and notarisation are skipped;
+  partial configuration fails the release before building.
   CI imports the certificate into a temporary keychain, signs each Darwin
   binary with the hardened runtime and a timestamp, and waits for Apple's
   notarisation service to accept a zip of it before publishing. The release
@@ -227,7 +247,9 @@ releases continue unchanged.
   generates `Formula/falcon.rb` from the published `SHA256SUMS`, then commits it
   through GitHub's contents API. Re-releasing an older tag does not roll the tap
   backwards. Prerelease and build-metadata versions do not update the tap.
-  No tap token means the publishing job is skipped.
+  With neither the token nor the tap variable set, publishing is skipped. A custom
+  `HOMEBREW_TAP` without a token fails the release before building; a token without
+  the variable publishes to the default tap.
 
 To inspect a formula locally:
 

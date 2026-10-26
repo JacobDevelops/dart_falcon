@@ -9,7 +9,7 @@ falcon --help
 
 Add the Dart pub cache's `bin` directory to your `PATH` if the `falcon` command is not found.
 
-On first run, the launcher downloads the matching GitHub release, verifies its SHA256 checksum, and caches the native binary. Later runs use the cached binary. Internet access and the system `tar` and `chmod` commands are required for the first run.
+On first run, the launcher downloads the matching GitHub release, checks the archive's SHA256 checksum against `SHA256SUMS` downloaded from that same release, and caches the native binary. This checks integrity against the manifest, not publisher authenticity: replacing both assets defeats the check. The launcher does not verify Minisign signatures or GitHub provenance attestations. Later runs use the cached binary. Internet access and the system `tar` and `chmod` commands are required for the first run.
 
 Update or select the native release without reinstalling the launcher:
 
@@ -33,6 +33,19 @@ environment pin, the launcher uses its package version.
 
 `self-update` belongs to this launcher, not the standalone native binary.
 Update the launcher itself with `dart pub global activate falcon`.
+
+When a release publishes Minisign signatures, download the archive and matching
+`.minisig` before extracting it. Obtain the publisher's public key independently
+through a trusted channel, then run:
+
+```sh
+minisign -Vm falcon-x86_64-linux.tar.gz -P <trusted-public-key>
+```
+
+Substitute your platform's archive name. A successful signature check authenticates
+the archive against that trusted key; a key downloaded only alongside the archive
+does not establish trust. No publisher public key is distributed by this launcher
+yet, and signature publishing is optional.
 
 Supports Linux and macOS on x86_64 and arm64. Windows is not supported.
 
