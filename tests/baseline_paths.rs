@@ -159,3 +159,20 @@ fn nested_pub_workspace_uses_the_enclosing_repository_baseline() {
         assert!(diagnostics.is_empty(), "{json}");
     }
 }
+
+#[test]
+fn missing_relative_path_at_repository_root_renders_reports() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path();
+    fs::create_dir(root.join(".git")).unwrap();
+    fs::create_dir(root.join("lib")).unwrap();
+    fs::write(root.join("lib/main.dart"), "void main() {}\n").unwrap();
+    for format in ["sarif", "checkstyle", "html", "gitlab", "sonar"] {
+        let output = check(root, &["lib/typo.dart", "lib", "--format", format]);
+        assert_ne!(output.status.code(), Some(101), "{format}: {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("typo.dart"),
+            "{format}: {output:?}"
+        );
+    }
+}

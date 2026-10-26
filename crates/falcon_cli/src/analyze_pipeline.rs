@@ -222,7 +222,7 @@ fn collect_check_impl(
     let root = paths
         .iter()
         .find_map(|path| {
-            let path = falcon_analyze::canonical_or_lexical(path);
+            let path = cwd.join(falcon_analyze::canonical_or_lexical(path));
             path.ancestors()
                 .find(|ancestor| ancestor.join(".git").exists() || ancestor.join(".jj").exists())
                 .map(Path::to_path_buf)
