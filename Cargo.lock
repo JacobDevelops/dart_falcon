@@ -457,6 +457,7 @@ dependencies = [
  "falcon_dart_parser",
  "falcon_diagnostics",
  "falcon_rules",
+ "falcon_syntax",
  "glob",
  "serde_yaml",
  "tempfile",

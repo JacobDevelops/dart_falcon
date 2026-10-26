@@ -2,15 +2,19 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 
-use falcon_analyze::AnalysisEnvironment;
+use falcon_analyze::{AnalysisEnvironment, ExternalIndexParts};
 use falcon_config::{FalconConfig, RuleFix};
-use falcon_diagnostics::{ApplyFixError, Diagnostic, FixKind, RULES_THREAD_ERROR_DIAGNOSTIC_ID};
+use falcon_diagnostics::{
+    ApplyFixError, Diagnostic, Fix, FixKind, RULES_THREAD_ERROR_DIAGNOSTIC_ID,
+    SYNTAX_ERROR_DIAGNOSTIC_ID,
+};
 
-use crate::{ProjectAnalysis, analyze_sources, resolve_document_positions};
+use crate::{ProjectAnalysis, autofix_analysis::AutofixAnalyzer, resolve_document_positions};
 
-const MAX_FIX_ITERATIONS: usize = 100;
+const MAX_NONCONVERGING_ITERATIONS: usize = 100;
 
 /// The final analyzed source and any reason fixing could not finish.
 #[derive(Debug)]
@@ -23,6 +27,8 @@ pub struct FixOutcome {
 /// A rejected fix or a non-converging sequence. Frontends decide whether to write.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FixStop {
+    SyntaxErrors,
+    Cancelled,
     InvalidFix {
         rule: &'static str,
         error: ApplyFixError,
@@ -42,6 +48,10 @@ pub enum FixStop {
 impl fmt::Display for FixStop {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::SyntaxErrors => {
+                formatter.write_str("autofix skipped because the file has syntax errors")
+            }
+            Self::Cancelled => formatter.write_str("autofix cancelled"),
             Self::InvalidFix { rule, error } => {
                 write!(formatter, "invalid fix from `{rule}`: {error}")
             }
@@ -115,7 +125,7 @@ pub fn apply_fix_policies(config: &FalconConfig, diagnostics: &mut [Diagnostic])
 /// The caller's environment supplies package, SDK and import context to the
 /// shared parser and resolving analysis pipeline on every iteration. Cross-file
 /// findings must be collected by the caller's final project-wide analysis.
-/// Diagnostics always describe the returned source, including on a stop.
+/// Diagnostics describe the returned source, except when cancellation avoids analysis.
 pub fn fix_file(
     analysis: &ProjectAnalysis,
     config: &FalconConfig,
@@ -124,27 +134,121 @@ pub fn fix_file(
     source: &str,
     unsafe_fixes: bool,
 ) -> FixOutcome {
-    fix_with(source, unsafe_fixes, MAX_FIX_ITERATIONS, |source| {
-        let files = [(path.to_path_buf(), source.to_owned())];
-        let (mut diagnostics, _, _) = analyze_sources(analysis, &files, &[], config, environment);
-        falcon_rules::apply_severities(&mut diagnostics, config);
-        apply_fix_policies(config, &mut diagnostics);
-        diagnostics
-    })
+    fix_file_with_context(
+        analysis,
+        config,
+        environment,
+        path,
+        source,
+        unsafe_fixes,
+        FixContext {
+            external: None,
+            external_libraries: None,
+            project_files: &[],
+            cancelled: &|| false,
+        },
+    )
 }
 
+/// Cached semantic dependencies and cancellation supplied by an editor.
+#[derive(Clone, Copy)]
+pub struct FixContext<'a> {
+    pub external: Option<ExternalIndexParts<'a>>,
+    pub external_libraries: Option<&'a falcon_analyze::ExternalLibraries>,
+    pub project_files: &'a [falcon_analyze::ProjectFile],
+    pub cancelled: &'a dyn Fn() -> bool,
+}
+
+/// Fix a document using cached external indexes and cooperative cancellation.
+pub fn fix_file_with_context(
+    analysis: &ProjectAnalysis,
+    config: &FalconConfig,
+    environment: &mut AnalysisEnvironment,
+    path: &Path,
+    source: &str,
+    unsafe_fixes: bool,
+    context: FixContext<'_>,
+) -> FixOutcome {
+    let mut analyzer = AutofixAnalyzer::new(analysis, config, environment, path, context);
+    fix_with_cancellation(
+        source,
+        unsafe_fixes,
+        MAX_NONCONVERGING_ITERATIONS,
+        context.cancelled,
+        |source| analyzer.analyze(source),
+    )
+}
+
+#[cfg(test)]
 fn fix_with(
     source: &str,
     unsafe_fixes: bool,
     limit: usize,
     mut analyze: impl FnMut(&str) -> Vec<Diagnostic>,
 ) -> FixOutcome {
-    let mut source = source.to_owned();
-    // String keys hash seen text and verify equality, avoiding hash-collision stops.
-    let mut seen: HashMap<String, usize> = HashMap::with_capacity(limit);
+    fix_with_cancellation(source, unsafe_fixes, limit, &|| false, &mut analyze)
+}
+
+fn fix_with_cancellation(
+    original: &str,
+    unsafe_fixes: bool,
+    limit: usize,
+    cancelled: &dyn Fn() -> bool,
+    mut analyze: impl FnMut(&str) -> Vec<Diagnostic>,
+) -> FixOutcome {
+    let mut source = original.to_owned();
+    let mut seen: HashMap<(u64, usize), Vec<usize>> = HashMap::with_capacity(limit);
     let mut applied: Vec<&'static str> = Vec::with_capacity(limit);
+    let mut edits: Vec<Fix> = Vec::with_capacity(limit);
+    let mut best_fixable = None;
+    let mut nonconverging = 0;
+    let mut source_fingerprint = fingerprint(&source);
     loop {
+        if cancelled() {
+            return FixOutcome {
+                source,
+                diagnostics: Vec::new(),
+                stop: Some(FixStop::Cancelled),
+            };
+        }
         let mut diagnostics = analyze(&source);
+        if cancelled()
+            || diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.rule == SYNTAX_ERROR_DIAGNOSTIC_ID)
+        {
+            let stop = Some(if cancelled() {
+                FixStop::Cancelled
+            } else if applied.is_empty() {
+                FixStop::SyntaxErrors
+            } else {
+                FixStop::AnalysisFailure {
+                    message: "a fix produced invalid source".to_owned(),
+                    rules: vec![*applied.last().expect("a fix was applied")],
+                }
+            });
+            resolve_document_positions(&mut diagnostics, &source);
+            return FixOutcome {
+                source,
+                diagnostics,
+                stop,
+            };
+        }
+        let fixable = diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic
+                    .fix
+                    .as_ref()
+                    .is_some_and(|fix| fix.kind == FixKind::Safe || unsafe_fixes)
+            })
+            .count();
+        if best_fixable.is_some_and(|best| fixable >= best) {
+            nonconverging += 1;
+        } else {
+            nonconverging = 0;
+            best_fixable = Some(fixable);
+        }
         if let Some(failure) = diagnostics
             .iter()
             .find(|diagnostic| diagnostic.rule == RULES_THREAD_ERROR_DIAGNOSTIC_ID)
@@ -183,26 +287,46 @@ fn fix_with(
             if candidate == source {
                 continue;
             }
-            if let Some(&start) = seen.get(&candidate) {
+            let candidate_fingerprint = fingerprint(&candidate);
+            let repeated = seen.get(&candidate_fingerprint).and_then(|states| {
+                states.iter().copied().find(|&state| {
+                    let mut previous = original.to_owned();
+                    for edit in &edits[..state] {
+                        previous = edit.apply(&previous).expect("previously applied fix");
+                    }
+                    previous == candidate
+                })
+            });
+            if let Some(start) = repeated {
                 let mut rules = applied[start..].to_vec();
                 rules.push(diagnostic.rule);
                 stop = Some(FixStop::Cycle {
                     rules: unique_rules(rules),
                 });
-            } else if applied.len() == limit {
+            } else if nonconverging >= limit {
                 let mut rules = applied.clone();
                 rules.push(diagnostic.rule);
                 stop = Some(FixStop::IterationLimit {
                     rules: unique_rules(rules),
                 });
             } else {
-                next = Some((candidate, diagnostic.rule));
+                next = Some((
+                    candidate,
+                    candidate_fingerprint,
+                    diagnostic.rule,
+                    fix.clone(),
+                ));
             }
             break;
         }
-        if let Some((candidate, rule)) = next {
-            seen.insert(std::mem::replace(&mut source, candidate), applied.len());
+        if let Some((candidate, candidate_fingerprint, rule, fix)) = next {
+            seen.entry(source_fingerprint)
+                .or_default()
+                .push(applied.len());
+            source = candidate;
+            source_fingerprint = candidate_fingerprint;
             applied.push(rule);
+            edits.push(fix);
         } else {
             resolve_document_positions(&mut diagnostics, &source);
             return FixOutcome {
@@ -212,6 +336,12 @@ fn fix_with(
             };
         }
     }
+}
+
+fn fingerprint(source: &str) -> (u64, usize) {
+    let mut hasher = DefaultHasher::new();
+    source.hash(&mut hasher);
+    (hasher.finish(), source.len())
 }
 
 fn unique_rules(rules: Vec<&'static str>) -> Vec<&'static str> {
@@ -228,6 +358,116 @@ fn unique_rules(rules: Vec<&'static str>) -> Vec<&'static str> {
 mod tests {
     use super::*;
     use falcon_diagnostics::{Fix, Severity, Span, TextEdit};
+
+    #[test]
+    fn many_shrinking_fixes_converge_beyond_the_iteration_limit() {
+        let outcome = fix_with(&"x".repeat(101), false, 3, |source| {
+            (0..source.len())
+                .map(|start| diagnostic("shrinking", start, start + 1, ""))
+                .collect()
+        });
+        assert_eq!(outcome.source, "");
+        assert!(outcome.stop.is_none());
+    }
+
+    #[test]
+    fn syntax_errors_prevent_any_fixes() {
+        let outcome = fix_with("broken", false, 3, |_| {
+            vec![
+                diagnostic("must-not-apply", 0, 6, "changed"),
+                Diagnostic::new(
+                    SYNTAX_ERROR_DIAGNOSTIC_ID,
+                    Severity::Error,
+                    "Invalid syntax.",
+                    "test.dart",
+                    Span { start: 0, end: 0 },
+                ),
+            ]
+        });
+        assert_eq!(outcome.source, "broken");
+        assert_eq!(outcome.stop, Some(FixStop::SyntaxErrors));
+    }
+
+    #[test]
+    fn cancellation_stops_before_reanalysis() {
+        let calls = std::cell::Cell::new(0);
+        let cancelled = std::cell::Cell::new(false);
+        let outcome = fix_with_cancellation("a", false, 3, &|| cancelled.get(), |_| {
+            calls.set(calls.get() + 1);
+            cancelled.set(true);
+            vec![diagnostic("must-not-apply", 0, 1, "b")]
+        });
+        assert_eq!(calls.get(), 1);
+        assert_eq!(outcome.source, "a");
+        assert_eq!(outcome.stop, Some(FixStop::Cancelled));
+    }
+
+    #[test]
+    fn oscillating_diagnostic_counts_do_not_reset_the_growth_limit() {
+        let outcome = fix_with("", false, 3, |source| {
+            let count = if source.len().is_multiple_of(2) { 2 } else { 1 };
+            (0..count)
+                .map(|_| diagnostic("growing", source.len(), source.len(), "x"))
+                .collect()
+        });
+        assert_eq!(outcome.source, "xxxx");
+        assert!(matches!(outcome.stop, Some(FixStop::IterationLimit { .. })));
+    }
+
+    #[test]
+    fn growing_fix_stops_without_spending_the_initial_diagnostic_count() {
+        let outcome = fix_with("", false, 3, |source| {
+            (0..200)
+                .map(|_| diagnostic("growing", source.len(), source.len(), "x"))
+                .collect()
+        });
+        assert_eq!(outcome.source, "xxx");
+        assert!(matches!(outcome.stop, Some(FixStop::IterationLimit { .. })));
+    }
+
+    #[test]
+    fn fix_producing_syntax_errors_names_the_responsible_rule() {
+        let outcome = fix_with("a", false, 3, |source| {
+            if source == "a" {
+                vec![diagnostic("prefix", 0, 1, "b")]
+            } else if source == "b" {
+                vec![diagnostic("broken-fix", 0, 1, "c")]
+            } else {
+                vec![Diagnostic::new(
+                    SYNTAX_ERROR_DIAGNOSTIC_ID,
+                    Severity::Error,
+                    "Invalid syntax.",
+                    "test.dart",
+                    Span { start: 0, end: 0 },
+                )]
+            }
+        });
+        assert!(
+            matches!(outcome.stop, Some(FixStop::AnalysisFailure { rules, .. }) if rules == ["broken-fix"])
+        );
+    }
+
+    #[test]
+    fn cancellation_after_an_edit_avoids_the_next_analysis() {
+        let checks = std::cell::Cell::new(0);
+        let analyses = std::cell::Cell::new(0);
+        let outcome = fix_with_cancellation(
+            "a",
+            false,
+            3,
+            &|| {
+                checks.set(checks.get() + 1);
+                checks.get() >= 3
+            },
+            |_| {
+                analyses.set(analyses.get() + 1);
+                vec![diagnostic("first", 0, 1, "b")]
+            },
+        );
+        assert_eq!(analyses.get(), 1);
+        assert_eq!(outcome.source, "b");
+        assert_eq!(outcome.stop, Some(FixStop::Cancelled));
+    }
 
     fn diagnostic(rule: &'static str, start: usize, end: usize, text: &str) -> Diagnostic {
         Diagnostic::new(

@@ -16,4 +16,5 @@ tracing.workspace    = true
 walkdir.workspace    = true
 
 [dev-dependencies]
+falcon_syntax      = { path = "../falcon_syntax" }
 tempfile.workspace = true

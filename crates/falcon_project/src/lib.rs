@@ -1,10 +1,14 @@
 //! Project discovery and reusable analysis stages shared by the CLI and LSP.
 
 pub mod autofix;
+mod autofix_analysis;
 mod discovery;
 mod workspace;
 
-pub use autofix::{FixOutcome, FixStop, apply_fix_policies, effective_fix_kind, fix_file};
+pub use autofix::{
+    FixContext, FixOutcome, FixStop, apply_fix_policies, effective_fix_kind, fix_file,
+    fix_file_with_context,
+};
 pub use workspace::{Workspace, WorkspacePackage, discover_workspace};
 
 pub use discovery::{
