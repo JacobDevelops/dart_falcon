@@ -536,6 +536,62 @@ fn body_only_edits_refresh_loop_mutation_facts_without_rebuilding_indexes() {
 }
 
 #[test]
+fn cross_file_only_indexes_reuse_explicit_bodies_but_rebuild_changed_return_types() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, "{}").unwrap();
+    let path = directory.path().join("main.dart");
+    let before = "int api() => 1; inferred() => 1; void main() { api(); inferred(); }";
+    std::fs::write(&path, before).unwrap();
+    let uri = format!("file://{}", path.display());
+    let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
+    state.resolve_semantics = false;
+    state.cross_file_resolve_semantics = true;
+    state.open(&uri, before.into(), Some(1));
+    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+    assert!(complete);
+    state.ensure_cross_file_indexes(&files);
+    assert_eq!(state.cross_file_index_build_count, 1);
+    state.ensure_cross_file_indexes(&files);
+    assert_eq!(state.cross_file_index_build_count, 1);
+    for (version, source, expected_builds) in [
+        (
+            2,
+            "int api() => 2; inferred() => 1; void main() { api(); inferred(); }",
+            1,
+        ),
+        (
+            3,
+            "String api() => 'value'; inferred() => 1; void main() { api(); inferred(); }",
+            2,
+        ),
+        (
+            4,
+            "String api() => 'value'; inferred() => 'changed'; void main() { api(); inferred(); }",
+            3,
+        ),
+    ] {
+        assert!(state.change(&uri, source.into(), Some(version)));
+        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+        assert!(complete);
+        state.ensure_cross_file_indexes(&files);
+        assert_eq!(
+            state.cross_file_index_build_count, expected_builds,
+            "{source}"
+        );
+        let cached = state.cross_file_index_cache.as_ref().unwrap();
+        let cached_file = cached.files.iter().find(|file| file.path == path).unwrap();
+        assert!(Arc::ptr_eq(
+            &cached_file.parsed,
+            &state.documents[&uri].parsed
+        ));
+        assert!(state.semantic_snapshot.is_none());
+        assert_eq!(state.semantic_snapshot_build_count, 0);
+        assert_eq!(state.semantic_topology_build_count, 0);
+    }
+}
+
+#[test]
 fn atomic_source_replacement_reuses_discovery() {
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("falcon.json");

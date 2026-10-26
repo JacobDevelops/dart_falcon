@@ -28,8 +28,8 @@ use falcon_project::{
     sort_diagnostics,
 };
 use falcon_syntax::{
-    LanguageVersion, NodeKind,
-    cst::{FunctionDecl, GetterDecl, MethodDecl, OperatorDecl, Program},
+    LanguageVersion,
+    cst::{FunctionDecl, GetterDecl, MethodDecl, NodeKind, OperatorDecl, Program},
 };
 use tracing::{debug, warn};
 
