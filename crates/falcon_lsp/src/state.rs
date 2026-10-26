@@ -569,7 +569,7 @@ impl LspState {
         self.workspace_roots
             .iter()
             .enumerate()
-            .flat_map(|(index, root)| {
+            .flat_map(move |(index, root)| {
                 root.ancestors().skip(1)
                     .map(|directory| directory.join("pubspec.yaml"))
                     .filter(move |path| !self.config_for_root(index).files.includes.excludes(&path.to_string_lossy()))
