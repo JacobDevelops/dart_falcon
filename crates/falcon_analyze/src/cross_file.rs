@@ -20,7 +20,7 @@ pub struct SemanticIndexes {
 
 impl SemanticIndexes {
     /// Retain declaration facts after an edit with an unchanged declaration signature.
-    pub fn refresh_file_body(&mut self, file: crate::FileId, parsed: &Arc<ParsedFile>) {
+    pub fn refresh_file_body(&mut self, file: crate::resolve::FileId, parsed: &Arc<ParsedFile>) {
         self.identities.refresh_file_body(file, parsed);
         self.signatures.refresh_file_body(file, parsed.program());
     }
@@ -67,21 +67,16 @@ impl ParsedFile {
         let mut body_end = 0;
         for node in self.program().syntax().descendants() {
             let offset = node.span().start;
-            if matches!(node.kind(), NodeKind::NamedType | NodeKind::TypeParam) {
-                // Declaration occurrences keep their ordinal when an earlier body
-                // changes size. Body-local occurrences occupy a separate namespace.
-                let identity = if offset >= body_start && offset < body_end {
-                    offset | (1 << (usize::BITS - 1))
-                } else {
-                    let identity = ordinal;
-                    ordinal += 1;
-                    identity
-                };
-                occurrences.insert(offset, identity);
+            if offset >= body_start && offset < body_end {
+                continue;
             }
-            if (offset < body_start || offset >= body_end)
-                && let Some(body) = declaration_body(node)
-            {
+            if matches!(node.kind(), NodeKind::NamedType | NodeKind::TypeParam) {
+                // Only declaration occurrences need a stable ordinal. Body-local
+                // occurrences derive their separate namespace directly from offsets.
+                occurrences.insert(offset, ordinal);
+                ordinal += 1;
+            }
+            if let Some(body) = declaration_body(node) {
                 body_start = body.span().start;
                 body_end = body.span().end;
             }

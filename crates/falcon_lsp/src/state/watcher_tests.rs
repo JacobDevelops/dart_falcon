@@ -147,10 +147,7 @@ fn fallback_keeps_closed_and_companion_edits_pending_across_analysis_boundaries(
             let stamp = state.fallback_stamps[&closed].clone();
             assert!(stamp.is_some());
             let snapshot = state.semantic_snapshot.as_ref().unwrap();
-            assert_eq!(
-                snapshot.files[snapshot.by_path[&closed]].source(),
-                before
-            );
+            assert_eq!(snapshot.files[snapshot.by_path[&closed]].source(), before);
 
             std::fs::write(&closed, &after).unwrap();
             if rebuild {
@@ -163,10 +160,7 @@ fn fallback_keeps_closed_and_companion_edits_pending_across_analysis_boundaries(
             } else {
                 state.cross_file_pass();
                 let snapshot = state.semantic_snapshot.as_ref().unwrap();
-                assert_eq!(
-                    snapshot.files[snapshot.by_path[&closed]].source(),
-                    before
-                );
+                assert_eq!(snapshot.files[snapshot.by_path[&closed]].source(), before);
             }
             assert_eq!(state.fallback_stamps[&closed], stamp);
             let published = state.revalidate_disk();

@@ -38,7 +38,8 @@ fn retained_type_occurrences_survive_body_shifts_without_conflating_alias_uses()
         parsed: &Arc<crate::ParsedFile>,
         identities: &IdentityIndex,
     ) -> (ResolvedType, Vec<Arc<AliasProvenance>>) {
-        let model = SemanticModel::new(Path::new("/project/aliases.dart"), parsed, identities, None);
+        let model =
+            SemanticModel::new(Path::new("/project/aliases.dart"), parsed, identities, None);
         let mut parameter = None;
         let mut aliases = Vec::with_capacity(2);
         for declaration in parsed.program().declarations() {
@@ -98,6 +99,13 @@ fn retained_type_occurrences_survive_body_shifts_without_conflating_alias_uses()
         );
         identities.refresh_file_body(file, &edited);
         assert_eq!(facts(&edited, &identities), expected);
+        let reread = parsed(edited.source.to_string());
+        assert!(!Arc::ptr_eq(&edited, &reread));
+        assert_eq!(facts(&reread, &identities), expected);
+        assert_eq!(
+            edited.type_occurrences().len(),
+            original.type_occurrences().len()
+        );
         // Retained templates still resolve against their original parsed file.
         assert_eq!(facts(&original, &identities), expected);
     }

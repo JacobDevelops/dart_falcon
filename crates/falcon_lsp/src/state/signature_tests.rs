@@ -24,6 +24,49 @@ fn signature(source: &str) -> u64 {
     .declaration_signature()
 }
 
+fn assert_shifted_invocation_types(
+    state: &LspState,
+    path: &Path,
+    parsed: &Arc<ParsedFile>,
+    indexes: &SemanticIndexes,
+) {
+    use falcon_syntax::cst::Expr;
+
+    let ctx = AnalyzeContext::new(path, &state.config, parsed)
+        .with_identities(&indexes.identities)
+        .with_types(&indexes.types)
+        .with_signatures(&indexes.signatures);
+    let semantic = falcon_analyze::SemanticState::new(parsed.program(), &ctx).unwrap();
+    let integer = semantic.model.core_type("int", false);
+    let alias = semantic.model.resolve_type_name(&["Builder"]).unwrap();
+    let mut checked = 0;
+    for expression in parsed
+        .program()
+        .syntax()
+        .descendants()
+        .filter_map(Expr::cast)
+    {
+        let span = expression.span();
+        match &parsed.source[span.start..span.end] {
+            "Box<int>().identity(1)" => {
+                assert_eq!(semantic.infer(expression), integer);
+                checked += 1;
+            }
+            "Screen().callback()" | "callback()" => {
+                let inferred = semantic.infer(expression);
+                assert_eq!(inferred, alias);
+                assert_eq!(
+                    inferred.function_alias_identity(),
+                    alias.function_alias_identity()
+                );
+                checked += 1;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(checked, 2);
+}
+
 #[test]
 fn declaration_signature_skips_bodies_and_shifted_type_offsets() {
     assert_eq!(signature("int f() => 1;"), signature("int f() => 2222;"));
@@ -145,6 +188,7 @@ fn body_shift_before_typed_build_and_generic_class_reuses_indexes_and_positions(
              void main() {{\n\
                Screen().build();\n\
                Box<int>().identity(1);\n\
+               Screen().callback();\n\
              }}\n"
         )
     };
@@ -158,7 +202,10 @@ fn body_shift_before_typed_build_and_generic_class_reuses_indexes_and_positions(
     let topologies = state.semantic_topology_build_count;
     let external = state.external_index_build_count;
     for (version, source) in [
-        (2, source("final values = <String>[];\n// shifted declarations\n")),
+        (
+            2,
+            source("final values = <String>[];\n// shifted declarations\n"),
+        ),
         (3, source("final values = <int>[1, 2, 3];")),
         (4, before),
     ] {
@@ -171,8 +218,12 @@ fn body_shift_before_typed_build_and_generic_class_reuses_indexes_and_positions(
             .iter()
             .filter(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
             .collect();
-        assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
-        for call in ["Screen().build()", "Box<int>().identity(1)"] {
+        assert_eq!(diagnostics.len(), 3, "{diagnostics:?}");
+        for call in [
+            "Screen().build()",
+            "Box<int>().identity(1)",
+            "Screen().callback()",
+        ] {
             let start = source.find(call).unwrap();
             let diagnostic = diagnostics
                 .iter()
@@ -181,10 +232,23 @@ fn body_shift_before_typed_build_and_generic_class_reuses_indexes_and_positions(
             assert!(diagnostic.span.end <= start + call.len());
             assert_eq!(
                 diagnostic.line,
-                u32::try_from(source[..start].bytes().filter(|&byte| byte == b'\n').count() + 1)
-                    .unwrap()
+                u32::try_from(
+                    source[..start]
+                        .bytes()
+                        .filter(|&byte| byte == b'\n')
+                        .count()
+                        + 1
+                )
+                .unwrap()
             );
         }
+        let snapshot = state.semantic_snapshot.as_ref().unwrap();
+        assert_shifted_invocation_types(
+            &state,
+            &path,
+            &state.documents[&uri].parsed,
+            &snapshot.indexes,
+        );
         assert_eq!(state.semantic_snapshot_build_count, builds);
         assert_eq!(state.semantic_topology_build_count, topologies);
         assert_eq!(state.external_index_build_count, external);
@@ -193,6 +257,73 @@ fn body_shift_before_typed_build_and_generic_class_reuses_indexes_and_positions(
             signature(&source)
         );
     }
+}
+
+#[test]
+fn cross_file_only_body_reuse_preserves_types_after_save_close_and_same_text_reread() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, "{}").unwrap();
+    let path = directory.path().join("main.dart");
+    let source = |body| {
+        format!(
+            "typedef Builder = int Function(); void initState() {{ {body} }} \
+             Builder callback() => () => 1; \
+             class Box<T> {{ T identity(T value) => value; }} \
+             void main() {{ Box<int>().identity(1); callback(); }}"
+        )
+    };
+    let before = source("");
+    std::fs::write(&path, &before).unwrap();
+    let uri = uri(&path);
+    let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
+    state.resolve_semantics = false;
+    state.cross_file_resolve_semantics = true;
+    state.open(&uri, before, Some(1));
+    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+    assert!(complete);
+    state.ensure_cross_file_indexes(&files);
+    let builds = state.cross_file_index_build_count;
+    assert_shifted_invocation_types(
+        &state,
+        &path,
+        &files[0].parsed,
+        &state.cross_file_index_cache.as_ref().unwrap().indexes,
+    );
+
+    let after = source("final values = <String>[]; // shift later declarations\n");
+    state.change(&uri, after.clone(), Some(2));
+    let edited = Arc::clone(&state.documents[&uri].parsed);
+    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+    assert!(complete);
+    state.ensure_cross_file_indexes(&files);
+    assert_shifted_invocation_types(
+        &state,
+        &path,
+        &edited,
+        &state.cross_file_index_cache.as_ref().unwrap().indexes,
+    );
+    assert_eq!(state.cross_file_index_build_count, builds);
+
+    std::fs::write(&path, &after).unwrap();
+    state.save(&uri, None);
+    state.close(&uri);
+    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+    assert!(complete);
+    let reread = &files.iter().find(|file| file.path == path).unwrap().parsed;
+    assert_eq!(reread.source, edited.source);
+    assert!(!Arc::ptr_eq(reread, &edited));
+    state.ensure_cross_file_indexes(&files);
+    assert_shifted_invocation_types(
+        &state,
+        &path,
+        reread,
+        &state.cross_file_index_cache.as_ref().unwrap().indexes,
+    );
+    assert_eq!(state.cross_file_index_build_count, builds);
+    assert_eq!(state.semantic_snapshot_build_count, 0);
+    assert_eq!(state.semantic_topology_build_count, 0);
+    assert!(state.semantic_snapshot.is_none());
 }
 
 #[cfg(unix)]

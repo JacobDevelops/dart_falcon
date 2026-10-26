@@ -131,9 +131,11 @@ fn cross_file_usage_in_another_editor_root_does_not_suppress_unused_files() {
     let mut standalone = LspState::new_from(None, |_| None, second.clone());
     standalone.initialize_workspace_roots(vec![second.clone()]);
     let expected = standalone.cross_file_diagnostics();
-    assert!(expected[orphan.to_str().unwrap()].iter().any(|diagnostic| {
-        diagnostic.rule == "unused-files"
-    }));
+    assert!(
+        expected[orphan.to_str().unwrap()]
+            .iter()
+            .any(|diagnostic| { diagnostic.rule == "unused-files" })
+    );
     let mut editor = LspState::new_from(None, |_| None, first.clone());
     editor.initialize_workspace_roots(vec![first, second]);
     assert_eq!(

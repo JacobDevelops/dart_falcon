@@ -428,7 +428,13 @@ mod tests {
         let mut environment = AnalysisEnvironment::with_sdk_locator(|_| None);
         let mut baseline = environment.config_stamps();
         environment.io_observer = Some(|environment, path| {
-            if !environment.package_discovery.lock().unwrap().manifests.is_empty() {
+            if !environment
+                .package_discovery
+                .lock()
+                .unwrap()
+                .manifests
+                .is_empty()
+            {
                 return;
             }
             // B has selected its uncached probes but has not read them yet.
@@ -565,9 +571,10 @@ mod tests {
             .write(true)
             .open(&path)
             .unwrap()
-            .set_times(std::fs::FileTimes::new().set_modified(
-                metadata.modified().unwrap() + std::time::Duration::from_secs(1),
-            ))
+            .set_times(
+                std::fs::FileTimes::new()
+                    .set_modified(metadata.modified().unwrap() + std::time::Duration::from_secs(1)),
+            )
             .unwrap();
         assert_eq!(original, environment.config_stamps());
         std::fs::write(&path, "name: modified\n").unwrap();

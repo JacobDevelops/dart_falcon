@@ -598,13 +598,19 @@ impl IdentityIndex {
         {
             return external.type_occurrence(file, parsed, offset);
         }
-        let occurrences = &self.type_occurrences[file.0 & !EXTERNAL_ID];
+        // External declarations are immutable and retain their source offsets.
+        let Some(occurrences) = self.type_occurrences.get(file.0 & !EXTERNAL_ID) else {
+            return offset;
+        };
         let offsets = occurrences
             .edited
             .as_ref()
-            .filter(|(edited, _)| Arc::ptr_eq(edited, parsed))
+            .filter(|(edited, _)| Arc::ptr_eq(edited, parsed) || edited.source == parsed.source)
             .map_or(&occurrences.original, |(_, offsets)| offsets);
-        offsets.get(&offset).copied().unwrap_or(offset)
+        offsets
+            .get(&offset)
+            .copied()
+            .unwrap_or_else(|| offset | (1 << (usize::BITS - 1)))
     }
 
     pub fn from_project_files(files: &[IdentitySource<'_>], packages: &[PackageIdentity]) -> Self {
@@ -1001,6 +1007,7 @@ impl IdentityIndex {
             paths,
             type_occurrences: parsed
                 .iter()
+                .take(files.len())
                 .map(|parsed| SourceTypeOccurrences {
                     original: parsed.type_occurrences(),
                     edited: None,

@@ -1598,17 +1598,12 @@ impl LspState {
                 } else {
                     let root = &self.workspace_roots[index];
                     let start = files.partition_point(|file| file.path < *root);
-                    let end = start
-                        + files[start..].partition_point(|file| file.path.starts_with(root));
+                    let end =
+                        start + files[start..].partition_point(|file| file.path.starts_with(root));
                     &files[start..end]
                 };
-                let diagnostics = cross_file_diagnostics(
-                    &self.environment,
-                    rules,
-                    files,
-                    config,
-                    indexes,
-                )?;
+                let diagnostics =
+                    cross_file_diagnostics(&self.environment, rules, files, config, indexes)?;
                 all.extend(diagnostics.into_iter().filter(|diagnostic| {
                     self.root_index(Path::new(&diagnostic.file_path)) == index
                 }));
