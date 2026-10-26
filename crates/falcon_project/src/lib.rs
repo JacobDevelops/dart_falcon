@@ -168,7 +168,7 @@ fn load_project_config_impl(
         }
         let mut configs = Vec::with_capacity(paths.len());
         for path in paths {
-            let package = match falcon_rules::load_config(&path) {
+            let package = match load_member_config(&path) {
                 Ok(package) => package,
                 Err(error) => {
                     member_error(ConfigError(
@@ -187,6 +187,24 @@ fn load_project_config_impl(
             configs.push(package.config);
         }
         loaded.config.set_package_configs(configs);
+    }
+    Ok(loaded)
+}
+
+fn load_member_config(path: &Path) -> Result<LoadedConfig, ConfigError> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|error| ConfigError::new(format!("failed to read config file: {error}")))?;
+    let value: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|error| ConfigError::new(format!("failed to parse config JSON: {error}")))?;
+    let mut loaded = falcon_config::deserialize_config_value(&value, path)
+        .and_then(falcon_rules::canonicalize_loaded_config)?;
+    for key in ["max-errors", "max_errors", "error-on-warnings", "baseline"] {
+        if value.get(key).is_some() {
+            loaded.warnings.push(format!(
+                "member configuration ignores run-wide setting `{key}`; \
+                 set it in the base configuration or use a CLI override"
+            ));
+        }
     }
     Ok(loaded)
 }

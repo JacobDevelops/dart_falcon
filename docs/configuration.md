@@ -63,7 +63,10 @@ a configuration error. The language server uses the same package configuration
 selection, reports individual invalid member configurations, and retains the
 base and other valid member configurations.
 Run-wide settings (`baseline`, `max-errors`, and `error-on-warnings`) come from
-the base configuration or their CLI overrides.
+the base configuration or their CLI overrides. When a member configuration
+explicitly sets one of these keys (including the legacy `max_errors` spelling),
+the CLI warns on stderr once per key and configuration file that the setting is
+ignored, even when its value is `null` or `false`. Omitting these keys does not warn.
 
 For example, a pub workspace can contain:
 
@@ -293,6 +296,16 @@ behavior described under [`files.includes`](#filesincludes)). Absolute paths are
 used as supplied. `--baseline <path>` overrides the configured baseline, and its
 relative path resolves from the CLI's current working directory, not the config
 directory. The same current-directory base applies to `--write-baseline <path>`.
+Without a path, `--write-baseline` writes to the configured `baseline` path, or
+to `falcon-baseline.json` in the anchored project root when none is configured.
+
+Baseline fingerprints use paths relative to the pub/Melos workspace root when
+present, otherwise the configuration root, otherwise the nearest Git root (or
+the current directory outside a project). Running from a subdirectory therefore
+preserves baseline matches within the same project.
+Syntax errors and malformed suppression directives are never baselined. They
+remain reported with their normal exit policy while baseline writing records
+the lint findings; operational failures still prevent overwriting a baseline.
 
 ## `error-on-warnings`
 

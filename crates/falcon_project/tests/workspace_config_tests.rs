@@ -437,6 +437,65 @@ fn member_warnings_identify_their_configuration_file() {
 }
 
 #[test]
+fn explicit_member_run_wide_settings_warn_once_even_at_their_defaults() {
+    for (key, value) in [
+        ("max-errors", "null"),
+        ("max-errors", "5"),
+        ("max_errors", "null"),
+        ("max_errors", "5"),
+        ("error-on-warnings", "false"),
+        ("error-on-warnings", "true"),
+        ("baseline", "null"),
+        ("baseline", r#""member-baseline.json""#),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        workspace(root);
+        write(
+            root,
+            "falcon.json",
+            r#"{"max-errors":7,"error-on-warnings":true,"baseline":"root-baseline.json"}"#,
+        );
+        // Both members inherit this file, but it must only warn once.
+        let member = write(
+            root,
+            "packages/falcon.json",
+            &format!(r#"{{"{key}":{value}}}"#),
+        );
+        let loaded = load_project_config(None, root).unwrap();
+        let warnings: Vec<_> = loaded
+            .warnings
+            .iter()
+            .filter(|warning| warning.contains("ignores run-wide setting"))
+            .collect();
+        assert_eq!(warnings.len(), 1, "{key}: {warnings:?}");
+        assert!(warnings[0].contains(&format!("`{key}`")));
+        assert!(warnings[0].contains(&member.display().to_string()));
+        assert_eq!(loaded.config.max_errors, Some(7));
+        assert!(loaded.config.error_on_warnings);
+        assert_eq!(
+            loaded.config.baseline.as_deref(),
+            Some(Path::new("root-baseline.json"))
+        );
+    }
+}
+
+#[test]
+fn absent_member_run_wide_settings_do_not_warn() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    workspace(root);
+    write(
+        root,
+        "falcon.json",
+        r#"{"max-errors":7,"error-on-warnings":true,"baseline":"root-baseline.json"}"#,
+    );
+    write(root, "packages/falcon.json", "{}");
+    let loaded = load_project_config(None, root).unwrap();
+    assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+}
+
+#[test]
 fn global_exclusions_escape_workspace_directory_metacharacters() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("workspace[v2]");

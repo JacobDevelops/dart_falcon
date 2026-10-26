@@ -459,6 +459,7 @@ dependencies = [
  "falcon_rules",
  "falcon_syntax",
  "glob",
+ "serde_json",
  "serde_yaml",
  "tempfile",
  "tracing",
