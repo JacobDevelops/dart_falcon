@@ -1,6 +1,9 @@
 //! Project discovery and reusable analysis stages shared by the CLI and LSP.
 
 mod discovery;
+mod workspace;
+
+pub use workspace::{Workspace, WorkspacePackage, discover_workspace};
 
 pub use discovery::{ProjectDiscovery, WalkOutput, discover_project, walk_project};
 pub use falcon_rules::run_cross_file as cross_file_diagnostics;
@@ -12,8 +15,8 @@ use std::sync::Arc;
 
 use falcon_analyze::{
     AnalysisEnvironment, AnalyzeContext, CrossFileRuleRegistry, ParsedFile, ProjectFile,
-    RuleRegistry, SemanticIndexes, Workspace, analyze_parallel_collecting_resolving,
-    package_identities,
+    RuleRegistry, SemanticIndexes, Workspace as AnalysisWorkspace,
+    analyze_parallel_collecting_resolving, package_identities,
 };
 use falcon_config::{ConfigError, FalconConfig, LoadedConfig, PathFilter};
 use falcon_diagnostics::{
@@ -29,10 +32,74 @@ pub fn load_project_config(
     explicit: Option<&Path>,
     start_dir: &Path,
 ) -> Result<LoadedConfig, ConfigError> {
-    match explicit {
-        Some(path) => falcon_rules::load_config(path),
-        None => falcon_rules::load_or_default(start_dir),
+    let workspace = discover_workspace(start_dir)
+        .or_else(|| explicit.and_then(Path::parent).and_then(discover_workspace));
+    let base = workspace
+        .as_ref()
+        .map_or(start_dir, |workspace| workspace.root.as_path());
+    let mut loaded = match explicit {
+        Some(path) => {
+            let mut loaded = falcon_rules::load_config(path)?;
+            if falcon_config::is_home_config(path) {
+                loaded.config.resolve_paths(base);
+            }
+            loaded
+        }
+        None => falcon_rules::load_or_default(base)?,
+    };
+    if let Some(workspace) = workspace {
+        let mut paths = std::collections::BTreeSet::new();
+        if explicit.is_none()
+            && let Some(local) = falcon_config::find_config(start_dir)
+        {
+            let local = std::fs::canonicalize(&local).unwrap_or(local);
+            if let Some(directory) = local.parent()
+                && directory != workspace.root
+                && directory.starts_with(&workspace.root)
+            {
+                let owner = directory
+                    .ancestors()
+                    .find(|ancestor| ancestor.join("pubspec.yaml").is_file());
+                let covered = workspace.packages.iter().any(|package| {
+                    package.root != workspace.root
+                        && owner.map_or_else(
+                            || directory.starts_with(&package.root),
+                            |owner| owner == package.root,
+                        )
+                });
+                if !covered {
+                    paths.insert(local);
+                }
+            }
+        }
+        for package in workspace.packages {
+            for directory in package.root.ancestors() {
+                if directory == workspace.root {
+                    break;
+                }
+                let path = directory.join("falcon.json");
+                if path.is_file() {
+                    paths.insert(path);
+                    break;
+                }
+            }
+        }
+        let mut configs = Vec::with_capacity(paths.len());
+        for path in paths {
+            let package = falcon_rules::load_config(&path).map_err(|error| {
+                ConfigError(format!("{}: {}", path.display(), error.0), error.1)
+            })?;
+            loaded.warnings.extend(
+                package
+                    .warnings
+                    .into_iter()
+                    .map(|warning| format!("{}: {warning}", path.display())),
+            );
+            configs.push(package.config);
+        }
+        loaded.config.set_package_configs(configs);
     }
+    Ok(loaded)
 }
 
 /// Enabled rules and the project facts they require.
@@ -94,7 +161,7 @@ pub fn analyze_sources(
         config,
         analysis.collect_programs,
         analysis.resolve,
-        Workspace {
+        AnalysisWorkspace {
             packages: &packages,
             environment: Some(environment),
         },

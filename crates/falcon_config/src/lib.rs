@@ -54,6 +54,9 @@ pub struct FalconConfig {
     /// Fail checks with warning diagnostics as well as errors. Defaults to false.
     #[serde(rename = "error-on-warnings")]
     pub error_on_warnings: bool,
+    /// Runtime-only replacement configurations for workspace package directories.
+    #[serde(skip)]
+    pub package_configs: Vec<FalconConfig>,
 }
 
 /// Accept JSON Schema integers, including whole-number float representations.
@@ -166,6 +169,7 @@ pub struct PathFilter {
     exclude: Vec<Pattern>,
     root: Option<Arc<PathRoot>>,
     warnings: Vec<String>,
+    package_filters: Vec<PathFilter>,
 }
 
 #[derive(Debug)]
@@ -269,6 +273,29 @@ impl PathFilter {
     }
 
     pub fn extend_excludes(&mut self, patterns: &[String]) {
+        if !self.package_filters.is_empty() {
+            let rooted: Vec<_> = patterns
+                .iter()
+                .map(|pattern| {
+                    self.root.as_ref().map_or_else(
+                        || pattern.clone(),
+                        |root| {
+                            if Path::new(pattern).is_absolute() {
+                                pattern.clone()
+                            } else {
+                                Path::new(&Pattern::escape(&root.lexical.to_string_lossy()))
+                                    .join(pattern)
+                                    .to_string_lossy()
+                                    .into_owned()
+                            }
+                        },
+                    )
+                })
+                .collect();
+            for filter in &mut self.package_filters {
+                filter.extend_excludes(&rooted);
+            }
+        }
         self.patterns
             .extend(patterns.iter().map(|raw| format!("!{raw}")));
         self.compile();
@@ -394,7 +421,28 @@ impl PathFilter {
         }
     }
 
+    fn contains_path(&self, path: &str) -> bool {
+        self.root.as_ref().is_some_and(|root| {
+            Path::new(self.matching_path(path).as_ref()).starts_with(&root.lexical)
+        })
+    }
+
+    fn package_filter(&self, path: &str) -> Option<&Self> {
+        self.package_filters
+            .iter()
+            .filter(|filter| filter.contains_path(path))
+            .max_by_key(|filter| {
+                filter
+                    .root
+                    .as_ref()
+                    .map(|root| root.lexical.components().count())
+            })
+    }
+
     pub fn excludes(&self, path: &str) -> bool {
+        if let Some(filter) = self.package_filter(path) {
+            return filter.excludes(path);
+        }
         let path = self.matching_path(path);
         self.excludes_resolved(&path)
     }
@@ -409,6 +457,21 @@ impl PathFilter {
     }
 
     pub fn excludes_directory(&self, path: &Path) -> bool {
+        let text = path.to_string_lossy();
+        // A replacement config can admit descendants excluded by the parent.
+        // Keep its ancestors traversable until its own filter takes over.
+        let resolved = self.matching_path(&text);
+        if self.package_filters.iter().any(|filter| {
+            filter.root.as_ref().is_some_and(|root| {
+                let path = Path::new(resolved.as_ref());
+                root.lexical != path && root.lexical.starts_with(path)
+            })
+        }) {
+            return false;
+        }
+        if let Some(filter) = self.package_filter(&text) {
+            return filter.excludes_directory(path);
+        }
         let mut path = if let Some(root) = &self.root {
             let normalized = normalize_path(&root.working_dir.join(path));
             let resolved = if normalized.starts_with(&root.lexical) {
@@ -452,6 +515,9 @@ impl PathFilter {
     }
 
     pub fn admits(&self, path: &str) -> bool {
+        if let Some(filter) = self.package_filter(path) {
+            return filter.admits(path);
+        }
         let path = self.matching_path(path);
         !self.excludes_resolved(&path)
             && (self.include.is_empty()
@@ -487,6 +553,24 @@ fn normalize_path(path: &Path) -> PathBuf {
 }
 
 impl FalconConfig {
+    /// Attach package replacements while preserving a single shared path filter.
+    pub fn set_package_configs(&mut self, configs: Vec<FalconConfig>) {
+        self.files.includes.package_filters = configs
+            .iter()
+            .map(|config| config.files.includes.clone())
+            .collect();
+        self.package_configs = configs;
+    }
+
+    /// Select the nearest package configuration, falling back to this config.
+    pub fn config_for_path(&self, path: &str) -> &Self {
+        self.package_configs
+            .iter()
+            .filter(|config| config.files.includes.contains_path(path))
+            .max_by_key(|config| config.root_dir().map(|root| root.components().count()))
+            .map_or(self, |config| config.config_for_path(path))
+    }
+
     pub fn root_dir(&self) -> Option<&Path> {
         self.files
             .includes
@@ -902,6 +986,10 @@ impl FalconConfig {
         rule_name: &str,
         section: Section,
     ) -> (Option<&RuleOptions>, Option<usize>) {
+        let config = self.config_for_path(path);
+        if !std::ptr::eq(config, self) {
+            return config.options_data_for(path, group, rule_name, section);
+        }
         let rules = match section {
             Section::Linter => &self.linter.rules,
             Section::CrossFile => &self.cross_file.rules,
@@ -940,6 +1028,10 @@ impl FalconConfig {
         recommended: bool,
         domains: &[&str],
     ) -> Option<ResolvedSeverity> {
+        let config = self.config_for_path(path);
+        if !std::ptr::eq(config, self) {
+            return config.resolve_rule_for(path, group, name, recommended, domains);
+        }
         self.resolve_for(
             path,
             (group, name),
@@ -960,6 +1052,10 @@ impl FalconConfig {
         name: &str,
         recommended: bool,
     ) -> Option<ResolvedSeverity> {
+        let config = self.config_for_path(path);
+        if !std::ptr::eq(config, self) {
+            return config.resolve_cross_file_rule_for(path, group, name, recommended);
+        }
         self.resolve_for(
             path,
             (group, name),
@@ -982,7 +1078,10 @@ impl FalconConfig {
             name,
             Section::CrossFile,
             self.cross_file.resolve_rule(group, name, recommended),
-        )
+        ) || self
+            .package_configs
+            .iter()
+            .any(|config| config.is_cross_file_rule_enabled_anywhere(group, name, recommended))
     }
 
     /// Whether the base config or an override enables this rule for any path.
@@ -998,7 +1097,10 @@ impl FalconConfig {
             name,
             Section::Linter,
             self.linter.resolve_rule(group, name, recommended, domains),
-        )
+        ) || self
+            .package_configs
+            .iter()
+            .any(|config| config.is_rule_enabled_anywhere(group, name, recommended, domains))
     }
 
     fn section_enabled(&self, section: Section) -> bool {

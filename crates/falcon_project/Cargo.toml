@@ -10,6 +10,8 @@ falcon_config      = { path = "../falcon_config" }
 falcon_dart_parser = { path = "../falcon_dart_parser" }
 falcon_diagnostics = { path = "../falcon_diagnostics" }
 falcon_rules       = { path = "../falcon_rules" }
+glob.workspace       = true
+serde_yaml.workspace = true
 tracing.workspace  = true
 walkdir.workspace  = true
 
