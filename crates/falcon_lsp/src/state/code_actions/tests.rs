@@ -10,6 +10,9 @@ fn fixture() -> (tempfile::TempDir, LspState, String) {
     )
     .unwrap();
     let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
+    state.configure_code_actions(&serde_json::json!({
+        "capabilities": {"workspace": {"applyEdit": true}}
+    }));
     let uri = format!("file://{}", directory.path().join("main.dart").display());
     state.open(
         &uri,
@@ -77,7 +80,7 @@ fn lazy_actions_require_data_support_and_edit_resolution() {
     let (_directory, mut state, uri) = fixture();
     for data_support in [None, Some(false), Some(true)] {
         let mut capabilities = serde_json::json!({
-            "capabilities": { "textDocument": { "codeAction": { "resolveSupport": { "properties": ["edit"] } } } }
+            "capabilities": { "workspace": {"applyEdit": true}, "textDocument": { "codeAction": { "resolveSupport": { "properties": ["edit"] } } } }
         });
         if let Some(data_support) = data_support {
             capabilities["capabilities"]["textDocument"]["codeAction"]["dataSupport"] =
@@ -88,12 +91,53 @@ fn lazy_actions_require_data_support_and_edit_resolution() {
             .code_actions(&params(&uri, Some(SAFE_FIX_ALL)), &|| false)
             .unwrap();
         assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].edit.is_none(), data_support == Some(true));
+        assert!(actions[0].edit.is_none());
+        assert_eq!(actions[0].command.is_none(), data_support == Some(true));
     }
     state.configure_code_actions(&serde_json::json!({
         "capabilities": { "textDocument": { "codeAction": { "dataSupport": true } } }
     }));
     assert!(!state.code_action_resolve);
+}
+
+#[test]
+fn fallback_commands_require_negotiated_apply_edit_support() {
+    let (_directory, mut state, uri) = fixture();
+    for workspace in [
+        serde_json::json!({}),
+        serde_json::json!({"applyEdit": false}),
+    ] {
+        state.configure_code_actions(&serde_json::json!({
+            "capabilities": {"workspace": workspace}
+        }));
+        for kind in [SAFE_FIX_ALL, UNSAFE_FIX_ALL] {
+            assert!(
+                state
+                    .code_actions(&params(&uri, Some(kind)), &|| false)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        // Quick fixes still return ordinary edits without server application.
+        assert_eq!(
+            state
+                .code_actions(&params(&uri, Some("quickfix")), &|| false)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+    state.configure_code_actions(&serde_json::json!({
+        "capabilities": {
+            "textDocument": {"codeAction": {"dataSupport": true, "resolveSupport": {"properties": ["edit"]}}}
+        }
+    }));
+    let actions = state
+        .code_actions(&params(&uri, Some(SAFE_FIX_ALL)), &|| false)
+        .unwrap();
+    assert_eq!(actions.len(), 1);
+    assert!(actions[0].data.is_some());
+    assert!(actions[0].command.is_none());
 }
 
 #[test]
@@ -127,11 +171,11 @@ fn lazy_safe_fix_all_requires_an_effective_safe_fix() {
 }
 
 #[test]
-fn clients_without_resolve_receive_eager_fix_all_and_compatible_edits() {
+fn clients_without_resolve_receive_lazy_commands_and_compatible_quickfixes() {
     let (_directory, mut state, uri) = fixture();
     for document_changes in [false, true] {
         state.configure_code_actions(&serde_json::json!({
-            "capabilities": { "workspace": { "workspaceEdit": { "documentChanges": document_changes } } }
+            "capabilities": { "workspace": { "applyEdit": true, "workspaceEdit": { "documentChanges": document_changes } } }
         }));
         let actions = state.code_actions(&params(&uri, None), &|| false).unwrap();
         assert!(actions.iter().any(|action| {
@@ -141,9 +185,15 @@ fn clients_without_resolve_receive_eager_fix_all_and_compatible_edits() {
                 .is_some_and(|kind| kind.as_str() == SAFE_FIX_ALL)
         }));
         for action in actions {
-            let edit = action.edit.unwrap();
-            assert_eq!(edit.document_changes.is_some(), document_changes);
-            assert_eq!(edit.changes.is_some(), !document_changes);
+            if action.kind.as_ref().unwrap() == &CodeActionKind::QUICKFIX {
+                let edit = action.edit.unwrap();
+                assert_eq!(edit.document_changes.is_some(), document_changes);
+                assert_eq!(edit.changes.is_some(), !document_changes);
+            } else {
+                assert!(action.edit.is_none());
+                assert!(action.data.is_none());
+                assert_eq!(action.command.unwrap().command, FIX_ALL_COMMAND);
+            }
         }
     }
 }
@@ -276,6 +326,9 @@ fn fix_all_reuses_published_external_graph_and_indexes() {
     std::fs::write(&config,
         r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-ignoring-return-values":"warn"},"style":{"unnecessary-new":"warn"}}},"cross-file":{"enabled":false}}"#).unwrap();
     let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
+    state.configure_code_actions(&serde_json::json!({
+        "capabilities": {"workspace": {"applyEdit": true}}
+    }));
     let uri = format!("file://{}", app.join("main.dart").display());
     state.open(&uri, "import 'package:dep/api.dart'; void main() { final a = new Example(); final b = new Example(); }".to_owned(), Some(1));
     let identities = std::sync::Arc::clone(&state.external_indexes.as_ref().unwrap().identities);
@@ -285,7 +338,24 @@ fn fix_all_reuses_published_external_graph_and_indexes() {
         .code_actions(&params(&uri, Some(SAFE_FIX_ALL)), &|| false)
         .unwrap();
     assert_eq!(actions.len(), 1);
-    assert!(actions[0].edit.is_some());
+    let action = state
+        .resolve_code_action(
+            CodeAction {
+                data: actions[0]
+                    .command
+                    .as_ref()
+                    .unwrap()
+                    .arguments
+                    .as_ref()
+                    .unwrap()
+                    .first()
+                    .cloned(),
+                ..Default::default()
+            },
+            &|| false,
+        )
+        .unwrap();
+    assert!(action.edit.is_some());
     assert!(std::sync::Arc::ptr_eq(
         &identities,
         &state.external_indexes.as_ref().unwrap().identities
@@ -301,7 +371,24 @@ fn fix_all_reuses_published_external_graph_and_indexes() {
         .code_actions(&params(&uri, Some(SAFE_FIX_ALL)), &|| false)
         .unwrap();
     assert_eq!(actions.len(), 1);
-    assert!(actions[0].edit.is_some());
+    let action = state
+        .resolve_code_action(
+            CodeAction {
+                data: actions[0]
+                    .command
+                    .as_ref()
+                    .unwrap()
+                    .arguments
+                    .as_ref()
+                    .unwrap()
+                    .first()
+                    .cloned(),
+                ..Default::default()
+            },
+            &|| false,
+        )
+        .unwrap();
+    assert!(action.edit.is_some());
     assert!(state.semantic_snapshot.is_some());
     assert_eq!(state.semantic_snapshot_build_count, snapshots + 1);
 }
@@ -380,7 +467,7 @@ fn secondary_root_actions_use_its_rules_and_fix_safety() {
         let mut state = LspState::new_from(None, |_| None, first.clone());
         state.initialize_workspace_roots(vec![first.clone(), second.clone()]);
         state.configure_code_actions(&serde_json::json!({
-            "capabilities": {"workspace": {"workspaceEdit": {"documentChanges": true}}}
+            "capabilities": {"workspace": {"applyEdit": true, "workspaceEdit": {"documentChanges": true}}}
         }));
         let source = "void main() {\n  final x = new Object();\n  print(\"hello\");\n}\n";
         for (root, secondary) in [(&first, false), (&second, true)] {
@@ -406,7 +493,11 @@ fn secondary_root_actions_use_its_rules_and_fix_safety() {
                 if fix == "unsafe" { 4 } else { 3 },
                 "{actions:?}"
             );
-            for action in actions {
+            for mut action in actions {
+                if let Some(command) = action.command.take() {
+                    action.data = command.arguments.unwrap().into_iter().next();
+                    action = state.resolve_code_action(action, &|| false).unwrap();
+                }
                 let kind = action.kind.as_ref().unwrap().as_str();
                 let removes_new = if kind == CodeActionKind::QUICKFIX.as_str() {
                     let diagnostic = &action.diagnostics.as_ref().unwrap()[0];

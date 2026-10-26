@@ -11,6 +11,7 @@ use lsp_types::{
 pub(crate) const SAFE_FIX_ALL: &str = "source.fixAll.falcon";
 // Not a descendant of source.fixAll: generic save requests must remain safe.
 pub(crate) const UNSAFE_FIX_ALL: &str = "source.falcon.fixAllUnsafe";
+pub(crate) const FIX_ALL_COMMAND: &str = "falcon.fixAll";
 
 fn requested(params: &CodeActionParams, kind: &str) -> bool {
     params.context.only.as_ref().is_none_or(|only| {
@@ -93,6 +94,10 @@ impl LspState {
                 .is_some_and(|properties| properties.iter().any(|property| property == "edit"));
         self.workspace_document_changes = params
             .pointer("/capabilities/workspace/workspaceEdit/documentChanges")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true);
+        self.workspace_apply_edit = params
+            .pointer("/capabilities/workspace/applyEdit")
             .and_then(serde_json::Value::as_bool)
             == Some(true);
     }
@@ -251,24 +256,17 @@ impl LspState {
                 action.disabled = Some(lsp_types::CodeActionDisabled {
                     reason: "Falcon cannot fix a document with syntax errors".to_owned(),
                 });
+            } else if !self.code_action_resolve {
+                if !self.workspace_apply_edit {
+                    continue;
+                }
+                action.command = Some(lsp_types::Command {
+                    title: title.to_owned(),
+                    command: FIX_ALL_COMMAND.to_owned(),
+                    arguments: Some(vec![action.data.take().expect("fix-all data")]),
+                });
             }
             actions.push(action);
-        }
-        if !self.code_action_resolve {
-            for action in &mut actions {
-                if action.data.is_some() && action.disabled.is_none() {
-                    let unresolved = std::mem::take(action);
-                    match self.resolve_code_action(unresolved.clone(), cancelled) {
-                        Ok(resolved) => *action = resolved,
-                        Err(reason) if quickfix => {
-                            *action = unresolved;
-                            action.disabled = Some(lsp_types::CodeActionDisabled { reason });
-                        }
-                        Err(reason) => return Err(reason),
-                    }
-                }
-            }
-            actions.retain(|action| action.edit.is_some() || action.disabled.is_some());
         }
         Ok(actions)
     }

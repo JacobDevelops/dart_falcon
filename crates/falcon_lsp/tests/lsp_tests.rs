@@ -139,7 +139,16 @@ impl TestClient {
     fn initialize(&mut self) {
         let id = self.request(
             lsp_types::request::Initialize::METHOD,
-            lsp_types::InitializeParams::default(),
+            lsp_types::InitializeParams {
+                capabilities: lsp_types::ClientCapabilities {
+                    workspace: Some(lsp_types::WorkspaceClientCapabilities {
+                        apply_edit: Some(true),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         );
         let resp = self.recv_response(&id);
         // Validate the message shape against lsp_types.
@@ -155,6 +164,16 @@ impl TestClient {
         );
         assert!(result.capabilities.hover_provider.is_some());
         assert!(result.capabilities.code_action_provider.is_some());
+        assert!(
+            result
+                .capabilities
+                .execute_command_provider
+                .as_ref()
+                .unwrap()
+                .commands
+                .iter()
+                .any(|command| command == "falcon.fixAll")
+        );
         assert_eq!(
             result.capabilities.position_encoding,
             Some(lsp_types::PositionEncodingKind::UTF16),
@@ -270,6 +289,52 @@ fn action_text(action: &lsp_types::CodeAction, version: i32, source: &str) -> St
     result
 }
 
+fn executed_action_text(
+    client: &mut TestClient,
+    action: &lsp_types::CodeAction,
+    version: i32,
+    source: &str,
+) -> String {
+    assert!(
+        action.edit.is_none(),
+        "listing fix-all must not compute edits"
+    );
+    let command = action.command.as_ref().expect("fix-all has a command");
+    assert_eq!(command.command, "falcon.fixAll");
+    let id = client.request("workspace/executeCommand", command);
+    let Message::Request(apply) = client.recv() else {
+        panic!("executing fix-all must request workspace/applyEdit");
+    };
+    assert_eq!(apply.method, "workspace/applyEdit");
+    let params: lsp_types::ApplyWorkspaceEditParams = serde_json::from_value(apply.params).unwrap();
+    let result = action_text(
+        &lsp_types::CodeAction {
+            edit: Some(params.edit),
+            ..Default::default()
+        },
+        version,
+        source,
+    );
+    client
+        .client
+        .sender
+        .send(
+            lsp_server::Response::new_ok(
+                apply.id,
+                lsp_types::ApplyWorkspaceEditResponse {
+                    applied: true,
+                    failure_reason: None,
+                    failed_change: None,
+                },
+            )
+            .into(),
+        )
+        .unwrap();
+    let response = client.recv_response(&id);
+    assert!(response.error.is_none(), "{response:?}");
+    result
+}
+
 const FIX_SOURCE: &str = "void main() {\n  final x = new Object();\n  print(\"hello\");\n}\n";
 const FIX_CONFIG: &str = r#"{"linter":{"rules":{"recommended":false,"style":{
     "unnecessary-new":"warn",
@@ -363,7 +428,7 @@ fn generic_fix_all_is_safe_and_unsafe_requires_separate_kind() {
         safe[0].kind.as_ref().unwrap().as_str(),
         "source.fixAll.falcon"
     );
-    let safe_text = action_text(&safe[0], 3, FIX_SOURCE);
+    let safe_text = executed_action_text(&mut client, &safe[0], 3, FIX_SOURCE);
     assert!(!safe_text.contains("new Object"));
     assert!(safe_text.contains("\"hello\""), "{safe_text}");
     let unsafe_actions = code_actions(
@@ -373,7 +438,7 @@ fn generic_fix_all_is_safe_and_unsafe_requires_separate_kind() {
         full_range(),
     );
     assert_eq!(unsafe_actions.len(), 1);
-    let unsafe_text = action_text(&unsafe_actions[0], 3, FIX_SOURCE);
+    let unsafe_text = executed_action_text(&mut client, &unsafe_actions[0], 3, FIX_SOURCE);
     assert!(!unsafe_text.contains("new Object"));
     assert!(unsafe_text.contains("'hello'"), "{unsafe_text}");
     let unsupported = code_actions(
@@ -482,28 +547,35 @@ fn cyclic_fix_all_returns_error_instead_of_partial_edits() {
         .unwrap();
     assert!(stopped.edit.is_none());
     assert!(
-        stopped
-            .disabled
-            .as_ref()
-            .unwrap()
-            .reason
-            .contains("prefer-")
+        stopped.disabled.is_none(),
+        "listing must not run cyclic fixes"
     );
-    let id = client.request(
-        "textDocument/codeAction",
-        serde_json::json!({
-            "textDocument": { "uri": DOC_URI }, "range": full_range(),
-            "context": { "diagnostics": [], "only": ["source.fixAll.falcon"] }
-        }),
+    assert!(stopped.command.is_some());
+    let mut only = code_actions(
+        &mut client,
+        Vec::new(),
+        Some(vec!["source.fixAll.falcon"]),
+        full_range(),
     );
-    let response = client.recv_response(&id);
-    assert!(response.result.is_none(), "{response:?}");
-    let error = response.error.expect("cycle must be reported");
-    assert!(
-        error.message.contains("without returning edits"),
-        "{error:?}"
-    );
-    assert!(error.message.contains("prefer-"), "{error:?}");
+    assert_eq!(only.len(), 1);
+    for action in [stopped.clone(), only.pop().unwrap()] {
+        assert!(action.edit.is_none());
+        assert!(action.disabled.is_none());
+        let id = client.request(
+            "workspace/executeCommand",
+            action.command.as_ref().expect("lazy fix-all command"),
+        );
+        // An applyEdit request here would fail recv_response: cycles must
+        // return an execution error without exposing any partial edits.
+        let response = client.recv_response(&id);
+        assert!(response.result.is_none(), "{response:?}");
+        let error = response.error.expect("cycle must be reported on execution");
+        assert!(
+            error.message.contains("without returning edits"),
+            "{error:?}"
+        );
+        assert!(error.message.contains("prefer-"), "{error:?}");
+    }
     client.shutdown();
 }
 

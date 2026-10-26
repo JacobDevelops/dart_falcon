@@ -178,6 +178,156 @@ fn initialize_analyzes_all_folders_and_reports_secondary_configuration_errors() 
     worker.join().unwrap();
 }
 
+#[test]
+fn fallback_fix_all_commands_are_lazy_and_execute_versioned_edits() {
+    use crate::state::code_actions::{FIX_ALL_COMMAND, SAFE_FIX_ALL, UNSAFE_FIX_ALL};
+    use serde_json::json;
+
+    let capabilities = server_capabilities();
+    assert_eq!(
+        capabilities.execute_command_provider.unwrap().commands,
+        vec![FIX_ALL_COMMAND]
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("falcon.json");
+    std::fs::write(
+        &config,
+        r#"{"linter":{"rules":{"recommended":false,"style":{"unnecessary-new":"warn"}}}}"#,
+    )
+    .unwrap();
+    let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
+    state.configure_code_actions(&json!({
+        "capabilities": {"workspace": {"applyEdit": true, "workspaceEdit": {"documentChanges": true}}}
+    }));
+    let uri = file_uri(&directory.path().join("main.dart")).unwrap();
+    let source = "void main() { final x = new Object(); }";
+    state.open(uri.as_str(), source.to_owned(), Some(7));
+    let (server, client) = Connection::memory();
+    for (index, kind) in [SAFE_FIX_ALL, UNSAFE_FIX_ALL].into_iter().enumerate() {
+        let id = RequestId::from(index as i32 + 1);
+        let polls = std::cell::Cell::new(0);
+        handle_request(
+            &server,
+            &mut state,
+            Request::new(id.clone(), "textDocument/codeAction".into(), json!({
+                "textDocument": {"uri": uri},
+                "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+                "context": {"diagnostics": [], "only": [kind]}
+            })),
+            &|| {
+                polls.set(polls.get() + 1);
+                false
+            },
+        )
+        .unwrap();
+        // Only the request guard, cached action admission, and response guard
+        // poll cancellation: no fix-engine reanalysis runs while listing.
+        assert_eq!(polls.get(), 3);
+        let Message::Response(response) = client.receiver.try_recv().unwrap() else {
+            panic!("expected code-action response");
+        };
+        assert!(response.error.is_none());
+        let actions: Vec<lsp_types::CodeAction> =
+            serde_json::from_value(response.result.unwrap()).unwrap();
+        assert_eq!(actions.len(), 1);
+        let action = &actions[0];
+        assert!(action.edit.is_none());
+        assert!(action.data.is_none());
+        let command = action.command.as_ref().unwrap();
+        assert_eq!(command.command, FIX_ALL_COMMAND);
+        assert_eq!(
+            command.arguments.as_ref().unwrap()[0]["includeUnsafe"],
+            kind == UNSAFE_FIX_ALL
+        );
+        assert!(client.receiver.try_recv().is_err());
+        handle_request(
+            &server,
+            &mut state,
+            Request::new(id.clone(), "workspace/executeCommand".into(), command),
+            &|| false,
+        )
+        .unwrap();
+        let Message::Request(apply) = client.receiver.try_recv().unwrap() else {
+            panic!("expected workspace/applyEdit request");
+        };
+        assert_eq!(apply.method, "workspace/applyEdit");
+        let params: lsp_types::ApplyWorkspaceEditParams =
+            serde_json::from_value(apply.params).unwrap();
+        let Some(lsp_types::DocumentChanges::Edits(documents)) = params.edit.document_changes
+        else {
+            panic!("expected versioned edits");
+        };
+        assert_eq!(documents.len(), 1);
+        assert_eq!(documents[0].text_document.uri, uri);
+        assert_eq!(documents[0].text_document.version, Some(7));
+        let mut applied = source.to_owned();
+        for edit in documents[0].edits.iter().rev() {
+            let lsp_types::OneOf::Left(edit) = edit else {
+                panic!("expected text edit");
+            };
+            let start = falcon_diagnostics::lsp_position_to_byte(source, edit.range.start);
+            let end = falcon_diagnostics::lsp_position_to_byte(source, edit.range.end);
+            applied.replace_range(start..end, &edit.new_text);
+        }
+        assert_eq!(applied, source.replace("new ", ""));
+        let Message::Response(response) = client.receiver.try_recv().unwrap() else {
+            panic!("expected executeCommand response");
+        };
+        assert_eq!(response.id, id);
+        assert!(response.error.is_none());
+
+        // Cancellation and a changed version must not emit applyEdit.
+        handle_request(
+            &server,
+            &mut state,
+            Request::new(10.into(), "workspace/executeCommand".into(), command),
+            &|| true,
+        )
+        .unwrap();
+        assert!(client.receiver.try_recv().is_err());
+        state.open(uri.as_str(), source.to_owned(), Some(8));
+        handle_request(
+            &server,
+            &mut state,
+            Request::new(11.into(), "workspace/executeCommand".into(), command),
+            &|| false,
+        )
+        .unwrap();
+        let Message::Response(response) = client.receiver.try_recv().unwrap() else {
+            panic!("stale execution must return an error, not applyEdit");
+        };
+        assert!(response.error.is_some());
+        assert!(client.receiver.try_recv().is_err());
+        for workspace in [json!({}), json!({"applyEdit": false})] {
+            state.configure_code_actions(&json!({
+                "capabilities": {"workspace": workspace}
+            }));
+            handle_request(
+                &server,
+                &mut state,
+                Request::new(12.into(), "workspace/executeCommand".into(), command),
+                &|| false,
+            )
+            .unwrap();
+            let Message::Response(response) = client.receiver.try_recv().unwrap() else {
+                panic!("unsupported applyEdit must not emit a server request");
+            };
+            assert!(
+                response
+                    .error
+                    .unwrap()
+                    .message
+                    .contains("workspace/applyEdit")
+            );
+            assert!(client.receiver.try_recv().is_err());
+        }
+        state.configure_code_actions(&json!({
+            "capabilities": {"workspace": {"applyEdit": true, "workspaceEdit": {"documentChanges": true}}}
+        }));
+        state.open(uri.as_str(), source.to_owned(), Some(7));
+    }
+}
+
 #[cfg(test)]
 mod debounce_tests {
     use super::*;

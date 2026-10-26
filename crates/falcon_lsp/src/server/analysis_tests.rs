@@ -136,6 +136,78 @@ fn cancellation_responds_while_analysis_is_blocked_and_suppresses_late_success()
 }
 
 #[test]
+fn fix_all_apply_requests_obey_transport_cancellation_and_generation() {
+    for outcome in ["current", "cancelled", "changed"] {
+        let client = RelayClient::start();
+        let generation = client.forward(
+            Request::new(1.into(), "workspace/executeCommand".to_owned(), json!({})).into(),
+        );
+        if outcome == "cancelled" {
+            client
+                .connection
+                .sender
+                .send(
+                    ServerNotification::new("$/cancelRequest".to_owned(), json!({"id": 1})).into(),
+                )
+                .unwrap();
+            let Message::Response(response) = client.recv() else {
+                panic!("expected cancellation response");
+            };
+            assert_eq!(
+                response.error.unwrap().code,
+                ErrorCode::RequestCanceled as i32
+            );
+        } else if outcome == "changed" {
+            assert!(client.edit(2) > generation);
+        }
+        let current = client.request(2);
+        client.complete(
+            generation,
+            true,
+            vec![
+                Request::new(
+                    "falcon-fix-all-1".to_owned().into(),
+                    "workspace/applyEdit".to_owned(),
+                    json!({"edit": {"changes": {}}}),
+                )
+                .into(),
+                Response::new_ok(1.into(), json!(null)).into(),
+            ],
+        );
+        client.complete(
+            current,
+            true,
+            vec![Response::new_ok(2.into(), json!(null)).into()],
+        );
+        if outcome == "current" {
+            let Message::Request(apply) = client.recv() else {
+                panic!("expected current fix-all applyEdit");
+            };
+            assert_eq!(apply.method, "workspace/applyEdit");
+        }
+        if outcome != "cancelled" {
+            let Message::Response(response) = client.recv() else {
+                panic!("expected command response without stale applyEdit");
+            };
+            assert_eq!(response.id, RequestId::from(1));
+            if outcome == "changed" {
+                assert_eq!(
+                    response.error.unwrap().code,
+                    ErrorCode::ContentModified as i32
+                );
+            } else {
+                assert!(response.error.is_none());
+            }
+        }
+        let Message::Response(barrier) = client.recv() else {
+            panic!("expected barrier, not cancelled applyEdit");
+        };
+        assert_eq!(barrier.id, RequestId::from(2));
+        client.finish();
+    }
+}
+
+#[test]
 fn newer_edits_suppress_stale_rounds_and_publish_each_file_only_once() {
     let client = RelayClient::start();
     let old = client.edit(1);

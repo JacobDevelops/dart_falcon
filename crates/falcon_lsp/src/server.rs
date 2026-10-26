@@ -390,6 +390,10 @@ fn server_capabilities() -> ServerCapabilities {
                 ..Default::default()
             },
         )),
+        execute_command_provider: Some(lsp_types::ExecuteCommandOptions {
+            commands: vec![crate::state::code_actions::FIX_ALL_COMMAND.to_owned()],
+            ..Default::default()
+        }),
         ..Default::default()
     }
 }
@@ -535,6 +539,30 @@ fn relay(
                             if let Some(uri) = notification.params.get("uri").and_then(serde_json::Value::as_str) {
                                 publication_order += 1;
                                 publications.insert(uri.to_string(), (publication_order, notification));
+                            }
+                        }
+                        Message::Request(request) if request.method == "workspace/applyEdit" => {
+                            // Recover the originating executeCommand id without
+                            // colliding with other server-to-client request ids.
+                            let origin = serde_json::to_value(&request.id)?
+                                .as_str()
+                                .and_then(|id| id.strip_prefix("falcon-fix-all-"))
+                                .and_then(|id| serde_json::from_str::<RequestId>(id).ok());
+                            // Never publish a side effect after cancellation or a
+                            // newer document notification overtook computation.
+                            if let Some(origin) = origin
+                                && pending_requests.contains_key(&origin)
+                            {
+                                if current {
+                                    other_messages.push(Message::Request(request));
+                                } else {
+                                    pending_requests.remove(&origin);
+                                    other_messages.push(Response::new_err(
+                                        origin,
+                                        ErrorCode::ContentModified as i32,
+                                        "Workspace changed while computing Falcon fixes".to_owned(),
+                                    ).into());
+                                }
                             }
                         }
                         Message::Response(response) => {
@@ -883,6 +911,66 @@ fn handle_request(
                         Response::new_err(request.id, ErrorCode::RequestFailed as i32, error)
                     }
                 },
+                Err(error) => Response::new_err(
+                    request.id,
+                    ErrorCode::InvalidParams as i32,
+                    format!("invalid params: {error}"),
+                ),
+            };
+            if !cancelled() {
+                connection.sender.send(response.into())?;
+            }
+        }
+        "workspace/executeCommand" => {
+            let result = serde_json::from_value::<lsp_types::ExecuteCommandParams>(request.params);
+            let response = match result {
+                Ok(_) if !state.workspace_apply_edit => Response::new_err(
+                    request.id,
+                    ErrorCode::RequestFailed as i32,
+                    "Client does not support workspace/applyEdit".to_owned(),
+                ),
+                Ok(mut params)
+                    if params.command == crate::state::code_actions::FIX_ALL_COMMAND
+                        && params.arguments.len() == 1 =>
+                {
+                    let action = lsp_types::CodeAction {
+                        title: "Fix all Falcon issues".to_owned(),
+                        data: params.arguments.pop(),
+                        ..Default::default()
+                    };
+                    match state.resolve_code_action(action, cancelled) {
+                        Ok(action) => {
+                            if !cancelled()
+                                && let Some(edit) = action.edit
+                            {
+                                connection.sender.send(
+                                    Request::new(
+                                        format!(
+                                            "falcon-fix-all-{}",
+                                            serde_json::to_string(&request.id)?
+                                        )
+                                        .into(),
+                                        "workspace/applyEdit".to_owned(),
+                                        lsp_types::ApplyWorkspaceEditParams {
+                                            label: Some(action.title),
+                                            edit,
+                                        },
+                                    )
+                                    .into(),
+                                )?;
+                            }
+                            Response::new_ok(request.id, serde_json::Value::Null)
+                        }
+                        Err(error) => {
+                            Response::new_err(request.id, ErrorCode::RequestFailed as i32, error)
+                        }
+                    }
+                }
+                Ok(_) => Response::new_err(
+                    request.id,
+                    ErrorCode::InvalidParams as i32,
+                    "Expected a Falcon fix-all command with one argument".to_owned(),
+                ),
                 Err(error) => Response::new_err(
                     request.id,
                     ErrorCode::InvalidParams as i32,
