@@ -144,6 +144,88 @@ fn positional_record_type_fields_preserve_optional_source_names() {
 }
 
 #[test]
+fn nullable_record_fields_in_casts_and_type_tests() {
+    for ty in [
+        "({int? value})",
+        "({int? audioBitrate, int? videoBitrate})",
+        "({int? a})?",
+        "(int, {String? second, double third, bool fourth, List<String>? fifth})",
+        "(int? first, {String? second})",
+    ] {
+        for operator in ["as", "is", "is!"] {
+            let source = format!("Object f(Object x) => x {operator} {ty};");
+            let parsed = parse_source(&source);
+            assert!(parsed.tree.is_lossless(&source));
+            let TopLevelDecl::Function(function) =
+                parsed.tree.program(&source).declarations().next().unwrap()
+            else {
+                panic!("expected function");
+            };
+            let Some(FunctionBody::Arrow(body)) = function.body() else {
+                panic!("expected expression body");
+            };
+            let dart_type = match body.expr() {
+                Expr::As(cast) => cast.dart_type(),
+                Expr::Is(test) => test.dart_type(),
+                other => panic!("expected cast or type test, got {other:?}"),
+            };
+            let DartType::Record(record) = dart_type else {
+                panic!("expected record type");
+            };
+            assert_eq!(record.is_nullable(), ty.ends_with('?'));
+            assert_eq!(
+                record.positional().len(),
+                usize::from(ty.starts_with("(int"))
+            );
+            assert!(
+                matches!(record.named().next().unwrap().field_type(), DartType::Named(named) if named.is_nullable())
+            );
+        }
+    }
+}
+
+#[test]
+fn record_type_restores_conditional_question_mark() {
+    let source = "bool f(Object x) => x is ({int? value}) ? true : false;";
+    let parsed = parse_source(source);
+    let TopLevelDecl::Function(function) =
+        parsed.tree.program(source).declarations().next().unwrap()
+    else {
+        panic!("expected function");
+    };
+    let Some(FunctionBody::Arrow(body)) = function.body() else {
+        panic!("expected expression body");
+    };
+    let Expr::Conditional(conditional) = body.expr() else {
+        panic!("expected conditional");
+    };
+    let Expr::Is(type_test) = conditional.condition() else {
+        panic!("expected type test");
+    };
+    let DartType::Record(record) = type_test.dart_type() else {
+        panic!("expected record type");
+    };
+    assert!(!record.is_nullable());
+    assert_eq!(record.named().len(), 1);
+}
+
+#[test]
+fn const_record_typed_local_declarations() {
+    for source in [
+        "void f() { const ({int start, int span}) rowConfig = (start: 0, span: 10); }",
+        "void f() { const ({int? a})? x = null; }",
+        "void f() { const (int, {String? second}) x = (1, second: null); }",
+        "void f() { const (1, second: null); const (value: 1); }",
+        "void f() { const (1, 2) as Object; const (value: 1) as Object; }",
+        "void f() { const (int, int) Function()? callback = null; }",
+        "void f(Object x) { final y = x as ({int? value}); }",
+    ] {
+        let parsed = parse_source(source);
+        assert!(parsed.tree.is_lossless(source));
+    }
+}
+
+#[test]
 fn function_type_parameters_preserve_annotations() {
     for source in [
         "typedef F = void Function(@deprecated int value);",

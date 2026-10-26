@@ -181,6 +181,23 @@ impl<'src> Parser<'src> {
         let marker = self.start();
         self.advance(); // (
 
+        self.with_ctx(
+            |ctx| ctx.suppress_conditional_qmark = false,
+            Self::parse_record_type_fields,
+        );
+        self.expect(TokenKind::RParen);
+        self.eat_type_qmark();
+        let completed = marker.complete(self, NodeKind::RecordType);
+        // A record type may itself be the return type of a function type, e.g.
+        // `(int, int) Function()` — check for the `Function(...)` suffix here so it
+        // parses in specialized type positions (typedef RHS, field/param types).
+        if self.at_function_type_start() {
+            return self.parse_function_type(Some(completed));
+        }
+        completed
+    }
+
+    fn parse_record_type_fields(&mut self) {
         while !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
             if self.at(TokenKind::LBrace) {
                 self.advance();
@@ -212,16 +229,6 @@ impl<'src> Parser<'src> {
                 break;
             }
         }
-        self.expect(TokenKind::RParen);
-        self.eat_type_qmark();
-        let completed = marker.complete(self, NodeKind::RecordType);
-        // A record type may itself be the return type of a function type, e.g.
-        // `(int, int) Function()` — check for the `Function(...)` suffix here so it
-        // parses in specialized type positions (typedef RHS, field/param types).
-        if self.at_function_type_start() {
-            return self.parse_function_type(Some(completed));
-        }
-        completed
     }
 
     pub(super) fn parse_type_params(&mut self) -> usize {

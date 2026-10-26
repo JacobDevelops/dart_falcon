@@ -739,10 +739,24 @@ impl<'src> Parser<'src> {
     fn const_starts_expr(&self) -> bool {
         let kind = |i: usize| self.tokens.get(i).map(|t| t.kind);
         let mut i = self.pos + 1; // token after `const`
-        // Collection / record literal: const [..], const {..}, const <T>[..], const (..).
+        if kind(i) == Some(TokenKind::LParen) {
+            i = self.index_after_balanced_parens(i);
+            if kind(i) == Some(TokenKind::Qmark) {
+                i += 1;
+            }
+            let declaration = kind(i).is_some_and(TokenKind::is_identifier_like)
+                && matches!(
+                    kind(i + 1),
+                    Some(TokenKind::Eq | TokenKind::Semicolon | TokenKind::Comma)
+                );
+            let function_type = kind(i) == Some(TokenKind::Function)
+                && matches!(kind(i + 1), Some(TokenKind::LParen | TokenKind::Lt));
+            return !declaration && !function_type;
+        }
+        // Collection literal: const [..], const {..}, const <T>[..].
         if matches!(
             kind(i),
-            Some(TokenKind::LBracket | TokenKind::LBrace | TokenKind::Lt | TokenKind::LParen)
+            Some(TokenKind::LBracket | TokenKind::LBrace | TokenKind::Lt)
         ) {
             return true;
         }
