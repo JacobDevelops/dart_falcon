@@ -1593,16 +1593,14 @@ impl LspState {
                 (&entry.config, &entry.analysis.cross_file_registry)
             };
             if !rules.is_empty() {
-                let root_files;
                 let files = if self.workspace_roots.len() == 1 {
                     files.as_slice()
                 } else {
-                    root_files = files
-                        .iter()
-                        .filter(|file| file.path.starts_with(&self.workspace_roots[index]))
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    &root_files
+                    let root = &self.workspace_roots[index];
+                    let start = files.partition_point(|file| file.path < *root);
+                    let end = start
+                        + files[start..].partition_point(|file| file.path.starts_with(root));
+                    &files[start..end]
                 };
                 let diagnostics = cross_file_diagnostics(
                     &self.environment,
@@ -2082,7 +2080,8 @@ impl LspState {
             let fallback_stamp = stamp.clone();
             if !self.dynamic_file_watching {
                 self.fallback_stamps
-                    .insert(path.to_path_buf(), fallback_stamp);
+                    .entry(path.to_path_buf())
+                    .or_insert(fallback_stamp);
             }
             match falcon_analyze::read_source(path) {
                 Ok(source) => {
@@ -2349,10 +2348,13 @@ impl LspState {
             let language_version = is_dart
                 .then(|| self.environment.package_language_version(path))
                 .flatten();
-            let stamp = FileStamp::read(path);
+            let stamp = self
+                .semantic_snapshot
+                .is_none()
+                .then(|| FileStamp::read(path));
             if let Some(cached) = self.disk_files.get(path)
                 && cached.language_version == language_version
-                && (self.semantic_snapshot.is_some() || cached.stamp == stamp)
+                && stamp.as_ref().is_none_or(|stamp| &cached.stamp == stamp)
             {
                 files.push(ProjectFile {
                     path: normalized.clone(),
@@ -2361,6 +2363,7 @@ impl LspState {
                 });
                 continue;
             }
+            let stamp = stamp.unwrap_or_else(|| FileStamp::read(path));
             self.disk_read_count += 1;
             let fallback_stamp = stamp.clone();
             if !self.dynamic_file_watching {

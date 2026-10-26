@@ -674,6 +674,7 @@ fn analysis_worker_with(
             publish_config_messages(&connection, &mut state)?;
             continue;
         };
+        idle_poll_delay = Duration::from_secs(1);
         let cancelled = || {
             token
                 .as_ref()

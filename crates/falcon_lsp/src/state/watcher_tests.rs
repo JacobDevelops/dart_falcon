@@ -104,6 +104,90 @@ fn fallback_boundary_refreshes_closed_edits_deletions_and_new_directories() {
 }
 
 #[test]
+fn fallback_keeps_closed_and_companion_edits_pending_across_analysis_boundaries() {
+    for companion in [false, true] {
+        for rebuild in [false, true] {
+            let (directory, mut state, uri) = workspace(false);
+            std::fs::write(
+                directory.path().join("falcon.json"),
+                r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-ignoring-return-values":"warn"}}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#,
+            )
+            .unwrap();
+            state.reload_config();
+            let outside = tempfile::tempdir().unwrap();
+            let (closed, directive, prefix) = if companion {
+                let outside_name = outside.path().file_name().unwrap().to_str().unwrap();
+                let workspace_name = directory.path().file_name().unwrap().to_str().unwrap();
+                (
+                    outside.path().join("companion.dart"),
+                    format!("part '../{outside_name}/companion.dart';"),
+                    format!("part of '../{workspace_name}/main.dart'; "),
+                )
+            } else {
+                (
+                    directory.path().join("closed.dart"),
+                    "import 'closed.dart';".to_owned(),
+                    String::new(),
+                )
+            };
+            let before = format!("{prefix}void api() {{}}");
+            let after = format!("{prefix}int api() => 1;");
+            std::fs::write(&closed, &before).unwrap();
+            let initial = state.open(
+                &uri,
+                format!("{directive} void main() {{ api(); }}"),
+                Some(1),
+            );
+            assert!(
+                initial
+                    .iter()
+                    .all(|diagnostic| diagnostic.rule != "avoid-ignoring-return-values")
+            );
+            state.cross_file_pass();
+            let stamp = state.fallback_stamps[&closed].clone();
+            assert!(stamp.is_some());
+            let snapshot = state.semantic_snapshot.as_ref().unwrap();
+            assert_eq!(
+                snapshot.files[snapshot.by_path[&closed]].source(),
+                before
+            );
+
+            std::fs::write(&closed, &after).unwrap();
+            if rebuild {
+                state.change(
+                    &uri,
+                    format!("{directive} void renamed() {{ api(); }}"),
+                    Some(2),
+                );
+                state.ensure_semantic_snapshot();
+            } else {
+                state.cross_file_pass();
+                let snapshot = state.semantic_snapshot.as_ref().unwrap();
+                assert_eq!(
+                    snapshot.files[snapshot.by_path[&closed]].source(),
+                    before
+                );
+            }
+            assert_eq!(state.fallback_stamps[&closed], stamp);
+            let published = state.revalidate_disk();
+            assert!(
+                published.iter().any(|(published_uri, diagnostics)| {
+                    published_uri == &uri
+                        && diagnostics
+                            .iter()
+                            .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
+                }),
+                "companion={companion}, rebuild={rebuild}: {published:?}"
+            );
+            let snapshot = state.semantic_snapshot.as_ref().unwrap();
+            assert_eq!(snapshot.files[snapshot.by_path[&closed]].source(), after);
+            assert_ne!(state.fallback_stamps[&closed], stamp);
+            assert!(state.revalidate_disk().is_empty());
+        }
+    }
+}
+
+#[test]
 fn text_changes_and_normal_ensure_never_scan_fallback_stamps() {
     for dynamic in [false, true] {
         let (directory, mut state, uri) = workspace(dynamic);

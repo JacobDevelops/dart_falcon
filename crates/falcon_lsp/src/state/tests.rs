@@ -143,6 +143,32 @@ fn cross_file_usage_in_another_editor_root_does_not_suppress_unused_files() {
 }
 
 #[test]
+fn nested_workspace_roots_remain_inputs_to_the_parent_cross_file_run() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let nested = root.join("nested");
+    std::fs::create_dir_all(root.join("lib")).unwrap();
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::write(
+        root.join("falcon.json"),
+        r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("lib/used.dart"), "class Used {}").unwrap();
+    std::fs::write(
+        nested.join("main.dart"),
+        "import '../lib/used.dart'; void main() { Used(); }",
+    )
+    .unwrap();
+    let mut standalone = LspState::new_from(None, |_| None, root.to_path_buf());
+    standalone.initialize_workspace_roots(vec![root.to_path_buf()]);
+    assert!(standalone.cross_file_diagnostics().is_empty());
+    let mut editor = LspState::new_from(None, |_| None, root.to_path_buf());
+    editor.initialize_workspace_roots(vec![root.to_path_buf(), nested]);
+    assert!(editor.cross_file_diagnostics().is_empty());
+}
+
+#[test]
 fn invalid_member_config_preserves_valid_workspace_and_member_rules() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
