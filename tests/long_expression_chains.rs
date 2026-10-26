@@ -30,6 +30,7 @@ fn check_chain(parameter_type: &str, value: &str, operand: &str, operator: &str,
             "json",
             "--max-errors",
             "1",
+            "--error-on-warnings",
             "--exit-code",
             "2",
         ])
