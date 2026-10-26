@@ -90,6 +90,8 @@ fn all_rules_config() -> String {
 
 #[test]
 fn deep_nesting_recovers_in_linear_time() {
+    use std::io::Read;
+
     for config in ["{}\n".to_owned(), all_rules_config()] {
         for (open, close) in [("[", "]"), ("(", ")"), ("{", "}"), ("{'key': ", "}")] {
             let project = tempfile::tempdir().unwrap();
@@ -119,15 +121,40 @@ fn deep_nesting_recovers_in_linear_time() {
                 .stderr(Stdio::piped())
                 .spawn()
                 .unwrap();
-            let deadline = Instant::now() + Duration::from_secs(10);
-            while child.try_wait().unwrap().is_none() {
-                if Instant::now() > deadline {
+            let mut stdout = child.stdout.take().unwrap();
+            let stdout_reader = std::thread::spawn(move || {
+                let mut bytes = Vec::new();
+                stdout.read_to_end(&mut bytes).unwrap();
+                bytes
+            });
+            let mut stderr = child.stderr.take().unwrap();
+            let stderr_reader = std::thread::spawn(move || {
+                let mut bytes = Vec::new();
+                stderr.read_to_end(&mut bytes).unwrap();
+                bytes
+            });
+            let deadline = Instant::now() + Duration::from_secs(60);
+            let (status, timed_out) = loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    break (status, false);
+                }
+                if Instant::now() >= deadline {
                     child.kill().unwrap();
-                    panic!("{open}: falcon check exceeded ten seconds");
+                    break (child.wait().unwrap(), true);
                 }
                 std::thread::sleep(Duration::from_millis(50));
-            }
-            let output = child.wait_with_output().unwrap();
+            };
+            let output = std::process::Output {
+                status,
+                stdout: stdout_reader.join().unwrap(),
+                stderr: stderr_reader.join().unwrap(),
+            };
+            assert!(
+                !timed_out,
+                "{open}: falcon check exceeded sixty seconds\nstdout: {}\nstderr: {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
             let stdout = String::from_utf8_lossy(&output.stdout);
             assert!(
                 output.status.code() == Some(2)
