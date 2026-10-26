@@ -315,7 +315,10 @@ fn cli_and_lsp_have_sdk_resolution_parity_for_unsaved_buffers() {
             "Avoid invoking an asynchronous function in a non-`async` function."
         );
         assert_eq!((diagnostic.line, diagnostic.col), (3, 3));
-        assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "pending");
+        assert_eq!(
+            &source[diagnostic.span.start..diagnostic.span.end],
+            "pending"
+        );
     }
     assert_eq!(
         serde_json::to_value(&cli.diagnostics).unwrap(),

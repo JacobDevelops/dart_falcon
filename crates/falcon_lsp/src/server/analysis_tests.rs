@@ -10,7 +10,7 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 
 struct RelayClient {
     connection: Connection,
-    inputs: Receiver<(u64, Message)>,
+    inputs: Receiver<WorkerMessage>,
     rounds: Sender<AnalysisRound>,
     thread: JoinHandle<()>,
 }
@@ -355,8 +355,13 @@ fn real_worker_cancels_and_supersedes_before_an_ignored_notification() {
     let (sender, output) = crossbeam_channel::unbounded();
     let (started, blocked) = crossbeam_channel::bounded(1);
     let (release, resume) = crossbeam_channel::bounded(1);
+    let request_runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let worker_request_runs = Arc::clone(&request_runs);
     let worker = thread::spawn(move || {
         analysis_worker_with(options, state, FileWatching::new(&json!({})), receiver, sender, |message| {
+            if matches!(message, Message::Request(request) if request.id == RequestId::from(1)) {
+                worker_request_runs.fetch_add(1, Ordering::Relaxed);
+            }
             if matches!(message, Message::Notification(notification) if notification.method == DidOpenTextDocument::METHOD) {
                 started.send(()).unwrap();
                 resume.recv_timeout(TIMEOUT).unwrap();
@@ -458,6 +463,11 @@ fn real_worker_cancels_and_supersedes_before_an_ignored_notification() {
     drop(client);
     transport.join().unwrap();
     worker.join().unwrap();
+    assert_eq!(
+        request_runs.load(Ordering::Relaxed),
+        0,
+        "a cancelled queued request must never enter the worker handler"
+    );
 }
 
 #[test]

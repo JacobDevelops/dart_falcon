@@ -351,6 +351,80 @@ mod file_watching_tests {
     }
 
     #[test]
+    fn workspace_initialization_preserves_code_action_capabilities() {
+        let client = Client::start_with_initialize(
+            false,
+            false,
+            json!({"capabilities": {
+                "textDocument": {"codeAction": {
+                    "dataSupport": true,
+                    "resolveSupport": {"properties": ["edit"]}
+                }},
+                "workspace": {"workspaceEdit": {"documentChanges": true}}
+            }}),
+        );
+        client.open();
+        let diagnostics = client
+            .drain()
+            .into_iter()
+            .filter_map(|message| match message {
+                Message::Notification(notification)
+                    if notification.method == "textDocument/publishDiagnostics" =>
+                {
+                    Some(notification.params["diagnostics"].clone())
+                }
+                _ => None,
+            })
+            .last()
+            .unwrap();
+        assert!(!diagnostics.as_array().unwrap().is_empty());
+        client
+            .connection
+            .sender
+            .send(
+                Request::new(
+                    2.into(),
+                    "textDocument/codeAction".into(),
+                    json!({
+                        "textDocument": {"uri": file_uri(&client.workspace.join("main.dart")).unwrap()},
+                        "range": {"start": {"line": 0, "character": 0}, "end": {"line": 2, "character": 0}},
+                        "context": {"diagnostics": diagnostics}
+                    }),
+                )
+                .into(),
+            )
+            .unwrap();
+        let Message::Response(response) = client.receive() else {
+            panic!("expected code action response");
+        };
+        assert!(response.error.is_none(), "{response:?}");
+        let actions = response.result.unwrap();
+        let action = actions
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|action| action.get("data").is_some())
+            .expect("resolve-capable clients receive lazy code actions")
+            .clone();
+        assert!(action.get("edit").is_none());
+        client
+            .connection
+            .sender
+            .send(Request::new(3.into(), "codeAction/resolve".into(), action).into())
+            .unwrap();
+        let Message::Response(response) = client.receive() else {
+            panic!("expected resolved code action response");
+        };
+        assert!(response.error.is_none(), "{response:?}");
+        let action = response.result.unwrap();
+        assert!(
+            action["edit"]["documentChanges"].is_array(),
+            "versioned workspace edits must survive workspace initialization: {action}"
+        );
+        client.finish();
+    }
+
+    #[test]
     fn first_open_delivers_environment_failures_to_client_once() {
         for input in [
             ".dart_tool/package_config.json",
@@ -457,6 +531,65 @@ mod file_watching_tests {
         publication.diagnostics.iter().any(|diagnostic| {
             matches!(&diagnostic.code, Some(lsp_types::NumberOrString::String(code)) if code == rule)
         })
+    }
+
+    #[test]
+    fn workspace_registration_includes_directory_events() {
+        let client = Client::start(true, false);
+        let messages = client.drain();
+        let registered = registrations(&messages);
+        assert_eq!(registered.len(), 1);
+        assert!(registered[0].watchers.iter().any(|watcher|
+            matches!(&watcher.glob_pattern, GlobPattern::String(pattern) if pattern == "**/*")
+                && watcher.kind.is_none()));
+        client.finish();
+    }
+
+    #[test]
+    fn watcherless_saved_and_idle_boundaries_refresh_closed_sources() {
+        for save in [false, true] {
+            let client = Client::start(false, false);
+            client.drain();
+            let closed = client.workspace.join("support.dart");
+            std::fs::write(&closed, "class C {} C make() => C();").unwrap();
+            let source = "import 'support.dart';\nvoid f() { C x = make(); x; }\n";
+            let uri = file_uri(&client.workspace.join("main.dart")).unwrap();
+            client.notify(
+                "textDocument/didOpen",
+                json!({"textDocument": {
+                    "uri": uri, "languageId": "dart", "version": 1, "text": source
+                }}),
+            );
+            let opened = client.drain();
+            assert!(
+                publications(&opened)
+                    .iter()
+                    .any(|publication| publication.uri == uri
+                        && has_rule(publication, "omit-local-variable-types")),
+                "{opened:?}"
+            );
+            std::fs::write(&closed, "class C {} int make() => 42;").unwrap();
+            let changed = if save {
+                client.notify(
+                    "textDocument/didSave",
+                    json!({"textDocument": {"uri": uri}}),
+                );
+                client.drain()
+            } else {
+                // A publication must arrive without any client notification.
+                let message = client.receive();
+                vec![message]
+            };
+            assert!(
+                publications(&changed)
+                    .iter()
+                    .any(|publication| publication.uri == uri
+                        && !has_rule(publication, "omit-local-variable-types")),
+                "{changed:?}"
+            );
+            client.drain();
+            client.finish();
+        }
     }
 
     #[test]
@@ -585,15 +718,7 @@ mod file_watching_tests {
                         .iter()
                         .all(|watcher| watcher.kind.is_none())
                 );
-                for pattern in [
-                    "**/falcon.json",
-                    "**/.falcon.json",
-                    "**/.dart_tool/package_config.json",
-                    "**/pubspec.{yaml,lock}",
-                    "**/pubspec_overrides.yaml",
-                    "**/melos.yaml",
-                    "**/*.dart",
-                ] {
+                for pattern in ["**/*"] {
                     assert!(
                         initial[0]
                             .watchers

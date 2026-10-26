@@ -2,7 +2,8 @@
 //!
 //! Text changes invalidate a document's tree; config changes rerun rules over
 //! cached trees, reparsing only when the effective language version changes.
-//! Unresolved filesystem identities are retried before analysis when files materialize.
+//! Filesystem identities and disk caches refresh on watcher events, or at quiet
+//! open/save/debounce/idle boundaries for clients without dynamic file watching.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -24,8 +25,8 @@ use falcon_dart_parser::try_parse_for_package;
 use falcon_diagnostics::Diagnostic;
 use falcon_project::{
     DiscoveryWatch, ProjectAnalysis, analyze_document, cross_file_diagnostics,
-    discover_project_with_watches, load_project_config_with_errors, manifest_file, resolve_document_positions,
-    sort_diagnostics,
+    discover_project_with_watches, load_project_config_with_errors, manifest_file,
+    resolve_document_positions, sort_diagnostics,
 };
 use falcon_syntax::{
     LanguageVersion,
@@ -44,9 +45,6 @@ struct DocumentParse {
 
 fn declaration_signature(parsed: &ParsedFile) -> u64 {
     let mut signature = DefaultHasher::new();
-    for uri in falcon_analyze::doc_imports(parsed.program(), &parsed.source) {
-        uri.hash(&mut signature);
-    }
     let mut cursor = 0;
     let mut body_start = 0;
     let mut body_end = 0;
@@ -54,7 +52,9 @@ fn declaration_signature(parsed: &ParsedFile) -> u64 {
         if node.span().start >= body_start && node.span().start < body_end {
             continue;
         }
-        if node.kind() == NodeKind::TypeParam {
+        // Alias provenance and generic owners use absolute syntax offsets.
+        // Rebuild if an earlier body edit moves their declaration-side types.
+        if matches!(node.kind(), NodeKind::TypeParam | NodeKind::NamedType) {
             node.span().start.hash(&mut signature);
         }
         let body = match node.kind() {
@@ -107,6 +107,7 @@ fn document_parse_result(
 /// One open document: full text, cached syntax tree, and instrumentation counters.
 pub struct DocumentState {
     parsed: Arc<ParsedFile>,
+    declaration_signature: u64,
     path: PathBuf,
     /// Only unresolved paths need filesystem checks between document events.
     unresolved_path: bool,
@@ -289,6 +290,7 @@ struct CachedDiskFile {
     parsed: Arc<ParsedFile>,
     has_parse_errors: bool,
     language_version: Option<LanguageVersion>,
+    fallback_stamp: Option<(Option<std::time::SystemTime>, u64)>,
 }
 
 struct RootConfig {
@@ -361,6 +363,9 @@ pub struct LspState {
     project_paths: Option<Vec<(PathBuf, bool)>>,
     project_path_patterns: Vec<String>,
     project_discovery_watches: Vec<DiscoveryWatch>,
+    dynamic_file_watching: bool,
+    #[cfg(test)]
+    fallback_scan_count: u64,
 }
 
 impl LspState {
@@ -462,6 +467,9 @@ impl LspState {
             project_paths: None,
             project_path_patterns: Vec::new(),
             project_discovery_watches: Vec::new(),
+            dynamic_file_watching: true,
+            #[cfg(test)]
+            fallback_scan_count: 0,
         }
     }
 
@@ -483,9 +491,11 @@ impl LspState {
         self.workspace_initialized = true;
         let messages = self.reload_additional_root_configs();
         for message in messages {
-            if !self.pending_config_messages.iter().any(|existing| {
-                existing.typ == message.typ && existing.message == message.message
-            }) {
+            if !self
+                .pending_config_messages
+                .iter()
+                .any(|existing| existing.typ == message.typ && existing.message == message.message)
+            {
                 self.pending_config_messages.push(message);
             }
         }
@@ -499,18 +509,24 @@ impl LspState {
     fn reload_additional_root_configs(&mut self) -> Vec<ShowMessageParams> {
         let mut messages = Vec::new();
         self.additional_root_configs.reserve(
-            self.workspace_roots.len().saturating_sub(1 + self.additional_root_configs.len()),
+            self.workspace_roots
+                .len()
+                .saturating_sub(1 + self.additional_root_configs.len()),
         );
         for (index, root) in self.workspace_roots.iter().skip(1).enumerate() {
             let (config, config_root, root_messages) = load_from(self.config_path.as_deref(), root);
             messages.extend(root_messages);
-            let config = config.or_else(|| {
-                self.additional_root_configs.get(index).map(|entry| entry.config.clone())
-            }).unwrap_or_else(|| {
-                let mut config = FalconConfig::default();
-                config.resolve_paths(&config_root);
-                config
-            });
+            let config = config
+                .or_else(|| {
+                    self.additional_root_configs
+                        .get(index)
+                        .map(|entry| entry.config.clone())
+                })
+                .unwrap_or_else(|| {
+                    let mut config = FalconConfig::default();
+                    config.resolve_paths(&config_root);
+                    config
+                });
             let analysis = ProjectAnalysis::new(&config);
             self.resolve_semantics |= analysis.resolve;
             self.cross_file_resolve_semantics |= analysis.cross_file_resolve;
@@ -525,14 +541,20 @@ impl LspState {
     }
 
     fn root_index(&self, path: &Path) -> usize {
-        self.workspace_roots.iter().enumerate()
+        self.workspace_roots
+            .iter()
+            .enumerate()
             .filter(|(_, root)| path.starts_with(root))
             .max_by_key(|(_, root)| root.components().count())
             .map_or(0, |(index, _)| index)
     }
 
     fn config_for_root(&self, index: usize) -> &FalconConfig {
-        if index == 0 { &self.config } else { &self.additional_root_configs[index - 1].config }
+        if index == 0 {
+            &self.config
+        } else {
+            &self.additional_root_configs[index - 1].config
+        }
     }
 
     fn config_for_path(&self, path: &Path) -> &FalconConfig {
@@ -570,9 +592,16 @@ impl LspState {
             .iter()
             .enumerate()
             .flat_map(move |(index, root)| {
-                root.ancestors().skip(1)
+                root.ancestors()
+                    .skip(1)
                     .map(|directory| directory.join("pubspec.yaml"))
-                    .filter(move |path| !self.config_for_root(index).files.includes.excludes(&path.to_string_lossy()))
+                    .filter(move |path| {
+                        !self
+                            .config_for_root(index)
+                            .files
+                            .includes
+                            .excludes(&path.to_string_lossy())
+                    })
             })
     }
 
@@ -592,20 +621,102 @@ impl LspState {
         self.watched_dependency_generation
     }
 
-    /// Process one native watcher batch. Project-only saves retain the shared
+    /// Dynamic clients own invalidation; fallback scans run at quiet boundaries.
+    pub fn set_dynamic_file_watching(&mut self, dynamic: bool) {
+        self.dynamic_file_watching = dynamic;
+    }
+
+    fn disk_stamp(&self, path: &Path) -> Option<(Option<std::time::SystemTime>, u64)> {
+        if self.dynamic_file_watching {
+            return None;
+        }
+        let metadata = path.metadata().ok()?;
+        Some((metadata.modified().ok(), metadata.len()))
+    }
+
+    pub fn revalidate_disk(&mut self) -> Vec<(String, Vec<Diagnostic>)> {
+        if self.dynamic_file_watching {
+            return Vec::new();
+        }
+        #[cfg(test)]
+        {
+            self.fallback_scan_count += 1;
+        }
+        let mut changed =
+            Vec::with_capacity(self.disk_files.len() + self.project_discovery_watches.len());
+        changed.extend(
+            self.disk_files
+                .iter()
+                .filter(|(path, cached)| self.disk_stamp(path) != cached.fallback_stamp)
+                .map(|(path, _)| path.clone()),
+        );
+        let mut watches = std::mem::take(&mut self.project_discovery_watches);
+        for watch in &mut watches {
+            if !watch.refresh(&self.config_for_path(&watch.path).files.includes, true) {
+                changed.push(watch.path.clone());
+            }
+        }
+        self.project_discovery_watches = watches;
+        if changed.is_empty() && self.refresh_unresolved_paths() {
+            return self
+                .open_uris()
+                .into_iter()
+                .map(|uri| {
+                    let diagnostics = self.analyze(&uri);
+                    (uri, diagnostics)
+                })
+                .collect();
+        }
+        self.watched_files_changed(&changed)
+    }
+
+    /// Process one client watcher batch. Project-only saves retain the shared
     /// external indexes; mutable dependencies or changed resolution inputs drop
     /// the external graph once, then all open documents share the rebuilt view.
     pub fn watched_files_changed(&mut self, paths: &[PathBuf]) -> Vec<(String, Vec<Diagnostic>)> {
         if paths.is_empty() {
             return Vec::new();
         }
+        self.refresh_unresolved_paths();
         // Discovery can capture new disk bytes while retaining a known context.
         // Check original link locations before watcher normalization follows them.
         let inputs_changed = paths.iter().any(|path| {
             self.environment
                 .inputs_affected_by(self.environment_stamps.as_ref(), path)
         });
-        let paths: Vec<_> = paths.iter().map(|path| watched_path(path)).collect();
+        // The directory-capable glob also reports unrelated assets. Ignore those
+        // without traversing directories; deleted directories match cached children.
+        let paths: Vec<_> = paths
+            .iter()
+            .map(|path| watched_path(path))
+            .filter(|path| {
+                inputs_changed
+                    || is_dart_file(path)
+                    || path.is_dir()
+                    || matches!(
+                        path.file_name().and_then(|name| name.to_str()),
+                        Some(
+                            "falcon.json"
+                                | ".falcon.json"
+                                | "melos.yaml"
+                                | "pubspec.yaml"
+                                | "pubspec.lock"
+                                | "pubspec_overrides.yaml"
+                                | "package_config.json"
+                        )
+                    )
+                    || self
+                        .disk_files
+                        .keys()
+                        .any(|cached| cached.starts_with(path))
+                    || self.project_paths.as_ref().is_some_and(|files| {
+                        files.iter().any(|(cached, _)| cached.starts_with(path))
+                    })
+            })
+            .collect();
+        if paths.is_empty() {
+            return Vec::new();
+        }
         if paths.iter().any(|path| {
             self.workspace_roots
                 .iter()
@@ -753,6 +864,7 @@ impl LspState {
                     tree,
                 });
             }
+            doc.declaration_signature = declaration_signature(&doc.parsed);
             doc.has_parse_errors = parsed.has_errors;
             doc.source_rejected = parsed.worker_failed;
             doc.syntax_diagnostics = parsed.diagnostics;
@@ -820,14 +932,22 @@ impl LspState {
             source: text.into_boxed_str(),
             tree,
         });
+        let next_signature = declaration_signature(&next_parsed);
         let unchanged_api = !source_rejected
             && !parsed.has_errors
             && self.semantic_snapshot.as_ref().is_some_and(|snapshot| {
                 snapshot.by_path.get(&path).is_some_and(|&index| {
                     let previous = &snapshot.files[index];
                     !previous.has_parse_errors
-                        && declaration_signature(&previous.parsed)
-                            == declaration_signature(&next_parsed)
+                        && self
+                            .documents
+                            .get(uri)
+                            .filter(|doc| doc.path == path)
+                            .map_or_else(
+                                || declaration_signature(&previous.parsed),
+                                |doc| doc.declaration_signature,
+                            )
+                            == next_signature
                 })
             });
         self.documents.insert(
@@ -836,6 +956,7 @@ impl LspState {
                 path,
                 unresolved_path,
                 parsed: next_parsed,
+                declaration_signature: next_signature,
                 version,
                 language_version,
                 has_parse_errors: source_rejected || parsed.has_errors,
@@ -864,7 +985,6 @@ impl LspState {
             return false;
         }
 
-        self.refresh_unresolved_paths();
         let path = self.documents[uri].path.clone();
         let source_error = reject_oversized_buffer(&path, &mut text);
         self.refresh_environment(std::iter::once(path.as_path()));
@@ -879,16 +999,18 @@ impl LspState {
             source: text.into_boxed_str(),
             tree,
         });
+        let next_signature = declaration_signature(&next_parsed);
         let unchanged_api = !doc.has_parse_errors
             && !doc.source_rejected
             && source_error.is_none()
             && !parsed.has_errors
             && !parsed.worker_failed
-            && declaration_signature(&doc.parsed) == declaration_signature(&next_parsed);
+            && doc.declaration_signature == next_signature;
         doc.syntax_diagnostics = parsed.diagnostics;
         doc.source_rejected = source_error.is_some() || parsed.worker_failed;
         doc.syntax_diagnostics.extend(source_error);
         doc.parsed = next_parsed;
+        doc.declaration_signature = next_signature;
         doc.version = version;
         doc.language_version = self.environment.language_version(&doc.path, doc.text());
         doc.has_parse_errors = doc.source_rejected || parsed.has_errors;
@@ -913,6 +1035,7 @@ impl LspState {
             && let Ok(path) = std::fs::canonicalize(uri_to_path(uri))
         {
             if path != doc.path {
+                self.body_only_changes.remove(uri);
                 if self.resolve_semantics {
                     let affected = self.affected_open_uris(uri);
                     self.pending_semantic_affected
@@ -949,7 +1072,6 @@ impl LspState {
 
     /// `textDocument/didClose`: restore the disk revision before dropping the buffer.
     pub fn close(&mut self, uri: &str) {
-        self.pending_semantic_affected.remove(uri);
         let Some(document) = self.documents.get(uri) else {
             return;
         };
@@ -991,19 +1113,23 @@ impl LspState {
             })
         });
         if let Some((parsed, has_parse_errors)) = disk {
+            let next_signature = declaration_signature(&parsed);
             let document = self.documents.get_mut(uri).expect("open document");
             let unchanged_api = !document.source_rejected
                 && !document.has_parse_errors
                 && !has_parse_errors
-                && declaration_signature(&document.parsed) == declaration_signature(&parsed);
+                && document.declaration_signature == next_signature;
             document.parsed = Arc::clone(&parsed);
+            document.declaration_signature = next_signature;
             document.has_parse_errors = has_parse_errors;
+            let fallback_stamp = self.disk_stamp(&path);
             self.disk_files.insert(
                 path,
                 CachedDiskFile {
                     parsed,
                     has_parse_errors,
                     language_version,
+                    fallback_stamp,
                 },
             );
             self.update_document_snapshot(uri, unchanged_api);
@@ -1012,7 +1138,6 @@ impl LspState {
             self.update_document_snapshot(uri, false);
         }
         self.documents.remove(uri);
-        self.body_only_changes.remove(uri);
     }
 
     /// Run enabled rules over the cached CST, in shared project diagnostic order.
@@ -1033,8 +1158,6 @@ impl LspState {
         }
         if self.resolve_semantics {
             self.ensure_semantic_snapshot();
-        } else {
-            self.refresh_unresolved_paths();
         }
         if !self.admits_project_dart(&self.documents[uri].path) {
             let doc = self.documents.get_mut(uri).expect("open document");
@@ -1080,12 +1203,7 @@ impl LspState {
                 .with_signatures(&snapshot.indexes.signatures)
                 .with_library(&library);
         }
-        let mut diagnostics = analyze_document(
-            rules,
-            config,
-            &ctx,
-            doc.syntax_diagnostics.clone(),
-        );
+        let mut diagnostics = analyze_document(rules, config, &ctx, doc.syntax_diagnostics.clone());
         if let Some(error) = &self.semantic_snapshot_error {
             diagnostics.push(falcon_analyze::rules_thread_diagnostic(&doc.path, error));
         }
@@ -1119,9 +1237,27 @@ impl LspState {
     pub(crate) fn affected_open_uris(&mut self, uri: &str) -> Vec<String> {
         if self.body_only_changes.remove(uri)
             && !self.pending_semantic_affected.contains_key(uri)
-            && self.semantic_snapshot.is_some()
+            && let Some(snapshot) = self.semantic_snapshot.as_ref()
         {
-            return vec![uri.to_string()];
+            let changed_path = self.documents.get(uri).map_or_else(
+                || document_path(uri, &self.workspace_roots).0,
+                |doc| doc.path.clone(),
+            );
+            if let Some(&index) = snapshot.by_path.get(&changed_path) {
+                let siblings = snapshot.grouping.siblings(index);
+                let mut uris: Vec<_> = self
+                    .documents
+                    .iter()
+                    .filter(|(_, doc)| {
+                        snapshot.by_path.get(&doc.path).is_some_and(|candidate| {
+                            *candidate == index || siblings.contains(candidate)
+                        })
+                    })
+                    .map(|(uri, _)| uri.clone())
+                    .collect();
+                uris.sort();
+                return uris;
+            }
         }
         if !self.resolve_semantics {
             return if self.documents.contains_key(uri) {
@@ -1196,8 +1332,14 @@ impl LspState {
         self.cross_file_resolve_semantics = analysis.cross_file_resolve;
         self.resolve_semantics = analysis.resolve;
         self.cross_file_rules = analysis.cross_file_registry;
-        self.resolve_semantics |= self.additional_root_configs.iter().any(|entry| entry.analysis.resolve);
-        self.cross_file_resolve_semantics |= self.additional_root_configs.iter().any(|entry| entry.analysis.cross_file_resolve);
+        self.resolve_semantics |= self
+            .additional_root_configs
+            .iter()
+            .any(|entry| entry.analysis.resolve);
+        self.cross_file_resolve_semantics |= self
+            .additional_root_configs
+            .iter()
+            .any(|entry| entry.analysis.cross_file_resolve);
         self.cross_file_index_cache = None;
         self.cross_file_external_cache = None;
         self.pending_semantic_affected.clear();
@@ -1227,7 +1369,10 @@ impl LspState {
     /// cross-file pass, avoiding the whole-workspace walk.
     pub fn cross_file_rules_enabled(&self) -> bool {
         !self.cross_file_rules.is_empty()
-            || self.additional_root_configs.iter().any(|entry| !entry.analysis.cross_file_registry.is_empty())
+            || self
+                .additional_root_configs
+                .iter()
+                .any(|entry| !entry.analysis.cross_file_registry.is_empty())
     }
 
     /// Run the cross-file rules over the whole workspace and republish the
@@ -1241,7 +1386,6 @@ impl LspState {
         if !self.cross_file_rules_enabled() {
             return Vec::new();
         }
-        self.refresh_unresolved_paths();
         // Compute the cross-file map first so its immutable borrow ends before the
         // per-document `analyze`/mutation loop below (avoids &self vs &mut self).
         let cross_file_map = self.cross_file_diagnostics();
@@ -1345,9 +1489,8 @@ impl LspState {
                 (&entry.config, &entry.analysis.cross_file_registry)
             };
             if !rules.is_empty() {
-                let diagnostics = cross_file_diagnostics(
-                    &self.environment, rules, &files, config, indexes,
-                )?;
+                let diagnostics =
+                    cross_file_diagnostics(&self.environment, rules, &files, config, indexes)?;
                 all.extend(diagnostics.into_iter().filter(|diagnostic| {
                     self.root_index(Path::new(&diagnostic.file_path)) == index
                 }));
@@ -1644,7 +1787,7 @@ impl LspState {
         }
     }
 
-    fn refresh_unresolved_paths(&mut self) {
+    fn refresh_unresolved_paths(&mut self) -> bool {
         let resolved: Vec<_> = self
             .documents
             .iter()
@@ -1655,6 +1798,7 @@ impl LspState {
                     .map(|path| (uri.clone(), path))
             })
             .collect();
+        let refreshed = !resolved.is_empty();
         let mut changed = false;
         for (uri, path) in resolved {
             let doc = &self.documents[&uri];
@@ -1689,10 +1833,10 @@ impl LspState {
         if changed {
             self.invalidate_semantic_snapshot();
         }
+        refreshed
     }
 
     fn ensure_semantic_snapshot(&mut self) {
-        self.refresh_unresolved_paths();
         self.refresh_environment(std::iter::empty());
         self.refresh_document_versions();
         if self.semantic_snapshot.is_some()
@@ -1802,6 +1946,7 @@ impl LspState {
                             parsed: Arc::clone(&parsed),
                             has_parse_errors,
                             language_version,
+                            fallback_stamp: self.disk_stamp(path),
                         },
                     );
                     files.push(ProjectFile {
@@ -1910,7 +2055,12 @@ impl LspState {
     }
 
     fn admits_project_dart(&self, path: &Path) -> bool {
-        is_dart_file(path) && self.config_for_path(path).files.includes.admits(&path.to_string_lossy())
+        is_dart_file(path)
+            && self
+                .config_for_path(path)
+                .files
+                .includes
+                .admits(&path.to_string_lossy())
     }
 
     /// Stable ownership while a debounced edit has dropped the snapshot.
@@ -1944,21 +2094,37 @@ impl LspState {
             let mut paths = Vec::new();
             self.project_discovery_watches.clear();
             for (index, root) in self.workspace_roots.iter().enumerate() {
-                let discovery = discover_project_with_watches(
+                let discover = if self.dynamic_file_watching {
+                    falcon_project::discover_project
+                } else {
+                    discover_project_with_watches
+                };
+                let discovery = discover(
                     std::slice::from_ref(root),
                     &self.config_for_root(index).files.includes,
                     true,
                 );
                 self.project_discovery_watches.extend(discovery.watches);
-                paths.extend(discovery.files.into_iter()
-                    .map(|path| (canonical_or_lexical(&path), true)));
-                paths.extend(discovery.manifests.into_iter()
-                    .map(|path| (canonical_or_lexical(&path), false)));
+                paths.extend(
+                    discovery
+                        .files
+                        .into_iter()
+                        .map(|path| (canonical_or_lexical(&path), true)),
+                );
+                paths.extend(
+                    discovery
+                        .manifests
+                        .into_iter()
+                        .map(|path| (canonical_or_lexical(&path), false)),
+                );
             }
             paths.retain(|(path, is_dart)| {
                 let includes = &self.config_for_path(path).files.includes;
-                if *is_dart { includes.admits(&path.to_string_lossy()) }
-                else { !includes.excludes(&path.to_string_lossy()) }
+                if *is_dart {
+                    includes.admits(&path.to_string_lossy())
+                } else {
+                    !includes.excludes(&path.to_string_lossy())
+                }
             });
             paths.sort_unstable_by(|a, b| a.0.cmp(&b.0));
             paths.dedup_by(|a, b| a.0 == b.0);
@@ -2056,6 +2222,7 @@ impl LspState {
                         parsed: Arc::clone(&file.parsed),
                         has_parse_errors: file.has_parse_errors,
                         language_version,
+                        fallback_stamp: self.disk_stamp(path),
                     },
                 );
                 files.push(file);
@@ -2071,6 +2238,7 @@ impl LspState {
                     parsed: Arc::clone(&parsed),
                     has_parse_errors,
                     language_version,
+                    fallback_stamp: self.disk_stamp(path),
                 },
             );
             files.push(ProjectFile {
@@ -2111,6 +2279,12 @@ mod tests;
 
 #[cfg(test)]
 mod lifecycle_tests;
+
+#[cfg(test)]
+mod signature_tests;
+
+#[cfg(test)]
+mod watcher_tests;
 
 fn build_reverse_dependencies(
     files: &[ProjectFile],

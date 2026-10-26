@@ -713,7 +713,7 @@ fn external_semantic_indexes_survive_edits_and_refresh_dependency_facts() {
 }
 
 #[test]
-fn cross_file_indexes_fall_back_after_unnotified_disk_changes() {
+fn cross_file_indexes_refresh_after_watched_disk_changes() {
     let config = r#"{
         "linter": { "rules": {
             "recommended": false,
@@ -748,8 +748,9 @@ fn cross_file_indexes_fall_back_after_unnotified_disk_changes() {
     );
     assert_eq!(state.semantic_snapshot_build_count(), builds);
 
-    // No watched-file notification: cross-file analysis must reject stale facts.
+    // Native notifications invalidate disk sources before cross-file analysis.
     fs::write(&api, "int? value() => null;\n").unwrap();
+    state.watched_files_changed(std::slice::from_ref(&api));
     let published = state.cross_file_pass();
     assert!(
         published
@@ -764,9 +765,10 @@ fn cross_file_indexes_fall_back_after_unnotified_disk_changes() {
             .iter()
             .all(|diagnostic| diagnostic.rule != "unnecessary-nullable")
     );
-    assert_eq!(state.semantic_snapshot_build_count(), builds);
+    assert_eq!(state.semantic_snapshot_build_count(), builds + 1);
 
     fs::write(&api, "int value() => 1;\n").unwrap();
+    state.watched_files_changed(std::slice::from_ref(&api));
     state.cross_file_pass();
     assert!(
         state
@@ -778,6 +780,7 @@ fn cross_file_indexes_fall_back_after_unnotified_disk_changes() {
     );
     // Unchanged Dart sources do not make a renamed package's old identities valid.
     fs::write(&manifest, "name: renamed\n").unwrap();
+    state.watched_files_changed(std::slice::from_ref(&manifest));
     state.cross_file_pass();
     assert!(
         state
@@ -787,7 +790,7 @@ fn cross_file_indexes_fall_back_after_unnotified_disk_changes() {
             .iter()
             .all(|diagnostic| diagnostic.rule != "unnecessary-nullable")
     );
-    assert_eq!(state.semantic_snapshot_build_count(), builds);
+    assert_eq!(state.semantic_snapshot_build_count(), builds + 3);
 }
 
 /// An inline `// falcon-ignore` comment suppresses the diagnostic through the

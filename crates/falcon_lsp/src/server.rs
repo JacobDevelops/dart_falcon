@@ -230,23 +230,11 @@ impl FileWatching {
                 .insert(request.id.clone(), UnregisterCapability::METHOD);
             connection.sender.send(request.into())?;
         }
-        let mut watchers = Vec::with_capacity(7 + roots.len() * 2 + files.len());
-        watchers.extend(
-            [
-                "**/falcon.json",
-                "**/.falcon.json",
-                "**/.dart_tool/package_config.json",
-                "**/pubspec.{yaml,lock}",
-                "**/pubspec_overrides.yaml",
-                "**/melos.yaml",
-                "**/*.dart",
-            ]
-            .into_iter()
-            .map(|pattern| FileSystemWatcher {
-                glob_pattern: GlobPattern::String(pattern.to_string()),
-                kind: None,
-            }),
-        );
+        let mut watchers = Vec::with_capacity(1 + roots.len() * 2 + files.len());
+        watchers.extend(["**/*"].into_iter().map(|pattern| FileSystemWatcher {
+            glob_pattern: GlobPattern::String(pattern.to_string()),
+            kind: None,
+        }));
         for root in &roots {
             watchers.push(relative_watcher(root, "**/*".to_string())?);
             // Watching the parent entry also observes deletion/recreation of the
@@ -434,8 +422,9 @@ fn run_with_state(
     // Initialize handshake (JSON-RPC request id is echoed by initialize_finish).
     let (initialize_id, initialize_params) = connection.initialize_start()?;
     let watching = FileWatching::new(&initialize_params);
-    state.configure_code_actions(&initialize_params);
     state.initialize_workspace_roots(watching.workspace_roots.clone());
+    state.configure_code_actions(&initialize_params);
+    state.set_dynamic_file_watching(watching.dynamic);
     let initialize_result = InitializeResult {
         capabilities: server_capabilities(),
         server_info: Some(ServerInfo {
@@ -640,18 +629,34 @@ fn analysis_worker_with(
                     Err(RecvTimeoutError::Disconnected) => return Ok(()),
                 }
             }
-            None => match receiver.recv() {
+            None if watching.dynamic => match receiver.recv() {
                 Ok((next_generation, message, cancelled)) => {
                     generation = next_generation;
                     Some((message, cancelled))
                 }
                 Err(_) => return Ok(()),
             },
+            None => match receiver.recv_timeout(Duration::from_secs(1)) {
+                Ok((next_generation, message, cancelled)) => {
+                    generation = next_generation;
+                    Some((message, cancelled))
+                }
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            },
         };
 
         let Some((message, token)) = message else {
-            // Debounce window elapsed: flush every dirty document.
+            // Revalidate only after a quiet debounce/idle interval.
+            let disk_updates = state.revalidate_disk();
+            let refreshed = !disk_updates.is_empty();
+            for (uri, diagnostics) in disk_updates {
+                publish(&connection, &state, &uri, &diagnostics)?;
+            }
             let uris = debounce.drain();
+            if uris.is_empty() && !refreshed {
+                continue;
+            }
             for (affected_uri, diagnostics) in state.analyze_affected_many(&uris) {
                 publish(&connection, &state, &affected_uri, &diagnostics)?;
             }
@@ -659,7 +664,11 @@ fn analysis_worker_with(
             publish_config_messages(&connection, &mut state)?;
             continue;
         };
-        let cancelled = || token.as_ref().is_some_and(|token| token.load(Ordering::Relaxed));
+        let cancelled = || {
+            token
+                .as_ref()
+                .is_some_and(|token| token.load(Ordering::Relaxed))
+        };
         if cancelled() {
             continue;
         }
@@ -676,6 +685,9 @@ fn analysis_worker_with(
                         continue;
                     }
                     let uri = params.text_document.uri.as_str().to_string();
+                    for (affected_uri, diagnostics) in state.revalidate_disk() {
+                        publish(&connection, &state, &affected_uri, &diagnostics)?;
+                    }
                     let diagnostics = state.open(
                         &uri,
                         params.text_document.text,
@@ -720,6 +732,9 @@ fn analysis_worker_with(
                         continue;
                     }
                     let uri = params.text_document.uri.as_str().to_string();
+                    for (affected_uri, diagnostics) in state.revalidate_disk() {
+                        publish(&connection, &state, &affected_uri, &diagnostics)?;
+                    }
                     let diagnostics = state.save(&uri, params.text);
                     publish_affected_with_current(&connection, &mut state, &uri, &diagnostics)?;
                     debounce.clear(&uri);
@@ -731,11 +746,8 @@ fn analysis_worker_with(
                         continue;
                     }
                     let uri = params.text_document.uri.as_str().to_string();
-                    let mut affected = state.affected_open_uris(&uri);
                     state.close(&uri);
-                    affected.extend(state.affected_open_uris(&uri));
-                    affected.sort();
-                    affected.dedup();
+                    let affected = state.affected_open_uris(&uri);
                     debounce.clear(&uri);
                     // Clear stale squiggles before refreshing dependents against
                     // the closed document's on-disk workspace state.

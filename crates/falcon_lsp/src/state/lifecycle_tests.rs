@@ -76,9 +76,12 @@ fn close_restores_disk_api_and_reanalyzes_dependents() {
     assert!(state.analyze(&caller_uri).is_empty());
     state.open(&api_uri, "int api() => 1;\n".into(), Some(1));
     assert!(state.affected_open_uris(&api_uri).contains(&caller_uri));
-    assert!(state.analyze(&caller_uri).iter().any(|diagnostic| {
-        diagnostic.rule == "avoid-ignoring-return-values"
-    }));
+    assert!(
+        state
+            .analyze(&caller_uri)
+            .iter()
+            .any(|diagnostic| { diagnostic.rule == "avoid-ignoring-return-values" })
+    );
     let builds = state.semantic_snapshot_build_count;
     state.close(&api_uri);
     assert!(state.semantic_snapshot.is_none());
@@ -128,9 +131,12 @@ fn watched_disk_change_remains_authoritative_after_close() {
     let builds = state.semantic_snapshot_build_count;
     state.watched_files_changed(&[path]);
     assert_eq!(state.semantic_snapshot_build_count, builds + 1);
-    assert!(state.analyze(&caller_uri).iter().any(|diagnostic| {
-        diagnostic.rule == "avoid-ignoring-return-values"
-    }));
+    assert!(
+        state
+            .analyze(&caller_uri)
+            .iter()
+            .any(|diagnostic| { diagnostic.rule == "avoid-ignoring-return-values" })
+    );
 }
 
 #[test]

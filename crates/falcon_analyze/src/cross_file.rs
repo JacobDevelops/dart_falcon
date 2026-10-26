@@ -86,7 +86,9 @@ impl ProjectFile {
 }
 
 pub trait CrossFileRule: Send + Sync {
-    /// Provided indexes must describe the same Dart files and source revisions.
+    /// Provided indexes must describe the same Dart files and agree with their
+    /// current semantic facts. Retained declaration-index syntax may predate
+    /// body-only edits when declarations are unchanged and body facts are refreshed.
     /// The environment must be the same package snapshot used for file analysis.
     /// Returns collector output; use a registry or [`CrossFileRuleAnalysis`] to assign ids.
     fn prepare_project(
