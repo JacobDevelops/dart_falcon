@@ -148,7 +148,7 @@
           "short": null,
           "valueName": "PATH",
           "default": null,
-          "help": "Record current findings (defaults to falcon-baseline.json)",
+          "help": "Record current findings (defaults to the configured baseline or project-root falcon-baseline.json)",
           "possibleValues": [],
           "positional": false
         },
