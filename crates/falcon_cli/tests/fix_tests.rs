@@ -245,7 +245,7 @@ fn dry_run_rejects_baseline_writes_without_changing_files() {
     let baseline = dir.path().join("baseline.json");
     fs::write(&baseline, "existing baseline").unwrap();
     options.dry_run = true;
-    options.write_baseline = Some(baseline.clone());
+    options.write_baseline = Some(Some(baseline.clone()));
     let error = collect_check_with_sdk_locator(&options, |_| None).unwrap_err();
     assert!(error.contains("--dry-run"), "{error}");
     assert!(error.contains("--write-baseline"), "{error}");

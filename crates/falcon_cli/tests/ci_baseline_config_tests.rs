@@ -20,7 +20,7 @@ fn configured_baseline_uses_project_root_and_cli_baseline_takes_precedence() {
     let mut options = CheckOptions {
         paths: vec![project.path().to_path_buf()],
         config_path: Some(config.clone()),
-        write_baseline: Some(baseline),
+        write_baseline: Some(Some(baseline)),
         ..Default::default()
     };
     collect_check_with_sdk_locator(&options, |_| None).unwrap();
@@ -47,7 +47,7 @@ fn writing_baseline_does_not_destroy_existing_debt_after_operational_failure() {
     let options = CheckOptions {
         paths: vec![project.path().join("missing.dart")],
         config_path: Some(config),
-        write_baseline: Some(baseline.clone()),
+        write_baseline: Some(Some(baseline.clone())),
         ..Default::default()
     };
     let error = collect_check_with_sdk_locator(&options, |_| None).unwrap_err();

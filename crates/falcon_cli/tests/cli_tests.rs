@@ -90,7 +90,7 @@ fn ci_adoption_options_parse() {
         };
         assert!(options.error_on_warnings);
         assert_eq!(options.baseline, Some("debt.json".into()));
-        assert_eq!(options.write_baseline, Some("falcon-baseline.json".into()));
+        assert_eq!(options.write_baseline, Some(None));
         assert_eq!(options.error_exit_code, 7);
     }
 }

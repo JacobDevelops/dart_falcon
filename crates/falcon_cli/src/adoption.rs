@@ -21,6 +21,15 @@ pub(crate) fn apply_baseline(
         .map(|path| config.root_dir().unwrap_or(root).join(path));
     let baseline_path = options.baseline.as_ref().or(configured.as_ref());
     if let Some(path) = &options.write_baseline {
+        let default_path;
+        let path = if let Some(path) = path {
+            path
+        } else if let Some(path) = &configured {
+            path
+        } else {
+            default_path = root.join("falcon-baseline.json");
+            &default_path
+        };
         if diagnostics.iter().any(|diagnostic| {
             falcon_diagnostics::RESERVED_DIAGNOSTIC_IDS.contains(&diagnostic.rule)
         }) {

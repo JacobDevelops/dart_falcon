@@ -59,9 +59,9 @@ pub struct CheckOptions {
     /// Suppress existing findings recorded in this baseline
     #[arg(long, value_name = "PATH")]
     pub baseline: Option<PathBuf>,
-    /// Record current findings (defaults to falcon-baseline.json)
-    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "falcon-baseline.json")]
-    pub write_baseline: Option<PathBuf>,
+    /// Record current findings (defaults to the configured baseline or project-root falcon-baseline.json)
+    #[arg(long, value_name = "PATH", num_args = 0..=1)]
+    pub write_baseline: Option<Option<PathBuf>>,
     /// Suppress all diagnostic output
     #[arg(long)]
     pub quiet: bool,

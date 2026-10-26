@@ -1775,7 +1775,7 @@ fn explicit_workspace_stdout_counts_after_baseline_before_print_limit() {
     collect_check(&CheckOptions {
         paths: vec![workspace.path().to_path_buf()],
         config_path: Some(workspace.path().join("falcon.json")),
-        write_baseline: Some(baseline),
+        write_baseline: Some(Some(baseline)),
         ..Default::default()
     })
     .unwrap();

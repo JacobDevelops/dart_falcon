@@ -54,7 +54,7 @@ fn baseline_tracks_content_across_line_shifts_and_counts_duplicates() {
     let mut options = CheckOptions {
         paths: vec![dir.path().to_path_buf()],
         config_path: Some(config),
-        write_baseline: Some(baseline.clone()),
+        write_baseline: Some(Some(baseline.clone())),
         ..Default::default()
     };
     collect(&options);
