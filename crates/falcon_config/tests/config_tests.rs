@@ -35,6 +35,92 @@ fn test_default_config() {
     assert!(cfg.linter.rules.groups.is_empty());
     assert!(cfg.linter.domains.is_empty());
     assert_eq!(cfg.max_errors, None);
+    assert!(cfg.baseline.is_none());
+    assert!(!cfg.error_on_warnings);
+}
+
+#[test]
+fn test_adoption_settings_parse_and_serialize() {
+    let loaded = falcon_config::deserialize_config_value(
+        &serde_json::json!({
+            "baseline": "ci/falcon-baseline.json",
+            "error-on-warnings": true
+        }),
+        std::path::Path::new("project/falcon.json"),
+    )
+    .expect("canonical adoption settings load");
+    assert!(loaded.warnings.is_empty());
+    assert_eq!(
+        loaded.config.baseline,
+        Some(PathBuf::from("ci/falcon-baseline.json"))
+    );
+    assert!(loaded.config.error_on_warnings);
+    let serialized = serde_json::to_value(&loaded.config).unwrap();
+    assert_eq!(serialized["baseline"], "ci/falcon-baseline.json");
+    assert_eq!(serialized["error-on-warnings"], true);
+    assert!(serialized.get("error_on_warnings").is_none());
+
+    let cfg = from_json(serde_json::json!({
+        "baseline": null,
+        "error-on-warnings": false
+    }));
+    assert!(cfg.baseline.is_none());
+    assert!(!cfg.error_on_warnings);
+    let serialized = serde_json::to_value(&cfg).unwrap();
+    assert!(serialized.get("baseline").is_none());
+    assert_eq!(serialized["error-on-warnings"], false);
+}
+
+#[test]
+fn test_adoption_settings_reject_invalid_types_at_the_key() {
+    for (key, values) in [
+        (
+            "baseline",
+            vec![
+                serde_json::json!(false),
+                serde_json::json!(1),
+                serde_json::json!([]),
+                serde_json::json!({}),
+            ],
+        ),
+        (
+            "error-on-warnings",
+            vec![
+                serde_json::json!(null),
+                serde_json::json!("true"),
+                serde_json::json!(1),
+                serde_json::json!([]),
+                serde_json::json!({}),
+            ],
+        ),
+    ] {
+        for value in values {
+            let error = falcon_config::deserialize_config_value(
+                &serde_json::json!({key: value}),
+                std::path::Path::new("falcon.json"),
+            )
+            .expect_err("wrong-typed adoption setting must fail");
+            assert_eq!(
+                error.1,
+                vec![falcon_config::ConfigPathSegment::Key(key.to_owned())]
+            );
+        }
+    }
+}
+
+#[test]
+fn test_adoption_settings_are_canonical_top_level_only() {
+    assert!(falcon_config::KNOWN_TOP_LEVEL_KEYS.contains(&"baseline"));
+    assert!(falcon_config::KNOWN_TOP_LEVEL_KEYS.contains(&"error-on-warnings"));
+    for value in [
+        serde_json::json!({"error_on_warnings": true}),
+        serde_json::json!({"errorOnWarnings": true}),
+        serde_json::json!({"overrides": [{"baseline": "baseline.json"}]}),
+        serde_json::json!({"overrides": [{"error-on-warnings": true}]}),
+    ] {
+        falcon_config::deserialize_config_value(&value, std::path::Path::new("falcon.json"))
+            .expect_err("adoption settings have no aliases or per-path overrides");
+    }
 }
 
 #[test]

@@ -47,6 +47,13 @@ pub struct FalconConfig {
         deserialize_with = "optional_integer::<_, 1>"
     )]
     pub max_errors: Option<usize>,
+    /// Optional diagnostic baseline path. Relative paths use the configuration
+    /// files root; the CLI's explicit baseline path takes precedence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<PathBuf>,
+    /// Fail checks with warning diagnostics as well as errors. Defaults to false.
+    #[serde(rename = "error-on-warnings")]
+    pub error_on_warnings: bool,
 }
 
 /// Accept JSON Schema integers, including whole-number float representations.
@@ -1183,6 +1190,8 @@ pub const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "cross-file",
     "overrides",
     "max-errors",
+    "baseline",
+    "error-on-warnings",
 ];
 
 /// Legacy top-level spellings still accepted, each mapped to its canonical key.
@@ -1307,7 +1316,7 @@ fn validate_keys(
         }
         use ConfigObject as Object;
         let child = match (kind, canonical) {
-            (Object::Root, "$schema" | "max-errors")
+            (Object::Root, "$schema" | "max-errors" | "baseline" | "error-on-warnings")
             | (Object::Files | Object::Override, "includes")
             | (Object::Linter | Object::CrossFile | Object::OverrideRules, "enabled")
             | (Object::Rules, "recommended")

@@ -2,11 +2,14 @@
 //!
 //! Commands: `falcon check [paths]`, `falcon migrate`, `falcon lsp`, `falcon version`, `falcon --version`.
 
+mod adoption;
 pub mod analyze_pipeline;
 pub mod args;
+pub mod baseline;
 pub mod logging;
 pub mod migrate;
 pub mod output;
+pub mod report;
 pub mod run;
 
 pub use analyze_pipeline::{

@@ -13,6 +13,18 @@
       ],
       "description": "URL of the falcon.json JSON Schema, enabling rule autocomplete and level validation in editors."
     },
+    "baseline": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Diagnostic baseline path. Relative paths resolve from the configuration files root (the current directory for user-level config). The CLI --baseline path takes precedence. Omit or use null for no baseline."
+    },
+    "error-on-warnings": {
+      "type": "boolean",
+      "default": false,
+      "description": "Fail checks on warnings as well as errors. By default, warning-only checks succeed. CLI --error-on-warnings enables this setting."
+    },
     "files": {
       "type": "object",
       "additionalProperties": false,

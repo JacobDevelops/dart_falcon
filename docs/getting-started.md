@@ -89,6 +89,16 @@ Emit machine-readable output for tooling:
 falcon check . --format json
 ```
 
+CI reports are available as `--format sarif` (SARIF 2.1.0),
+`--format gitlab` (GitLab Code Quality / CodeClimate JSON),
+`--format checkstyle` (XML), `--format sonar` (Sonar generic issue import JSON),
+and `--format html` (a self-contained page). Redirect stdout to a report file.
+GitLab and Sonar paths are relative to the current directory, so invoke falcon
+from the repository or Sonar project base. Other report paths are relative to
+the configuration root, or the current directory when no configuration exists.
+Status messages stay on stderr. Output limits also apply to report files;
+omit `max-errors` when uploading a complete CI report.
+
 Diagnostic `line` and `col` are one-based, with columns counted in UTF-16 code units; unresolved positions are omitted from JSON rather than reported as zero. JSON severities are lowercase (`error`, `warning`, `info`). The half-open `span.start` and `span.end` are UTF-8 byte offsets into the source file, not a column and length. To compare a diagnostic range with `dart analyze --format=machine`, count the UTF-16 code units in the source slice covered by `span`.
 
 The `eol-at-end-of-file` rule can report a virtual one-character range at EOF. In that case `span.end` is one byte beyond the file; preserve the extra unit when computing the UTF-16 range length.
@@ -98,13 +108,35 @@ Diagnostics may include a `fix` object with a `title` (the quick-fix label, such
 falcon discovers `falcon.json` automatically: the current directory, then the
 enclosing git root, then `~/.falcon.json`.
 
-**Exit codes:** `falcon check` exits `0` when clean and `1` when diagnostics (including info or warnings) are reported. `--exit-code` changes the findings exit code. Configuration and analysis pipeline failures exit `1` regardless of that flag. A missing or explicitly filtered path, or a run that selects neither Dart files nor package manifests, reports an error; use `--no-errors-on-unmatched` for tools such as lint-staged that can pass unmatched paths. A manifest counts when named explicitly or found within an input directory, not merely discovered in an ancestor directory. Omitting paths checks the current directory. Unreadable or non-UTF-8 files are skipped with a warning. `--max-errors` limits printing only, not the exit code:
+**Exit codes:** `falcon check` exits `0` when there are no errors, including warning-only and info-only runs. Errors exit `1`; `--error-on-warnings` (or config `error-on-warnings: true`) also fails warning-only runs. Info never fails a run. `--exit-code` (also accepted as `--error-exit-code`) changes the findings exit code. Configuration and analysis pipeline failures exit `1` regardless of that flag. A missing or explicitly filtered path, or a run that selects neither Dart files nor package manifests, reports an error; use `--no-errors-on-unmatched` for tools such as lint-staged that can pass unmatched paths. A manifest counts when named explicitly or found within an input directory, not merely discovered in an ancestor directory. Omitting paths checks the current directory. Unreadable or non-UTF-8 files are skipped with a warning. `--max-errors` limits printing only, not the exit code:
 
 ```sh
 falcon check . --exit-code 2    # use exit code 2 on findings
 falcon check . --max-errors 50  # report at most 50 diagnostics
 falcon check missing.dart --no-errors-on-unmatched  # tolerate unmatched paths
 ```
+
+### Adopting falcon with existing findings
+
+Record current lint debt, then report only new findings:
+
+```sh
+falcon check . --write-baseline             # writes falcon-baseline.json
+falcon check . --write-baseline debt.json   # choose a path
+falcon check . --baseline debt.json --error-on-warnings
+```
+
+The baseline stores counted content fingerprints, not line numbers or messages.
+Inserting lines above a finding does not make it new, while adding another
+identical occurrence still reports that extra finding. Changes to the flagged
+source text can make a finding new. Syntax and operational errors cannot be
+baselined. Suppressed and fixed (stale) counts are printed on stderr. Counts
+describe the selected input paths: use the same full-project inputs for capture
+and CI rather than treating findings outside a partial run as fixed. Regenerating
+replaces the whole baseline with current findings; syntax and operational errors
+prevent writing it. Baseline matching happens before output limits and exit-code
+selection. CLI baseline paths resolve from the current directory; a configured
+`baseline` path resolves from the configuration root.
 
 ## Editor setup
 

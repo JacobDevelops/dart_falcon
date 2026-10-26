@@ -1,5 +1,6 @@
 //! Analyze pipeline: config loading, file walking, parallel analysis, and diagnostic output.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::output;
@@ -16,6 +17,11 @@ use falcon_project::{
 pub enum OutputFormat {
     Text,
     Json,
+    Sarif,
+    Gitlab,
+    Checkstyle,
+    Sonar,
+    Html,
 }
 
 /// Options for the check pipeline.
@@ -35,6 +41,15 @@ pub struct CheckOptions {
     /// Limit the number of printed diagnostics without changing the exit status
     #[arg(long, value_name = "N")]
     pub max_errors: Option<usize>,
+    /// Fail on warnings as well as errors
+    #[arg(long)]
+    pub error_on_warnings: bool,
+    /// Suppress existing findings recorded in this baseline
+    #[arg(long, value_name = "PATH")]
+    pub baseline: Option<PathBuf>,
+    /// Record current findings (defaults to falcon-baseline.json)
+    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "falcon-baseline.json")]
+    pub write_baseline: Option<PathBuf>,
     /// Suppress all diagnostic output
     #[arg(long)]
     pub quiet: bool,
@@ -45,6 +60,7 @@ pub struct CheckOptions {
     #[arg(
         id = "exit_code",
         long = "exit-code",
+        alias = "error-exit-code",
         value_name = "N",
         default_value_t = 1
     )]
@@ -58,6 +74,9 @@ impl Default for CheckOptions {
             config_path: None,
             exclude_patterns: vec![],
             max_errors: None,
+            error_on_warnings: false,
+            baseline: None,
+            write_baseline: None,
             quiet: false,
             no_errors_on_unmatched: false,
             format: OutputFormat::Text,
@@ -72,8 +91,10 @@ pub struct CheckOutput {
     pub diagnostics: Vec<Diagnostic>,
     pub total_files: usize,
     pub exit_code: i32,
-    /// Effective print limit; `diagnostics` always contains every finding.
+    /// Effective print limit; `diagnostics` contains every unbaselined finding.
     pub max_errors: Option<usize>,
+    /// Root used for portable report and baseline paths.
+    pub root: PathBuf,
 }
 
 /// Run analysis and collect results without printing diagnostics.
@@ -113,6 +134,9 @@ fn collect_check_impl(
         eprintln!("warning: {warning}");
     }
     let config = loaded.config;
+    let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+    let root = config.root_dir().unwrap_or(&cwd).to_path_buf();
+    let error_on_warnings = options.error_on_warnings || config.error_on_warnings;
     let default_paths;
     let paths = if options.paths.is_empty() {
         default_paths = [PathBuf::from(".")];
@@ -174,11 +198,13 @@ fn collect_check_impl(
         }
     }
     if files.is_empty() && manifests.is_empty() {
+        crate::adoption::apply_baseline(options, &config, &root, &mut unmatched, &HashMap::new())?;
         return Ok(CheckOutput {
             exit_code: i32::from(!unmatched.is_empty()),
             diagnostics: unmatched,
             total_files: 0,
             max_errors,
+            root,
         });
     }
     // Package configurations give every file its language version; resolving
@@ -233,23 +259,42 @@ fn collect_check_impl(
         );
     }
 
+    if options.baseline.is_some() || config.baseline.is_some() || options.write_baseline.is_some() {
+        let sources = if collect_programs {
+            project_files
+                .iter()
+                .map(|file| (file.path.to_string_lossy(), file.source()))
+                .collect()
+        } else {
+            files
+                .iter()
+                .chain(manifests.iter())
+                .map(|(path, source)| (path.to_string_lossy(), source.as_str()))
+                .collect()
+        };
+        crate::adoption::apply_baseline(options, &config, &root, &mut diagnostics, &sources)?;
+    }
     let exit_code = if pipeline_failed || has_unmatched {
         1
-    } else if diagnostics.is_empty() {
-        0
-    } else {
+    } else if diagnostics.iter().any(|diagnostic| {
+        diagnostic.severity == Severity::Error
+            || (error_on_warnings && diagnostic.severity == Severity::Warning)
+    }) {
         options.error_exit_code
+    } else {
+        0
     };
     Ok(CheckOutput {
         diagnostics,
         total_files,
         exit_code,
         max_errors,
+        root,
     })
 }
 
-/// Run the check pipeline and print diagnostics. Returns 0 if no diagnostics,
-/// `error_exit_code` if any found, 1 on pipeline errors.
+/// Run the check pipeline and print diagnostics. Errors fail, warnings fail
+/// only when requested, and pipeline errors always return 1.
 pub fn run_check(options: CheckOptions) -> i32 {
     run_check_impl(options, None)
 }
@@ -285,6 +330,7 @@ fn run_check_impl(options: CheckOptions, sdk_locator: Option<SdkLocator>) -> i32
                 }
             }
             OutputFormat::Json => println!("{}", output::format_json(printed)),
+            format => println!("{}", crate::report::render(format, printed, &result.root)),
         }
     }
 

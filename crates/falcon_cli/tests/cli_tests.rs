@@ -67,6 +67,32 @@ fn check_options_parse_with_stable_argument_ids() {
 }
 
 #[test]
+fn ci_adoption_options_parse() {
+    for format in ["sarif", "gitlab", "checkstyle", "sonar", "html"] {
+        let cli = Cli::try_parse_from([
+            "falcon",
+            "check",
+            "--format",
+            format,
+            "--error-on-warnings",
+            "--baseline",
+            "debt.json",
+            "--write-baseline",
+            "--error-exit-code",
+            "7",
+        ])
+        .unwrap();
+        let Command::Check(options) = cli.command else {
+            panic!("expected check")
+        };
+        assert!(options.error_on_warnings);
+        assert_eq!(options.baseline, Some("debt.json".into()));
+        assert_eq!(options.write_baseline, Some("falcon-baseline.json".into()));
+        assert_eq!(options.error_exit_code, 7);
+    }
+}
+
+#[test]
 fn check_rejects_removed_parallel_flag() {
     let error = Cli::try_parse_from(["falcon", "check", "--parallel"]).unwrap_err();
     assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);

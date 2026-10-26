@@ -139,6 +139,18 @@ pub fn config_schema() -> Value {
                 "description": "URL of the falcon.json JSON Schema, enabling rule \
                     autocomplete and level validation in editors."
             },
+            "baseline": {
+                "type": ["string", "null"],
+                "description": "Diagnostic baseline path. Relative paths resolve from the \
+                    configuration files root (the current directory for user-level config). \
+                    The CLI --baseline path takes precedence. Omit or use null for no baseline."
+            },
+            "error-on-warnings": {
+                "type": "boolean",
+                "default": false,
+                "description": "Fail checks on warnings as well as errors. By default, \
+                    warning-only checks succeed. CLI --error-on-warnings enables this setting."
+            },
             "files": {
                 "type": "object",
                 "additionalProperties": false,
@@ -289,6 +301,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn adoption_settings_have_canonical_types_and_defaults() {
+        let schema = config_schema();
+        let properties = &schema["properties"];
+        assert_eq!(properties["baseline"]["type"], json!(["string", "null"]));
+        assert_eq!(properties["error-on-warnings"]["type"], "boolean");
+        assert_eq!(properties["error-on-warnings"]["default"], false);
+        assert!(properties.get("error_on_warnings").is_none());
+        let overrides = &properties["overrides"]["items"]["properties"];
+        assert!(overrides.get("baseline").is_none());
+        assert!(overrides.get("error-on-warnings").is_none());
+    }
+
+    #[test]
     fn optional_configuration_fields_accept_null() {
         let schema = config_schema();
         for path in [
@@ -299,6 +324,7 @@ mod tests {
             "/definitions/overrideLinter/properties/enabled/type",
             "/definitions/overrideCrossFile/properties/enabled/type",
             "/properties/max-errors/type",
+            "/properties/baseline/type",
         ] {
             assert!(
                 schema

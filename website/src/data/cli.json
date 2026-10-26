@@ -63,7 +63,12 @@
           "help": "Output format for diagnostics",
           "possibleValues": [
             "text",
-            "json"
+            "json",
+            "sarif",
+            "gitlab",
+            "checkstyle",
+            "sonar",
+            "html"
           ],
           "positional": false
         },
@@ -84,6 +89,36 @@
           "valueName": "N",
           "default": null,
           "help": "Limit the number of printed diagnostics without changing the exit status",
+          "possibleValues": [],
+          "positional": false
+        },
+        {
+          "name": "error_on_warnings",
+          "long": "--error-on-warnings",
+          "short": null,
+          "valueName": null,
+          "default": "false",
+          "help": "Fail on warnings as well as errors",
+          "possibleValues": [],
+          "positional": false
+        },
+        {
+          "name": "baseline",
+          "long": "--baseline",
+          "short": null,
+          "valueName": "PATH",
+          "default": null,
+          "help": "Suppress existing findings recorded in this baseline",
+          "possibleValues": [],
+          "positional": false
+        },
+        {
+          "name": "write_baseline",
+          "long": "--write-baseline",
+          "short": null,
+          "valueName": "PATH",
+          "default": null,
+          "help": "Record current findings (defaults to falcon-baseline.json)",
           "possibleValues": [],
           "positional": false
         },

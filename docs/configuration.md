@@ -82,7 +82,9 @@ The VS Code extension enables the [published schema](../schema/falcon.schema.jso
       }
     }
   },
-  "max-errors": null
+  "max-errors": null,
+  "baseline": null,
+  "error-on-warnings": false
 }
 ```
 
@@ -176,9 +178,38 @@ With no config file, only falcon's recommended rules run, at warning severity.
 
 ## `max-errors`
 
-Optional cap on printed diagnostics (`null` = unlimited). In `falcon.json`, the value must be **at least 1**; `0` is rejected at load. The CLI `--max-errors` flag overrides the config value and accepts `0` to hide every diagnostic. The cap never changes the exit code: all diagnostics count, including those not printed. The legacy config key `max_errors` still loads with a deprecation warning.
+Optional cap on printed diagnostics (`null` = unlimited). In `falcon.json`, the value must be **at least 1**; `0` is rejected at load. The CLI `--max-errors` flag overrides the config value and accepts `0` to hide every diagnostic. The cap never changes the exit code: diagnostics not printed still participate in the [exit policy](#error-on-warnings). The legacy config key `max_errors` still loads with a deprecation warning.
 Whole-number JSON values such as `1.0` are accepted; fractional and out-of-range
 values are rejected.
+
+## `baseline`
+
+Optional path to a diagnostic baseline used by `falcon check`. Omit this key or
+set it to `null` to disable baseline filtering. The value must otherwise be a
+string. Matching baseline diagnostics are suppressed; new diagnostics remain
+visible and participate in the exit policy.
+
+Relative configured paths resolve from the configuration files root: the
+directory containing `falcon.json`, or the current working directory for
+user-level `~/.falcon.json` (including the directory-alias and config-symlink
+behavior described under [`files.includes`](#filesincludes)). Absolute paths are
+used as supplied. `--baseline <path>` overrides the configured baseline, and its
+relative path resolves from the CLI's current working directory, not the config
+directory. The same current-directory base applies to `--write-baseline <path>`.
+
+## `error-on-warnings`
+
+Boolean, default `false`; `null` is invalid. By default, `falcon check` succeeds
+when its remaining diagnostics are warnings or information only. Error
+diagnostics cause a nonzero exit. Set `"error-on-warnings": true` to also fail on
+remaining warning diagnostics; information alone still succeeds. The CLI
+`--error-on-warnings` flag enables this policy even when the config value is
+`false`. Baseline-suppressed diagnostics do not count, while diagnostics hidden
+by `max-errors` still count. Configuration and pipeline failures remain errors
+regardless of this setting.
+
+Both `baseline` and `error-on-warnings` are top-level settings, not per-path
+override keys.
 
 ## Rule options
 
