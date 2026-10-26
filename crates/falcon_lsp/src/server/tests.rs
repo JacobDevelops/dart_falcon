@@ -73,8 +73,8 @@ fn initialize_analyzes_all_folders_and_reports_secondary_configuration_errors() 
     for name in ["used.dart", "unused.dart"] {
         std::fs::write(first.join("lib/src").join(name), source).unwrap();
     }
-    // This closed file must enter the analysis graph from the second root.
-    // Otherwise used.dart is incorrectly reported as unreachable.
+    // Semantic analysis can still resolve across roots, but each root's
+    // cross-file rules consider only files from that root.
     std::fs::write(
         second.join("main.dart"),
         "import '../first/lib/src/used.dart';\nvoid main() { Used(); }\n",
@@ -133,7 +133,7 @@ fn initialize_analyzes_all_folders_and_reports_secondary_configuration_errors() 
             }
         }
     }
-    for (name, unused) in [("used.dart", false), ("unused.dart", true)] {
+    for (name, unused) in [("used.dart", true), ("unused.dart", true)] {
         let uri = file_uri(&first.join("lib/src").join(name)).unwrap();
         client.sender.send(ServerNotification::new(DidOpenTextDocument::METHOD.into(), json!({
             "textDocument": {"uri": uri, "languageId": "dart", "version": 1, "text": source}

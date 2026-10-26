@@ -108,6 +108,41 @@ fn secondary_root_cross_file_rules_run_without_enabling_primary_root_rules() {
 }
 
 #[test]
+fn cross_file_usage_in_another_editor_root_does_not_suppress_unused_files() {
+    let directory = tempfile::tempdir().unwrap();
+    let first = directory.path().join("first");
+    let second = directory.path().join("second");
+    for root in [&first, &second] {
+        std::fs::create_dir_all(root.join("lib")).unwrap();
+        std::fs::write(
+            root.join("falcon.json"),
+            r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("lib/main.dart"), "void main() {}").unwrap();
+    }
+    let orphan = second.join("lib/orphan.dart");
+    std::fs::write(&orphan, "class Orphan {}").unwrap();
+    std::fs::write(
+        first.join("lib/main.dart"),
+        "import '../../second/lib/orphan.dart'; void main() { Orphan(); }",
+    )
+    .unwrap();
+    let mut standalone = LspState::new_from(None, |_| None, second.clone());
+    standalone.initialize_workspace_roots(vec![second.clone()]);
+    let expected = standalone.cross_file_diagnostics();
+    assert!(expected[orphan.to_str().unwrap()].iter().any(|diagnostic| {
+        diagnostic.rule == "unused-files"
+    }));
+    let mut editor = LspState::new_from(None, |_| None, first.clone());
+    editor.initialize_workspace_roots(vec![first, second]);
+    assert_eq!(
+        serde_json::to_value(editor.cross_file_diagnostics()).unwrap(),
+        serde_json::to_value(expected).unwrap()
+    );
+}
+
+#[test]
 fn invalid_member_config_preserves_valid_workspace_and_member_rules() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();

@@ -1629,6 +1629,22 @@ impl LspState {
                 .as_ref()
                 .map(|cache| &cache.indexes)
         };
+        let mut files_by_root = vec![Vec::new(); self.workspace_roots.len()];
+        if files_by_root.len() == 1 {
+            files_by_root[0] = files;
+        } else {
+            for (index, root_files) in files_by_root.iter_mut().enumerate() {
+                root_files.reserve(
+                    files
+                        .iter()
+                        .filter(|file| self.root_index(&file.path) == index)
+                        .count(),
+                );
+            }
+            for file in files {
+                files_by_root[self.root_index(&file.path)].push(file);
+            }
+        }
         let result = (0..self.workspace_roots.len()).try_fold(Vec::new(), |mut all, index| {
             let (config, rules) = if index == 0 {
                 (&self.config, &self.cross_file_rules)
@@ -1637,8 +1653,13 @@ impl LspState {
                 (&entry.config, &entry.analysis.cross_file_registry)
             };
             if !rules.is_empty() {
-                let diagnostics =
-                    cross_file_diagnostics(&self.environment, rules, &files, config, indexes)?;
+                let diagnostics = cross_file_diagnostics(
+                    &self.environment,
+                    rules,
+                    &files_by_root[index],
+                    config,
+                    indexes,
+                )?;
                 all.extend(diagnostics.into_iter().filter(|diagnostic| {
                     self.root_index(Path::new(&diagnostic.file_path)) == index
                 }));
