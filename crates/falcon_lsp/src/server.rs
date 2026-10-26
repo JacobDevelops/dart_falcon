@@ -9,6 +9,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::RecvTimeoutError;
@@ -56,6 +57,8 @@ impl Default for ServerOptions {
 }
 
 type ServerError = Box<dyn Error + Send + Sync>;
+
+type WorkerMessage = (u64, Message, Option<Arc<AtomicBool>>);
 
 #[derive(Default)]
 struct Debounce {
@@ -463,11 +466,11 @@ struct AnalysisRound {
 /// The transport owns publication and cancellation; the worker alone owns state.
 fn relay(
     connection: &Connection,
-    input: crossbeam_channel::Sender<(u64, Message)>,
+    input: crossbeam_channel::Sender<WorkerMessage>,
     output: crossbeam_channel::Receiver<AnalysisRound>,
 ) -> Result<(), ServerError> {
     let mut generation = 0;
-    let mut pending_requests = HashSet::new();
+    let mut pending_requests = HashMap::<RequestId, Arc<AtomicBool>>::new();
     let mut publications = HashMap::new();
     let mut other_messages = Vec::new();
     let mut publication_order = 0_u64;
@@ -476,12 +479,16 @@ fn relay(
         crossbeam_channel::select_biased! {
             recv(connection.receiver) -> message => {
                 let Ok(message) = message else { return Ok(()); };
+                let mut cancelled = None;
                 match &message {
+                    // Only requests need a token; notifications always execute
+                    // to preserve the worker's ordered document state.
                     Message::Request(request) => {
                         if request.method == "shutdown" {
                             // Resolve every accepted request before acknowledging
                             // shutdown; the worker's late responses are discarded.
-                            for id in pending_requests.drain() {
+                            for (id, token) in pending_requests.drain() {
+                                token.store(true, Ordering::Relaxed);
                                 connection.sender.send(Response::new_err(
                                     id,
                                     ErrorCode::RequestCanceled as i32,
@@ -491,13 +498,16 @@ fn relay(
                             connection.handle_shutdown(request)?;
                             return Ok(());
                         }
-                        pending_requests.insert(request.id.clone());
+                        let token = Arc::new(AtomicBool::new(false));
+                        pending_requests.insert(request.id.clone(), Arc::clone(&token));
+                        cancelled = Some(token);
                     }
                     Message::Notification(notification) if notification.method == "$/cancelRequest" => {
                         if let Some(id) = notification.params.get("id")
                             .and_then(|id| serde_json::from_value::<RequestId>(id.clone()).ok())
-                            && pending_requests.remove(&id)
+                            && let Some(token) = pending_requests.remove(&id)
                         {
+                            token.store(true, Ordering::Relaxed);
                             connection.sender.send(Response::new_err(
                                 id,
                                 ErrorCode::RequestCanceled as i32,
@@ -520,7 +530,7 @@ fn relay(
                     }
                     Message::Response(_) => {}
                 }
-                input.send((generation, message))?;
+                input.send((generation, message, cancelled))?;
             }
             recv(output) -> round => {
                 let Ok(round) = round else { return Ok(()); };
@@ -539,7 +549,7 @@ fn relay(
                             }
                         }
                         Message::Response(response) => {
-                            if pending_requests.remove(&response.id) {
+                            if pending_requests.remove(&response.id).is_some() {
                                 other_messages.push(Message::Response(response));
                             }
                         }
@@ -565,7 +575,7 @@ fn analysis_worker(
     options: ServerOptions,
     state: LspState,
     watching: FileWatching,
-    receiver: crossbeam_channel::Receiver<(u64, Message)>,
+    receiver: crossbeam_channel::Receiver<WorkerMessage>,
     output: crossbeam_channel::Sender<AnalysisRound>,
 ) -> Result<(), ServerError> {
     analysis_worker_with(options, state, watching, receiver, output, |_| {})
@@ -575,7 +585,7 @@ fn analysis_worker_with(
     options: ServerOptions,
     mut state: LspState,
     mut watching: FileWatching,
-    receiver: crossbeam_channel::Receiver<(u64, Message)>,
+    receiver: crossbeam_channel::Receiver<WorkerMessage>,
     output: crossbeam_channel::Sender<AnalysisRound>,
     mut before_message: impl FnMut(&Message),
 ) -> Result<(), ServerError> {
@@ -622,24 +632,24 @@ fn analysis_worker_with(
             Some(at) => {
                 let timeout = at.saturating_duration_since(Instant::now());
                 match receiver.recv_timeout(timeout) {
-                    Ok((next_generation, message)) => {
+                    Ok((next_generation, message, cancelled)) => {
                         generation = next_generation;
-                        Some(message)
+                        Some((message, cancelled))
                     }
                     Err(RecvTimeoutError::Timeout) => None,
                     Err(RecvTimeoutError::Disconnected) => return Ok(()),
                 }
             }
             None => match receiver.recv() {
-                Ok((next_generation, message)) => {
+                Ok((next_generation, message, cancelled)) => {
                     generation = next_generation;
-                    Some(message)
+                    Some((message, cancelled))
                 }
                 Err(_) => return Ok(()),
             },
         };
 
-        let Some(message) = message else {
+        let Some((message, token)) = message else {
             // Debounce window elapsed: flush every dirty document.
             let uris = debounce.drain();
             for (affected_uri, diagnostics) in state.analyze_affected_many(&uris) {
@@ -649,11 +659,15 @@ fn analysis_worker_with(
             publish_config_messages(&connection, &mut state)?;
             continue;
         };
+        let cancelled = || token.as_ref().is_some_and(|token| token.load(Ordering::Relaxed));
+        if cancelled() {
+            continue;
+        }
         before_message(&message);
 
         match message {
             Message::Request(request) => {
-                handle_request(&connection, &mut state, request)?;
+                handle_request(&connection, &mut state, request, &cancelled)?;
             }
             Message::Notification(ServerNotification { method, params }) => match method.as_str() {
                 DidOpenTextDocument::METHOD => {
@@ -810,12 +824,16 @@ fn handle_request(
     connection: &Connection,
     state: &mut LspState,
     request: Request,
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<(), ServerError> {
+    if cancelled() {
+        return Ok(());
+    }
     match request.method.as_str() {
         "textDocument/codeAction" => {
             let response =
                 match serde_json::from_value::<lsp_types::CodeActionParams>(request.params) {
-                    Ok(params) => match state.code_actions(&params, &|| false) {
+                    Ok(params) => match state.code_actions(&params, cancelled) {
                         Ok(actions) => Response::new_ok(request.id, actions),
                         Err(error) => {
                             Response::new_err(request.id, ErrorCode::RequestFailed as i32, error)
@@ -827,7 +845,27 @@ fn handle_request(
                         format!("invalid params: {error}"),
                     ),
                 };
-            connection.sender.send(response.into())?;
+            if !cancelled() {
+                connection.sender.send(response.into())?;
+            }
+        }
+        "codeAction/resolve" => {
+            let response = match serde_json::from_value::<lsp_types::CodeAction>(request.params) {
+                Ok(action) => match state.resolve_code_action(action, cancelled) {
+                    Ok(action) => Response::new_ok(request.id, action),
+                    Err(error) => {
+                        Response::new_err(request.id, ErrorCode::RequestFailed as i32, error)
+                    }
+                },
+                Err(error) => Response::new_err(
+                    request.id,
+                    ErrorCode::InvalidParams as i32,
+                    format!("invalid params: {error}"),
+                ),
+            };
+            if !cancelled() {
+                connection.sender.send(response.into())?;
+            }
         }
         "codeAction/resolve" => {
             let response = match serde_json::from_value::<lsp_types::CodeAction>(request.params) {
@@ -861,10 +899,12 @@ fn handle_request(
                     return Ok(());
                 }
             };
-            let result = hover(state, &params);
-            connection
-                .sender
-                .send(Response::new_ok(request.id, result).into())?;
+            let result = hover(state, &params, cancelled);
+            if !cancelled() {
+                connection
+                    .sender
+                    .send(Response::new_ok(request.id, result).into())?;
+            }
         }
         other => {
             warn!(method = other, "unsupported request");
@@ -882,7 +922,7 @@ fn handle_request(
 }
 
 /// Hover: surface the falcon diagnostics under the cursor (rule id + message).
-fn hover(state: &LspState, params: &HoverParams) -> Option<Hover> {
+fn hover(state: &LspState, params: &HoverParams, cancelled: &dyn Fn() -> bool) -> Option<Hover> {
     let uri = params
         .text_document_position_params
         .text_document
@@ -896,6 +936,7 @@ fn hover(state: &LspState, params: &HoverParams) -> Option<Hover> {
     let lines: Vec<String> = document
         .last_diagnostics
         .iter()
+        .take_while(|_| !cancelled())
         .filter(|d| d.span.start <= offset && offset < d.span.end.max(d.span.start + 1))
         .map(|d| format!("**{}**: {}", d.rule, d.message))
         .collect();
