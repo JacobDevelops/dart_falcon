@@ -101,7 +101,15 @@ fn deep_nesting_recovers_in_linear_time() {
             );
             std::fs::write(project.path().join("main.dart"), source).unwrap();
             let mut child = Command::new(env!("CARGO_BIN_EXE_falcon"))
-                .args(["check", ".", "--format", "json", "--exit-code", "2"])
+                .args([
+                    "check",
+                    ".",
+                    "--format",
+                    "json",
+                    "--error-on-warnings",
+                    "--exit-code",
+                    "2",
+                ])
                 .current_dir(project.path())
                 .env_remove("DART_SDK")
                 .env_remove("FLUTTER_ROOT")
@@ -186,7 +194,15 @@ mod semantic_walkers {
         std::fs::write(project.path().join("main.dart"), source).unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_falcon"));
         command
-            .args(["check", "main.dart", "--format", "json", "--error-on-warnings", "--exit-code", "2"])
+            .args([
+                "check",
+                "main.dart",
+                "--format",
+                "json",
+                "--error-on-warnings",
+                "--exit-code",
+                "2",
+            ])
             .current_dir(project.path())
             .env_remove("DART_SDK")
             .env_remove("FLUTTER_ROOT")
