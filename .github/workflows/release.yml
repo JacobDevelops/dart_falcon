@@ -23,6 +23,7 @@ jobs:
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       ref: ${{ steps.version.outputs.ref }}
+      homebrew_enabled: ${{ steps.packaging.outputs.homebrew_enabled }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -42,6 +43,11 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Check optional publishing credentials
+        id: packaging
+        env:
+          HAS_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+        run: echo "homebrew_enabled=$HAS_TAP_TOKEN" >> "$GITHUB_OUTPUT"
 
   build:
     needs: resolve
@@ -98,6 +104,13 @@ jobs:
     env:
       RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
     steps:
+      - name: Configure optional archive signing
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          if [ -n "$MINISIGN_SECRET_KEY" ]; then
+            echo "SIGN_ARCHIVES=true" >> "$GITHUB_ENV"
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.resolve.outputs.ref }}
@@ -117,6 +130,23 @@ jobs:
           echo "found=$(grep -q '[^[:space:]]' release-notes.md && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - name: Write checksums
         run: cd dist && sha256sum -- *.tar.gz > SHA256SUMS
+      - name: Install archive signing tool
+        if: env.SIGN_ARCHIVES == 'true'
+        run: sudo apt-get update && sudo apt-get install -y minisign
+      - name: Sign archives and checksum manifest
+        if: env.SIGN_ARCHIVES == 'true'
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          key="$(mktemp)"
+          trap 'rm -f "$key"' EXIT
+          chmod 600 "$key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          for asset in dist/*.tar.gz dist/SHA256SUMS; do
+            printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$key" -m "$asset"
+          done
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-checksums: dist/SHA256SUMS
@@ -128,12 +158,63 @@ jobs:
           generate_release_notes: ${{ steps.notes.outputs.found != 'true' }}
           # Re-releasing an old tag must not steal `latest` from the newest release.
           make_latest: legacy
-          files: |
-            dist/*.tar.gz
-            dist/SHA256SUMS
+          files: dist/*
           fail_on_unmatched_files: true
       # pub.dev only accepts tokens from tag-scoped runs, and this run may come from the release PR merge.
       - name: Dispatch package publishing
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run publish.yml --ref "$RELEASE_TAG"
+
+  homebrew:
+    name: Publish Homebrew formula
+    needs: [resolve, release]
+    if: needs.resolve.outputs.homebrew_enabled == 'true'
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+      HOMEBREW_TAP: ${{ vars.HOMEBREW_TAP || 'JacobDevelops/homebrew-tap' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
+      - name: Check latest release
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "$RELEASE_TAG" in
+            *-*|*+*) echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          latest="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          echo "publish=$([ "$latest" = "$RELEASE_TAG" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - name: Download release checksums
+        if: steps.latest.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$RELEASE_TAG" --pattern SHA256SUMS --dir dist
+      - name: Generate formula
+        if: steps.latest.outputs.publish == 'true'
+        run: cargo xtask homebrew --version "${RELEASE_TAG#v}" --checksums dist/SHA256SUMS --output falcon.rb
+      - name: Publish formula to tap
+        if: steps.latest.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          path="repos/$HOMEBREW_TAP/contents/Formula/falcon.rb"
+          if gh api "$path" > tap-current.json 2> tap-error.log; then
+            sha="$(jq -er .sha tap-current.json)"
+          elif jq -e '.status == "404"' tap-current.json > /dev/null; then
+            sha=""
+          else
+            cat tap-error.log >&2
+            exit 1
+          fi
+          jq -n --arg message "chore: release falcon $RELEASE_TAG" \
+            --arg content "$(base64 -w0 falcon.rb)" --arg sha "$sha" \
+            '{message: $message, content: $content} + (if $sha == "" then {} else {sha: $sha} end)' > tap-update.json
+          gh api --method PUT "$path" --input tap-update.json

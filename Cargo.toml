@@ -65,6 +65,18 @@ description          = "A fast Dart linter built in Rust"
 keywords             = [ "dart", "flutter", "linter", "lsp" ]
 categories           = [ "command-line-utilities", "development-tools" ]
 
+[package.metadata.binstall]
+pkg-url             = "{ repo }/releases/download/v{ version }/falcon-{ version }-{ target-arch }-{ os-name }.tar.gz"
+pkg-fmt             = "tgz"
+bin-dir             = "{ bin }"
+disabled-strategies = [ "quick-install", "compile" ]
+
+[package.metadata.binstall.overrides.x86_64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/falcon-{ version }-x86_64-darwin.tar.gz"
+
+[package.metadata.binstall.overrides.aarch64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/falcon-{ version }-aarch64-darwin.tar.gz"
+
 [dependencies]
 falcon_cli = { path = "crates/falcon_cli" }
 

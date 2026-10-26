@@ -60,6 +60,17 @@ wrapper is MIT/Apache-2.0 licensed; bundled jemalloc is
 
 Run `mise exec -- falcon check .`, or use `falcon` directly with mise activated.
 
+**Dart pub launcher**: `dart pub global activate falcon`, then
+`falcon self-update` to select the latest native release. Use
+`falcon self-update X.Y.Z` or `FALCON_VERSION=X.Y.Z falcon check .` to pin a release.
+Downloads are SHA256-verified before atomic installation.
+
+**Homebrew** (once [tap publishing](./docs/installation.md#release-publishing-setup)
+is configured): `brew install JacobDevelops/tap/falcon`, then `brew upgrade falcon`.
+
+**cargo-binstall**:
+`cargo binstall --git https://github.com/JacobDevelops/dart_falcon dart_falcon`.
+
 See [docs/installation.md](./docs/installation.md) for all channels, supported
 platforms, and how releases are cut.
 

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 mod bench_compare;
 mod codegen;
 mod docgen;
+mod homebrew;
 mod perf_lock;
 mod schema;
 mod support;
@@ -34,6 +35,8 @@ enum Task {
     PerfLock(perf_lock::Options),
     /// Compare release falcon with dart analyze on pinned public projects.
     BenchCompare(bench_compare::Options),
+    /// Generate a Homebrew formula from release archive checksums.
+    Homebrew(homebrew::Options),
     /// Generate the configuration schema.
     Schema {
         #[arg(long)]
@@ -85,6 +88,7 @@ fn main() {
         Task::BenchCompare(options) => {
             bench_compare::run(&options).map_err(|error| error.to_string())
         }
+        Task::Homebrew(options) => homebrew::run(&options),
         Task::Schema { check } => {
             schema::run(check);
             Ok(())
@@ -109,6 +113,37 @@ fn workspace_root() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn homebrew_cli_requires_release_inputs() {
+        let args = [
+            "xtask",
+            "homebrew",
+            "--version",
+            "9.8.7",
+            "--checksums",
+            "dist/SHA256SUMS",
+            "--output",
+            "dist/falcon.rb",
+        ];
+        let Task::Homebrew(options) = Cli::try_parse_from(args).unwrap().task else {
+            panic!("expected homebrew command");
+        };
+        assert_eq!(options.version, "9.8.7");
+        assert_eq!(options.checksums, PathBuf::from("dist/SHA256SUMS"));
+        assert_eq!(options.output, PathBuf::from("dist/falcon.rb"));
+        for flag in ["--version", "--checksums", "--output"] {
+            let index = args.iter().position(|arg| *arg == flag).unwrap();
+            let incomplete: Vec<_> = args
+                .iter()
+                .enumerate()
+                .filter_map(|(position, arg)| {
+                    (position != index && position != index + 1).then_some(*arg)
+                })
+                .collect();
+            assert!(Cli::try_parse_from(incomplete).is_err(), "{flag}");
+        }
+    }
 
     #[test]
     fn codegen_cli_uses_rule_id_value_parser() {

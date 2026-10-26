@@ -54,6 +54,51 @@ The first invocation downloads the matching native binary for Linux or macOS
 on x86_64 or arm64. Make sure Dart's pub cache `bin` directory is on your
 `PATH` to run `falcon`.
 
+The pub launcher verifies the release's SHA256 checksum before installing the
+binary into a versioned user cache. It supports updating the native binary
+without reactivating the Dart package:
+
+```sh
+falcon self-update          # latest GitHub Release
+falcon self-update X.Y.Z    # select a published version
+FALCON_VERSION=X.Y.Z falcon check .
+```
+
+`self-update` is a pub-launcher command, not a command in the standalone native
+binary. A successful update selects that version for future launcher invocations.
+`FALCON_VERSION` overrides the selected version; an explicit `self-update` version
+overrides the environment. Without either selection, the launcher uses its pub
+package version. An update with `FALCON_VERSION` set and no explicit version
+updates that pinned version instead of fetching latest. Downloads are checked
+before atomic installation; a checksum failure leaves the installed binary and
+version selection unchanged. Update the Dart wrapper itself with
+`dart pub global activate falcon`.
+
+## Homebrew
+
+After the maintainer has enabled [tap publishing](#release-publishing-setup):
+
+```sh
+brew install JacobDevelops/tap/falcon
+brew upgrade falcon
+```
+
+The tap ships the same checksummed Linux and macOS binaries as GitHub Releases.
+
+## cargo-binstall
+
+With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) installed:
+
+```sh
+cargo binstall --git https://github.com/JacobDevelops/dart_falcon dart_falcon
+```
+
+The package is not published to crates.io, so `--git` supplies its manifest.
+The manifest maps Linux GNU and musl targets to the static Linux release assets
+and macOS targets to their native assets. It disables compilation and third-party
+QuickInstall fallbacks. To install from a particular release, use a checkout of
+that release with `cargo binstall --manifest-path Cargo.toml dart_falcon`.
+
 ## Build from source
 
 With a nightly Rust toolchain. On x86_64 GNU/Linux, building the bundled jemalloc
@@ -132,6 +177,35 @@ falls back to watching every directory under the project separately.
    versionless `falcon-<system>.tar.gz` copy for `releases/latest/download/`
    links, checksummed into `SHA256SUMS`, given a build provenance attestation,
    and attached to a GitHub Release.
+
+### Release publishing setup
+
+These integrations are optional. Without their secrets, ordinary GitHub and pub
+releases continue unchanged.
+
+- **Archive signing:** create a Minisign key pair (`minisign -G`). Store the
+  complete secret key file as the Actions secret `MINISIGN_SECRET_KEY` and its
+  password as `MINISIGN_PASSWORD` (empty for an unencrypted key). Keep the secret
+  key offline too, and distribute the public key through a trusted channel.
+  Releases then include `.minisig` signatures for every archive and `SHA256SUMS`.
+  Verify them with `minisign -Vm <asset> -P <trusted-public-key>`. These detached
+  signatures are not Apple Developer ID signing or notarisation; macOS archives
+  remain unnotarised.
+- **Homebrew:** create the public repository `JacobDevelops/homebrew-tap` with
+  an initial commit. Set `HOMEBREW_TAP_TOKEN` to a fine-grained PAT with
+  **Contents: read and write** on that tap repository. The single Actions variable
+  `HOMEBREW_TAP` controls the destination (default `JacobDevelops/homebrew-tap`);
+  if changed, substitute that owner/tap in the install command above. Release CI
+  generates `Formula/falcon.rb` from the published `SHA256SUMS`, then commits it
+  through GitHub's contents API. Re-releasing an older tag does not roll the tap
+  backwards. Prerelease and build-metadata versions do not update the tap.
+  No tap token means the publishing job is skipped.
+
+To inspect a formula locally:
+
+```sh
+cargo xtask homebrew --version X.Y.Z --checksums SHA256SUMS --output falcon.rb
+```
 
 ## Next steps
 
