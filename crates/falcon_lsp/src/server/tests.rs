@@ -1,5 +1,168 @@
 use super::*;
 
+#[test]
+fn initialize_workspace_folders_take_precedence_over_root_uri() {
+    let directory = tempfile::tempdir().unwrap();
+    let first = directory.path().join("first");
+    let second = directory.path().join("second");
+    let legacy = directory.path().join("legacy");
+    let watching = FileWatching::new(&serde_json::json!({
+        "workspaceFolders": [
+            {"uri": file_uri(&first).unwrap(), "name": "first"},
+            {"uri": file_uri(&second).unwrap(), "name": "second"},
+            {"uri": file_uri(&first).unwrap(), "name": "duplicate"},
+            {"uri": "untitled:buffer", "name": "virtual"}
+        ],
+        "rootUri": file_uri(&legacy).unwrap()
+    }));
+    assert_eq!(
+        watching.workspace_roots,
+        vec![canonical_or_lexical(&first), canonical_or_lexical(&second)]
+    );
+    for folders in [serde_json::Value::Null, serde_json::json!([])] {
+        let watching = FileWatching::new(&serde_json::json!({
+            "workspaceFolders": folders,
+            "rootUri": file_uri(&legacy).unwrap()
+        }));
+        assert_eq!(
+            watching.workspace_roots,
+            vec![canonical_or_lexical(&legacy)]
+        );
+    }
+}
+
+#[test]
+fn initialize_analyzes_all_folders_and_reports_secondary_configuration_errors() {
+    use serde_json::json;
+
+    let directory = tempfile::tempdir().unwrap();
+    let first = directory.path().join("first");
+    let second = directory.path().join("second");
+    let legacy = directory.path().join("legacy");
+    std::fs::create_dir_all(first.join("lib/src")).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    std::fs::create_dir_all(&legacy).unwrap();
+    std::fs::write(
+        first.join("falcon.json"),
+        r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#,
+    )
+    .unwrap();
+    let secondary_config = second.join("falcon.json");
+    std::fs::write(&secondary_config, r#"{"linter":{"enabledd":true}}"#).unwrap();
+    std::fs::write(
+        legacy.join("falcon.json"),
+        r#"{"linter":{"enabled":false},"cross-file":{"enabled":false}}"#,
+    )
+    .unwrap();
+    let source = "class Used {}\n";
+    for name in ["used.dart", "unused.dart"] {
+        std::fs::write(first.join("lib/src").join(name), source).unwrap();
+    }
+    // This closed file must enter the analysis graph from the second root.
+    // Otherwise used.dart is incorrectly reported as unreachable.
+    std::fs::write(
+        second.join("main.dart"),
+        "import '../first/lib/src/used.dart';\nvoid main() { Used(); }\n",
+    )
+    .unwrap();
+    let (server, client) = Connection::memory();
+    let worker = std::thread::spawn(move || {
+        let options = ServerOptions {
+            config_path: None,
+            debounce: Duration::ZERO,
+        };
+        let state = LspState::new_with_sdk_locator(None, |_| None);
+        run_with_state(server, options, state).unwrap();
+    });
+    let receive = || {
+        client
+            .receiver
+            .recv_timeout(Duration::from_secs(30))
+            .unwrap()
+    };
+    client
+        .sender
+        .send(
+            Request::new(
+                1.into(),
+                "initialize".to_string(),
+                json!({
+                    "capabilities": {},
+                    "rootUri": file_uri(&legacy).unwrap(),
+                    "workspaceFolders": [
+                        {"uri": file_uri(&first).unwrap(), "name": "first"},
+                        {"uri": file_uri(&second).unwrap(), "name": "second"}
+                    ]
+                }),
+            )
+            .into(),
+        )
+        .unwrap();
+    let Message::Response(response) = receive() else {
+        panic!("expected initialize response");
+    };
+    assert!(response.error.is_none());
+    client
+        .sender
+        .send(ServerNotification::new("initialized".into(), json!({})).into())
+        .unwrap();
+    loop {
+        if let Message::Notification(notification) = receive()
+            && notification.method == ShowMessage::METHOD
+        {
+            let message: lsp_types::ShowMessageParams =
+                serde_json::from_value(notification.params).unwrap();
+            if message.typ == lsp_types::MessageType::ERROR {
+                assert!(message.message.contains(secondary_config.to_str().unwrap()));
+                break;
+            }
+        }
+    }
+    for (name, unused) in [("used.dart", false), ("unused.dart", true)] {
+        let uri = file_uri(&first.join("lib/src").join(name)).unwrap();
+        client.sender.send(ServerNotification::new(DidOpenTextDocument::METHOD.into(), json!({
+            "textDocument": {"uri": uri, "languageId": "dart", "version": 1, "text": source}
+        })).into()).unwrap();
+        loop {
+            if let Message::Notification(notification) = receive()
+                && notification.method == PublishDiagnostics::METHOD
+            {
+                let params: PublishDiagnosticsParams =
+                    serde_json::from_value(notification.params).unwrap();
+                if params.uri == uri {
+                    assert_eq!(
+                        params.diagnostics.iter().any(|diagnostic| {
+                            diagnostic.code
+                                == Some(lsp_types::NumberOrString::String("unused-files".into()))
+                        }),
+                        unused,
+                        "{name}: {:?}",
+                        params.diagnostics
+                    );
+                    break;
+                }
+            }
+        }
+    }
+    client
+        .sender
+        .send(Request::new(2.into(), "shutdown".into(), ()).into())
+        .unwrap();
+    loop {
+        if let Message::Response(response) = receive()
+            && response.id == 2.into()
+        {
+            assert!(response.error.is_none());
+            break;
+        }
+    }
+    client
+        .sender
+        .send(ServerNotification::new("exit".into(), json!(null)).into())
+        .unwrap();
+    worker.join().unwrap();
+}
+
 #[cfg(test)]
 mod debounce_tests {
     use super::*;
@@ -50,10 +213,19 @@ mod file_watching_tests {
         }
 
         fn start_with_initialize(dynamic: bool, relative: bool, extra: Value) -> Self {
+            Self::start_with_configuration(dynamic, relative, extra, CONFIG)
+        }
+
+        fn start_with_configuration(
+            dynamic: bool,
+            relative: bool,
+            extra: Value,
+            config: &str,
+        ) -> Self {
             let directory = tempfile::tempdir().unwrap();
             let workspace = directory.path().join("workspace");
             std::fs::create_dir_all(workspace.join(".dart_tool")).unwrap();
-            std::fs::write(workspace.join("falcon.json"), CONFIG).unwrap();
+            std::fs::write(workspace.join("falcon.json"), config).unwrap();
             std::fs::write(workspace.join("main.dart"), SOURCE).unwrap();
             for name in ["dep [one]", "dep two"] {
                 let library = directory.path().join(name).join("lib");
@@ -287,6 +459,67 @@ mod file_watching_tests {
         })
     }
 
+    #[test]
+    fn manifest_change_refreshes_publications_when_rules_config_is_invalid() {
+        let client = Client::start_with_configuration(
+            true,
+            false,
+            json!({}),
+            r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"correctness":{"depend-on-referenced-packages":"warn"}}}}"#,
+        );
+        client.drain();
+        let config = client.workspace.join("falcon.json");
+        let manifest = client.workspace.join("pubspec.yaml");
+        std::fs::write(&manifest, "name: app\n").unwrap();
+        let uri = file_uri(&client.workspace.join("main.dart")).unwrap();
+        client.open();
+        let opened = client.drain();
+        assert!(
+            opened.iter().any(|message| {
+                let Message::Notification(notification) = message else {
+                    return false;
+                };
+                if notification.method != PublishDiagnostics::METHOD {
+                    return false;
+                }
+                let publication: PublishDiagnosticsParams =
+                    serde_json::from_value(notification.params.clone()).unwrap();
+                publication.uri == uri && has_rule(&publication, "depend-on-referenced-packages")
+            }),
+            "{opened:?}"
+        );
+        std::fs::write(&config, "{").unwrap();
+        std::fs::write(&manifest, "name: app\ndependencies:\n  dep: any\n").unwrap();
+        client.notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes":[{
+                "uri": file_uri(&manifest).unwrap(), "type": 2
+            }]}),
+        );
+        let changed = client.drain();
+        assert!(changed.iter().any(|message| matches!(message,
+            Message::Notification(notification)
+                if notification.method == ShowMessage::METHOD
+                    && notification.params["type"] == 1
+                    && notification.params["message"].as_str().unwrap().contains("failed to load config")
+        )), "{changed:?}");
+        assert!(
+            changed.iter().any(|message| {
+                let Message::Notification(notification) = message else {
+                    return false;
+                };
+                if notification.method != PublishDiagnostics::METHOD {
+                    return false;
+                }
+                let publication: PublishDiagnosticsParams =
+                    serde_json::from_value(notification.params.clone()).unwrap();
+                publication.uri == uri && !has_rule(&publication, "depend-on-referenced-packages")
+            }),
+            "{changed:?}"
+        );
+        client.finish();
+    }
+
     #[cfg(unix)]
     #[test]
     fn symlinked_workspace_watcher_roots_use_filesystem_identity() {
@@ -358,6 +591,7 @@ mod file_watching_tests {
                     "**/.dart_tool/package_config.json",
                     "**/pubspec.{yaml,lock}",
                     "**/pubspec_overrides.yaml",
+                    "**/melos.yaml",
                     "**/*.dart",
                 ] {
                     assert!(
@@ -864,4 +1098,62 @@ mod file_watching_tests {
         assert!(debounce.dirty.contains(&uri));
         assert!(client.receiver.try_recv().is_err());
     }
+}
+
+#[test]
+fn publish_maps_all_diagnostic_ranges_to_utf16() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("falcon.json");
+    std::fs::write(
+        &config,
+        r#"{"linter":{"enabled":false},"cross-file":{"enabled":false}}"#,
+    )
+    .unwrap();
+    let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
+    let uri = file_uri(&directory.path().join("main.dart")).unwrap();
+    let source = "// 😀x\n// é😀y\n";
+    state.open(uri.as_str(), source.to_owned(), Some(7));
+    let diagnostics: Vec<_> = ['x', 'y']
+        .into_iter()
+        .map(|character| {
+            let start = source.find(character).unwrap();
+            Diagnostic::new(
+                "test-rule",
+                falcon_diagnostics::Severity::Warning,
+                "message",
+                "main.dart",
+                falcon_diagnostics::Span {
+                    start,
+                    end: start + 1,
+                },
+            )
+        })
+        .collect();
+    let (server, client) = Connection::memory();
+    publish(&server, &state, uri.as_str(), &diagnostics).unwrap();
+    let Message::Notification(notification) = client.receiver.try_recv().unwrap() else {
+        panic!("expected diagnostic publication");
+    };
+    assert_eq!(notification.method, PublishDiagnostics::METHOD);
+    let params: PublishDiagnosticsParams = serde_json::from_value(notification.params).unwrap();
+    assert_eq!(params.version, Some(7));
+    assert_eq!(params.uri, uri);
+    let ranges: Vec<_> = params
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.range)
+        .collect();
+    assert_eq!(
+        ranges,
+        [
+            lsp_types::Range::new(
+                lsp_types::Position::new(0, 5),
+                lsp_types::Position::new(0, 6)
+            ),
+            lsp_types::Range::new(
+                lsp_types::Position::new(1, 6),
+                lsp_types::Position::new(1, 7)
+            ),
+        ]
+    );
 }

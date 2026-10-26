@@ -1,6 +1,570 @@
 use super::*;
 
 #[test]
+fn starting_inside_non_git_workspace_member_preserves_shared_loader_root_and_overrides() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let member = root.join("packages/member");
+    let start = member.join("lib/nested");
+    std::fs::create_dir_all(&start).unwrap();
+    std::fs::create_dir(root.join("shared")).unwrap();
+    std::fs::write(
+        root.join("pubspec.yaml"),
+        "name: root\nworkspace:\n  - packages/member\n",
+    )
+    .unwrap();
+    std::fs::write(
+        member.join("pubspec.yaml"),
+        "name: member\nresolution: workspace\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("falcon.json"),
+        r#"{"files":{"includes":["shared/**"]},"linter":{"rules":{"recommended":false}},"cross-file":{"enabled":false}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        member.join("falcon.json"),
+        r#"{"files":{"includes":["lib/**"]},"linter":{"rules":{"recommended":false,"suspicious":{"avoid-dynamic":"error"}}},"cross-file":{"enabled":false}}"#,
+    )
+    .unwrap();
+    let shared = root.join("shared/shared.dart");
+    std::fs::write(&shared, "void shared() {}\n").unwrap();
+    let path = member.join("lib/main.dart");
+    let source = "void main() { dynamic value = 1; print(value); }\n";
+    std::fs::write(&path, source).unwrap();
+    let mut state = LspState::new_from(None, |_| None, start);
+    assert_eq!(state.workspace_root, canonical_or_lexical(root));
+    assert_eq!(
+        state.config.root_dir(),
+        Some(canonical_or_lexical(root).as_path())
+    );
+    let diagnostics = state.open(
+        &format!("file://{}", path.display()),
+        source.to_owned(),
+        Some(1),
+    );
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.rule == "avoid-dynamic"
+            && diagnostic.severity == falcon_diagnostics::Severity::Error
+    }));
+    let (files, complete) = state.collect_project_files(ProjectView::Semantic);
+    assert!(complete);
+    assert!(files.iter().any(|file| file.path == shared));
+    assert!(files.iter().any(|file| file.path == path));
+    state.reload_config();
+    assert_eq!(state.workspace_root, canonical_or_lexical(root));
+}
+
+#[test]
+fn initialized_roots_report_shared_ancestor_configuration_error_once() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir(directory.path().join(".git")).unwrap();
+    let first = directory.path().join("first");
+    let second = directory.path().join("second");
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, r#"{"linter":{"enabledd":true}}"#).unwrap();
+    let mut state = LspState::new_with_sdk_locator(None, |_| None);
+    state.initialize_workspace_roots(vec![first, second]);
+    let messages = state.take_config_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].typ, MessageType::ERROR);
+    assert!(messages[0].message.contains(config.to_str().unwrap()));
+    state.reload_config();
+    assert!(state.take_config_messages().is_empty());
+    std::fs::write(&config, "{}").unwrap();
+    state.reload_config();
+    state.take_config_messages();
+    std::fs::write(&config, r#"{"linter":{"enabledd":true}}"#).unwrap();
+    state.reload_config();
+    assert_eq!(state.take_config_messages().len(), 1);
+}
+
+#[test]
+fn workspace_declaration_events_rebuild_effective_rule_registry() {
+    for declaration in ["melos.yaml", "pubspec.yaml"] {
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("falcon.json");
+        std::fs::write(
+            &config,
+            r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"enabled":false}}"#,
+        )
+        .unwrap();
+        let mut state = LspState::new_with_sdk_locator(Some(config.clone()), |_| None);
+        let uri = format!("file://{}", directory.path().join("main.dart").display());
+        let source = "void main() { dynamic value = 1; print(value); }\n";
+        assert!(state.open(&uri, source.to_owned(), Some(1)).is_empty());
+        let parses = state.document(&uri).unwrap().parse_count;
+        std::fs::write(
+            &config,
+            r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-dynamic":"error"}}},"cross-file":{"enabled":false}}"#,
+        )
+        .unwrap();
+        let refreshed = state.watched_files_changed(&[directory.path().join(declaration)]);
+        assert_eq!(refreshed.len(), 1);
+        assert!(refreshed[0].1.iter().any(|diagnostic| {
+            diagnostic.rule == "avoid-dynamic"
+                && diagnostic.severity == falcon_diagnostics::Severity::Error
+        }));
+        assert_eq!(state.document(&uri).unwrap().parse_count, parses);
+    }
+}
+
+#[test]
+fn initialized_roots_replace_cwd_discovery_and_report_each_config_error() {
+    let directory = tempfile::tempdir().unwrap();
+    let cwd = directory.path().join("cwd");
+    let first = directory.path().join("first");
+    let second = directory.path().join("second");
+    for root in [&cwd, &first, &second] {
+        std::fs::create_dir(root).unwrap();
+        std::fs::write(root.join("main.dart"), "void main() {}\n").unwrap();
+    }
+    std::fs::write(cwd.join("falcon.json"), "{").unwrap();
+    std::fs::write(
+        first.join("falcon.json"),
+        r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"enabled":false}}"#,
+    )
+    .unwrap();
+    let invalid = second.join("falcon.json");
+    std::fs::write(&invalid, r#"{"linter":{"enabledd":false}}"#).unwrap();
+    let mut state = LspState::new_from(None, |_| None, cwd.clone());
+    state.initialize_workspace_roots(vec![first.clone(), second.clone(), first.clone()]);
+    assert_eq!(state.workspace_root, canonical_or_lexical(&first));
+    assert_eq!(state.workspace_roots.len(), 2);
+    assert_eq!(state.config.linter.rules.recommended, Some(false));
+    let messages = state.take_config_messages();
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert_eq!(messages[0].typ, MessageType::ERROR);
+    assert!(messages[0].message.contains(&invalid.display().to_string()));
+    for view in [ProjectView::Semantic, ProjectView::CrossFile] {
+        let (files, complete) = state.collect_project_files(view);
+        assert!(complete);
+        assert_eq!(files.len(), 2);
+        for root in [&first, &second] {
+            assert!(files.iter().any(|file| file.path == root.join("main.dart")));
+        }
+        assert!(files.iter().all(|file| !file.path.starts_with(&cwd)));
+    }
+    state.reload_config();
+    assert!(state.take_config_messages().is_empty());
+    assert_eq!(state.workspace_roots.len(), 2);
+    std::fs::write(&invalid, "{}").unwrap();
+    state.watched_files_changed(std::slice::from_ref(&invalid));
+    assert!(state.take_config_messages().is_empty());
+    std::fs::write(&invalid, "{").unwrap();
+    state.watched_files_changed(&[invalid]);
+    assert_eq!(state.take_config_messages().len(), 1);
+}
+
+#[test]
+fn initialized_root_does_not_expand_to_ancestor_configuration_directory() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir(directory.path().join(".git")).unwrap();
+    std::fs::write(directory.path().join("falcon.json"), "{}").unwrap();
+    std::fs::write(directory.path().join("outside.dart"), "void outside() {}").unwrap();
+    let root = directory.path().join("nested");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("inside.dart"), "void inside() {}").unwrap();
+    let mut state = LspState::new_from(None, |_| None, directory.path().to_path_buf());
+    state.initialize_workspace_roots(vec![root.clone()]);
+    let (files, complete) = state.collect_project_files(ProjectView::Semantic);
+    assert!(complete);
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path, root.join("inside.dart"));
+    state.reload_config();
+    assert_eq!(state.workspace_root, canonical_or_lexical(&root));
+}
+
+#[test]
+fn edit_reuses_workspace_disk_parses_and_discovery() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, "{}").unwrap();
+    let main = directory.path().join("main.dart");
+    let support = directory.path().join("support.dart");
+    std::fs::write(&main, "import 'support.dart'; void main() {}").unwrap();
+    std::fs::write(&support, "class Before {}").unwrap();
+    let uri = format!("file://{}", main.display());
+    let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
+    state.resolve_semantics = true;
+    state.open(&uri, std::fs::read_to_string(&main).unwrap(), Some(1));
+    let parses = state.disk_parse_count;
+    let walks = state.workspace_walk_count;
+    let document_parses = state.document(&uri).unwrap().parse_count;
+    state.change(
+        &uri,
+        "import 'support.dart'; void main() { print(1); }".into(),
+        Some(2),
+    );
+    state.analyze_affected_many(std::slice::from_ref(&uri));
+    state.collect_project_files(ProjectView::CrossFile);
+    assert_eq!(
+        state.document(&uri).unwrap().parse_count,
+        document_parses + 1
+    );
+    assert_eq!(
+        state.disk_parse_count, parses,
+        "unchanged disk sources were reparsed"
+    );
+    assert_eq!(
+        state.workspace_walk_count, walks,
+        "edit walked the workspace again"
+    );
+}
+
+#[test]
+fn atomic_source_replacement_reuses_discovery() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, "{}").unwrap();
+    let main = directory.path().join("main.dart");
+    let support = directory.path().join("support.dart");
+    std::fs::write(&main, "void main() {}").unwrap();
+    std::fs::write(&support, "class Before {}").unwrap();
+    let uri = format!("file://{}", main.display());
+    let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
+    state.resolve_semantics = true;
+    state.open(&uri, "void main() {}".into(), Some(1));
+    let parses = state.disk_parse_count;
+    let walks = state.workspace_walk_count;
+    let modified = std::fs::metadata(directory.path())
+        .unwrap()
+        .modified()
+        .unwrap();
+    let temporary = directory.path().join("support.dart.tmp");
+    let changed = "class AfterReplacement {}";
+    std::fs::write(&temporary, changed).unwrap();
+    std::fs::rename(&temporary, &support).unwrap();
+    std::fs::File::open(directory.path())
+        .unwrap()
+        .set_modified(modified + std::time::Duration::from_secs(2))
+        .unwrap();
+    state.change(&uri, "void main() { print(1); }".into(), Some(2));
+    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+    assert!(complete);
+    assert_eq!(
+        files
+            .iter()
+            .find(|file| file.path == support)
+            .unwrap()
+            .source(),
+        changed
+    );
+    assert_eq!(state.disk_parse_count, parses + 1);
+    assert_eq!(state.workspace_walk_count, walks);
+}
+
+#[test]
+fn unsupported_directory_entries_reuse_discovery() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, "{}").unwrap();
+    let git = directory.path().join(".git");
+    std::fs::create_dir(&git).unwrap();
+    let main = directory.path().join("main.dart");
+    std::fs::write(&main, "void main() {}").unwrap();
+    let uri = format!("file://{}", main.display());
+    let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
+    state.resolve_semantics = true;
+    state.open(&uri, "void main() {}".into(), Some(1));
+    let walks = state.workspace_walk_count;
+    let parses = state.disk_parse_count;
+    for (index, temporary) in [
+        directory.path().join("editor.tmp"),
+        git.join("index.lock"),
+        git.join("index"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let parent = temporary.parent().unwrap();
+        for remove in [false, true] {
+            let modified = std::fs::metadata(parent).unwrap().modified().unwrap();
+            if remove {
+                std::fs::remove_file(&temporary).unwrap();
+            } else {
+                std::fs::write(&temporary, "background update").unwrap();
+            }
+            std::fs::File::open(parent)
+                .unwrap()
+                .set_modified(modified + std::time::Duration::from_secs(2))
+                .unwrap();
+            let version = 2 + (index * 2 + usize::from(remove)) as i32;
+            state.change(
+                &uri,
+                format!("void main() {{ print({version}); }}"),
+                Some(version),
+            );
+            let (_, complete) = state.collect_project_files(ProjectView::CrossFile);
+            assert!(complete);
+            assert_eq!(state.workspace_walk_count, walks);
+            assert_eq!(state.disk_parse_count, parses);
+        }
+    }
+    let modified = std::fs::metadata(&git).unwrap().modified().unwrap();
+    std::fs::write(git.join("index"), "old index").unwrap();
+    std::fs::write(git.join("index.lock"), "new index").unwrap();
+    std::fs::rename(git.join("index.lock"), git.join("index")).unwrap();
+    std::fs::File::open(&git)
+        .unwrap()
+        .set_modified(modified + std::time::Duration::from_secs(2))
+        .unwrap();
+    state.change(&uri, "void main() { print(10); }".into(), Some(10));
+    state.collect_project_files(ProjectView::CrossFile);
+    assert_eq!(state.workspace_walk_count, walks);
+    assert_eq!(state.disk_parse_count, parses);
+}
+
+#[test]
+fn new_and_renamed_directories_refresh_discovery() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, "{}").unwrap();
+    std::fs::write(directory.path().join("main.dart"), "void main() {}").unwrap();
+    let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
+    state.collect_project_files(ProjectView::CrossFile);
+    let walks = state.workspace_walk_count;
+    let nested = directory.path().join("new/nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::write(nested.join("added.dart"), "class Added {}").unwrap();
+    state
+        .project_discovery_watches
+        .iter_mut()
+        .find(|watch| watch.path == directory.path())
+        .unwrap()
+        .modified = None;
+    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+    assert!(complete);
+    assert!(
+        files
+            .iter()
+            .any(|file| file.path == nested.join("added.dart"))
+    );
+    assert_eq!(state.workspace_walk_count, walks + 1);
+    std::fs::rename(
+        directory.path().join("new"),
+        directory.path().join("renamed"),
+    )
+    .unwrap();
+    state
+        .project_discovery_watches
+        .iter_mut()
+        .find(|watch| watch.path == directory.path())
+        .unwrap()
+        .modified = None;
+    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+    assert!(complete);
+    assert!(
+        files
+            .iter()
+            .any(|file| file.path == directory.path().join("renamed/nested/added.dart"))
+    );
+    assert!(
+        !files
+            .iter()
+            .any(|file| file.path.starts_with(directory.path().join("new")))
+    );
+    assert_eq!(state.workspace_walk_count, walks + 2);
+}
+
+#[test]
+fn watched_disk_changes_refresh_cached_cross_file_input() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, "{}").unwrap();
+    let main = directory.path().join("main.dart");
+    let support = directory.path().join("support.dart");
+    std::fs::write(&main, "void main() {}").unwrap();
+    std::fs::write(&support, "class Before {}").unwrap();
+    let uri = format!("file://{}", main.display());
+    let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
+    state.resolve_semantics = true;
+    state.open(&uri, "void main() {}".into(), Some(1));
+    let parses = state.disk_parse_count;
+    let walks = state.workspace_walk_count;
+    let modified = std::fs::metadata(&support).unwrap().modified().unwrap();
+    let changed = "class After_ {}";
+    assert_eq!(changed.len(), "class Before {}".len());
+    std::fs::write(&support, changed).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&support)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    assert_eq!(
+        std::fs::metadata(&support).unwrap().modified().unwrap(),
+        modified
+    );
+    state.watched_files_changed(std::slice::from_ref(&support));
+    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+    assert!(complete);
+    let file = files.iter().find(|file| file.path == support).unwrap();
+    assert_eq!(file.source(), changed);
+    assert_eq!(state.disk_parse_count, parses + 1);
+    assert_eq!(state.workspace_walk_count, walks);
+    let added = directory.path().join("added.dart");
+    std::fs::write(&added, "class Added {}").unwrap();
+    state.watched_files_changed(std::slice::from_ref(&added));
+    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+    assert!(complete);
+    assert!(files.iter().any(|file| file.path == added));
+}
+
+#[test]
+fn changed_disk_mtime_reuses_unchanged_parsed_source() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, "{}").unwrap();
+    let support = directory.path().join("support.dart");
+    let source = "class Support {}";
+    std::fs::write(&support, source).unwrap();
+    let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
+    let (before, complete) = state.collect_project_files(ProjectView::CrossFile);
+    assert!(complete);
+    let before = before.iter().find(|file| file.path == support).unwrap();
+    let parses = state.disk_parse_count;
+    assert_eq!(parses, 1);
+    let modified = std::fs::metadata(&support).unwrap().modified().unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&support)
+        .unwrap()
+        .set_modified(modified + std::time::Duration::from_secs(2))
+        .unwrap();
+    assert_ne!(
+        std::fs::metadata(&support).unwrap().modified().unwrap(),
+        modified
+    );
+
+    let (after, complete) = state.collect_project_files(ProjectView::CrossFile);
+    assert!(complete);
+    let after = after.iter().find(|file| file.path == support).unwrap();
+    assert_eq!(after.source(), source);
+    assert!(Arc::ptr_eq(&before.parsed, &after.parsed));
+    assert_eq!(state.disk_parse_count, parses);
+}
+
+#[test]
+fn save_invalidates_cached_disk_source_with_unchanged_metadata() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, "{}").unwrap();
+    let support = directory.path().join("support.dart");
+    let original = "class Before {}";
+    let changed = "class After_ {}";
+    assert_eq!(original.len(), changed.len());
+    std::fs::write(&support, original).unwrap();
+    let uri = format!("file://{}", support.display());
+    let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
+    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+    assert!(complete);
+    assert_eq!(
+        files
+            .iter()
+            .find(|file| file.path == support)
+            .unwrap()
+            .source(),
+        original
+    );
+    let parses = state.disk_parse_count;
+    assert_eq!(parses, 1);
+    let modified = std::fs::metadata(&support).unwrap().modified().unwrap();
+    std::fs::write(&support, changed).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&support)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    assert_eq!(
+        std::fs::metadata(&support).unwrap().modified().unwrap(),
+        modified
+    );
+
+    // Keep the document closed so buffer precedence and close invalidation
+    // cannot conceal whether the save event refreshes the disk input.
+    state.save(&uri, None);
+    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+    assert!(complete);
+    assert_eq!(
+        files
+            .iter()
+            .find(|file| file.path == support)
+            .unwrap()
+            .source(),
+        changed
+    );
+    assert_eq!(state.disk_parse_count, parses + 1);
+}
+
+#[test]
+fn close_refreshes_cached_disk_source_with_unchanged_metadata() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, "{}").unwrap();
+    let support = directory.path().join("support.dart");
+    let original = "class Before {}";
+    let changed = "class After_ {}";
+    assert_eq!(original.len(), changed.len());
+    std::fs::write(&support, original).unwrap();
+    let uri = format!("file://{}", support.display());
+    let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
+    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+    assert!(complete);
+    assert_eq!(
+        files
+            .iter()
+            .find(|file| file.path == support)
+            .unwrap()
+            .source(),
+        original
+    );
+    let parses = state.disk_parse_count;
+    assert_eq!(parses, 1);
+    state.open(&uri, "class Buffered {}".into(), Some(1));
+    let modified = std::fs::metadata(&support).unwrap().modified().unwrap();
+    std::fs::write(&support, changed).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&support)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    assert_eq!(
+        std::fs::metadata(&support).unwrap().modified().unwrap(),
+        modified
+    );
+    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+    assert!(complete);
+    assert_eq!(
+        files
+            .iter()
+            .find(|file| file.path == support)
+            .unwrap()
+            .source(),
+        "class Buffered {}"
+    );
+    assert_eq!(state.disk_parse_count, parses);
+
+    state.close(&uri);
+    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+    assert!(complete);
+    assert_eq!(
+        files
+            .iter()
+            .find(|file| file.path == support)
+            .unwrap()
+            .source(),
+        changed
+    );
+    assert_eq!(state.disk_parse_count, parses + 1);
+}
+
+#[test]
 fn ancestor_manifest_cross_file_findings_refresh_after_disk_change() {
     let directory = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(directory.path()).unwrap();
@@ -173,6 +737,8 @@ mod source_size_tests {
             );
             let failed = canonical_or_lexical(&failed);
             state.parser_failure_path = Some(failed.clone());
+            let source = std::fs::read_to_string(&failed).unwrap();
+            std::fs::write(&failed, format!("{source}\n")).unwrap();
             state.invalidate_semantic_snapshot();
             let runs = Arc::new(AtomicUsize::new(0));
             state.cross_file_rules.register(
@@ -302,11 +868,18 @@ mod source_size_tests {
     fn ordinary_walk_errors_keep_project_collection_complete() {
         let directory = tempfile::tempdir().unwrap();
         let mut state = LspState::new(None);
-        state.workspace_root = directory.path().join("missing");
+        state.initialize_workspace_roots(vec![directory.path().join("missing")]);
         state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
         let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
         assert!(complete);
         assert!(files.is_empty());
+        let root = directory.path().join("missing");
+        std::fs::create_dir(&root).unwrap();
+        let created = root.join("created.dart");
+        std::fs::write(&created, "class Created {}").unwrap();
+        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+        assert!(complete);
+        assert!(files.iter().any(|file| file.path == created));
     }
 
     #[test]
@@ -315,7 +888,7 @@ mod source_size_tests {
         std::fs::write(directory.path().join("main.dart"), "void main() {}").unwrap();
         let uri = format!("file://{}", directory.path().join("main.dart").display());
         let mut state = LspState::new(None);
-        state.workspace_root = directory.path().to_path_buf();
+        state.initialize_workspace_roots(vec![directory.path().to_path_buf()]);
         state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
         state.open(&uri, String::new(), Some(1));
         let doc = state.documents.get_mut(&uri).unwrap();
@@ -1374,7 +1947,6 @@ mod dependency_tests {
         let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
         state.cross_file_diagnostics();
         assert_eq!(state.cross_file_index_build_count, 1);
-        // Disk collection reparses files, so Arc identity is not a revision key.
         state.cross_file_diagnostics();
         assert_eq!(state.cross_file_index_build_count, 1);
         std::fs::write(
@@ -2880,6 +3452,26 @@ mod environment_regressions {
                     .iter()
                     .all(|file| file.path != defining && file.path != part)
             }));
+            let defining_parse = Arc::clone(&snapshot.files[snapshot.by_path[&defining]].parsed);
+            let parses = state.disk_parse_count;
+            assert!(parses > 0, "the unopened defining companion was not parsed");
+            assert!(state.change(
+                &app_uri,
+                "import 'package:dep/bridge.dart'; void main() {}".into(),
+                Some(2),
+            ));
+            state.analyze(&app_uri);
+            let snapshot = state.semantic_snapshot.as_ref().unwrap();
+            let companion = &snapshot.files[snapshot.by_path[&defining]];
+            assert_eq!(
+                companion.source(),
+                "library leaf; part 'leaf_part.dart'; class Leaf {}"
+            );
+            assert!(Arc::ptr_eq(&defining_parse, &companion.parsed));
+            assert_eq!(
+                state.disk_parse_count, parses,
+                "unchanged companion was reparsed"
+            );
             state.close(&part_uri);
             state.ensure_semantic_snapshot();
             let leaf = state

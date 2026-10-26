@@ -5,7 +5,10 @@ mod workspace;
 
 pub use workspace::{Workspace, WorkspacePackage, discover_workspace};
 
-pub use discovery::{ProjectDiscovery, WalkOutput, discover_project, walk_project};
+pub use discovery::{
+    DiscoveryWatch, ProjectDiscovery, WalkOutput, discover_project, discover_project_with_watches,
+    walk_project,
+};
 pub use falcon_rules::run_cross_file as cross_file_diagnostics;
 
 use std::borrow::Cow;

@@ -1,12 +1,14 @@
 //! LSP server implementation (JSON-RPC 2.0, LSP 3.17).
 //!
-//! Single-threaded message loop over `lsp-server`; full-text document sync;
-//! per-document CST cache with config-driven rule reloads.
+//! Responsive transport with a dedicated analysis-state worker; full-text document
+//! sync and per-document CST caches with config-driven rule reloads.
 //!
 //! Handlers: initialize/initialized/shutdown, textDocument/didOpen,
 //! didChange (debounced), didSave, didClose, textDocument/hover, and
 //! workspace/didChangeWatchedFiles (falcon.json reload). Diagnostics are
-//! published via textDocument/publishDiagnostics.
+//! published once per file after each merged analysis round. Newer generations
+//! retain only the latest pending result per URI until that file is current;
+//! unrelated results remain publishable and requests support cancellation.
 
 pub mod server;
 pub mod state;

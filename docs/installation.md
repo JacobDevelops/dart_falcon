@@ -144,6 +144,17 @@ falcon speaks LSP (`falcon lsp`); first-party extensions live in
 Both launch the `falcon` binary from your `PATH`, so install falcon with any
 channel above first.
 
+The language server analyzes the folders supplied by the editor, falling back to
+`rootUri` and then its working directory when no workspace folders are supplied.
+Configuration is session-wide: an explicit config takes precedence, otherwise
+discovery starts in the first workspace folder. Configuration errors appear as
+editor messages. Diagnostics use UTF-16 positions and combine file and project
+findings in a single publication.
+
+Workspace parses are cached between edits. Clients should send
+`workspace/didChangeWatchedFiles` events for disk changes so newly created,
+changed, or removed files are included without restarting the server.
+
 ### Neovim
 
 Neovim 0.11+ needs no plugin. Add this to your config:

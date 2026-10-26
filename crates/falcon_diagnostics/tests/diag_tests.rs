@@ -257,3 +257,53 @@ fn test_diagnostic_accepts_syntax_span() {
     let diag = Diagnostic::new("rule", Severity::Warning, "message", "file.dart", span);
     assert_eq!(diag.span, Span { start: 5, end: 10 });
 }
+
+#[test]
+fn test_format_lsp_in_reuses_utf16_index_for_both_span_ends() {
+    let source = "a😀x\né😀y\n";
+    let lines = falcon_diagnostics::LineIndex::new(source);
+    for (span, start, end) in [
+        (
+            Span { start: 1, end: 5 },
+            lsp_types::Position::new(0, 1),
+            lsp_types::Position::new(0, 3),
+        ),
+        (
+            Span {
+                start: source.find('x').unwrap(),
+                end: source.find('y').unwrap() + 1,
+            },
+            lsp_types::Position::new(0, 3),
+            lsp_types::Position::new(1, 4),
+        ),
+        (
+            Span {
+                start: source.len(),
+                end: source.len() + 10,
+            },
+            lsp_types::Position::new(2, 0),
+            lsp_types::Position::new(2, 0),
+        ),
+    ] {
+        let diagnostic =
+            Diagnostic::new("test-rule", Severity::Warning, "message", "file.dart", span);
+        let formatted = diagnostic.format_lsp_in(&lines);
+        assert_eq!(formatted.range, lsp_types::Range::new(start, end));
+    }
+}
+
+#[test]
+fn test_format_lsp_in_handles_empty_source() {
+    let lines = falcon_diagnostics::LineIndex::new("");
+    let diagnostic = Diagnostic::new(
+        "test-rule",
+        Severity::Error,
+        "message",
+        "file.dart",
+        Span { start: 0, end: 10 },
+    );
+    assert_eq!(
+        diagnostic.format_lsp_in(&lines).range,
+        lsp_types::Range::default()
+    );
+}

@@ -422,21 +422,21 @@ fn did_change_republishes_cross_file_diagnostics() {
         fs::write(&path, source).unwrap();
 
         client.open(&uri, source, 1);
-        client.recv_publish();
         let initial = client.recv_publish();
         assert!(
             has_rule(&initial, "unused-code"),
             "open must publish the cross-file diagnostic: {initial:?}"
         );
+        client.assert_quiet(Duration::from_millis(50));
 
         client.change(&uri, "void unused() {}\n\n", 2);
-        client.recv_publish();
         let refreshed = client.recv_publish();
         assert_eq!(refreshed.version, Some(2));
         assert!(
             has_rule(&refreshed, "unused-code"),
             "didChange must republish the cross-file diagnostic with debounce {debounce:?}: {refreshed:?}"
         );
+        client.assert_quiet(Duration::from_millis(50));
         client.shutdown();
     }
 }
@@ -1117,4 +1117,47 @@ fn exit_without_shutdown_terminates_with_error() {
         result.is_err(),
         "exit before shutdown must fail the server loop (exit code 1)"
     );
+}
+
+#[test]
+fn unrelated_open_save_and_close_publish_while_another_file_is_debounced() {
+    let config = r#"{
+        "linter": { "rules": { "recommended": false } },
+        "cross-file": { "enabled": false }
+    }"#;
+    // Deliberately longer than the receive deadline: an accidental dependency
+    // on the dirty file's debounce will fail instead of eventually succeeding.
+    let mut client = TestClient::start(Duration::from_secs(60), Some(config));
+    let dirty = "file:///test/dirty.dart";
+    let other = "file:///test/other.dart";
+    client.open(dirty, "void before() {}", 1);
+    assert_eq!(client.recv_publish().uri.as_str(), dirty);
+    client.change(dirty, "void after() {}", 2);
+
+    client.open(other, "void other() {}", 1);
+    let opened = client.recv_publish();
+    assert_eq!(opened.uri.as_str(), other);
+    assert_eq!(opened.version, Some(1));
+    client.notify(
+        lsp_types::notification::DidSaveTextDocument::METHOD,
+        DidSaveTextDocumentParams {
+            text_document: TextDocumentIdentifier {
+                uri: Uri::from_str(other).unwrap(),
+            },
+            text: None,
+        },
+    );
+    assert_eq!(client.recv_publish().uri.as_str(), other);
+    client.notify(
+        lsp_types::notification::DidCloseTextDocument::METHOD,
+        DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier {
+                uri: Uri::from_str(other).unwrap(),
+            },
+        },
+    );
+    let closed = client.recv_publish();
+    assert_eq!(closed.uri.as_str(), other);
+    assert!(closed.diagnostics.is_empty());
+    client.shutdown();
 }

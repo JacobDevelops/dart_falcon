@@ -1,4 +1,4 @@
-//! LSP server loop: single-threaded message dispatch over `lsp-server`.
+//! Responsive LSP transport with a dedicated, serial analysis-state worker.
 //!
 //! Transport-agnostic: `run_server` binds stdio for production; tests drive
 //! the identical loop through `run_with_connection` + `Connection::memory()`.
@@ -8,6 +8,7 @@ use std::error::Error;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::RecvTimeoutError;
@@ -58,26 +59,39 @@ type ServerError = Box<dyn Error + Send + Sync>;
 
 #[derive(Default)]
 struct Debounce {
-    dirty: HashSet<String>,
+    dirty: Arc<HashSet<String>>,
     deadline: Option<Instant>,
 }
 
 impl Debounce {
     fn clear(&mut self, uri: &str) {
-        self.dirty.remove(uri);
+        if self.dirty.contains(uri) {
+            Arc::make_mut(&mut self.dirty).remove(uri);
+        }
         if self.dirty.is_empty() {
             self.deadline = None;
         }
     }
 
     fn schedule(&mut self, uri: String, delay: Duration) {
-        self.dirty.insert(uri);
+        if !self.dirty.contains(&uri) {
+            Arc::make_mut(&mut self.dirty).insert(uri);
+        }
         self.deadline = Some(Instant::now() + delay);
     }
 
     fn drain(&mut self) -> Vec<String> {
         self.deadline = None;
-        let mut uris = self.dirty.drain().collect::<Vec<_>>();
+        if self.dirty.is_empty() {
+            return Vec::new();
+        }
+        let mut uris = if let Some(dirty) = Arc::get_mut(&mut self.dirty) {
+            dirty.drain().collect::<Vec<_>>()
+        } else {
+            // In-flight rounds retain their immutable snapshot. Only the owned
+            // URI list needs copying, not another hash table and its capacity.
+            std::mem::take(&mut self.dirty).iter().cloned().collect()
+        };
         uris.sort();
         uris
     }
@@ -107,17 +121,29 @@ impl FileWatching {
             .pointer("/capabilities/workspace/didChangeWatchedFiles/relativePatternSupport")
             .and_then(serde_json::Value::as_bool)
             == Some(true);
-        let workspace_roots = params
+        let folders = params
             .get("workspaceFolders")
             .and_then(serde_json::Value::as_array)
+            .filter(|folders| !folders.is_empty());
+        let uris = folders
             .into_iter()
             .flatten()
             .filter_map(|folder| folder.get("uri").and_then(serde_json::Value::as_str))
-            .chain(params.get("rootUri").and_then(serde_json::Value::as_str))
-            .filter_map(|text| Uri::from_str(text).ok())
-            .filter(|uri| uri.scheme().is_some_and(|scheme| scheme.as_str() == "file"))
-            .map(|uri| canonical_or_lexical(&crate::state::uri_to_path(uri.as_str())))
-            .collect();
+            .chain(
+                params
+                    .get("rootUri")
+                    .filter(|_| folders.is_none())
+                    .and_then(serde_json::Value::as_str),
+            );
+        let mut workspace_roots = Vec::with_capacity(folders.map_or(1, Vec::len));
+        for uri in uris.filter_map(|text| Uri::from_str(text).ok()) {
+            if uri.scheme().is_some_and(|scheme| scheme.as_str() == "file") {
+                let root = canonical_or_lexical(&crate::state::uri_to_path(uri.as_str()));
+                if !workspace_roots.contains(&root) {
+                    workspace_roots.push(root);
+                }
+            }
+        }
         Self {
             dynamic,
             relative,
@@ -201,7 +227,7 @@ impl FileWatching {
                 .insert(request.id.clone(), UnregisterCapability::METHOD);
             connection.sender.send(request.into())?;
         }
-        let mut watchers = Vec::with_capacity(6 + roots.len() * 2 + files.len());
+        let mut watchers = Vec::with_capacity(7 + roots.len() * 2 + files.len());
         watchers.extend(
             [
                 "**/falcon.json",
@@ -209,6 +235,7 @@ impl FileWatching {
                 "**/.dart_tool/package_config.json",
                 "**/pubspec.{yaml,lock}",
                 "**/pubspec_overrides.yaml",
+                "**/melos.yaml",
                 "**/*.dart",
             ]
             .into_iter()
@@ -317,6 +344,7 @@ fn is_environment_document(uri: &Uri) -> bool {
                 | "pubspec.yaml"
                 | "pubspec.lock"
                 | "pubspec_overrides.yaml"
+                | "melos.yaml"
         )
     )
 }
@@ -391,7 +419,8 @@ fn run_with_state(
 ) -> Result<(), ServerError> {
     // Initialize handshake (JSON-RPC request id is echoed by initialize_finish).
     let (initialize_id, initialize_params) = connection.initialize_start()?;
-    let mut watching = FileWatching::new(&initialize_params);
+    let watching = FileWatching::new(&initialize_params);
+    state.initialize_workspace_roots(watching.workspace_roots.clone());
     let initialize_result = InitializeResult {
         capabilities: server_capabilities(),
         server_info: Some(ServerInfo {
@@ -403,6 +432,149 @@ fn run_with_state(
     info!("LSP server initialized");
     publish_config_messages(&connection, &mut state)?;
 
+    let (input, receiver) = crossbeam_channel::unbounded();
+    let (sender, output) = crossbeam_channel::unbounded();
+    let worker = std::thread::Builder::new()
+        .name("falcon-lsp-analysis".to_string())
+        .spawn(move || analysis_worker(options, state, watching, receiver, sender))?;
+    let result = relay(&connection, input, output);
+    let worker_result = worker.join().map_err(|_| "LSP analysis worker panicked")?;
+    worker_result.and(result)
+}
+
+struct AnalysisRound {
+    generation: u64,
+    deferred: Arc<HashSet<String>>,
+    messages: Vec<Message>,
+}
+
+/// The transport owns publication and cancellation; the worker alone owns state.
+fn relay(
+    connection: &Connection,
+    input: crossbeam_channel::Sender<(u64, Message)>,
+    output: crossbeam_channel::Receiver<AnalysisRound>,
+) -> Result<(), ServerError> {
+    let mut generation = 0;
+    let mut pending_requests = HashSet::new();
+    let mut publications = HashMap::new();
+    let mut other_messages = Vec::new();
+    let mut publication_order = 0_u64;
+    let mut ready_publications = Vec::new();
+    loop {
+        crossbeam_channel::select_biased! {
+            recv(connection.receiver) -> message => {
+                let Ok(message) = message else { return Ok(()); };
+                match &message {
+                    Message::Request(request) => {
+                        if request.method == "shutdown" {
+                            // Resolve every accepted request before acknowledging
+                            // shutdown; the worker's late responses are discarded.
+                            for id in pending_requests.drain() {
+                                connection.sender.send(Response::new_err(
+                                    id,
+                                    ErrorCode::RequestCanceled as i32,
+                                    "server shutting down".to_string(),
+                                ).into())?;
+                            }
+                            connection.handle_shutdown(request)?;
+                            return Ok(());
+                        }
+                        pending_requests.insert(request.id.clone());
+                    }
+                    Message::Notification(notification) if notification.method == "$/cancelRequest" => {
+                        if let Some(id) = notification.params.get("id")
+                            .and_then(|id| serde_json::from_value::<RequestId>(id.clone()).ok())
+                            && pending_requests.remove(&id)
+                        {
+                            connection.sender.send(Response::new_err(
+                                id,
+                                ErrorCode::RequestCanceled as i32,
+                                "request cancelled".to_string(),
+                            ).into())?;
+                        }
+                        continue;
+                    }
+                    Message::Notification(notification) => {
+                        if notification.method == "exit" {
+                            return Err("exit notification received without prior shutdown".into());
+                        }
+                        if matches!(notification.method.as_str(),
+                            DidOpenTextDocument::METHOD | DidChangeTextDocument::METHOD
+                            | DidSaveTextDocument::METHOD | DidCloseTextDocument::METHOD
+                            | DidChangeWatchedFiles::METHOD)
+                        {
+                            generation += 1;
+                        }
+                    }
+                    Message::Response(_) => {}
+                }
+                input.send((generation, message))?;
+            }
+            recv(output) -> round => {
+                let Ok(round) = round else { return Ok(()); };
+                let current = round.generation == generation;
+                // Keep unpublished unrelated files when a newer edit supersedes
+                // a round. Its affected files replace these entries before flush.
+                other_messages.reserve(round.messages.len());
+                for message in round.messages {
+                    match message {
+                        Message::Notification(notification)
+                            if notification.method == PublishDiagnostics::METHOD =>
+                        {
+                            if let Some(uri) = notification.params.get("uri").and_then(serde_json::Value::as_str) {
+                                publication_order += 1;
+                                publications.insert(uri.to_string(), (publication_order, notification));
+                            }
+                        }
+                        Message::Response(response) => {
+                            if pending_requests.remove(&response.id) {
+                                other_messages.push(Message::Response(response));
+                            }
+                        }
+                        message => other_messages.push(message),
+                    }
+                }
+                if current {
+                    ready_publications.extend(publications.extract_if(|uri, _| !round.deferred.contains(uri)).map(|(_, publication)| publication));
+                    ready_publications.sort_unstable_by_key(|(order, _)| *order);
+                    for (_, notification) in ready_publications.drain(..) {
+                        connection.sender.send(notification.into())?;
+                    }
+                }
+                for message in other_messages.drain(..) {
+                    connection.sender.send(message)?;
+                }
+            }
+        }
+    }
+}
+
+fn analysis_worker(
+    options: ServerOptions,
+    state: LspState,
+    watching: FileWatching,
+    receiver: crossbeam_channel::Receiver<(u64, Message)>,
+    output: crossbeam_channel::Sender<AnalysisRound>,
+) -> Result<(), ServerError> {
+    analysis_worker_with(options, state, watching, receiver, output, |_| {})
+}
+
+fn analysis_worker_with(
+    options: ServerOptions,
+    mut state: LspState,
+    mut watching: FileWatching,
+    receiver: crossbeam_channel::Receiver<(u64, Message)>,
+    output: crossbeam_channel::Sender<AnalysisRound>,
+    mut before_message: impl FnMut(&Message),
+) -> Result<(), ServerError> {
+    // Buffer a complete round so preliminary per-file results never reach the
+    // client before the cross-file pass has supplied the final merged set.
+    let (sender, outbox) = crossbeam_channel::unbounded();
+    let connection = Connection {
+        sender,
+        receiver: crossbeam_channel::never(),
+    };
+    let mut generation = 0;
     let mut debounce = Debounce::default();
     watching.refresh(&connection, &state)?;
 
@@ -421,17 +593,36 @@ fn run_with_state(
     }
 
     loop {
+        let messages: Vec<_> = outbox.try_iter().collect();
+        // Even an ignored notification completes its generation. Otherwise an
+        // unrelated superseding event could strand a valid buffered publication.
+        if output
+            .send(AnalysisRound {
+                generation,
+                deferred: Arc::clone(&debounce.dirty),
+                messages,
+            })
+            .is_err()
+        {
+            return Ok(());
+        }
         let message = match debounce.deadline {
             Some(at) => {
                 let timeout = at.saturating_duration_since(Instant::now());
-                match connection.receiver.recv_timeout(timeout) {
-                    Ok(message) => Some(message),
+                match receiver.recv_timeout(timeout) {
+                    Ok((next_generation, message)) => {
+                        generation = next_generation;
+                        Some(message)
+                    }
                     Err(RecvTimeoutError::Timeout) => None,
                     Err(RecvTimeoutError::Disconnected) => return Ok(()),
                 }
             }
-            None => match connection.receiver.recv() {
-                Ok(message) => Some(message),
+            None => match receiver.recv() {
+                Ok((next_generation, message)) => {
+                    generation = next_generation;
+                    Some(message)
+                }
                 Err(_) => return Ok(()),
             },
         };
@@ -446,12 +637,10 @@ fn run_with_state(
             publish_config_messages(&connection, &mut state)?;
             continue;
         };
+        before_message(&message);
 
         match message {
             Message::Request(request) => {
-                if connection.handle_shutdown(&request)? {
-                    return Ok(());
-                }
                 handle_request(&connection, &state, request)?;
             }
             Message::Notification(ServerNotification { method, params }) => match method.as_str() {
@@ -549,10 +738,6 @@ fn run_with_state(
                         .collect();
                     watched_files_and_publish(&connection, &mut state, &mut debounce, &paths)?;
                 }
-                // `handle_shutdown` consumes the `exit` that follows a `shutdown`
-                // request, so reaching this arm means `exit` arrived with no prior
-                // `shutdown` — the spec requires the process to exit with code 1.
-                "exit" => return Err("exit notification received without prior shutdown".into()),
                 other => debug!(method = other, "ignoring notification"),
             },
             Message::Response(response) => watching.response(response),
@@ -741,13 +926,16 @@ fn publish(
     diagnostics: &[Diagnostic],
 ) -> Result<(), ServerError> {
     let (lsp_diagnostics, version) = match state.document(uri) {
-        Some(document) => (
-            diagnostics
-                .iter()
-                .map(|d| d.format_lsp(document.text()))
-                .collect(),
-            document.version,
-        ),
+        Some(document) => {
+            let lines = falcon_diagnostics::LineIndex::new(document.text());
+            (
+                diagnostics
+                    .iter()
+                    .map(|diagnostic| diagnostic.format_lsp_in(&lines))
+                    .collect(),
+                document.version,
+            )
+        }
         // Closed document: publish an empty set to clear editor state.
         None => (Vec::new(), None),
     };
@@ -764,3 +952,6 @@ fn publish(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod analysis_tests;

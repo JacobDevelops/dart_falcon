@@ -242,8 +242,15 @@ impl Diagnostic {
     /// `source` is the full text of the file — required to convert the byte-offset
     /// `Span` into the 0-based line+character positions that LSP expects.
     pub fn format_lsp(&self, source: &str) -> LspDiagnostic {
-        let start_pos = byte_to_lsp_position(source, self.span.start);
-        let end_pos = byte_to_lsp_position(source, self.span.end);
+        self.format_lsp_in(&LineIndex::new(source))
+    }
+
+    /// Serialize with a source index shared by every diagnostic in one LSP publish.
+    ///
+    /// Positions use UTF-16 code units, including two units per astral character.
+    pub fn format_lsp_in(&self, lines: &LineIndex<'_>) -> LspDiagnostic {
+        let start_pos = lines.lsp_position(self.span.start);
+        let end_pos = lines.lsp_position(self.span.end);
         LspDiagnostic {
             range: Range {
                 start: start_pos,

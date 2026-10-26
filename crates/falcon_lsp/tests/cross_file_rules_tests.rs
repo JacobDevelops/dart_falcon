@@ -111,20 +111,6 @@ impl TestClient {
         }
     }
 
-    fn recv_publish(&self) -> PublishDiagnosticsParams {
-        match self.recv() {
-            Message::Notification(note) => {
-                assert_eq!(
-                    note.method,
-                    lsp_types::notification::PublishDiagnostics::METHOD,
-                    "expected publishDiagnostics"
-                );
-                serde_json::from_value(note.params).expect("PublishDiagnosticsParams shape")
-            }
-            other => panic!("expected notification, got {other:?}"),
-        }
-    }
-
     /// The FIFO server completes prior notification handlers before answering this request.
     fn drain_publishes(&mut self) -> Vec<PublishDiagnosticsParams> {
         let deadline = Instant::now() + RECV_TIMEOUT;
@@ -264,30 +250,27 @@ fn did_open_publishes_cross_file_diagnostic() {
     client.shutdown();
 }
 
-/// (2) A file with no per-file issues, flagged only by a cross-file rule, still
-/// gets the cross-file diagnostic. The first (per-file) publish is empty; a later
-/// publish carries `unused-files` — proving the cross-file pass, not a file rule.
+/// A clean per-file result must not briefly clear the cross-file squiggle.
+/// Both open and save deliver exactly one final merged publication.
 #[test]
 fn clean_file_still_gets_cross_file_diagnostic() {
     let mut client = TestClient::start(ENABLE_UNUSED_FILES);
     let orphan_uri = write_corpus(&client);
 
     client.open(&orphan_uri, "class OrphanThing {}\n", 1);
-    let per_file = client.recv_publish();
-    assert_eq!(per_file.uri.as_str(), orphan_uri);
-    assert!(
-        per_file.diagnostics.is_empty(),
-        "clean file must have no per-file diagnostics: {per_file:?}"
+    let opened = client.drain_publishes();
+    assert_eq!(
+        opened.len(),
+        1,
+        "no preliminary empty publication: {opened:?}"
     );
-    let cross_file = client.recv_publish();
-    assert!(
-        has_rule(&cross_file, "unused-files"),
-        "cross-file pass must add unused-files: {cross_file:?}"
-    );
+    assert_eq!(opened[0].uri.as_str(), orphan_uri);
+    assert!(has_rule(&opened[0], "unused-files"));
 
     // didSave also re-runs the cross-file pass and republishes the diagnostic.
     client.save(&orphan_uri);
     let after_save = client.drain_publishes();
+    assert_eq!(after_save.len(), 1, "save must not flicker: {after_save:?}");
     assert!(
         any_publish_has_rule(&after_save, &orphan_uri, "unused-files"),
         "didSave must republish the cross-file diagnostic: {after_save:?}"
