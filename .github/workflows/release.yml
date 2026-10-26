@@ -47,7 +47,32 @@ jobs:
         id: packaging
         env:
           HAS_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
-        run: echo "homebrew_enabled=$HAS_TAP_TOKEN" >> "$GITHUB_OUTPUT"
+          HAS_TAP: ${{ vars.HOMEBREW_TAP != '' }}
+          HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+          HAS_APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD != '' }}
+          HAS_APPLE_ID: ${{ secrets.APPLE_ID != '' }}
+          HAS_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID != '' }}
+          HAS_APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD != '' }}
+          HAS_MINISIGN_KEY: ${{ secrets.MINISIGN_SECRET_KEY != '' }}
+          HAS_MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD != '' }}
+        run: |
+          set -euo pipefail
+          apple=("$HAS_APPLE_CERTIFICATE" "$HAS_APPLE_CERTIFICATE_PASSWORD" "$HAS_APPLE_ID" "$HAS_APPLE_TEAM_ID" "$HAS_APPLE_APP_PASSWORD")
+          for configured in "${apple[@]}"; do
+            if [ "$configured" != "${apple[0]}" ]; then
+              echo "macOS signing requires all five APPLE_* secrets or none" >&2
+              exit 1
+            fi
+          done
+          if [ "$HAS_MINISIGN_KEY" != "$HAS_MINISIGN_PASSWORD" ]; then
+            echo "Archive signing requires both MINISIGN_SECRET_KEY and MINISIGN_PASSWORD or neither" >&2
+            exit 1
+          fi
+          if [ "$HAS_TAP" = true ] && [ "$HAS_TAP_TOKEN" != true ]; then
+            echo "HOMEBREW_TAP requires HOMEBREW_TAP_TOKEN" >&2
+            exit 1
+          fi
+          echo "homebrew_enabled=$HAS_TAP_TOKEN" >> "$GITHUB_OUTPUT"
 
   build:
     needs: resolve
