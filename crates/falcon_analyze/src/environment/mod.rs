@@ -28,10 +28,13 @@ struct Context {
     sdk: Option<DartSdk>,
 }
 
+type FileFingerprint = (PathBuf, PathBuf, Option<Arc<[u8]>>);
+type ResolvedFingerprint = (PathBuf, Option<Arc<[u8]>>);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnvironmentCacheKey {
-    files: Vec<(PathBuf, PathBuf, Option<Arc<[u8]>>)>,
-    discovered_files: Vec<(PathBuf, PathBuf, Option<Arc<[u8]>>)>,
+    files: Vec<FileFingerprint>,
+    discovered_files: Vec<FileFingerprint>,
     roots: Vec<(PathBuf, PathBuf)>,
     aliases: Vec<PathBuf>,
     sdk_environment: [Option<std::ffi::OsString>; 3],
@@ -127,7 +130,7 @@ fn canonical_event_path(path: &Path) -> PathBuf {
     }
 }
 
-fn file_fingerprint(path: &Path) -> (PathBuf, Option<Arc<[u8]>>) {
+fn file_fingerprint(path: &Path) -> ResolvedFingerprint {
     // Fingerprints include synthetic probes; real loads report read failures.
     let contents = std::fs::read(path).ok().map(Arc::from);
     let resolved = packages::canonical_comparison_path(path);
@@ -197,7 +200,7 @@ fn metadata_predates_observation(
 struct PackageDiscovery {
     directories: HashMap<PathBuf, Option<Arc<PackageMetadata>>>,
     manifests: HashMap<PathBuf, Arc<PackageMetadata>>,
-    fingerprints: std::collections::BTreeMap<PathBuf, (PathBuf, Option<Arc<[u8]>>)>,
+    fingerprints: std::collections::BTreeMap<PathBuf, ResolvedFingerprint>,
 }
 
 #[derive(Debug, Default)]
@@ -466,7 +469,7 @@ impl AnalysisEnvironment {
         })
     }
 
-    fn config_fingerprint(&self, path: &Path) -> (PathBuf, Option<Arc<[u8]>>) {
+    fn config_fingerprint(&self, path: &Path) -> ResolvedFingerprint {
         let observed_at = std::time::SystemTime::now();
         #[cfg(test)]
         let observed_at = self.observation_time.unwrap_or(observed_at);

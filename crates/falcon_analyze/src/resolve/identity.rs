@@ -610,7 +610,7 @@ impl IdentityIndex {
         offsets
             .get(&offset)
             .copied()
-            .unwrap_or_else(|| offset | (1 << (usize::BITS - 1)))
+            .unwrap_or(offset | (1 << (usize::BITS - 1)))
     }
 
     pub fn from_project_files(files: &[IdentitySource<'_>], packages: &[PackageIdentity]) -> Self {
