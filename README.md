@@ -63,7 +63,9 @@ Run `mise exec -- falcon check .`, or use `falcon` directly with mise activated.
 **Dart pub launcher**: `dart pub global activate falcon`, then
 `falcon self-update` to select the latest native release. Use
 `falcon self-update X.Y.Z` or `FALCON_VERSION=X.Y.Z falcon check .` to pin a release.
-Downloads are SHA256-verified before atomic installation.
+Downloads are checked against SHA256SUMS from the same GitHub release before
+atomic installation. This checks integrity, not publisher authenticity; see
+[signature verification](./docs/installation.md#prebuilt-binaries-recommended) for the trust limits.
 
 **Homebrew** (once [tap publishing](./docs/installation.md#release-publishing-setup)
 is configured): `brew install JacobDevelops/tap/falcon`, then `brew upgrade falcon`.
@@ -85,7 +87,7 @@ falcon version            # print version information
 ```
 
 `falcon check` discovers `falcon.json` automatically: first the current directory,
-then the enclosing git root, then `~/.falcon.json`. With no config found, every
+then the nearest Git or Jujutsu repository root, then `~/.falcon.json`. With no config found, every
 recommended rule runs at its default severity. Pass `--config <path>` to point at
 a specific file.
 

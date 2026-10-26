@@ -1645,7 +1645,7 @@ pub fn is_home_config(path: &Path) -> bool {
 /// Find a config file starting from `start_dir`, following this priority order:
 ///
 /// 1. `start_dir/falcon.json` — if exists, return it
-/// 2. Walk parent dirs up to filesystem root looking for `.git` dir; when found, check `<git_root>/falcon.json`
+/// 2. Walk parent dirs to the nearest `.git` or `.jj` entry and check its `falcon.json`
 /// 3. `$HOME/.falcon.json` (via `std::env::var("HOME")`)
 /// 4. Return None if nothing found
 pub fn find_config(start_dir: &Path) -> Option<PathBuf> {
@@ -1656,11 +1656,10 @@ pub fn find_config(start_dir: &Path) -> Option<PathBuf> {
 
     let mut current = start_dir;
     loop {
-        let git_dir = current.join(".git");
-        if git_dir.exists() {
-            let config_at_git_root = current.join("falcon.json");
-            if config_at_git_root.exists() {
-                return Some(config_at_git_root);
+        if current.join(".git").exists() || current.join(".jj").exists() {
+            let config_at_repository_root = current.join("falcon.json");
+            if config_at_repository_root.exists() {
+                return Some(config_at_repository_root);
             }
             break;
         }

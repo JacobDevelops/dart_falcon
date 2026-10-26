@@ -227,7 +227,7 @@ fn package_values(packages: &[PackageSummary], root: &Path) -> Vec<Value> {
 /// unresolved positions default to line/column one.
 /// Repeated fingerprints receive occurrence suffixes (`:2`, `:3`, ...).
 /// GitLab and Sonar paths are relative to the invocation directory; other report
-/// paths and all baseline fingerprints use the supplied configuration root.
+/// paths and all baseline fingerprints use the supplied project root.
 pub fn render(format: OutputFormat, diagnostics: &[Diagnostic], root: &Path) -> String {
     render_impl(format, diagnostics, root, &[])
 }
