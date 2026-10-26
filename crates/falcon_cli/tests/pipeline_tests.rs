@@ -1557,6 +1557,117 @@ fn workspace_report_fixture(root: &std::path::Path) {
 }
 
 #[test]
+fn selected_member_ignores_unselected_malformed_configuration() {
+    const CHILD: &str = "FALCON_SELECTED_MEMBER_CONFIG_TEST";
+    if std::env::var_os(CHILD).is_none() {
+        let temp = tempdir().unwrap();
+        workspace_report_fixture(temp.path());
+        let bad_member = temp.path().join("packages/flagged");
+        fs::write(
+            bad_member.join("falcon.json"),
+            r#"{"linter":{"enabld":false}}"#,
+        )
+        .unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "selected_member_ignores_unselected_malformed_configuration",
+            ])
+            .current_dir(&bad_member)
+            .env("HOME", temp.path())
+            .env(CHILD, temp.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        return;
+    }
+    let root = std::path::PathBuf::from(std::env::var_os(CHILD).unwrap());
+    let bad_config = root.join("packages/flagged/falcon.json");
+    for explicit in [None, Some(root.join("falcon.json"))] {
+        let output = collect_check(&CheckOptions {
+            paths: vec![root.join("packages/clean")],
+            config_path: explicit.clone(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.total_files, 1);
+        assert_eq!(output.packages.len(), 1);
+        assert_eq!(output.packages[0].name, "clean");
+        let error = collect_check(&CheckOptions {
+            paths: vec![root.join("packages/flagged")],
+            config_path: explicit,
+            ..Default::default()
+        })
+        .unwrap_err();
+        assert!(error.contains(&bad_config.display().to_string()), "{error}");
+        assert!(error.contains("enabld"), "{error}");
+    }
+}
+
+#[test]
+fn nonmember_cwd_configuration_agrees_for_default_and_dot_inputs() {
+    const CHILD: &str = "FALCON_NONMEMBER_CWD_CONFIG_TEST";
+    if std::env::var_os(CHILD).is_none() {
+        let temp = tempdir().unwrap();
+        workspace_report_fixture(temp.path());
+        let tools = temp.path().join("tools");
+        fs::create_dir_all(&tools).unwrap();
+        fs::write(
+            tools.join("falcon.json"),
+            r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-dynamic":"error"}}},"cross-file":{"rules":{"recommended":false}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("falcon.json"),
+            r#"{"linter":{"enabled":false},"cross-file":{"enabled":false}}"#,
+        )
+        .unwrap();
+        fs::write(tools.join("main.dart"), "dynamic value = 1;\n").unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "nonmember_cwd_configuration_agrees_for_default_and_dot_inputs",
+                "--nocapture",
+            ])
+            .current_dir(&tools)
+            .env("HOME", temp.path())
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        return;
+    }
+    let default = collect_check(&CheckOptions::default()).unwrap();
+    let dot = collect_check(&CheckOptions {
+        paths: vec![".".into()],
+        ..Default::default()
+    })
+    .unwrap();
+    for output in [&default, &dot] {
+        assert_eq!(output.total_files, 1);
+        assert_eq!(output.exit_code, 1);
+        assert_eq!(output.diagnostics.len(), 1);
+        assert_eq!(output.diagnostics[0].rule, "avoid-dynamic");
+    }
+    assert_eq!(
+        default.diagnostics[0].file_path,
+        dot.diagnostics[0].file_path
+    );
+    assert_eq!(default.root, dot.root);
+}
+
+#[test]
 fn member_only_reports_omit_unselected_siblings_and_nested_nonmembers() {
     let temp = tempdir().unwrap();
     workspace_report_fixture(temp.path());

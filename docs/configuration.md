@@ -52,8 +52,16 @@ rather than merges with, the workspace configuration; there is no `extends`
 setting. Members without their own configuration use the workspace configuration.
 An explicit `--config` selects the base configuration, but member configurations
 still apply. File filters and overrides in a member configuration resolve from
-that configuration's directory. The language server uses the same package
-configuration selection as the CLI.
+that configuration's directory. Explicit input paths select workspace members,
+not a different default configuration: discovery still follows the current
+directory's configuration precedence, falling back to the input workspace when
+no configuration is discovered there. A local configuration in a nonmember
+directory (for example, `tools/`) remains scoped to that directory.
+The CLI loads only selected members' configurations, so an invalid configuration
+in an unselected sibling does not block the run. Selecting that sibling is still
+a configuration error. The language server uses the same package configuration
+selection, reports individual invalid member configurations, and retains the
+base and other valid member configurations.
 Run-wide settings (`baseline`, `max-errors`, and `error-on-warnings`) come from
 the base configuration or their CLI overrides.
 

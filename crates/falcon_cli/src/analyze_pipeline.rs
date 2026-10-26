@@ -8,8 +8,8 @@ use clap::{Args, ValueEnum};
 use falcon_analyze::{AnalysisEnvironment, DartSdk, PackageConfig, SdkLocator};
 use falcon_diagnostics::{Diagnostic, FixKind, Severity, Span, UNMATCHED_PATH_DIAGNOSTIC_ID};
 use falcon_project::{
-    ProjectAnalysis, analyze_sources, complete_analysis, finalize_diagnostics, load_project_config,
-    manifest_file, walk_project,
+    ProjectAnalysis, analyze_sources, complete_analysis, finalize_diagnostics,
+    load_workspace_config, manifest_file, walk_project,
 };
 
 /// Output format for diagnostics.
@@ -157,31 +157,6 @@ fn collect_check_impl(
         falcon_project::discover_workspace(directory)
     });
     let cwd_workspace = falcon_project::discover_workspace(&cwd);
-    let start_dir = input_workspace
-        .as_ref()
-        .map_or(&cwd, |workspace| &workspace.root);
-    // Explicit inputs select workspace members, not a different default config.
-    // Preserve normal cwd config precedence while loading the input's member configs.
-    let cwd_config = input_workspace.as_ref().and_then(|_| {
-        let base = cwd_workspace
-            .as_ref()
-            .map_or(cwd.as_path(), |workspace| workspace.root.as_path());
-        falcon_config::find_config(base)
-    });
-    let loaded = load_project_config(
-        options.config_path.as_deref().or(cwd_config.as_deref()),
-        start_dir,
-    )
-    .map_err(|e| e.to_string())?;
-    for warning in loaded.warnings {
-        eprintln!("warning: {warning}");
-    }
-    let config = loaded.config;
-    let root = config.root_dir().unwrap_or(&cwd).to_path_buf();
-    let workspace = input_workspace
-        .or(cwd_workspace)
-        .or_else(|| falcon_project::discover_workspace(&root));
-    let error_on_warnings = options.error_on_warnings || config.error_on_warnings;
     let default_paths;
     let paths = if options.paths.is_empty() {
         default_paths = [PathBuf::from(".")];
@@ -189,32 +164,56 @@ fn collect_check_impl(
     } else {
         &options.paths
     };
-    let workspace = workspace.map(|mut workspace| {
-        let inputs: Vec<_> = paths
-            .iter()
-            .map(|path| falcon_analyze::canonical_or_lexical(path))
-            .collect();
-        workspace.packages.retain(|package| {
-            inputs.iter().any(|input| {
-                if package.root.starts_with(input) {
-                    return true;
-                }
-                if !input.starts_with(&package.root) {
-                    return false;
-                }
-                let directory = if input.is_dir() {
-                    input.as_path()
-                } else {
-                    input.parent().unwrap_or(input)
-                };
-                directory
-                    .ancestors()
-                    .find(|ancestor| ancestor.join("pubspec.yaml").is_file())
-                    .is_some_and(|nearest| nearest == package.root)
-            })
+    let workspace = input_workspace
+        .or_else(|| cwd_workspace.clone())
+        .or_else(|| {
+            options
+                .config_path
+                .as_deref()
+                .and_then(std::path::Path::parent)
+                .and_then(falcon_project::discover_workspace)
+        })
+        .map(|mut workspace| {
+            let inputs: Vec<_> = paths
+                .iter()
+                .map(|path| falcon_analyze::canonical_or_lexical(path))
+                .collect();
+            workspace.packages.retain(|package| {
+                inputs.iter().any(|input| {
+                    if package.root.starts_with(input) {
+                        return true;
+                    }
+                    if !input.starts_with(&package.root) {
+                        return false;
+                    }
+                    let directory = if input.is_dir() {
+                        input.as_path()
+                    } else {
+                        input.parent().unwrap_or(input)
+                    };
+                    directory
+                        .ancestors()
+                        .find(|ancestor| ancestor.join("pubspec.yaml").is_file())
+                        .is_some_and(|nearest| nearest == package.root)
+                })
+            });
+            workspace
         });
-        workspace
-    });
+    // Inputs select members, but only --config is an explicit configuration.
+    // Discovered cwd configuration takes precedence over the input workspace.
+    let loaded = load_workspace_config(
+        options.config_path.as_deref(),
+        &cwd,
+        workspace.as_ref(),
+        cwd_workspace.as_ref(),
+    )
+    .map_err(|e| e.to_string())?;
+    for warning in loaded.warnings {
+        eprintln!("warning: {warning}");
+    }
+    let config = loaded.config;
+    let root = config.root_dir().unwrap_or(&cwd).to_path_buf();
+    let error_on_warnings = options.error_on_warnings || config.error_on_warnings;
 
     let mut cli_filter;
     let filter = if options.exclude_patterns.is_empty() {
