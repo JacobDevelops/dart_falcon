@@ -30,41 +30,71 @@ fn assert_shifted_invocation_types(
     parsed: &Arc<ParsedFile>,
     indexes: &SemanticIndexes,
 ) {
-    use falcon_syntax::cst::Expr;
+    use falcon_analyze::{
+        ResolvedType, SemanticRuleVisitor, SemanticState, TypeParameterScope, visit_program,
+    };
+    use falcon_syntax::cst::{Expr, TopLevelDecl};
+
+    struct Check<'a> {
+        source: &'a str,
+        integer: ResolvedType,
+        alias: ResolvedType,
+        parameter: ResolvedType,
+        checked: usize,
+    }
+
+    impl<'a> SemanticRuleVisitor<'a> for Check<'_> {
+        fn visit_expr(&mut self, expression: Expr<'a>, semantic: &SemanticState<'a>) {
+            let span = expression.span();
+            match &self.source[span.start..span.end] {
+                "Box<int>().identity(1)" => {
+                    assert_eq!(semantic.infer(expression), self.integer);
+                    self.checked += 1;
+                }
+                "Screen().callback()" | "callback()" => {
+                    let inferred = semantic.infer(expression);
+                    assert_eq!(inferred, self.alias);
+                    assert_eq!(
+                        inferred.function_alias_identity(),
+                        self.alias.function_alias_identity()
+                    );
+                    self.checked += 1;
+                }
+                "identity(v)" => {
+                    // Mix the current tree's header key with the retained member's
+                    // return type: stale source offsets cannot substitute this T.
+                    assert_eq!(semantic.infer(expression), self.parameter);
+                    self.checked += 1;
+                }
+                _ => {}
+            }
+        }
+    }
 
     let ctx = AnalyzeContext::new(path, &state.config, parsed)
         .with_identities(&indexes.identities)
         .with_types(&indexes.types)
         .with_signatures(&indexes.signatures);
-    let semantic = falcon_analyze::SemanticState::new(parsed.program(), &ctx).unwrap();
-    let integer = semantic.model.core_type("int", false);
-    let alias = semantic.model.resolve_type_name(&["Builder"]).unwrap();
-    let mut checked = 0;
-    for expression in parsed
+    let semantic = SemanticState::new(parsed.program(), &ctx).unwrap();
+    let class = parsed
         .program()
-        .syntax()
-        .descendants()
-        .filter_map(Expr::cast)
-    {
-        let span = expression.span();
-        match &parsed.source[span.start..span.end] {
-            "Box<int>().identity(1)" => {
-                assert_eq!(semantic.infer(expression), integer);
-                checked += 1;
-            }
-            "Screen().callback()" | "callback()" => {
-                let inferred = semantic.infer(expression);
-                assert_eq!(inferred, alias);
-                assert_eq!(
-                    inferred.function_alias_identity(),
-                    alias.function_alias_identity()
-                );
-                checked += 1;
-            }
-            _ => {}
-        }
-    }
-    assert_eq!(checked, 2);
+        .declarations()
+        .find_map(|declaration| match declaration {
+            TopLevelDecl::Class(class) if class.name().name() == "Box" => Some(class),
+            _ => None,
+        })
+        .unwrap();
+    let mut parameters = TypeParameterScope::default();
+    parameters.push(class.type_params(), &semantic.model);
+    let mut check = Check {
+        source: &parsed.source,
+        integer: semantic.model.core_type("int", false),
+        alias: semantic.model.resolve_type_name(&["Builder"]).unwrap(),
+        parameter: parameters.lookup("T").unwrap(),
+        checked: 0,
+    };
+    visit_program(&mut check, parsed.program(), semantic);
+    assert_eq!(check.checked, 3);
 }
 
 #[test]
@@ -184,7 +214,7 @@ fn body_shift_before_typed_build_and_generic_class_reuses_indexes_and_positions(
                int build() => 1;\n\
                Builder callback() => () => 1;\n\
              }}\n\
-             class Box<T> {{ T identity(T value) => value; }}\n\
+             class Box<T> {{ T identity(T value) => value; T again(T v) {{ return identity(v); }} }}\n\
              void main() {{\n\
                Screen().build();\n\
                Box<int>().identity(1);\n\
@@ -269,7 +299,7 @@ fn cross_file_only_body_reuse_preserves_types_after_save_close_and_same_text_rer
         format!(
             "typedef Builder = int Function(); void initState() {{ {body} }} \
              Builder callback() => () => 1; \
-             class Box<T> {{ T identity(T value) => value; }} \
+             class Box<T> {{ T identity(T value) => value; T again(T v) {{ return identity(v); }} }} \
              void main() {{ Box<int>().identity(1); callback(); }}"
         )
     };

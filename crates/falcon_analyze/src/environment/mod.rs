@@ -181,8 +181,8 @@ fn metadata_predates_observation(
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        // Treat the entire observation second as racy, including filesystems
-        // with coarse timestamps. A later read can establish a stable baseline.
+        // Treat the entire observation second as racy for second-granularity
+        // timestamps. A later read can establish a stable baseline.
         observed_at
             .duration_since(std::time::UNIX_EPOCH)
             .ok()

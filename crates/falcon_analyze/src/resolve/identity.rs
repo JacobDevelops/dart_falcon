@@ -602,11 +602,15 @@ impl IdentityIndex {
         let Some(occurrences) = self.type_occurrences.get(file.0 & !EXTERNAL_ID) else {
             return offset;
         };
-        let offsets = occurrences
-            .edited
-            .as_ref()
-            .filter(|(edited, _)| Arc::ptr_eq(edited, parsed) || edited.source == parsed.source)
-            .map_or(&occurrences.original, |(_, offsets)| offsets);
+        let offsets = if Arc::ptr_eq(parsed, &self.parsed[file.0 & !EXTERNAL_ID]) {
+            &occurrences.original
+        } else {
+            occurrences
+                .edited
+                .as_ref()
+                .filter(|(edited, _)| Arc::ptr_eq(edited, parsed) || edited.source == parsed.source)
+                .map_or(&occurrences.original, |(_, offsets)| offsets)
+        };
         offsets
             .get(&offset)
             .copied()
