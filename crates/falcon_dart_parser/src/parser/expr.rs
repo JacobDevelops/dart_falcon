@@ -527,9 +527,41 @@ impl<'src> Parser<'src> {
         })
     }
 
+    /// Past the depth limit, swallow the rest of the operand as one error node
+    /// so deeper input costs neither recursion nor a selector chain per token.
+    fn skip_overflowed_expr(&mut self) -> CompletedMarker {
+        let marker = self.start();
+        let mut depth = 0usize;
+        loop {
+            match self.cur().kind {
+                TokenKind::LParen
+                | TokenKind::LBracket
+                | TokenKind::QmarkLBracket
+                | TokenKind::LBrace => depth += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace if depth > 0 => {
+                    depth -= 1;
+                }
+                TokenKind::RParen
+                | TokenKind::RBracket
+                | TokenKind::RBrace
+                | TokenKind::Comma
+                | TokenKind::Semicolon
+                | TokenKind::Colon
+                    if depth == 0 =>
+                {
+                    break;
+                }
+                TokenKind::Eof => break,
+                _ => {}
+            }
+            self.advance();
+        }
+        marker.complete(self, NodeKind::ErrorExpr)
+    }
+
     fn parse_unary(&mut self) -> CompletedMarker {
         self.guarded(
-            |p| p.missing(NodeKind::ErrorExpr),
+            |p| p.skip_overflowed_expr(),
             |p| {
                 if matches!(
                     p.cur().kind,
@@ -570,7 +602,7 @@ impl<'src> Parser<'src> {
 
     fn parse_postfix(&mut self) -> CompletedMarker {
         self.guarded(
-            |p| p.missing(NodeKind::ErrorExpr),
+            |p| p.skip_overflowed_expr(),
             |p| {
                 let mut expr = p.parse_primary();
                 loop {
@@ -753,7 +785,7 @@ impl<'src> Parser<'src> {
 
     pub(super) fn parse_primary(&mut self) -> CompletedMarker {
         self.guarded(
-            |p| p.missing(NodeKind::ErrorExpr),
+            |p| p.skip_overflowed_expr(),
             |p| {
                 let start = p.cur().offset();
                 match p.cur().kind {

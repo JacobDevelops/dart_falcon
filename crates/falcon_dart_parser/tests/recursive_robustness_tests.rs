@@ -93,6 +93,25 @@ fn old_style_function_formals_stop_at_the_depth_limit() {
 }
 
 #[test]
+fn nested_expression_forms_skip_past_the_depth_limit() {
+    for (open, close) in [("[", "]"), ("(", ")"), ("{", "}"), ("{'key': ", "}")] {
+        let source = format!(
+            "void f() {{ var value = {}0{}; print(value); }}",
+            open.repeat(10_000),
+            close.repeat(10_000)
+        );
+        assert_depth_limited(&source);
+        let parsed = parse(&source);
+        assert_eq!(parsed.errors.len(), 1, "{open}: {:?}", parsed.errors);
+        assert_eq!(
+            common::body_stmts(parsed.tree.program(&source)).count(),
+            2,
+            "{open}"
+        );
+    }
+}
+
+#[test]
 fn pattern_chain_accessors_preserve_associativity_and_postfix_order() {
     let source = "void f() { switch (value) { case 1 || 2 || 3: break; } }";
     let parsed = parse(source);
