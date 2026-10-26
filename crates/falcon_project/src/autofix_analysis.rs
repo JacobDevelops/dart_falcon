@@ -5,10 +5,10 @@ use std::sync::Arc;
 
 use falcon_analyze::{
     AnalysisEnvironment, AnalyzeContext, ExternalIndexParts, ExternalLibraries, ExternalSources,
-    ExternalTarget, IdentityIndex, IdentitySource, PackageIdentity, ParsedFile, ProjectFile,
-    SignatureIndex, TypeIndex, build_semantic_indexes, canonical_or_lexical, library_unit,
-    package_identities, read_source, rules_thread_diagnostic, source_size_diagnostic,
-    syntax_error_diagnostics,
+    ExternalTarget, IdentityIndex, IdentitySource, LibraryGrouping, PackageIdentity, ParsedFile,
+    ProjectFile, SemanticIndexes, SignatureIndex, TypeIndex, build_semantic_indexes,
+    canonical_or_lexical, library_unit_by, package_identities, read_source,
+    rules_thread_diagnostic, source_size_diagnostic, syntax_error_diagnostics,
 };
 use falcon_config::FalconConfig;
 use falcon_diagnostics::Diagnostic;
@@ -19,6 +19,13 @@ struct ExternalIndexes {
     identities: Arc<IdentityIndex>,
     types: Arc<TypeIndex>,
     signatures: Arc<SignatureIndex>,
+}
+
+struct ProjectOverlay {
+    indexes: SemanticIndexes,
+    grouping: LibraryGrouping,
+    declaration_signature: u64,
+    has_parse_errors: bool,
 }
 
 impl ExternalIndexes {
@@ -50,7 +57,7 @@ impl ExternalIndexes {
 }
 
 /// The external graph and unopened library companions remain fixed for one run.
-/// Only the requested file's parsed tree and project overlay are rebuilt.
+/// Declaration-preserving passes refresh only the requested file's body facts.
 pub(crate) struct AutofixAnalyzer<'a> {
     analysis: &'a ProjectAnalysis,
     config: &'a FalconConfig,
@@ -61,8 +68,12 @@ pub(crate) struct AutofixAnalyzer<'a> {
     external_libraries: Option<&'a ExternalLibraries>,
     indexes: Option<ExternalIndexes>,
     companions: Vec<ProjectFile>,
-    companion_diagnostics: Vec<Diagnostic>,
     packages: Vec<PackageIdentity>,
+    overlay: Option<ProjectOverlay>,
+    #[cfg(test)]
+    overlay_builds: usize,
+    #[cfg(test)]
+    body_refreshes: usize,
 }
 
 impl<'a> AutofixAnalyzer<'a> {
@@ -102,14 +113,20 @@ impl<'a> AutofixAnalyzer<'a> {
                 signatures: Arc::clone(parts.signatures),
             }),
             companions,
-            companion_diagnostics: Vec::new(),
             packages: Vec::new(),
+            overlay: None,
+            #[cfg(test)]
+            overlay_builds: 0,
+            #[cfg(test)]
+            body_refreshes: 0,
         }
     }
 
     pub(crate) fn analyze(&mut self, source: &str) -> Vec<Diagnostic> {
-        falcon_dart_parser::with_stack(|| self.analyze_inner(source))
-            .unwrap_or_else(|error| vec![rules_thread_diagnostic(self.path, &error)])
+        let mut diagnostics = falcon_dart_parser::with_stack(|| self.analyze_inner(source))
+            .unwrap_or_else(|error| vec![rules_thread_diagnostic(self.path, &error)]);
+        diagnostics.retain(|diagnostic| diagnostic.file_path == self.path.to_string_lossy());
+        diagnostics
     }
 
     fn analyze_inner(&mut self, source: &str) -> Vec<Diagnostic> {
@@ -117,7 +134,7 @@ impl<'a> AutofixAnalyzer<'a> {
             Ok((file, diagnostics)) => (file, diagnostics),
             Err(diagnostic) => return vec![*diagnostic],
         };
-        let (file, mut diagnostics) = file;
+        let (file, diagnostics) = file;
         if !self.analysis.resolve {
             let ctx = AnalyzeContext::new(self.path, self.config, &file.parsed)
                 .with_environment(Some(self.environment));
@@ -126,34 +143,64 @@ impl<'a> AutofixAnalyzer<'a> {
         if !self.initialized {
             self.load_external(&file);
         }
-        let sources: Vec<_> = std::iter::once(&file)
-            .chain(&self.companions)
-            .map(|file| IdentitySource {
-                path: &file.path,
-                parsed: &file.parsed,
+        let declaration_signature = file.parsed.declaration_signature();
+        if let Some(overlay) = self.overlay.as_mut().filter(|overlay| {
+            !file.has_parse_errors
+                && !overlay.has_parse_errors
+                && overlay.declaration_signature == declaration_signature
+        }) {
+            let id = overlay.indexes.identities.file(self.path).unwrap();
+            overlay.indexes.refresh_file_body(id, &file.parsed);
+            #[cfg(test)]
+            {
+                self.body_refreshes += 1;
+            }
+        } else {
+            let sources: Vec<_> = std::iter::once(&file)
+                .chain(&self.companions)
+                .map(|file| IdentitySource {
+                    path: &file.path,
+                    parsed: &file.parsed,
+                    has_parse_errors: file.has_parse_errors,
+                })
+                .collect();
+            let (indexes, grouping) = build_semantic_indexes(
+                &sources,
+                &self.packages,
+                self.external_libraries
+                    .or(self.libraries.as_ref())
+                    .map(|libraries| ExternalSources {
+                        libraries,
+                        environment: self.environment,
+                    }),
+                self.indexes.as_ref().map(ExternalIndexes::borrowed),
+            );
+            self.overlay = Some(ProjectOverlay {
+                indexes,
+                grouping,
+                declaration_signature,
                 has_parse_errors: file.has_parse_errors,
-            })
-            .collect();
-        let (indexes, grouping) = build_semantic_indexes(
-            &sources,
-            &self.packages,
-            self.external_libraries
-                .or(self.libraries.as_ref())
-                .map(|libraries| ExternalSources {
-                    libraries,
-                    environment: self.environment,
-                }),
-            self.indexes.as_ref().map(ExternalIndexes::borrowed),
-        );
-        let parsed: Vec<_> = sources.iter().map(|file| file.parsed).collect();
-        let library = library_unit(&grouping, &parsed, 0);
+            });
+            #[cfg(test)]
+            {
+                self.overlay_builds += 1;
+            }
+        }
+        let overlay = self.overlay.as_ref().unwrap();
+        let indexes = &overlay.indexes;
+        let library = library_unit_by(&overlay.grouping, 0, |i| {
+            if i == 0 {
+                &file.parsed
+            } else {
+                &self.companions[i - 1].parsed
+            }
+        });
         let ctx = AnalyzeContext::new(self.path, self.config, &file.parsed)
             .with_types(&indexes.types)
             .with_identities(&indexes.identities)
             .with_signatures(&indexes.signatures)
             .with_library(&library)
             .with_environment(Some(self.environment));
-        diagnostics.extend(self.companion_diagnostics.iter().cloned());
         analyze_document(&self.analysis.registry, self.config, &ctx, diagnostics)
     }
 
@@ -207,11 +254,10 @@ impl<'a> AutofixAnalyzer<'a> {
             .project_companions()
             .filter(|candidate| owned.is_some() && !project_paths.contains(*candidate))
         {
-            if let Ok(source) = read_source(companion) {
-                match self.parse(companion, &source) {
-                    Ok((file, _)) => self.companions.push(file),
-                    Err(diagnostic) => self.companion_diagnostics.push(*diagnostic),
-                }
+            if let Ok(source) = read_source(companion)
+                && let Ok((file, _)) = self.parse(companion, &source)
+            {
+                self.companions.push(file);
             }
         }
         self.packages = package_identities(
@@ -227,7 +273,7 @@ impl<'a> AutofixAnalyzer<'a> {
                     .chain(file.doc_imports.iter().map(|uri| std::borrow::Cow::Borrowed(uri.as_str())))
                     .any(|uri| matches!(
                         libraries.resolve_target(self.environment, &file.path, Some(instance), &uri),
-                        Some(ExternalTarget::Path(target)) if target == path || self.companions.iter().any(|file| file.path == target)
+                        Some(ExternalTarget::Path(target)) if project_paths.contains(&target)
                     ))
             })
         });
@@ -247,6 +293,95 @@ impl<'a> AutofixAnalyzer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn body_fix_passes_do_not_reindex_companions() {
+        let config = FalconConfig::default();
+        let mut analysis = ProjectAnalysis::new(&config);
+        analysis.resolve = true;
+        let files: Vec<_> = (0..64)
+            .map(|i| {
+                let source = format!("class Companion{i} {{}}");
+                ProjectFile {
+                    path: format!("/virtual/companion{i}.dart").into(),
+                    parsed: Arc::new(ParsedFile {
+                        tree: falcon_dart_parser::parse(&source).tree,
+                        source: source.into(),
+                    }),
+                    has_parse_errors: false,
+                }
+            })
+            .collect();
+        let mut environment = AnalysisEnvironment::default();
+        let libraries = ExternalLibraries::default();
+        let mut analyzer = AutofixAnalyzer::new(
+            &analysis,
+            &config,
+            &mut environment,
+            Path::new("/virtual/main.dart"),
+            FixContext {
+                external_libraries: Some(&libraries),
+                external: None,
+                project_files: &files,
+                cancelled: &|| false,
+            },
+        );
+        for body in ["", "print(1);", "print('longer');", "print('x');"] {
+            analyzer.analyze(&format!(
+                "void main() {{ {body} }} String after(String value) => value;"
+            ));
+        }
+        assert_eq!(analyzer.overlay_builds, 1);
+        assert_eq!(analyzer.body_refreshes, 3);
+        analyzer.analyze("void main() {} int after(int value) => value;");
+        assert_eq!(analyzer.overlay_builds, 2);
+        assert_eq!(analyzer.body_refreshes, 3);
+    }
+
+    struct CompanionFailure;
+
+    impl falcon_analyze::Rule for CompanionFailure {
+        fn prepare<'a>(
+            &self,
+            _program: falcon_syntax::cst::Program<'a>,
+            _ctx: &'a AnalyzeContext<'a>,
+        ) -> falcon_analyze::RulePreparation<'a> {
+            falcon_analyze::RulePreparation::Diagnostics(vec![
+                rules_thread_diagnostic(
+                    Path::new("companion.dart"),
+                    &std::io::Error::other("companion parser failed"),
+                ),
+                falcon_diagnostics::Diagnostic::new(
+                    falcon_diagnostics::SYNTAX_ERROR_DIAGNOSTIC_ID,
+                    falcon_diagnostics::Severity::Error,
+                    "Companion syntax error.",
+                    "companion.dart",
+                    falcon_diagnostics::Span { start: 0, end: 0 },
+                ),
+            ])
+        }
+    }
+
+    #[test]
+    fn companion_failures_do_not_enter_the_target_fix_loop() {
+        let config = FalconConfig::default();
+        let mut analysis = ProjectAnalysis::new(&config);
+        analysis.registry = falcon_analyze::RuleRegistry::new();
+        analysis
+            .registry
+            .register("companion-failure", Box::new(CompanionFailure));
+        let mut environment = AnalysisEnvironment::default();
+        let outcome = crate::fix_file(
+            &analysis,
+            &config,
+            &mut environment,
+            Path::new("target.dart"),
+            "void main() {}",
+            false,
+        );
+        assert!(outcome.diagnostics.is_empty());
+        assert!(outcome.stop.is_none());
+    }
 
     #[test]
     fn successive_edits_reuse_external_indexes_and_report_fresh_syntax() {

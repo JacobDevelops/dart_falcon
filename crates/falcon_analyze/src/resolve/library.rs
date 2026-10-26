@@ -235,10 +235,19 @@ pub fn library_unit<'a>(
     parsed: &[&'a Arc<ParsedFile>],
     i: usize,
 ) -> LibraryUnit<'a> {
+    library_unit_by(grouping, i, |j| parsed[j])
+}
+
+/// Build a library unit by looking up only the requested file's siblings.
+pub fn library_unit_by<'a>(
+    grouping: &'a LibraryGrouping,
+    i: usize,
+    parsed: impl Fn(usize) -> &'a Arc<ParsedFile>,
+) -> LibraryUnit<'a> {
     let siblings = grouping.siblings(i);
     LibraryUnit {
-        siblings: siblings.iter().map(|&j| parsed[j].program()).collect(),
-        sibling_parsed: siblings.iter().map(|&j| parsed[j]).collect(),
+        siblings: siblings.iter().map(|&j| parsed(j).program()).collect(),
+        sibling_parsed: siblings.iter().map(|&j| parsed(j)).collect(),
         sibling_paths: siblings
             .iter()
             .map(|&j| grouping.paths[j].as_path())

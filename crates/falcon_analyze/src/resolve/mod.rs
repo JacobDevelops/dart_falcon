@@ -21,7 +21,7 @@ pub use identity::{
 };
 pub use library::{
     LibraryGrouping, LibraryUnit, canonical_or_lexical, group_libraries, is_generated_dart_file,
-    lexical_normalize, library_unit,
+    lexical_normalize, library_unit, library_unit_by,
 };
 pub use semantic::{
     ConstConstructorBody, DeclarationFacts, FunctionTypeShape, InferenceContext, MemberFacts,

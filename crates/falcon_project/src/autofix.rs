@@ -556,6 +556,25 @@ mod tests {
     }
 
     #[test]
+    fn nonoverlapping_fixes_are_reanalyzed_one_at_a_time() {
+        let mut inputs = Vec::new();
+        let outcome = fix_with("abc", false, 100, |source| {
+            inputs.push(source.to_owned());
+            match source {
+                "abc" => vec![
+                    diagnostic("first", 0, 1, "x"),
+                    diagnostic("later", 2, 3, "z"),
+                ],
+                "xbc" => vec![diagnostic("later", 2, 3, "y")],
+                _ => Vec::new(),
+            }
+        });
+        assert_eq!(outcome.source, "xby");
+        assert_eq!(inputs, ["abc", "xbc", "xby"]);
+        assert!(outcome.stop.is_none());
+    }
+
+    #[test]
     fn overlapping_diagnostics_are_reanalyzed_after_one_atomic_fix() {
         let mut inputs = Vec::new();
         let outcome = fix_with("abc", false, 100, |source| {
