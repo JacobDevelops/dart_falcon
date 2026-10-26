@@ -11,3 +11,5 @@ Report missing input paths without panicking when a path component is a regular 
 Anchor baseline fingerprints to the workspace, configuration, or Git root so checks from subdirectories match baselines recorded at the root.
 
 Bare `--write-baseline` writes to the configured baseline destination, or to `falcon-baseline.json` in the anchored project root, instead of creating a stray file in the current subdirectory.
+
+Baseline writing records lint findings even when other files have syntax errors or malformed suppressions; those diagnostics remain visible and retain their normal exit policy.

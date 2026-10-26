@@ -54,3 +54,32 @@ fn writing_baseline_does_not_destroy_existing_debt_after_operational_failure() {
     assert!(error.contains("Cannot write a baseline"));
     assert_eq!(fs::read_to_string(baseline).unwrap(), original);
 }
+
+#[test]
+fn writing_baseline_preserves_unbaselinable_source_diagnostics() {
+    for (source, rule) in [
+        ("void broken( {\n", "syntax-error"),
+        ("// falcon-ignore lint/suspicious/avoid-dynamic\nvoid f() {}\n", "malformed-suppression"),
+    ] {
+        let project = tempfile::tempdir().unwrap();
+        let config = project.path().join("falcon.json");
+        let baseline = project.path().join("debt.json");
+        fs::write(&config, r#"{"baseline":"debt.json","linter":{"rules":{"recommended":false,"suspicious":{"avoid-dynamic":"error"}}},"cross-file":{"rules":{"recommended":false}}}"#).unwrap();
+        fs::write(project.path().join("lint.dart"), "void f(dynamic value) {}\n").unwrap();
+        fs::write(project.path().join("broken.dart"), source).unwrap();
+        let options = CheckOptions {
+            paths: vec![project.path().to_path_buf()],
+            config_path: Some(config),
+            write_baseline: Some(None),
+            error_exit_code: 7,
+            ..Default::default()
+        };
+        let output = collect_check_with_sdk_locator(&options, |_| None).unwrap();
+        assert!(baseline.is_file());
+        assert!(output.diagnostics.iter().any(|diagnostic| diagnostic.rule == rule), "{:?}", output.diagnostics);
+        assert!(!output.diagnostics.iter().any(|diagnostic| diagnostic.rule == "avoid-dynamic"));
+        assert_eq!(output.exit_code, if rule == "syntax-error" { 7 } else { 0 });
+        let recorded: serde_json::Value = serde_json::from_str(&fs::read_to_string(baseline).unwrap()).unwrap();
+        assert_eq!(recorded["entries"].as_object().unwrap().len(), 1);
+    }
+}

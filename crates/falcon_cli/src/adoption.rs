@@ -32,8 +32,13 @@ pub(crate) fn apply_baseline(
         };
         if diagnostics.iter().any(|diagnostic| {
             falcon_diagnostics::RESERVED_DIAGNOSTIC_IDS.contains(&diagnostic.rule)
+                && !matches!(
+                    diagnostic.rule,
+                    falcon_diagnostics::SYNTAX_ERROR_DIAGNOSTIC_ID
+                        | falcon_diagnostics::MALFORMED_SUPPRESSION_DIAGNOSTIC_ID
+                )
         }) {
-            return Err("Cannot write a baseline after syntax or operational errors.".into());
+            return Err("Cannot write a baseline after operational errors.".into());
         }
         Baseline::from_diagnostics(diagnostics, root, |path| sources.get(path).copied())?
             .write(path)?;
