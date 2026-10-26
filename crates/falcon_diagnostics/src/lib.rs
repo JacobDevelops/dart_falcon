@@ -16,12 +16,14 @@ pub const SYNTAX_ERROR_DIAGNOSTIC_ID: &str = "syntax-error";
 pub const UNMATCHED_PATH_DIAGNOSTIC_ID: &str = "unmatched-path";
 pub const RULES_THREAD_ERROR_DIAGNOSTIC_ID: &str = "rules-thread-error";
 pub const MALFORMED_SUPPRESSION_DIAGNOSTIC_ID: &str = "malformed-suppression";
+pub const AUTOFIX_DIAGNOSTIC_ID: &str = "autofix";
 pub const RESERVED_DIAGNOSTIC_IDS: &[&str] = &[
     CONFIG_DIAGNOSTIC_ID,
     SYNTAX_ERROR_DIAGNOSTIC_ID,
     UNMATCHED_PATH_DIAGNOSTIC_ID,
     RULES_THREAD_ERROR_DIAGNOSTIC_ID,
     MALFORMED_SUPPRESSION_DIAGNOSTIC_ID,
+    AUTOFIX_DIAGNOSTIC_ID,
 ];
 
 #[derive(Debug, Clone, Serialize)]

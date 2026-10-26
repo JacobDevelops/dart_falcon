@@ -120,7 +120,7 @@ fn path_override_controls_fix_classification() {
 }
 
 #[test]
-fn dry_run_previews_diff_and_analyzes_fixed_text_without_writes() {
+fn dry_run_previews_diff_and_reports_original_diagnostics_without_writes() {
     let (dir, mut options) = fixture(json!("error"));
     options.dry_run = true;
     let output = collect(&options);
@@ -128,8 +128,12 @@ fn dry_run_previews_diff_and_analyzes_fixed_text_without_writes() {
         fs::read_to_string(dir.path().join("main.dart")).unwrap(),
         BEFORE
     );
-    assert_eq!(output.exit_code, 0);
-    assert!(output.diagnostics.is_empty());
+    assert_eq!(output.exit_code, 1);
+    assert_eq!(output.diagnostics.len(), 1);
+    assert_eq!(
+        output.diagnostics[0].span.start,
+        BEFORE.find("new ").unwrap()
+    );
     assert!(
         output
             .diff
@@ -194,7 +198,7 @@ fn fixing_preserves_final_cross_file_diagnostics() {
 }
 
 #[test]
-fn cycles_fail_with_rules_and_do_not_write_files() {
+fn cycles_report_stops_and_still_write_converged_files() {
     let (dir, options) = fixture(json!("error"));
     let config_path = options.config_path.as_ref().unwrap();
     let mut config: serde_json::Value =
@@ -206,15 +210,20 @@ fn cycles_fail_with_rules_and_do_not_write_files() {
     fs::write(dir.path().join("main.dart"), source).unwrap();
     let earlier = dir.path().join("aaa.dart");
     fs::write(&earlier, BEFORE).unwrap();
-    let error = collect_check_with_sdk_locator(&options, |_| None).unwrap_err();
-    assert!(error.contains("prefer-single-quotes"), "{error}");
-    assert!(error.contains("prefer-double-quotes"), "{error}");
-    assert_ne!(falcon_cli::run_check_with_sdk_locator(options, |_| None), 0);
+    let output = collect(&options);
+    let stop = output
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.rule == "autofix")
+        .unwrap();
+    assert!(stop.message.contains("prefer-single-quotes"), "{stop:?}");
+    assert!(stop.message.contains("prefer-double-quotes"), "{stop:?}");
+    assert_eq!(output.exit_code, 1);
     assert_eq!(
         fs::read_to_string(dir.path().join("main.dart")).unwrap(),
         source
     );
-    assert_eq!(fs::read_to_string(earlier).unwrap(), BEFORE);
+    assert_eq!(fs::read_to_string(earlier).unwrap(), AFTER);
 }
 
 #[test]
@@ -248,7 +257,7 @@ fn dry_run_rejects_baseline_writes_without_changing_files() {
 }
 
 #[test]
-fn iteration_limit_reports_rules_and_leaves_disk_unchanged() {
+fn large_converging_files_are_written() {
     let (dir, options) = fixture(json!("error"));
     let source = format!(
         "class Example {{}}\nvoid main() {{\n{}}}\n",
@@ -256,9 +265,130 @@ fn iteration_limit_reports_rules_and_leaves_disk_unchanged() {
     );
     let path = dir.path().join("main.dart");
     fs::write(&path, &source).unwrap();
-    let error = collect_check_with_sdk_locator(&options, |_| None).unwrap_err();
-    assert!(error.contains("iteration limit"), "{error}");
-    assert!(error.contains("unnecessary-new"), "{error}");
-    assert_ne!(falcon_cli::run_check_with_sdk_locator(options, |_| None), 0);
-    assert_eq!(fs::read_to_string(path).unwrap(), source);
+    let output = collect(&options);
+    assert_eq!(output.exit_code, 0);
+    assert!(output.diagnostics.is_empty());
+    assert_eq!(
+        fs::read_to_string(path).unwrap(),
+        source.replace("new ", "")
+    );
+}
+
+#[test]
+fn dry_run_pending_warning_fixes_fail_but_clean_dry_runs_succeed() {
+    let (dir, mut options) = fixture(json!("warn"));
+    options.dry_run = true;
+    options.error_exit_code = 0;
+    let output = collect(&options);
+    assert_eq!(output.exit_code, 1);
+    assert!(!output.diff.is_empty());
+    fs::write(dir.path().join("main.dart"), AFTER).unwrap();
+    let output = collect(&options);
+    assert_eq!(output.exit_code, 0);
+    assert!(output.diff.is_empty());
+}
+
+#[test]
+fn syntax_errors_are_reported_and_other_files_are_fixed() {
+    let (dir, options) = fixture(json!("error"));
+    let source = format!("{BEFORE}void broken( {{\n");
+    fs::write(dir.path().join("main.dart"), &source).unwrap();
+    fs::write(dir.path().join("other.dart"), BEFORE).unwrap();
+    let output = collect(&options);
+    assert_eq!(output.exit_code, 1);
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "syntax-error")
+    );
+    assert!(output.diagnostics.iter().any(|diagnostic| diagnostic.rule == "autofix" && diagnostic.message.contains("syntax")));
+    assert_eq!(
+        fs::read_to_string(dir.path().join("main.dart")).unwrap(),
+        source
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("other.dart")).unwrap(),
+        AFTER
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_files_are_reported_and_never_rewritten() {
+    let (dir, options) = fixture(json!("error"));
+    let outside = tempdir().unwrap();
+    let target = outside.path().join("target.dart");
+    fs::write(&target, BEFORE).unwrap();
+    let link = dir.path().join("linked.dart");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let output = collect(&options);
+    assert_eq!(output.exit_code, 1);
+    assert!(
+        output.diagnostics.iter().any(
+            |diagnostic| diagnostic.rule == "autofix" && diagnostic.message.contains("symlink")
+        )
+    );
+    assert!(fs::symlink_metadata(link).unwrap().file_type().is_symlink());
+    assert_eq!(fs::read_to_string(target).unwrap(), BEFORE);
+    assert_eq!(
+        fs::read_to_string(dir.path().join("main.dart")).unwrap(),
+        AFTER
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn atomic_writes_replace_inodes_and_preserve_permissions() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let (dir, options) = fixture(json!("error"));
+    let path = dir.path().join("main.dart");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+    let original = fs::File::open(&path).unwrap();
+    let inode = original.metadata().unwrap().ino();
+    assert_eq!(collect(&options).exit_code, 0);
+    let metadata = fs::metadata(&path).unwrap();
+    assert_ne!(metadata.ino(), inode);
+    assert_eq!(metadata.permissions().mode() & 0o777, 0o640);
+    assert_eq!(fs::read_to_string(path).unwrap(), AFTER);
+}
+
+#[test]
+fn read_only_sources_are_reported_and_preserve_original_diagnostics() {
+    let (dir, options) = fixture(json!("error"));
+    let path = dir.path().join("main.dart");
+    let original_permissions = fs::metadata(&path).unwrap().permissions();
+    let mut permissions = original_permissions.clone();
+    permissions.set_readonly(true);
+    fs::set_permissions(&path, permissions).unwrap();
+    let output = collect(&options);
+    fs::set_permissions(&path, original_permissions).unwrap();
+    assert_eq!(output.exit_code, 1);
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.rule == "autofix" && diagnostic.message.contains("read-only")
+    }));
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.rule == "unnecessary-new"
+            && diagnostic.span.start == BEFORE.find("new ").unwrap()
+    }));
+    assert_eq!(fs::read_to_string(path).unwrap(), BEFORE);
+}
+
+#[test]
+fn autofix_reports_are_sorted_with_other_diagnostics() {
+    let (dir, options) = fixture(json!("error"));
+    let first = dir.path().join("aaa.dart");
+    fs::write(&first, BEFORE).unwrap();
+    let original_permissions = fs::metadata(&first).unwrap().permissions();
+    let mut permissions = original_permissions.clone();
+    permissions.set_readonly(true);
+    fs::set_permissions(&first, permissions).unwrap();
+    let output = collect(&options);
+    fs::set_permissions(&first, original_permissions).unwrap();
+    assert_eq!(output.diagnostics[0].rule, "autofix");
+    assert!(output.diagnostics[0].file_path.ends_with("aaa.dart"));
+    assert_eq!(
+        fs::read_to_string(dir.path().join("main.dart")).unwrap(),
+        AFTER
+    );
 }

@@ -2,11 +2,14 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 
 use clap::{Args, ValueEnum};
 use falcon_analyze::{AnalysisEnvironment, DartSdk, PackageConfig, SdkLocator};
-use falcon_diagnostics::{Diagnostic, FixKind, Severity, Span, UNMATCHED_PATH_DIAGNOSTIC_ID};
+use falcon_diagnostics::{
+    AUTOFIX_DIAGNOSTIC_ID, Diagnostic, FixKind, Severity, Span, UNMATCHED_PATH_DIAGNOSTIC_ID,
+};
 use falcon_project::{
     ProjectAnalysis, analyze_sources, complete_analysis, finalize_diagnostics,
     load_workspace_config, manifest_file, walk_project,
@@ -294,6 +297,7 @@ fn collect_check_impl(
         None => AnalysisEnvironment::default(),
     };
     let mut diff = String::new();
+    let mut fix_reports = Vec::new();
     if options.write {
         let (mut initial, _, _) =
             analyze_sources(&analysis, &files, &manifests, &config, &mut environment);
@@ -309,12 +313,21 @@ fn collect_check_impl(
             })
             .map(|diagnostic| diagnostic.file_path)
             .collect();
-        let mut changed = Vec::with_capacity(files.len());
         for (path, source) in &mut files {
             if !fixable.contains(path.to_string_lossy().as_ref()) {
-                changed.push(false);
                 continue;
             }
+            let snapshot = if options.dry_run {
+                None
+            } else {
+                match WriteSnapshot::capture(path, source) {
+                    Ok(snapshot) => Some(snapshot),
+                    Err(message) => {
+                        fix_reports.push(fix_report(path, message));
+                        continue;
+                    }
+                }
+            };
             let outcome = falcon_project::fix_file(
                 &analysis,
                 &config,
@@ -324,23 +337,20 @@ fn collect_check_impl(
                 options.unsafe_fixes,
             );
             if let Some(stop) = outcome.stop {
-                return Err(format!("failed to fix {}: {stop}", path.display()));
+                fix_reports.push(fix_report(path, stop.to_string()));
+                continue;
             }
-            changed.push(outcome.source != *source);
-            if outcome.source != *source {
-                if options.dry_run {
-                    let relative = crate::baseline::relative_path(&path.to_string_lossy(), &root);
-                    append_full_file_diff(&mut diff, &relative, source, &outcome.source);
-                }
-                *source = outcome.source;
+            if outcome.source == *source {
+                continue;
             }
-        }
-        if !options.dry_run {
-            for ((path, source), changed) in files.iter().zip(changed) {
-                if changed {
-                    std::fs::write(path, source)
-                        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+            if let Some(snapshot) = snapshot {
+                match snapshot.write(path, &outcome.source) {
+                    Ok(()) => *source = outcome.source,
+                    Err(message) => fix_reports.push(fix_report(path, message)),
                 }
+            } else {
+                let relative = crate::baseline::relative_path(&path.to_string_lossy(), &root);
+                append_full_file_diff(&mut diff, &relative, source, &outcome.source);
             }
         }
     }
@@ -390,6 +400,9 @@ fn collect_check_impl(
         );
     }
 
+    let fix_failed = !fix_reports.is_empty();
+    diagnostics.append(&mut fix_reports);
+    falcon_project::sort_diagnostics(&mut diagnostics);
     if options.baseline.is_some() || config.baseline.is_some() || options.write_baseline.is_some() {
         let sources = if collect_programs {
             project_files
@@ -406,7 +419,7 @@ fn collect_check_impl(
         crate::adoption::apply_baseline(options, &config, &root, &mut diagnostics, &sources)?;
     }
     crate::report::count_package_diagnostics(&mut packages, &diagnostics);
-    let exit_code = if pipeline_failed || has_unmatched {
+    let exit_code = if pipeline_failed || has_unmatched || fix_failed || !diff.is_empty() {
         1
     } else if diagnostics.iter().any(|diagnostic| {
         diagnostic.severity == Severity::Error
@@ -426,6 +439,91 @@ fn collect_check_impl(
         diff,
     })
 }
+
+fn fix_report(path: &Path, message: String) -> Diagnostic {
+    let mut diagnostic = Diagnostic::new(
+        AUTOFIX_DIAGNOSTIC_ID,
+        Severity::Error,
+        format!("Skipped autofix: {message}."),
+        path.to_string_lossy(),
+        Span { start: 0, end: 0 },
+    );
+    diagnostic.resolve_position("");
+    diagnostic
+}
+
+struct WriteSnapshot {
+    len: u64,
+    modified: std::time::SystemTime,
+    permissions: std::fs::Permissions,
+}
+
+impl WriteSnapshot {
+    fn capture(path: &Path, source: &str) -> Result<Self, String> {
+        let metadata = Self::metadata(path)?;
+        let snapshot = Self {
+            len: metadata.len(),
+            modified: metadata.modified().map_err(|error| error.to_string())?,
+            permissions: metadata.permissions(),
+        };
+        // The walker read source before this snapshot. Detect intervening saves.
+        let current = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+        if current != source {
+            return Err("file changed since it was read".to_owned());
+        }
+        drop(current);
+        snapshot.check(path)?;
+        Ok(snapshot)
+    }
+
+    fn metadata(path: &Path) -> Result<std::fs::Metadata, String> {
+        let metadata = std::fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+        if metadata.file_type().is_symlink() {
+            return Err("refusing to rewrite a symlink".to_owned());
+        }
+        if !metadata.is_file() {
+            return Err("path is no longer a regular file".to_owned());
+        }
+        if metadata.permissions().readonly() {
+            return Err("refusing to rewrite a read-only file".to_owned());
+        }
+        Ok(metadata)
+    }
+
+    fn check(&self, path: &Path) -> Result<(), String> {
+        let metadata = Self::metadata(path)?;
+        let modified = metadata.modified().map_err(|error| error.to_string())?;
+        if metadata.len() != self.len || modified != self.modified {
+            return Err("file changed since it was read (mtime or length differs)".to_owned());
+        }
+        Ok(())
+    }
+
+    fn write(self, path: &Path, source: &str) -> Result<(), String> {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let mut temporary = tempfile::NamedTempFile::new_in(parent)
+            .map_err(|error| format!("could not create temporary file: {error}"))?;
+        temporary
+            .write_all(source.as_bytes())
+            .map_err(|error| format!("could not write temporary file: {error}"))?;
+        temporary
+            .as_file()
+            .set_permissions(self.permissions.clone())
+            .map_err(|error| format!("could not preserve file permissions: {error}"))?;
+        temporary
+            .as_file()
+            .sync_all()
+            .map_err(|error| format!("could not sync temporary file: {error}"))?;
+        self.check(path)?;
+        temporary
+            .persist(path)
+            .map_err(|error| format!("could not replace file: {error}"))?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests;
 
 fn append_full_file_diff(output: &mut String, path: &str, before: &str, after: &str) {
     let old_lines = before.lines().count();
