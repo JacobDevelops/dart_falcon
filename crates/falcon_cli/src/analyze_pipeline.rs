@@ -4,9 +4,13 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use clap::{Args, ValueEnum};
-use falcon_analyze::{AnalysisEnvironment, DartSdk, PackageConfig, SdkLocator};
+use falcon_analyze::{
+    AnalysisEnvironment, DartSdk, ExternalIndexParts, ExternalLibraries, ExternalSources,
+    IdentityIndex, PackageConfig, ParsedFile, ProjectFile, SdkLocator, SignatureIndex, TypeIndex,
+};
 use falcon_diagnostics::{
     AUTOFIX_DIAGNOSTIC_ID, Diagnostic, FixKind, Severity, Span, UNMATCHED_PATH_DIAGNOSTIC_ID,
 };
@@ -240,8 +244,10 @@ fn collect_check_impl(
         &cli_filter
     };
     let max_errors = options.max_errors.or(config.max_errors);
-    let analysis = ProjectAnalysis::new(&config);
+    let mut analysis = ProjectAnalysis::new(&config);
     let collect_programs = analysis.collect_programs;
+    // The fix pass shares the initial project snapshot and dependency closure.
+    analysis.collect_programs |= options.write && analysis.resolve;
     let walked = walk_project(paths, filter, true)?;
     let mut files = walked.files;
     let mut manifests = walked.manifests;
@@ -309,7 +315,7 @@ fn collect_check_impl(
     let mut diff = String::new();
     let mut fix_reports = Vec::new();
     if options.write {
-        let (mut initial, _, _) =
+        let (mut initial, mut fix_files, _) =
             analyze_sources(&analysis, &files, &manifests, &config, &mut environment);
         falcon_rules::apply_severities(&mut initial, &config);
         falcon_project::apply_fix_policies(&config, &mut initial);
@@ -323,6 +329,8 @@ fn collect_check_impl(
             })
             .map(|diagnostic| diagnostic.file_path)
             .collect();
+        let external = (analysis.resolve && !fixable.is_empty())
+            .then(|| FixExternals::load(&environment, &mut fix_files));
         for (path, source) in &mut files {
             if !fixable.contains(path.to_string_lossy().as_ref()) {
                 continue;
@@ -338,13 +346,19 @@ fn collect_check_impl(
                     }
                 }
             };
-            let outcome = falcon_project::fix_file(
+            let outcome = falcon_project::fix_file_with_context(
                 &analysis,
                 &config,
                 &mut environment,
                 path,
                 source,
                 options.unsafe_fixes,
+                falcon_project::FixContext {
+                    external: external.as_ref().map(FixExternals::indexes),
+                    external_libraries: external.as_ref().map(|external| &external.libraries),
+                    project_files: &fix_files,
+                    cancelled: &|| false,
+                },
             );
             if let Some(stop) = outcome.stop {
                 fix_reports.push(fix_report(path, stop.to_string()));
@@ -353,16 +367,27 @@ fn collect_check_impl(
             if outcome.source == *source {
                 continue;
             }
-            if let Some(snapshot) = snapshot {
-                match snapshot.write(path, &outcome.source) {
-                    Ok(()) => *source = outcome.source,
-                    Err(message) => fix_reports.push(fix_report(path, message)),
-                }
-            } else {
+            let project_file = fix_files.iter_mut().find(|file| file.path == *path);
+            if let Err(message) = WriteSnapshot::apply_with_project_snapshot(
+                snapshot,
+                path,
+                &outcome.source,
+                project_file,
+                &environment,
+            ) {
+                fix_reports.push(fix_report(path, message));
+                continue;
+            }
+            if options.dry_run {
                 let relative = crate::baseline::relative_path(&path.to_string_lossy(), &root);
                 append_full_file_diff(&mut diff, &relative, source, &outcome.source);
+            } else {
+                *source = outcome.source;
             }
         }
+        // Project snapshots are retained only for fixing unless cross-file rules
+        // also need the final parsed files.
+        analysis.collect_programs = collect_programs;
     }
     let (mut diagnostics, mut project_files, indexes) =
         analyze_sources(&analysis, &files, &manifests, &config, &mut environment);
@@ -462,6 +487,86 @@ fn fix_report(path: &Path, message: String) -> Diagnostic {
     diagnostic
 }
 
+struct FixExternals {
+    libraries: ExternalLibraries,
+    identities: Arc<IdentityIndex>,
+    types: Arc<TypeIndex>,
+    signatures: Arc<SignatureIndex>,
+}
+
+#[cfg(test)]
+thread_local! {
+    static FIX_EXTERNAL_LOADS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl FixExternals {
+    fn load(environment: &AnalysisEnvironment, files: &mut Vec<ProjectFile>) -> Self {
+        #[cfg(test)]
+        FIX_EXTERNAL_LOADS.with(|loads| loads.set(loads.get() + 1));
+        let paths: HashSet<_> = files
+            .iter()
+            .map(|file| falcon_analyze::canonical_or_lexical(&file.path))
+            .collect();
+        let roots: Vec<_> = files
+            .iter()
+            .map(|file| (file.path.as_path(), file.program(), file.source()))
+            .collect();
+        let libraries = ExternalLibraries::load(environment, &roots, |path| paths.contains(path));
+        // A selected part can promote its unopened library companions out of
+        // the external graph. Keep those in the shared project snapshot.
+        for path in libraries
+            .project_companions()
+            .filter(|path| !paths.contains(*path))
+        {
+            let Ok(source) = falcon_analyze::read_source(path) else {
+                continue;
+            };
+            let Ok(parsed) = falcon_dart_parser::try_parse_for_package(
+                &source,
+                environment.package_language_version(path),
+            ) else {
+                continue;
+            };
+            files.push(ProjectFile {
+                path: path.to_path_buf(),
+                has_parse_errors: !parsed.errors.is_empty(),
+                parsed: Arc::new(ParsedFile {
+                    source: source.into(),
+                    tree: parsed.tree,
+                }),
+            });
+        }
+        let external = ExternalSources {
+            libraries: &libraries,
+            environment,
+        };
+        let identities = Arc::new(IdentityIndex::build_external(external));
+        let mut types = TypeIndex::from_resolved_files(std::iter::empty(), &identities);
+        types.add_external(&libraries, &identities);
+        let types = Arc::new(types);
+        let signatures = Arc::new(SignatureIndex::build(
+            &[],
+            Some(&libraries),
+            &identities,
+            &types,
+        ));
+        Self {
+            libraries,
+            identities,
+            types,
+            signatures,
+        }
+    }
+
+    fn indexes(&self) -> ExternalIndexParts<'_> {
+        ExternalIndexParts {
+            identities: &self.identities,
+            types: &self.types,
+            signatures: &self.signatures,
+        }
+    }
+}
+
 struct WriteSnapshot {
     len: u64,
     modified: std::time::SystemTime,
@@ -505,6 +610,41 @@ impl WriteSnapshot {
         let modified = metadata.modified().map_err(|error| error.to_string())?;
         if metadata.len() != self.len || modified != self.modified {
             return Err("file changed since it was read (mtime or length differs)".to_owned());
+        }
+        Ok(())
+    }
+
+    fn apply_with_project_snapshot(
+        snapshot: Option<Self>,
+        path: &Path,
+        source: &str,
+        project_file: Option<&mut ProjectFile>,
+        environment: &AnalysisEnvironment,
+    ) -> Result<(), String> {
+        // Prepare the snapshot before committing. Preview advances the same
+        // in-memory project state without changing disk or report sources.
+        let updated = if project_file.is_some() {
+            let parsed = falcon_dart_parser::try_parse_for_package(
+                source,
+                environment.package_language_version(path),
+            )
+            .map_err(|error| format!("could not refresh fixed project snapshot: {error}"))?;
+            Some((
+                Arc::new(ParsedFile {
+                    source: source.into(),
+                    tree: parsed.tree,
+                }),
+                !parsed.errors.is_empty(),
+            ))
+        } else {
+            None
+        };
+        if let Some(snapshot) = snapshot {
+            snapshot.write(path, source)?;
+        }
+        if let (Some(file), Some((parsed, has_parse_errors))) = (project_file, updated) {
+            file.parsed = parsed;
+            file.has_parse_errors = has_parse_errors;
         }
         Ok(())
     }
