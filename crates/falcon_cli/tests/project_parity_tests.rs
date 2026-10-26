@@ -207,3 +207,118 @@ fn cli_and_lsp_sort_syntax_errors_before_earlier_lints() {
         serde_json::to_value(&editor_diagnostics).unwrap()
     );
 }
+
+#[test]
+fn cli_and_lsp_have_sdk_resolution_parity_for_unsaved_buffers() {
+    fn fixture_sdk(
+        config: Option<&falcon_analyze::PackageConfig>,
+    ) -> Option<falcon_analyze::DartSdk> {
+        falcon_analyze::DartSdk::load(&config?.flutter_root.as_ref()?.join("bin/cache/dart-sdk"))
+    }
+
+    let temp = tempdir().unwrap();
+    let workspace = fs::canonicalize(temp.path()).unwrap();
+    let root = workspace.join("app");
+    let flutter = workspace.join("flutter");
+    let sdk = flutter.join("bin/cache/dart-sdk");
+    fs::create_dir_all(root.join("lib")).unwrap();
+    fs::create_dir_all(root.join(".dart_tool")).unwrap();
+    fs::write(
+        root.join(".dart_tool/package_config.json"),
+        format!(
+            r#"{{"configVersion":2,"flutterRoot":"file://{}","packages":[
+                {{"name":"sdk_parity_fixture","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"}}
+            ]}}"#,
+            flutter.display(),
+        ),
+    )
+    .unwrap();
+    fs::create_dir_all(sdk.join("lib/core")).unwrap();
+    fs::create_dir_all(sdk.join("lib/async")).unwrap();
+    // Follow the external-library fixtures: resolve real parsed SDK declarations
+    // through libraries.json, without depending on a locally installed SDK.
+    fs::write(
+        sdk.join("lib/libraries.json"),
+        r#"{"vm":{"libraries":{
+            "core":{"uri":"core/core.dart"},
+            "async":{"uri":"async/async.dart"}
+        }}}"#,
+    )
+    .unwrap();
+    fs::write(
+        sdk.join("lib/core/core.dart"),
+        "library dart.core;\nclass Object {}\n",
+    )
+    .unwrap();
+    fs::write(
+        sdk.join("lib/async/async.dart"),
+        "library dart.async;\nabstract class Future<T> {}\n",
+    )
+    .unwrap();
+    fs::write(root.join("pubspec.yaml"), "name: sdk_parity_fixture\n").unwrap();
+    let config_path = root.join("falcon.json");
+    fs::write(
+        &config_path,
+        r#"{
+          "linter": {
+            "rules": {
+              "recommended": false,
+              "correctness": { "discarded-futures": "warn" }
+            }
+          },
+          "cross-file": { "enabled": false }
+        }"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("lib/pending.dart"),
+        "import 'dart:async';\nFuture<void> pending() async {}\n",
+    )
+    .unwrap();
+    let path = root.join("lib/main.dart");
+    let source = "import 'pending.dart';\nvoid main() {\n  pending();\n}\n";
+    fs::write(&path, source).unwrap();
+    let cli = falcon_cli::collect_check_with_sdk_locator(
+        &CheckOptions {
+            paths: vec![root],
+            config_path: Some(config_path.clone()),
+            quiet: true,
+            ..Default::default()
+        },
+        fixture_sdk,
+    )
+    .unwrap();
+    assert_eq!(cli.total_files, 2);
+    assert_eq!(cli.exit_code, 0);
+
+    // CLI analyzed the edited snapshot. Leave a clean version on disk so LSP
+    // must resolve the changed buffer, with its dependency still unopened.
+    let saved = "import 'pending.dart';\nvoid main() {}\n";
+    fs::write(&path, saved).unwrap();
+    let mut lsp = LspState::new_with_sdk_locator(Some(config_path), fixture_sdk);
+    let uri = format!("file://{}", path.display());
+    lsp.open(&uri, saved.to_owned(), Some(1));
+    assert!(lsp.analyze(&uri).is_empty());
+    assert!(lsp.change(&uri, source.to_owned(), Some(2)));
+    let editor_diagnostics = lsp.analyze(&uri);
+    assert!(lsp.take_config_messages().is_empty());
+    assert_eq!(fs::read_to_string(&path).unwrap(), saved);
+
+    for diagnostics in [&cli.diagnostics, &editor_diagnostics] {
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.rule, "discarded-futures");
+        assert_eq!(diagnostic.severity, Severity::Warning);
+        assert_eq!(diagnostic.file_path, path.to_string_lossy());
+        assert_eq!(
+            diagnostic.message,
+            "Avoid invoking an asynchronous function in a non-`async` function."
+        );
+        assert_eq!((diagnostic.line, diagnostic.col), (3, 3));
+        assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "pending");
+    }
+    assert_eq!(
+        serde_json::to_value(&cli.diagnostics).unwrap(),
+        serde_json::to_value(&editor_diagnostics).unwrap()
+    );
+}
