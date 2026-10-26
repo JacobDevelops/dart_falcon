@@ -182,12 +182,44 @@ fn saving_retargeted_body_only_alias_keeps_old_dependents() {
     state.open(&alias_uri, "int api() => 1;".into(), Some(1));
     state.affected_open_uris(&alias_uri);
     state.change(&alias_uri, "int api() => 2222;".into(), Some(2));
-    assert!(state.body_only_changes.contains(&alias_uri));
+    assert!(state.body_only_changes.contains_key(&alias_uri));
     std::fs::remove_file(&alias).unwrap();
     std::os::unix::fs::symlink(&new, &alias).unwrap();
     state.save(&alias_uri, None);
     assert!(state.affected_open_uris(&alias_uri).contains(&caller_uri));
     assert_eq!(state.documents[&alias_uri].path, canonical_or_lexical(&new));
+}
+
+#[cfg(unix)]
+#[test]
+fn closing_retargeted_body_only_alias_keeps_its_original_library_siblings() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let owner = root.join("owner.dart");
+    let part = root.join("part.dart");
+    let replacement = root.join("replacement.dart");
+    let alias = root.join("alias.dart");
+    let owner_source = "part 'part.dart'; class C { int _value = 0; }";
+    let part_source = "part of 'owner.dart'; void write(C c) {}";
+    std::fs::write(&owner, owner_source).unwrap();
+    std::fs::write(&part, part_source).unwrap();
+    std::fs::write(&replacement, "void unrelated() {}").unwrap();
+    std::os::unix::fs::symlink(&part, &alias).unwrap();
+    let owner_uri = uri(&owner);
+    let alias_uri = uri(&alias);
+    let mut state = state(root);
+    state.open(&owner_uri, owner_source.into(), Some(1));
+    state.open(&alias_uri, part_source.into(), Some(1));
+    state.affected_open_uris(&alias_uri);
+    state.change(
+        &alias_uri,
+        "part of 'owner.dart'; void write(C c) { c._value = 1; }".into(),
+        Some(2),
+    );
+    std::fs::remove_file(&alias).unwrap();
+    std::os::unix::fs::symlink(&replacement, &alias).unwrap();
+    state.close(&alias_uri);
+    assert_eq!(state.affected_open_uris(&alias_uri), vec![owner_uri]);
 }
 
 #[test]

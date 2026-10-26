@@ -31,12 +31,75 @@ struct Context {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnvironmentCacheKey {
     files: Vec<(PathBuf, PathBuf, Option<Vec<u8>>)>,
+    discovered_files: Vec<(PathBuf, PathBuf, Option<Vec<u8>>)>,
     roots: Vec<(PathBuf, PathBuf)>,
     aliases: Vec<PathBuf>,
     sdk_environment: [Option<std::ffi::OsString>; 3],
 }
 
 impl EnvironmentCacheKey {
+    /// Compare live inputs while admitting lazy paths at their first-read baseline.
+    /// Never replace an existing fingerprint with bytes captured after analysis.
+    pub fn extend_discovery(&mut self, mut current: Self) -> bool {
+        let mut changed = self.sdk_environment != current.sdk_environment
+            || self.files.iter().any(|previous| {
+                current
+                    .files
+                    .binary_search_by(|entry| entry.0.cmp(&previous.0))
+                    .ok()
+                    .is_none_or(|index| current.files[index] != *previous)
+            })
+            || self.roots.iter().any(|previous| {
+                current
+                    .roots
+                    .binary_search_by(|entry| entry.0.cmp(&previous.0))
+                    .ok()
+                    .is_none_or(|index| current.roots[index] != *previous)
+            })
+            || self
+                .aliases
+                .iter()
+                .any(|alias| current.aliases.binary_search(alias).is_err());
+        current.files.retain(|entry| {
+            self.files
+                .binary_search_by(|previous| previous.0.cmp(&entry.0))
+                .is_err()
+        });
+        for entry in &mut current.files {
+            if let Ok(index) = current
+                .discovered_files
+                .binary_search_by(|observed| observed.0.cmp(&entry.0))
+            {
+                let observed = &current.discovered_files[index];
+                changed |= *entry != *observed;
+                entry.clone_from(observed);
+            }
+        }
+        current.roots.retain(|entry| {
+            self.roots
+                .binary_search_by(|previous| previous.0.cmp(&entry.0))
+                .is_err()
+        });
+        if !current.files.is_empty() {
+            self.files.extend(current.files);
+            self.files
+                .sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        }
+        if !current.roots.is_empty() {
+            self.roots.extend(current.roots);
+            self.roots
+                .sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        }
+        current
+            .aliases
+            .retain(|alias| self.aliases.binary_search(alias).is_err());
+        if !current.aliases.is_empty() {
+            self.aliases.extend(current.aliases);
+            self.aliases.sort_unstable();
+        }
+        changed
+    }
+
     /// File events also represent replacement or deletion of an input's parent.
     pub fn affected_by(&self, path: &Path) -> bool {
         self.affected_by_lexical(path) || {
@@ -64,10 +127,18 @@ fn canonical_event_path(path: &Path) -> PathBuf {
     }
 }
 
+fn file_fingerprint(path: &Path) -> (PathBuf, Option<Vec<u8>>) {
+    // Fingerprints include synthetic probes; real loads report read failures.
+    let contents = std::fs::read(path).ok();
+    let resolved = packages::canonical_comparison_path(path);
+    (resolved, contents)
+}
+
 #[derive(Debug, Default)]
 struct PackageDiscovery {
     directories: HashMap<PathBuf, Option<Arc<PackageMetadata>>>,
     manifests: HashMap<PathBuf, Arc<PackageMetadata>>,
+    fingerprints: std::collections::BTreeMap<PathBuf, (PathBuf, Option<Vec<u8>>)>,
 }
 
 #[derive(Debug, Default)]
@@ -334,6 +405,7 @@ impl AnalysisEnvironment {
         roots.extend(sdk::discovery_inputs());
         roots.extend(self.mutable_roots.iter().cloned());
         let mut files = self.config_candidates.clone();
+        let discovered_files;
         {
             let discovery = self.package_discovery.lock().unwrap();
             for directory in discovery.directories.keys() {
@@ -343,6 +415,13 @@ impl AnalysisEnvironment {
                 files.insert(package.manifest.clone());
                 roots.insert(package.manifest.parent().unwrap().join("lib"));
             }
+            discovered_files = discovery
+                .fingerprints
+                .iter()
+                .map(|(path, (resolved, contents))| {
+                    (path.clone(), resolved.clone(), contents.clone())
+                })
+                .collect();
         }
         for root in &roots {
             files.insert(root.join("version"));
@@ -374,12 +453,11 @@ impl AnalysisEnvironment {
             files: files
                 .into_iter()
                 .map(|path| {
-                    // Fingerprints include synthetic probes; real loads report read failures.
-                    let contents = std::fs::read(&path).ok();
-                    let resolved = packages::canonical_comparison_path(&path);
+                    let (resolved, contents) = file_fingerprint(&path);
                     (path, resolved, contents)
                 })
                 .collect(),
+            discovered_files,
             roots: roots
                 .into_iter()
                 .map(|path| {
@@ -450,29 +528,25 @@ impl AnalysisEnvironment {
         if let Some(package) = self.directory_packages.get(directory) {
             return package.clone();
         }
-        if let Some(package) = self
-            .package_discovery
-            .lock()
-            .unwrap()
-            .directories
-            .get(directory)
-        {
+        let mut discovery = self.package_discovery.lock().unwrap();
+        if let Some(package) = discovery.directories.get(directory) {
             return package.clone();
         }
+        // Capture present manifests and absent nearer probes before discovery
+        // reads them, not newer bytes sampled at the next idle boundary.
+        for ancestor in directory.ancestors() {
+            discovery
+                .fingerprints
+                .entry(ancestor.join("pubspec.yaml"))
+                .or_insert_with_key(|path| file_fingerprint(path));
+        }
         let package = packages::enclosing_pubspec_normalized(path).map(|manifest| {
-            let cached = self
-                .package_discovery
-                .lock()
-                .unwrap()
-                .manifests
-                .get(&manifest)
-                .cloned();
-            let package = cached.unwrap_or_else(|| Arc::new(PackageMetadata::load(&manifest)));
-            (manifest, package)
-        });
-        let mut discovery = self.package_discovery.lock().unwrap();
-        let package = package.map(|(manifest, package)| {
-            Arc::clone(discovery.manifests.entry(manifest).or_insert(package))
+            Arc::clone(
+                discovery
+                    .manifests
+                    .entry(manifest.clone())
+                    .or_insert_with(|| Arc::new(PackageMetadata::load(&manifest))),
+            )
         });
         discovery
             .directories

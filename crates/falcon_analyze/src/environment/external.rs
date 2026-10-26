@@ -131,8 +131,19 @@ impl ExternalLibraries {
         project: &[(&Path, Program<'_>, &str)],
         is_project: impl Fn(&Path) -> bool,
     ) -> Self {
+        Self::load_with_source_observer(environment, project, is_project, |_, _| {})
+    }
+
+    /// Load reachable libraries, observing each source path immediately before
+    /// reading it, including parts and missing sources. Reads may run in parallel.
+    pub fn load_with_source_observer(
+        environment: &AnalysisEnvironment,
+        project: &[(&Path, Program<'_>, &str)],
+        is_project: impl Fn(&Path) -> bool,
+        observe_source: impl Fn(&Path, &ExternalOrigin) + Sync,
+    ) -> Self {
         let mut loaded = Self::default();
-        loaded.extend(environment, project, is_project);
+        loaded.extend_with_source_observer(environment, project, is_project, observe_source);
         loaded
     }
 
@@ -145,6 +156,18 @@ impl ExternalLibraries {
         environment: &AnalysisEnvironment,
         project: &[(&Path, Program<'_>, &str)],
         is_project: impl Fn(&Path) -> bool,
+    ) {
+        self.extend_with_source_observer(environment, project, is_project, |_, _| {});
+    }
+
+    /// Extend this graph with a callback before every source read, including
+    /// failed reads. The callback may be called concurrently for dependency waves.
+    pub fn extend_with_source_observer(
+        &mut self,
+        environment: &AnalysisEnvironment,
+        project: &[(&Path, Program<'_>, &str)],
+        is_project: impl Fn(&Path) -> bool,
+        observe_source: impl Fn(&Path, &ExternalOrigin) + Sync,
     ) {
         self.canonical_paths
             .get_mut()
@@ -235,7 +258,9 @@ impl ExternalLibraries {
                     continue;
                 }
                 companions.push(part.clone());
-                let Some(cached) = self.companion_dependencies(environment, context, &part) else {
+                let Some(cached) =
+                    self.companion_dependencies(environment, context, &part, &observe_source)
+                else {
                     continue;
                 };
                 dependencies.extend(cached.dependencies.iter().cloned());
@@ -252,7 +277,7 @@ impl ExternalLibraries {
                 }
             }
         }
-        self.load_waves(environment, wave, &is_project);
+        self.load_waves(environment, wave, &is_project, &observe_source);
         self.group_instances(environment);
         if !self.companion_dependencies.is_empty() {
             let referenced: FxHashSet<_> = self.project_companions.values().flatten().collect();
@@ -266,7 +291,10 @@ impl ExternalLibraries {
         environment: &AnalysisEnvironment,
         context: Option<usize>,
         path: &Path,
+        observe_source: &(impl Fn(&Path, &ExternalOrigin) + Sync),
     ) -> Option<&CompanionDependencies> {
+        let origin = environment.origin(context, path, &mut StringInterner::default());
+        observe_source(path, &origin);
         let source = match crate::source::read_source(path) {
             Ok(source) => source,
             Err(error) => {
@@ -451,6 +479,7 @@ impl ExternalLibraries {
         environment: &AnalysisEnvironment,
         mut wave: Vec<(u32, PathBuf, Option<usize>)>,
         is_project: &impl Fn(&Path) -> bool,
+        observe_source: &(impl Fn(&Path, &ExternalOrigin) + Sync),
     ) {
         let track_dependencies =
             environment.contexts.len() + usize::from(environment.default_sdk.is_some()) > 1;
@@ -480,6 +509,7 @@ impl ExternalLibraries {
                         &path,
                         context,
                         origin,
+                        observe_source,
                     );
                     (id, path, context, local, sdk, loaded)
                 })
@@ -1109,6 +1139,7 @@ fn load_library(
     path: &Path,
     context: Option<usize>,
     origin: ExternalOrigin,
+    observe_source: &(impl Fn(&Path, &ExternalOrigin) + Sync),
 ) -> std::io::Result<Option<(ExternalLibrary, Vec<PathBuf>)>> {
     // Each file parses at its package's language version (SDK: current).
     let read = |path: &Path| {
@@ -1117,6 +1148,7 @@ fn load_library(
                 .config
                 .language_version_canonical(path)
         });
+        observe_source(path, &origin);
         read(environment, path, package_version)
     };
     let Some(defining) = read(path)? else {
@@ -1315,6 +1347,74 @@ mod tests {
     use super::*;
 
     #[test]
+    fn source_observer_runs_before_library_part_and_companion_reads() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let path = root.join("main.dart");
+        let source = "import 'dep.dart'; import 'missing.dart'; part 'companion.dart';";
+        std::fs::write(&path, source).unwrap();
+        std::fs::write(root.join("dep.dart"), "class Before {}").unwrap();
+        std::fs::write(root.join("companion.dart"), "part of 'main.dart';").unwrap();
+        std::fs::write(
+            root.join("companion_dep.dart"),
+            "class CompanionDependency {}",
+        )
+        .unwrap();
+        let environment =
+            AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);
+        let parsed = falcon_dart_parser::parse(source);
+        let observed = std::sync::Mutex::new(FxHashSet::default());
+        let libraries = ExternalLibraries::load_with_source_observer(
+            &environment,
+            &[(path.as_path(), parsed.tree.program(source), source)],
+            |candidate| candidate == path,
+            |candidate, origin| {
+                assert!(matches!(origin, ExternalOrigin::Project));
+                observed.lock().unwrap().insert(candidate.to_path_buf());
+                match candidate.file_name().and_then(|name| name.to_str()) {
+                    Some("dep.dart") => {
+                        std::fs::write(candidate, "part 'new_part.dart'; class Observed {}")
+                            .unwrap();
+                    }
+                    Some("new_part.dart") => {
+                        assert!(!candidate.exists());
+                        std::fs::write(candidate, "part of 'dep.dart'; class ObservedPart {}")
+                            .unwrap();
+                    }
+                    Some("companion.dart") => std::fs::write(
+                        candidate,
+                        "part of 'main.dart'; import 'companion_dep.dart';",
+                    )
+                    .unwrap(),
+                    _ => {}
+                }
+            },
+        );
+        let observed = observed.into_inner().unwrap();
+        for name in [
+            "dep.dart",
+            "new_part.dart",
+            "missing.dart",
+            "companion.dart",
+            "companion_dep.dart",
+        ] {
+            assert!(observed.contains(&root.join(name)), "{name}");
+        }
+        let files: Vec<_> = libraries
+            .libraries()
+            .iter()
+            .flat_map(|library| library.files.iter())
+            .collect();
+        for declaration in ["Observed", "ObservedPart", "CompanionDependency"] {
+            assert!(files.iter().any(|file| {
+                file.parsed
+                    .source
+                    .contains(&format!("class {declaration} {{}}"))
+            }));
+        }
+    }
+
+    #[test]
     fn declaration_integrity_uses_error_kind_not_message() {
         let source = "class Example {}";
         let parsed = falcon_dart_parser::parse(source);
@@ -1437,7 +1537,7 @@ mod tests {
         let mut libraries = ExternalLibraries::default();
         assert!(
             libraries
-                .companion_dependencies(&environment, None, &path)
+                .companion_dependencies(&environment, None, &path, &|_, _| {})
                 .is_some()
         );
         std::fs::File::create(&path)
@@ -1446,7 +1546,7 @@ mod tests {
             .unwrap();
         assert!(
             libraries
-                .companion_dependencies(&environment, None, &path)
+                .companion_dependencies(&environment, None, &path, &|_, _| {})
                 .is_none()
         );
         assert!(!libraries.companion_dependencies.contains_key(&path));
@@ -1461,12 +1561,12 @@ mod tests {
             AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);
         let mut libraries = ExternalLibraries::default();
         let cached = libraries
-            .companion_dependencies(&environment, None, &path)
+            .companion_dependencies(&environment, None, &path, &|_, _| {})
             .unwrap();
         let dependencies = cached.dependencies.as_ptr();
         let parts = cached.parts.as_ptr();
         let cached = libraries
-            .companion_dependencies(&environment, None, &path)
+            .companion_dependencies(&environment, None, &path, &|_, _| {})
             .unwrap();
         assert_eq!(cached.dependencies.as_ptr(), dependencies);
         assert_eq!(cached.parts.as_ptr(), parts);
@@ -1482,14 +1582,14 @@ mod tests {
             .set_times(std::fs::FileTimes::new().set_modified(modified))
             .unwrap();
         let cached = libraries
-            .companion_dependencies(&environment, None, &path)
+            .companion_dependencies(&environment, None, &path, &|_, _| {})
             .unwrap();
         assert_eq!(cached.dependencies, [directory.path().join("other.dart")]);
         assert_eq!(cached.parts, [directory.path().join("second.dart")]);
         // Different-size changes must also refresh and remove old part edges.
         std::fs::write(&path, "import 'replacement.dart';").unwrap();
         let cached = libraries
-            .companion_dependencies(&environment, None, &path)
+            .companion_dependencies(&environment, None, &path, &|_, _| {})
             .unwrap();
         assert_eq!(
             cached.dependencies,
@@ -1499,13 +1599,13 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
         assert!(
             libraries
-                .companion_dependencies(&environment, None, &path)
+                .companion_dependencies(&environment, None, &path, &|_, _| {})
                 .is_none(),
         );
         assert!(!libraries.companion_dependencies.contains_key(&path));
         std::fs::write(&path, "part 'restored.dart';").unwrap();
         let cached = libraries
-            .companion_dependencies(&environment, None, &path)
+            .companion_dependencies(&environment, None, &path, &|_, _| {})
             .unwrap();
         assert!(cached.dependencies.is_empty());
         assert_eq!(cached.parts, [directory.path().join("restored.dart")]);

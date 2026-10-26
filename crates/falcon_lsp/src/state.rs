@@ -268,9 +268,11 @@ struct CrossFileExternalCache {
 }
 
 impl CrossFileExternalCache {
-    /// Whether `path` is a watched source this cache loaded or tried to load.
+    /// Whether `path` names a watched source or an ancestor directory.
     fn loaded(&self, path: &Path) -> bool {
-        self.watched_paths.contains(path)
+        self.watched_paths
+            .iter()
+            .any(|cached| cached.starts_with(path))
     }
 }
 
@@ -286,11 +288,35 @@ enum ProjectView {
     CrossFile,
 }
 
+#[derive(PartialEq, Eq)]
+struct FileStamp {
+    modified: Option<std::time::SystemTime>,
+    len: u64,
+    permissions: std::fs::Permissions,
+    #[cfg(unix)]
+    changed: (i64, i64),
+}
+
+impl FileStamp {
+    fn read(path: &Path) -> Option<Self> {
+        let metadata = path.metadata().ok()?;
+        Some(Self {
+            modified: metadata.modified().ok(),
+            len: metadata.len(),
+            permissions: metadata.permissions(),
+            #[cfg(unix)]
+            changed: {
+                use std::os::unix::fs::MetadataExt;
+                (metadata.ctime(), metadata.ctime_nsec())
+            },
+        })
+    }
+}
+
 struct CachedDiskFile {
     parsed: Arc<ParsedFile>,
     has_parse_errors: bool,
     language_version: Option<LanguageVersion>,
-    fallback_stamp: Option<(Option<std::time::SystemTime>, u64)>,
 }
 
 struct RootConfig {
@@ -335,7 +361,7 @@ pub struct LspState {
     build_panic: bool,
     /// Dependents from the graph before an edit, retained until that edit is analyzed.
     pending_semantic_affected: HashMap<String, HashSet<String>>,
-    body_only_changes: HashSet<String>,
+    body_only_changes: HashMap<String, usize>,
     /// Instrumentation for incremental tests: number of semantic snapshot builds.
     semantic_snapshot_build_count: u64,
     /// Instrumentation for incremental tests: number of dependency topology builds.
@@ -360,6 +386,10 @@ pub struct LspState {
     disk_read_count: u64,
     workspace_walk_count: u64,
     disk_files: HashMap<PathBuf, CachedDiskFile>,
+    /// Quiet-boundary stamps include rejected reads, not just cached syntax.
+    fallback_stamps: HashMap<PathBuf, Option<FileStamp>>,
+    fallback_config_stamps: HashMap<PathBuf, Option<Vec<u8>>>,
+    fallback_dependency_watches: HashMap<PathBuf, Vec<DiscoveryWatch>>,
     project_paths: Option<Vec<(PathBuf, bool)>>,
     project_path_patterns: Vec<String>,
     project_discovery_watches: Vec<DiscoveryWatch>,
@@ -403,6 +433,10 @@ impl LspState {
         environment: AnalysisEnvironment,
         config_start_dir: PathBuf,
     ) -> Self {
+        let fallback_config_stamps = rule_config_stamps(
+            std::iter::once(config_start_dir.as_path()),
+            config_path.as_deref(),
+        );
         let (config, workspace_root, pending_config_messages) =
             load_from(config_path.as_deref(), &config_start_dir);
         let config = config.unwrap_or_else(|| {
@@ -445,7 +479,7 @@ impl LspState {
             #[cfg(test)]
             build_panic: false,
             pending_semantic_affected: HashMap::new(),
-            body_only_changes: HashSet::new(),
+            body_only_changes: HashMap::new(),
             semantic_snapshot_build_count: 0,
             semantic_topology_build_count: 0,
             environment,
@@ -464,6 +498,9 @@ impl LspState {
             disk_read_count: 0,
             workspace_walk_count: 0,
             disk_files: HashMap::new(),
+            fallback_stamps: HashMap::new(),
+            fallback_config_stamps,
+            fallback_dependency_watches: HashMap::new(),
             project_paths: None,
             project_path_patterns: Vec::new(),
             project_discovery_watches: Vec::new(),
@@ -507,6 +544,12 @@ impl LspState {
     }
 
     fn reload_additional_root_configs(&mut self) -> Vec<ShowMessageParams> {
+        for (path, stamp) in rule_config_stamps(
+            self.workspace_roots.iter().map(PathBuf::as_path),
+            self.config_path.as_deref(),
+        ) {
+            self.fallback_config_stamps.entry(path).or_insert(stamp);
+        }
         let mut messages = Vec::new();
         self.additional_root_configs.reserve(
             self.workspace_roots
@@ -623,15 +666,47 @@ impl LspState {
 
     /// Dynamic clients own invalidation; fallback scans run at quiet boundaries.
     pub fn set_dynamic_file_watching(&mut self, dynamic: bool) {
-        self.dynamic_file_watching = dynamic;
+        if self.dynamic_file_watching != dynamic {
+            self.dynamic_file_watching = dynamic;
+            self.project_paths = None;
+            self.project_discovery_watches.clear();
+            self.fallback_stamps.clear();
+            self.disk_files.clear();
+            self.fallback_dependency_watches.clear();
+            self.reset_external_environment();
+            self.invalidate_semantic_snapshot();
+        }
     }
 
-    fn disk_stamp(&self, path: &Path) -> Option<(Option<std::time::SystemTime>, u64)> {
+    fn disk_stamp(&self, path: &Path) -> Option<FileStamp> {
         if self.dynamic_file_watching {
             return None;
         }
-        let metadata = path.metadata().ok()?;
-        Some((metadata.modified().ok(), metadata.len()))
+        FileStamp::read(path)
+    }
+
+    fn capture_rule_config_inputs(&mut self) {
+        self.fallback_config_stamps = rule_config_stamps(
+            self.workspace_roots
+                .iter()
+                .map(PathBuf::as_path)
+                .chain(std::iter::once(self.config_start_dir.as_path())),
+            self.config_path.as_deref(),
+        );
+    }
+
+    fn capture_fallback_dependency_watches(&mut self) {
+        if self.dynamic_file_watching {
+            return;
+        }
+        let filter = falcon_config::PathFilter::default();
+        for root in self.environment.watched_dependency_roots() {
+            self.fallback_dependency_watches
+                .entry(root.to_path_buf())
+                .or_insert_with(|| {
+                    discover_project_with_watches(&[root.to_path_buf()], &filter, false).watches
+                });
+        }
     }
 
     pub fn revalidate_disk(&mut self) -> Vec<(String, Vec<Diagnostic>)> {
@@ -643,21 +718,67 @@ impl LspState {
             self.fallback_scan_count += 1;
         }
         let mut changed =
-            Vec::with_capacity(self.disk_files.len() + self.project_discovery_watches.len());
-        changed.extend(
-            self.disk_files
-                .iter()
-                .filter(|(path, cached)| self.disk_stamp(path) != cached.fallback_stamp)
-                .map(|(path, _)| path.clone()),
-        );
-        let mut watches = std::mem::take(&mut self.project_discovery_watches);
-        for watch in &mut watches {
-            if !watch.refresh(&self.config_for_path(&watch.path).files.includes, true) {
-                changed.push(watch.path.clone());
+            Vec::with_capacity(self.fallback_stamps.len() + self.project_discovery_watches.len());
+        for (path, stamp) in &mut self.fallback_stamps {
+            let current = FileStamp::read(path);
+            if current != *stamp {
+                *stamp = current;
+                changed.push(path.clone());
             }
         }
+        for (path, stamp) in &mut self.fallback_config_stamps {
+            let current = std::fs::read(path).ok();
+            if current != *stamp {
+                *stamp = current;
+                changed.push(path.clone());
+            }
+        }
+        let current_environment = self.environment.config_stamps();
+        let environment_changed = self
+            .environment_stamps
+            .as_mut()
+            .is_some_and(|key| key.extend_discovery(current_environment));
+        let filter = falcon_config::PathFilter::default();
+        self.fallback_dependency_watches.retain(|_, watches| {
+            let mut unchanged = true;
+            for watch in watches {
+                if !watch.refresh(&filter, false) {
+                    changed.push(watch.path.clone());
+                    unchanged = false;
+                }
+            }
+            unchanged
+        });
+        let mut watches = std::mem::take(&mut self.project_discovery_watches);
+        watches.retain_mut(|watch| {
+            if watch.refresh(&self.config_for_path(&watch.path).files.includes, true) {
+                true
+            } else {
+                changed.push(watch.path.clone());
+                false
+            }
+        });
         self.project_discovery_watches = watches;
-        if changed.is_empty() && self.refresh_unresolved_paths() {
+        let unresolved_changed = self.refresh_unresolved_paths();
+        if environment_changed {
+            self.disk_files
+                .retain(|cached, _| !changed.iter().any(|path| cached.starts_with(path)));
+            self.project_paths = None;
+            self.reset_external_environment();
+            self.invalidate_semantic_snapshot();
+            return self.reload_config();
+        }
+        let updates = self.watched_files_changed(&changed);
+        if !updates.is_empty() {
+            return updates;
+        }
+        let discovery_needed = self.project_paths.is_none()
+            && self.semantic_snapshot_error.is_none()
+            && ((self.resolve_semantics
+                && self.documents.values().any(|doc| !doc.source_rejected))
+                || (self.cross_file_rules_enabled()
+                    && self.documents.values().all(|doc| !doc.source_rejected)));
+        if unresolved_changed || discovery_needed {
             return self
                 .open_uris()
                 .into_iter()
@@ -667,7 +788,7 @@ impl LspState {
                 })
                 .collect();
         }
-        self.watched_files_changed(&changed)
+        Vec::new()
     }
 
     /// Process one client watcher batch. Project-only saves retain the shared
@@ -712,6 +833,19 @@ impl LspState {
                     || self.project_paths.as_ref().is_some_and(|files| {
                         files.iter().any(|(cached, _)| cached.starts_with(path))
                     })
+                    || self
+                        .watched_local_paths
+                        .iter()
+                        .any(|cached| cached.starts_with(path))
+                    || self
+                        .cross_file_external_cache
+                        .as_ref()
+                        .is_some_and(|cache| cache.loaded(path))
+                    || (!path.exists()
+                        && self
+                            .environment
+                            .watched_dependency_roots()
+                            .any(|root| path.starts_with(root)))
             })
             .collect();
         if paths.is_empty() {
@@ -750,7 +884,10 @@ impl LspState {
         };
         let dependency_changed = paths.iter().any(|path| {
             !open(path)
-                && (self.watched_local_paths.binary_search(path).is_ok()
+                && (self
+                    .watched_local_paths
+                    .iter()
+                    .any(|cached| cached.starts_with(path))
                     || self
                         .cross_file_external_cache
                         .as_ref()
@@ -823,7 +960,7 @@ impl LspState {
     }
 
     /// Discover new directories without polling dependency/configuration files.
-    /// Configuration changes enter through `watched_files_changed`.
+    /// Watcher events or quiet-boundary fallback handle configuration changes.
     fn refresh_environment<'a>(&mut self, paths: impl Iterator<Item = &'a Path> + Clone) {
         if !self.environment.covers(paths.clone())
             || !self
@@ -833,7 +970,12 @@ impl LspState {
             self.environment
                 .extend(self.documents.values().map(|doc| doc.path.as_path()));
             self.environment.extend(paths);
-            self.environment_stamps = Some(self.environment.config_stamps());
+            let current = self.environment.config_stamps();
+            if let Some(previous) = &mut self.environment_stamps {
+                previous.extend_discovery(current);
+            } else {
+                self.environment_stamps = Some(current);
+            }
             self.watched_dependency_generation += 1;
             self.cross_file_index_cache = None;
             self.cross_file_external_cache = None;
@@ -864,7 +1006,11 @@ impl LspState {
                     tree,
                 });
             }
-            doc.declaration_signature = declaration_signature(&doc.parsed);
+            doc.declaration_signature = if parsed.worker_failed {
+                0
+            } else {
+                declaration_signature(&doc.parsed)
+            };
             doc.has_parse_errors = parsed.has_errors;
             doc.source_rejected = parsed.worker_failed;
             doc.syntax_diagnostics = parsed.diagnostics;
@@ -932,7 +1078,13 @@ impl LspState {
             source: text.into_boxed_str(),
             tree,
         });
-        let next_signature = declaration_signature(&next_parsed);
+        // A failed parser worker supplies an empty fallback tree, not a tree
+        // for this source. It must never be inspected for declaration reuse.
+        let next_signature = if source_rejected {
+            0
+        } else {
+            declaration_signature(&next_parsed)
+        };
         let unchanged_api = !source_rejected
             && !parsed.has_errors
             && self.semantic_snapshot.as_ref().is_some_and(|snapshot| {
@@ -999,7 +1151,11 @@ impl LspState {
             source: text.into_boxed_str(),
             tree,
         });
-        let next_signature = declaration_signature(&next_parsed);
+        let next_signature = if source_error.is_some() || parsed.worker_failed {
+            0
+        } else {
+            declaration_signature(&next_parsed)
+        };
         let unchanged_api = !doc.has_parse_errors
             && !doc.source_rejected
             && source_error.is_none()
@@ -1088,6 +1244,10 @@ impl LspState {
         let language_version = self.environment.package_language_version(&path);
         // Read only this file: an unsaved buffer is never evidence of disk contents.
         self.disk_read_count += 1;
+        let fallback_stamp = self.disk_stamp(&path);
+        if !self.dynamic_file_watching {
+            self.fallback_stamps.insert(path.clone(), fallback_stamp);
+        }
         let disk = falcon_analyze::read_source(&path).ok().and_then(|source| {
             if let Some(cached) = self.disk_files.get(&path)
                 && cached.language_version == language_version
@@ -1122,14 +1282,12 @@ impl LspState {
             document.parsed = Arc::clone(&parsed);
             document.declaration_signature = next_signature;
             document.has_parse_errors = has_parse_errors;
-            let fallback_stamp = self.disk_stamp(&path);
             self.disk_files.insert(
                 path,
                 CachedDiskFile {
                     parsed,
                     has_parse_errors,
                     language_version,
-                    fallback_stamp,
                 },
             );
             self.update_document_snapshot(uri, unchanged_api);
@@ -1235,29 +1393,23 @@ impl LspState {
 
     /// Open documents affected by a semantic change in `uri`, including `uri`.
     pub(crate) fn affected_open_uris(&mut self, uri: &str) -> Vec<String> {
-        if self.body_only_changes.remove(uri)
+        if let Some(index) = self.body_only_changes.remove(uri)
             && !self.pending_semantic_affected.contains_key(uri)
             && let Some(snapshot) = self.semantic_snapshot.as_ref()
         {
-            let changed_path = self.documents.get(uri).map_or_else(
-                || document_path(uri, &self.workspace_roots).0,
-                |doc| doc.path.clone(),
-            );
-            if let Some(&index) = snapshot.by_path.get(&changed_path) {
-                let siblings = snapshot.grouping.siblings(index);
-                let mut uris: Vec<_> = self
-                    .documents
-                    .iter()
-                    .filter(|(_, doc)| {
-                        snapshot.by_path.get(&doc.path).is_some_and(|candidate| {
-                            *candidate == index || siblings.contains(candidate)
-                        })
+            let siblings = snapshot.grouping.siblings(index);
+            let mut uris: Vec<_> = self
+                .documents
+                .iter()
+                .filter(|(_, doc)| {
+                    snapshot.by_path.get(&doc.path).is_some_and(|candidate| {
+                        *candidate == index || siblings.contains(candidate)
                     })
-                    .map(|(uri, _)| uri.clone())
-                    .collect();
-                uris.sort();
-                return uris;
-            }
+                })
+                .map(|(uri, _)| uri.clone())
+                .collect();
+            uris.sort();
+            return uris;
         }
         if !self.resolve_semantics {
             return if self.documents.contains_key(uri) {
@@ -1294,6 +1446,7 @@ impl LspState {
     /// against its cached CST (no re-parse). Returns per-document results
     /// for the caller to publish.
     pub fn reload_config(&mut self) -> Vec<(String, Vec<Diagnostic>)> {
+        self.capture_rule_config_inputs();
         let (config, workspace_root, mut messages) =
             load_from(self.config_path.as_deref(), &self.config_start_dir);
         messages.extend(self.reload_additional_root_configs());
@@ -1344,10 +1497,11 @@ impl LspState {
         self.cross_file_external_cache = None;
         self.pending_semantic_affected.clear();
         self.invalidate_semantic_snapshot();
+        let current_environment = self.environment.config_stamps();
         if self
             .environment_stamps
-            .as_ref()
-            .is_some_and(|key| *key != self.environment.config_stamps())
+            .as_mut()
+            .is_some_and(|key| key.extend_discovery(current_environment))
         {
             self.reset_external_environment();
         }
@@ -1650,12 +1804,33 @@ impl LspState {
             .as_ref()
             .is_some_and(|cache| cache.roots == graph_roots)
         {
+            self.capture_fallback_dependency_watches();
             let roots: Vec<_> = files
                 .iter()
                 .map(|file| (file.path.as_path(), file.program(), file.source()))
                 .collect();
-            let libraries =
-                ExternalLibraries::load(&self.environment, &roots, |path| paths.contains(path));
+            let dynamic = self.dynamic_file_watching;
+            let environment = &self.environment;
+            let stamps = std::sync::Mutex::new(&mut self.fallback_stamps);
+            let libraries = ExternalLibraries::load_with_source_observer(
+                environment,
+                &roots,
+                |path| paths.contains(path),
+                |path, origin| {
+                    if !dynamic
+                        && (matches!(origin, ExternalOrigin::Project)
+                            || environment
+                                .watched_dependency_roots()
+                                .any(|root| path.starts_with(root)))
+                    {
+                        stamps
+                            .lock()
+                            .unwrap()
+                            .entry(path.to_path_buf())
+                            .or_insert_with(|| FileStamp::read(path));
+                    }
+                },
+            );
             let topology = ExternalTopology::build(&libraries, &self.environment);
             let depends_on_project = files
                 .iter()
@@ -1739,7 +1914,7 @@ impl LspState {
                 .refresh_file_body(file, doc.parsed.program());
             snapshot.files[index].parsed = Arc::clone(&doc.parsed);
             snapshot.files[index].has_parse_errors = doc.has_parse_errors;
-            self.body_only_changes.insert(uri.to_string());
+            self.body_only_changes.insert(uri.to_string(), index);
             return;
         }
         if let Some(snapshot) = self.semantic_snapshot.as_ref() {
@@ -1839,12 +2014,15 @@ impl LspState {
     fn ensure_semantic_snapshot(&mut self) {
         self.refresh_environment(std::iter::empty());
         self.refresh_document_versions();
-        if self.semantic_snapshot.is_some()
+        // Saves and open-file watcher events can invalidate membership without
+        // changing an open tree. A cached snapshot must not prevent its refill.
+        if !self.resolve_semantics
             || self.semantic_snapshot_error.is_some()
-            || !self.resolve_semantics
+            || (self.project_paths.is_some() && self.semantic_snapshot.is_some())
         {
             return;
         }
+        self.invalidate_semantic_snapshot();
         // Dependency waves and recursive index builds need the large-stack workers.
         if let Err(error) = falcon_dart_parser::with_stack(|| self.build_semantic_snapshot()) {
             // Keep the environment so its dependency roots stay watched for recovery.
@@ -1860,6 +2038,7 @@ impl LspState {
         if self.semantic_snapshot_error.is_some() {
             return;
         }
+        self.capture_fallback_dependency_watches();
         {
             let project_paths: HashSet<&Path> = files
                 .iter()
@@ -1875,10 +2054,28 @@ impl LspState {
                 .iter()
                 .map(|file| (file.path.as_path(), file.program(), file.source()))
                 .collect();
-            self.external_libraries
-                .extend(&self.environment, &roots, |path| {
-                    project_paths.contains(path)
-                });
+            let dynamic = self.dynamic_file_watching;
+            let environment = &self.environment;
+            let stamps = std::sync::Mutex::new(&mut self.fallback_stamps);
+            self.external_libraries.extend_with_source_observer(
+                environment,
+                &roots,
+                |path| project_paths.contains(path),
+                |path, origin| {
+                    if !dynamic
+                        && (matches!(origin, ExternalOrigin::Project)
+                            || environment
+                                .watched_dependency_roots()
+                                .any(|root| path.starts_with(root)))
+                    {
+                        stamps
+                            .lock()
+                            .unwrap()
+                            .entry(path.to_path_buf())
+                            .or_insert_with(|| FileStamp::read(path));
+                    }
+                },
+            );
         };
         if !self
             .environment
@@ -1886,7 +2083,12 @@ impl LspState {
         {
             self.environment
                 .extend(self.external_libraries.project_companions());
-            self.environment_stamps = Some(self.environment.config_stamps());
+            let current = self.environment.config_stamps();
+            if let Some(previous) = &mut self.environment_stamps {
+                previous.extend_discovery(current);
+            } else {
+                self.environment_stamps = Some(current);
+            }
             self.watched_dependency_generation += 1;
         }
         // An open dependency part promotes its whole library to the project
@@ -1915,6 +2117,11 @@ impl LspState {
                 continue;
             }
             self.disk_read_count += 1;
+            let fallback_stamp = self.disk_stamp(path);
+            if !self.dynamic_file_watching {
+                self.fallback_stamps
+                    .insert(path.to_path_buf(), fallback_stamp);
+            }
             match falcon_analyze::read_source(path) {
                 Ok(source) => {
                     self.disk_parse_count += 1;
@@ -1946,7 +2153,6 @@ impl LspState {
                             parsed: Arc::clone(&parsed),
                             has_parse_errors,
                             language_version,
-                            fallback_stamp: self.disk_stamp(path),
                         },
                     );
                     files.push(ProjectFile {
@@ -2080,8 +2286,9 @@ impl LspState {
 
     /// Assemble the [`ProjectFile`] set: every non-excluded `.dart` file under
     /// the workspace root, preferring an open buffer's text + cached CST over the
-    /// on-disk copy. Semantic analysis also includes open buffers that do not exist
-    /// on disk yet. Cross-file analysis can additionally include package manifests.
+    /// on-disk copy. Semantic analysis also includes explicitly open buffers,
+    /// including excluded, external and unsaved files, so imports use editor text.
+    /// Cross-file analysis respects file includes and can include package manifests.
     /// The boolean is false when oversized ingestion left the workspace incomplete;
     /// cross-file rules must not infer absence from that partial set.
     fn collect_project_files(&mut self, view: ProjectView) -> (Vec<ProjectFile>, bool) {
@@ -2156,6 +2363,10 @@ impl LspState {
         let mut worker_failure = None;
         for (normalized, is_dart) in &paths {
             if !is_dart && matches!(view, ProjectView::Semantic) {
+                if !self.dynamic_file_watching && !self.fallback_stamps.contains_key(normalized) {
+                    let stamp = self.disk_stamp(normalized);
+                    self.fallback_stamps.insert(normalized.clone(), stamp);
+                }
                 continue;
             }
             let path = normalized.as_path();
@@ -2186,6 +2397,11 @@ impl LspState {
                 continue;
             }
             self.disk_read_count += 1;
+            let fallback_stamp = self.disk_stamp(path);
+            if !self.dynamic_file_watching {
+                self.fallback_stamps
+                    .insert(path.to_path_buf(), fallback_stamp);
+            }
             let source = match falcon_analyze::read_source(path) {
                 Ok(source) => source,
                 Err(e) => {
@@ -2222,7 +2438,6 @@ impl LspState {
                         parsed: Arc::clone(&file.parsed),
                         has_parse_errors: file.has_parse_errors,
                         language_version,
-                        fallback_stamp: self.disk_stamp(path),
                     },
                 );
                 files.push(file);
@@ -2238,7 +2453,6 @@ impl LspState {
                     parsed: Arc::clone(&parsed),
                     has_parse_errors,
                     language_version,
-                    fallback_stamp: self.disk_stamp(path),
                 },
             );
             files.push(ProjectFile {
@@ -2414,6 +2628,50 @@ fn load_from(
             )
         }
     }
+}
+
+fn rule_config_stamps<'a>(
+    roots: impl Iterator<Item = &'a Path>,
+    explicit: Option<&'a Path>,
+) -> HashMap<PathBuf, Option<Vec<u8>>> {
+    let mut stamps = HashMap::new();
+    let mut visited = HashSet::new();
+    for root in roots.chain(explicit.and_then(Path::parent)) {
+        if !visited.insert(root) {
+            continue;
+        }
+        for ancestor in root.ancestors() {
+            for name in ["falcon.json", ".falcon.json"] {
+                stamps
+                    .entry(ancestor.join(name))
+                    .or_insert_with_key(|path| std::fs::read(path).ok());
+            }
+        }
+        if let Some(workspace) = falcon_project::discover_workspace(root) {
+            for package in &workspace.packages {
+                for directory in package.root.ancestors() {
+                    if directory == workspace.root {
+                        break;
+                    }
+                    stamps
+                        .entry(directory.join("falcon.json"))
+                        .or_insert_with_key(|path| std::fs::read(path).ok());
+                }
+            }
+        }
+    }
+    if let Some(path) = explicit {
+        stamps
+            .entry(path.to_path_buf())
+            .or_insert_with(|| std::fs::read(path).ok());
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let path = PathBuf::from(home).join(".falcon.json");
+        stamps
+            .entry(path.clone())
+            .or_insert_with(|| std::fs::read(&path).ok());
+    }
+    stamps
 }
 
 fn is_dart_file(path: &Path) -> bool {

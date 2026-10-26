@@ -356,97 +356,96 @@ fn minimal_edits_preserve_common_text_and_utf8_boundaries() {
         assert_eq!(applied, replacement);
     }
 }
-    #[test]
-    fn secondary_root_actions_use_its_rules_and_fix_safety() {
-        for fix in ["unsafe", "none"] {
-            let directory = tempfile::tempdir().unwrap();
-            let first = directory.path().join("first");
-            let second = directory.path().join("second");
-            for root in [&first, &second] {
-                std::fs::create_dir(root).unwrap();
-            }
-            std::fs::write(
-                first.join("falcon.json"),
-                r#"{"linter":{"enabled":false},"cross-file":{"enabled":false}}"#,
-            )
-            .unwrap();
-            std::fs::write(
+#[test]
+fn secondary_root_actions_use_its_rules_and_fix_safety() {
+    for fix in ["unsafe", "none"] {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first");
+        let second = directory.path().join("second");
+        for root in [&first, &second] {
+            std::fs::create_dir(root).unwrap();
+        }
+        std::fs::write(
+            first.join("falcon.json"),
+            r#"{"linter":{"enabled":false},"cross-file":{"enabled":false}}"#,
+        )
+        .unwrap();
+        std::fs::write(
                 second.join("falcon.json"),
                 format!(
                     r#"{{"linter":{{"rules":{{"recommended":false,"style":{{"unnecessary-new":{{"level":"error","fix":"{fix}"}},"prefer-single-quotes":"warn"}}}}}},"cross-file":{{"enabled":false}}}}"#
                 ),
             )
             .unwrap();
-            let mut state = LspState::new_from(None, |_| None, first.clone());
-            state.initialize_workspace_roots(vec![first.clone(), second.clone()]);
-            state.configure_code_actions(&serde_json::json!({
-                "capabilities": {"workspace": {"workspaceEdit": {"documentChanges": true}}}
-            }));
-            let source = "void main() {\n  final x = new Object();\n  print(\"hello\");\n}\n";
-            for (root, secondary) in [(&first, false), (&second, true)] {
-                let uri = format!("file://{}", root.join("main.dart").display());
-                let diagnostics = state.open(&uri, source.to_owned(), Some(7));
-                let params = serde_json::from_value(serde_json::json!({
+        let mut state = LspState::new_from(None, |_| None, first.clone());
+        state.initialize_workspace_roots(vec![first.clone(), second.clone()]);
+        state.configure_code_actions(&serde_json::json!({
+            "capabilities": {"workspace": {"workspaceEdit": {"documentChanges": true}}}
+        }));
+        let source = "void main() {\n  final x = new Object();\n  print(\"hello\");\n}\n";
+        for (root, secondary) in [(&first, false), (&second, true)] {
+            let uri = format!("file://{}", root.join("main.dart").display());
+            let diagnostics = state.open(&uri, source.to_owned(), Some(7));
+            let params = serde_json::from_value(serde_json::json!({
                     "textDocument": { "uri": uri },
                     "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 20, "character": 0 } },
                     "context": { "diagnostics": [], "only": ["quickfix", SAFE_FIX_ALL, UNSAFE_FIX_ALL] }
                 })).unwrap();
-                let actions = state.code_actions(&params, &|| false).unwrap();
-                if !secondary {
-                    assert!(diagnostics.is_empty(), "{diagnostics:?}");
-                    assert!(actions.is_empty(), "{actions:?}");
-                    continue;
+            let actions = state.code_actions(&params, &|| false).unwrap();
+            if !secondary {
+                assert!(diagnostics.is_empty(), "{diagnostics:?}");
+                assert!(actions.is_empty(), "{actions:?}");
+                continue;
+            }
+            assert!(diagnostics.iter().any(|diagnostic| {
+                diagnostic.rule == "unnecessary-new"
+                    && diagnostic.severity == falcon_diagnostics::Severity::Error
+            }));
+            assert_eq!(
+                actions.len(),
+                if fix == "unsafe" { 4 } else { 3 },
+                "{actions:?}"
+            );
+            for action in actions {
+                let kind = action.kind.as_ref().unwrap().as_str();
+                let removes_new = if kind == CodeActionKind::QUICKFIX.as_str() {
+                    let diagnostic = &action.diagnostics.as_ref().unwrap()[0];
+                    let removes_new = diagnostic.code
+                        == Some(lsp_types::NumberOrString::String("unnecessary-new".into()));
+                    assert_eq!(action.is_preferred, Some(!removes_new));
+                    assert_eq!(action.title.contains("(unsafe)"), removes_new);
+                    removes_new
+                } else {
+                    assert!(kind == SAFE_FIX_ALL || kind == UNSAFE_FIX_ALL);
+                    kind == UNSAFE_FIX_ALL && fix == "unsafe"
+                };
+                let replaces_quotes = kind != CodeActionKind::QUICKFIX.as_str() || !removes_new;
+                let mut expected = source.to_owned();
+                if removes_new {
+                    expected = expected.replace("new ", "");
                 }
-                assert!(diagnostics.iter().any(|diagnostic| {
-                    diagnostic.rule == "unnecessary-new"
-                        && diagnostic.severity == falcon_diagnostics::Severity::Error
-                }));
-                assert_eq!(
-                    actions.len(),
-                    if fix == "unsafe" { 4 } else { 3 },
-                    "{actions:?}"
-                );
-                for action in actions {
-                    let kind = action.kind.as_ref().unwrap().as_str();
-                    let removes_new = if kind == CodeActionKind::QUICKFIX.as_str() {
-                        let diagnostic = &action.diagnostics.as_ref().unwrap()[0];
-                        let removes_new = diagnostic.code
-                            == Some(lsp_types::NumberOrString::String("unnecessary-new".into()));
-                        assert_eq!(action.is_preferred, Some(!removes_new));
-                        assert_eq!(action.title.contains("(unsafe)"), removes_new);
-                        removes_new
-                    } else {
-                        assert!(kind == SAFE_FIX_ALL || kind == UNSAFE_FIX_ALL);
-                        kind == UNSAFE_FIX_ALL && fix == "unsafe"
-                    };
-                    let replaces_quotes = kind != CodeActionKind::QUICKFIX.as_str() || !removes_new;
-                    let mut expected = source.to_owned();
-                    if removes_new {
-                        expected = expected.replace("new ", "");
-                    }
-                    if replaces_quotes {
-                        expected = expected.replace("\"hello\"", "'hello'");
-                    }
-                    let workspace_edit = action.edit.as_ref().expect("action has an edit");
-                    let Some(DocumentChanges::Edits(documents)) = &workspace_edit.document_changes
-                    else {
-                        panic!("expected versioned document edits");
-                    };
-                    assert_eq!(documents.len(), 1);
-                    assert_eq!(documents[0].text_document.uri.as_str(), uri);
-                    assert_eq!(documents[0].text_document.version, Some(7));
-                    let mut applied = source.to_owned();
-                    for edit in documents[0].edits.iter().rev() {
-                        let OneOf::Left(edit) = edit else {
-                            panic!("expected text edit");
-                        };
-                        let start =
-                            falcon_diagnostics::lsp_position_to_byte(source, edit.range.start);
-                        let end = falcon_diagnostics::lsp_position_to_byte(source, edit.range.end);
-                        applied.replace_range(start..end, &edit.new_text);
-                    }
-                    assert_eq!(applied, expected, "{action:?}");
+                if replaces_quotes {
+                    expected = expected.replace("\"hello\"", "'hello'");
                 }
+                let workspace_edit = action.edit.as_ref().expect("action has an edit");
+                let Some(DocumentChanges::Edits(documents)) = &workspace_edit.document_changes
+                else {
+                    panic!("expected versioned document edits");
+                };
+                assert_eq!(documents.len(), 1);
+                assert_eq!(documents[0].text_document.uri.as_str(), uri);
+                assert_eq!(documents[0].text_document.version, Some(7));
+                let mut applied = source.to_owned();
+                for edit in documents[0].edits.iter().rev() {
+                    let OneOf::Left(edit) = edit else {
+                        panic!("expected text edit");
+                    };
+                    let start = falcon_diagnostics::lsp_position_to_byte(source, edit.range.start);
+                    let end = falcon_diagnostics::lsp_position_to_byte(source, edit.range.end);
+                    applied.replace_range(start..end, &edit.new_text);
+                }
+                assert_eq!(applied, expected, "{action:?}");
             }
         }
     }
+}

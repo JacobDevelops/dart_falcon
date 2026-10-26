@@ -288,7 +288,7 @@ impl FileWatching {
             && let Some(error) = response.error
         {
             warn!(method, code = error.code, message = %error.message,
-                "client rejected file watching; using configuration-save fallback");
+                "client rejected file watching; using quiet-boundary fallback");
             self.dynamic = false;
             self.registration = None;
             self.dependency_roots.clear();
@@ -778,7 +778,10 @@ fn analysis_worker_with(
                 }
                 other => debug!(method = other, "ignoring notification"),
             },
-            Message::Response(response) => watching.response(response),
+            Message::Response(response) => {
+                watching.response(response);
+                state.set_dynamic_file_watching(watching.dynamic);
+            }
         }
         publish_config_messages(&connection, &mut state)?;
         watching.refresh(&connection, &state)?;
@@ -878,22 +881,6 @@ fn handle_request(
             if !cancelled() {
                 connection.sender.send(response.into())?;
             }
-        }
-        "codeAction/resolve" => {
-            let response = match serde_json::from_value::<lsp_types::CodeAction>(request.params) {
-                Ok(action) => match state.resolve_code_action(action, &|| false) {
-                    Ok(action) => Response::new_ok(request.id, action),
-                    Err(error) => {
-                        Response::new_err(request.id, ErrorCode::RequestFailed as i32, error)
-                    }
-                },
-                Err(error) => Response::new_err(
-                    request.id,
-                    ErrorCode::InvalidParams as i32,
-                    format!("invalid params: {error}"),
-                ),
-            };
-            connection.sender.send(response.into())?;
         }
         HoverRequest::METHOD => {
             let params: HoverParams = match serde_json::from_value(request.params) {

@@ -42,6 +42,7 @@ fn analyze_refreshes_path_when_file_materializes_under_symlink() {
     let uri = format!("file://{}", path.display());
     state.open(&uri, VIOLATING_SRC.to_string(), Some(1));
     fs::write(&path, CLEAN_SRC).unwrap();
+    state.watched_files_changed(std::slice::from_ref(&path));
     assert!(state.change(&uri, VIOLATING_SRC.to_string(), Some(2)));
     let diagnostics = state.analyze(&uri);
     assert!(!diagnostics.is_empty());
@@ -359,7 +360,13 @@ fn affected_documents_share_one_invalidated_semantic_snapshot() {
     let api = "int calculate() => 1;\n";
     let consumer = "import 'api.dart';\nvoid check() { calculate(); }\n";
     fs::write(&api_path, api).unwrap();
-    fs::write(&consumer_path, consumer).unwrap();
+    // Opening a buffer with a different declaration invalidates the disk snapshot;
+    // an identical or body-only buffer can now reuse that snapshot.
+    fs::write(
+        &consumer_path,
+        "import 'api.dart';\nvoid diskCheck() { calculate(); }\n",
+    )
+    .unwrap();
 
     state.open(&api_uri, api.to_string(), Some(1));
     state.open(&consumer_uri, consumer.to_string(), Some(1));

@@ -349,6 +349,59 @@ mod tests {
     }
 
     #[test]
+    fn lazy_package_admission_detects_changes_after_discovery_before_idle() {
+        for nearer in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let nested = root.path().join("lib/nested");
+            std::fs::create_dir_all(&nested).unwrap();
+            let manifest = root.path().join("pubspec.yaml");
+            std::fs::write(&manifest, "name: original\n").unwrap();
+            let source = nested.join("source.dart");
+            let mut environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+            let mut baseline = environment.config_stamps();
+            assert_eq!(
+                environment.file_package(&source).identity().unwrap().name,
+                "original"
+            );
+            let changed = if nearer {
+                nested.join("pubspec.yaml")
+            } else {
+                manifest
+            };
+            std::fs::write(&changed, "name: changed\n").unwrap();
+
+            // The first idle sample is already newer than the loaded metadata.
+            assert!(baseline.extend_discovery(environment.config_stamps()));
+            assert_eq!(
+                environment.file_package(&source).identity().unwrap().name,
+                "original"
+            );
+            assert!(baseline.extend_discovery(environment.config_stamps()));
+            environment.reset();
+            assert_eq!(
+                environment.file_package(&source).identity().unwrap().name,
+                "changed"
+            );
+        }
+    }
+
+    #[test]
+    fn unchanged_lazy_package_admission_preserves_the_first_read_baseline() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("lib")).unwrap();
+        let manifest = root.path().join("pubspec.yaml");
+        std::fs::write(&manifest, "name: original\n").unwrap();
+        let source = root.path().join("lib/source.dart");
+        let environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+        let mut baseline = environment.config_stamps();
+        environment.file_package(&source);
+        assert!(!baseline.extend_discovery(environment.config_stamps()));
+        assert!(!baseline.extend_discovery(environment.config_stamps()));
+        std::fs::write(&manifest, "name: changed\n").unwrap();
+        assert!(baseline.extend_discovery(environment.config_stamps()));
+    }
+
+    #[test]
     fn concurrent_external_discovery_publishes_one_manifest_snapshot() {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("lib/src")).unwrap();

@@ -40,7 +40,7 @@ fn invalid_secondary_root_edit_retains_last_good_rules() {
     );
 
     std::fs::write(&config, r#"{"linter":{"enabledd":false}}"#).unwrap();
-    let refreshed = state.watched_files_changed(&[config.clone()]);
+    let refreshed = state.watched_files_changed(std::slice::from_ref(&config));
     let messages = state.take_config_messages();
     assert_eq!(messages.len(), 1, "{messages:?}");
     assert_eq!(messages[0].typ, MessageType::ERROR);
@@ -362,12 +362,6 @@ fn initialized_roots_use_independent_rules_and_file_includes_after_reload() {
             "{diagnostics:?}"
         );
     }
-    let excluded_uri = format!("file://{}", second.join("lib/main.dart").display());
-    assert!(
-        state
-            .open(&excluded_uri, source.to_owned(), Some(1))
-            .is_empty()
-    );
     for view in [ProjectView::Semantic, ProjectView::CrossFile] {
         let (files, complete) = state.collect_project_files(view);
         assert!(complete);
@@ -380,6 +374,12 @@ fn initialized_roots_use_independent_rules_and_file_includes_after_reload() {
             ])
         );
     }
+    let excluded_uri = format!("file://{}", second.join("lib/main.dart").display());
+    assert!(
+        state
+            .open(&excluded_uri, source.to_owned(), Some(1))
+            .is_empty()
+    );
     std::fs::write(
         second.join("falcon.json"),
         r#"{"files":{"includes":["src/**"]},"linter":{"rules":{"recommended":false}},"cross-file":{"enabled":false}}"#,
@@ -391,6 +391,17 @@ fn initialized_roots_use_independent_rules_and_file_includes_after_reload() {
         diagnostic.rule == "avoid-dynamic"
             && diagnostic.severity == falcon_diagnostics::Severity::Warning
     }));
+    for view in [ProjectView::Semantic, ProjectView::CrossFile] {
+        let semantic = matches!(view, ProjectView::Semantic);
+        let (files, complete) = state.collect_project_files(view);
+        assert!(complete);
+        let excluded = canonical_or_lexical(&second.join("lib/main.dart"));
+        assert_eq!(
+            files.iter().any(|file| file.path == excluded),
+            semantic,
+            "explicitly open excluded buffers belong only to the semantic view"
+        );
+    }
 }
 
 #[test]
@@ -511,8 +522,10 @@ fn return_type_edits_rebuild_indexes_and_refresh_dependent_diagnostics() {
     for (before, after) in [
         ("void api() {}", "int api() => 1;"),
         (
-            "void sink() {} api() => sink();",
-            "void sink() {} api() => 1;",
+            // Cross-file inference supports variable initializers, whereas
+            // unannotated top-level function returns remain dynamic.
+            "void sink() {} int value() => 1; final api = sink;",
+            "void sink() {} int value() => 1; final api = value;",
         ),
     ] {
         let directory = tempfile::tempdir().unwrap();
@@ -1214,12 +1227,12 @@ mod source_size_tests {
             state.parser_failure_path = Some(failed.clone());
             let source = std::fs::read_to_string(&failed).unwrap();
             std::fs::write(&failed, format!("{source}\n")).unwrap();
-            state.invalidate_semantic_snapshot();
             let runs = Arc::new(AtomicUsize::new(0));
             state.cross_file_rules.register(
                 "count-cross-runs",
                 Box::new(CountCrossRuns(Arc::clone(&runs))),
             );
+            state.watched_files_changed(std::slice::from_ref(&failed));
             let published = state.cross_file_pass();
             assert_eq!(published.len(), 2);
             for (_, diagnostics) in published {
@@ -1352,6 +1365,7 @@ mod source_size_tests {
         std::fs::create_dir(&root).unwrap();
         let created = root.join("created.dart");
         std::fs::write(&created, "class Created {}").unwrap();
+        state.watched_files_changed(std::slice::from_ref(&created));
         let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
         assert!(complete);
         assert!(files.iter().any(|file| file.path == created));
@@ -1453,6 +1467,7 @@ mod source_size_tests {
                 .unwrap()
                 .set_len(u64::from(u32::MAX) + 1)
                 .unwrap();
+            state.watched_files_changed(std::slice::from_ref(&rejected));
             let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
             assert!(!complete);
             assert!(files.iter().all(|file| file.path != rejected));
@@ -1477,7 +1492,8 @@ mod source_size_tests {
             assert!(snapshot.files.iter().all(|file| file.path != rejected));
             assert!(state.semantic_snapshot_error.is_none());
 
-            std::fs::remove_file(rejected).unwrap();
+            std::fs::remove_file(&rejected).unwrap();
+            state.watched_files_changed(std::slice::from_ref(&rejected));
             assert!(state.cross_file_diagnostics().values().any(|diagnostics| {
                 diagnostics
                     .iter()
@@ -2430,6 +2446,7 @@ mod dependency_tests {
             "void _take(int? value) {} void main() { _take(null); }",
         )
         .unwrap();
+        state.watched_files_changed(std::slice::from_ref(&path));
         let diagnostics = state.cross_file_diagnostics();
         assert!(
             diagnostics
@@ -2440,9 +2457,11 @@ mod dependency_tests {
         assert_eq!(state.cross_file_index_build_count, 2);
         let peer = dir.path().join("peer.dart");
         std::fs::write(&peer, "void peer() {}").unwrap();
+        state.watched_files_changed(std::slice::from_ref(&peer));
         state.cross_file_diagnostics();
         assert_eq!(state.cross_file_index_build_count, 3);
         std::fs::remove_file(&peer).unwrap();
+        state.watched_files_changed(std::slice::from_ref(&peer));
         state.cross_file_diagnostics();
         assert_eq!(state.cross_file_index_build_count, 4);
         state.cross_file_diagnostics();
@@ -2495,6 +2514,7 @@ mod dependency_tests {
             "import 'orphan.dart';\nvoid main() { Orphan(); }\n",
         )
         .unwrap();
+        state.watched_files_changed(&[alias.join("lib/main.dart")]);
         let published = state.cross_file_pass();
         let (_, diagnostics) = published
             .iter()
@@ -2951,10 +2971,11 @@ mod environment_regressions {
     }
 
     #[test]
-    fn configuration_events_invalidate_even_after_discovery_recaptures_new_bytes() {
+    fn configuration_events_invalidate_after_discovery_preserves_known_fingerprints() {
         let (dir, mut state, uri, _dependency) = dependency_fixture(false);
         let app = dir.path().join("app");
         let config = app.join(".dart_tool/package_config.json");
+        let mut expected_stamps = state.environment_stamps.clone().unwrap();
         std::fs::create_dir_all(dir.path().join("new/lib")).unwrap();
         std::fs::write(dir.path().join("new/lib/api.dart"), "class Replacement {}").unwrap();
         std::fs::write(&config,
@@ -2963,10 +2984,10 @@ mod environment_regressions {
         let new_uri = format!("file://{}", app.join("new_directory/file.dart").display());
         state.open(&new_uri, "void other() {}".into(), Some(1));
         state.analyze(&new_uri);
-        assert_eq!(
-            state.environment_stamps.as_ref(),
-            Some(&state.environment.config_stamps())
-        );
+        let current_stamps = state.environment.config_stamps();
+        assert!(expected_stamps.extend_discovery(current_stamps.clone()));
+        assert_eq!(state.environment_stamps.as_ref(), Some(&expected_stamps));
+        assert_ne!(state.environment_stamps.as_ref(), Some(&current_stamps));
         assert!(has_external_class(&state, "Original"));
         let resets = state.external_reset_count;
         state.watched_files_changed(&[config]);
@@ -3095,10 +3116,41 @@ mod environment_regressions {
     }
 
     #[test]
+    fn deleted_dependency_directories_invalidate_loaded_external_facts() {
+        for local in [false, true] {
+            let (dir, mut state, uri, dependency) = dependency_fixture(false);
+            state.set_dynamic_file_watching(true);
+            let deleted = if local {
+                let directory = dir.path().join("local/nested");
+                std::fs::create_dir_all(&directory).unwrap();
+                std::fs::write(directory.join("api.dart"), "class Original {}").unwrap();
+                state.change(
+                    &uri,
+                    "import '../local/nested/api.dart'; void main() {}".into(),
+                    Some(2),
+                );
+                state.ensure_semantic_snapshot();
+                directory
+            } else {
+                dependency.parent().unwrap().to_path_buf()
+            };
+            assert!(has_external_class(&state, "Original"));
+            let resets = state.external_reset_count;
+            std::fs::remove_dir_all(&deleted).unwrap();
+            let published = state.watched_files_changed(&[deleted]);
+            assert_eq!(published.len(), 1);
+            assert_eq!(published[0].0, uri);
+            assert_eq!(state.external_reset_count, resets + 1);
+            assert!(!has_external_class(&state, "Original"));
+        }
+    }
+
+    #[test]
     fn watched_workspace_part_refreshes_project_without_resetting_external_facts() {
         let (dir, mut state, uri, _) = dependency_fixture(false);
         let generated = dir.path().join("app/generated.dart");
         std::fs::write(&generated, "part of 'main.dart'; class Before {}").unwrap();
+        state.watched_files_changed(std::slice::from_ref(&generated));
         state.change(
             &uri,
             "import 'package:dep/api.dart'; part 'generated.dart'; void main() {}".into(),
@@ -3337,6 +3389,7 @@ mod environment_regressions {
         let (dir, mut state, uri, _dependency) = dependency_fixture(false);
         let closed = dir.path().join("app/api.dart");
         std::fs::write(&closed, "void api() {}").unwrap();
+        state.watched_files_changed(std::slice::from_ref(&closed));
         state.change(
             &uri,
             "import 'api.dart'; import 'package:dep/api.dart'; void main() { api(); }".into(),
@@ -3857,23 +3910,33 @@ mod environment_regressions {
         assert!(state.external_index_build_count > builds);
         let after = primary_function(&state);
         assert_ne!(before, after);
-        let fresh = IdentityIndex::build_external(ExternalSources {
+        // Compare the same importing context: a path-only model chooses the
+        // shared file's primary copy, which need not be the third app's copy.
+        let snapshot = state.semantic_snapshot.as_ref().unwrap();
+        let project_files: Vec<_> = snapshot.files.iter().collect();
+        let fresh_external = ExternalIndexCache::build(ExternalSources {
             libraries: &state.external_libraries,
             environment: &state.environment,
         });
-        let shared_file = state
-            .external_libraries
-            .libraries()
-            .iter()
-            .flat_map(|library| library.files.iter())
-            .find(|file| file.path == shared)
-            .unwrap();
-        assert_eq!(
-            after,
-            SemanticModel::new(&shared, &shared_file.parsed, &fresh, None)
-                .resolve_value("makeValue")
-                .unwrap()
+        let (fresh, _, _) = state.build_semantic_indexes(
+            &project_files,
+            &state.external_libraries,
+            Some(&fresh_external),
         );
+        for app in &apps {
+            let parsed = &snapshot.files[snapshot.by_path[app]].parsed;
+            let cached = SemanticModel::new(
+                app,
+                parsed,
+                &snapshot.indexes.identities,
+                Some(&snapshot.indexes.types),
+            );
+            let rebuilt = SemanticModel::new(app, parsed, &fresh.identities, Some(&fresh.types));
+            assert_eq!(
+                cached.resolve_value("makeValue"),
+                rebuilt.resolve_value("makeValue")
+            );
+        }
     }
 
     #[test]

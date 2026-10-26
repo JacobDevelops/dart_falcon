@@ -352,7 +352,7 @@ mod file_watching_tests {
 
     #[test]
     fn workspace_initialization_preserves_code_action_capabilities() {
-        let client = Client::start_with_initialize(
+        let client = Client::start_with_configuration(
             false,
             false,
             json!({"capabilities": {
@@ -362,8 +362,16 @@ mod file_watching_tests {
                 }},
                 "workspace": {"workspaceEdit": {"documentChanges": true}}
             }}),
+            r#"{"linter":{"rules":{"recommended":false,"style":{"unnecessary-new":"warn"}}},"cross-file":{"enabled":false}}"#,
         );
-        client.open();
+        client.notify(
+            "textDocument/didOpen",
+            json!({"textDocument": {
+                "uri": file_uri(&client.workspace.join("main.dart")).unwrap(),
+                "languageId": "dart", "version": 1,
+                "text": "void main() { final x = new Object(); }"
+            }}),
+        );
         let diagnostics = client
             .drain()
             .into_iter()
@@ -375,7 +383,7 @@ mod file_watching_tests {
                 }
                 _ => None,
             })
-            .last()
+            .next_back()
             .unwrap();
         assert!(!diagnostics.as_array().unwrap().is_empty());
         client
@@ -718,15 +726,13 @@ mod file_watching_tests {
                         .iter()
                         .all(|watcher| watcher.kind.is_none())
                 );
-                for pattern in ["**/*"] {
-                    assert!(
-                        initial[0]
-                            .watchers
-                            .iter()
-                            .any(|watcher| watcher.glob_pattern
-                                == GlobPattern::String(pattern.to_string()))
-                    );
-                }
+                assert!(
+                    initial[0]
+                        .watchers
+                        .iter()
+                        .any(|watcher| watcher.glob_pattern
+                            == GlobPattern::String("**/*".to_string()))
+                );
                 if relative {
                     let parent = canonical_or_lexical(client.directory.path());
                     assert!(!parent.join("pubspec.yaml").exists());
@@ -1133,6 +1139,67 @@ mod file_watching_tests {
         let published = publications(&saved);
         assert_eq!(published.len(), 1);
         assert!(published[0].diagnostics.is_empty());
+        client.finish();
+    }
+
+    #[test]
+    fn rejected_registration_refreshes_closed_sources_and_directories_while_idle() {
+        let client = Client::start(true, false);
+        let Message::Request(request) = client.receive() else {
+            panic!("expected watcher registration");
+        };
+        assert_eq!(request.method, RegisterCapability::METHOD);
+        client
+            .connection
+            .sender
+            .send(
+                Response::new_err(
+                    request.id,
+                    ErrorCode::MethodNotFound as i32,
+                    "registration unsupported".to_owned(),
+                )
+                .into(),
+            )
+            .unwrap();
+        client.drain();
+        let generated = client.workspace.join("generated");
+        let support = generated.join("support.dart");
+        std::fs::create_dir(&generated).unwrap();
+        std::fs::write(&support, "class C {} C make() => C();").unwrap();
+        let uri = file_uri(&client.workspace.join("main.dart")).unwrap();
+        client.notify(
+            "textDocument/didOpen",
+            json!({"textDocument": {
+                "uri": uri, "languageId": "dart", "version": 1,
+                "text": "import 'generated/support.dart'; void f() { C x = make(); x; }"
+            }}),
+        );
+        assert!(
+            publications(&client.drain())
+                .iter()
+                .any(|publication| publication.uri == uri
+                    && has_rule(publication, "omit-local-variable-types"))
+        );
+        let assert_idle_warning = |warning| loop {
+            if let Message::Notification(notification) = client.receive()
+                && notification.method == "textDocument/publishDiagnostics"
+            {
+                let publication: PublishDiagnosticsParams =
+                    serde_json::from_value(notification.params).unwrap();
+                if publication.uri == uri {
+                    assert_eq!(has_rule(&publication, "omit-local-variable-types"), warning);
+                    break;
+                }
+            }
+        };
+        std::fs::write(&support, "class C {} int make() => 42;").unwrap();
+        assert_idle_warning(false);
+        std::fs::remove_dir_all(&generated).unwrap();
+        assert_idle_warning(false);
+        std::fs::create_dir(&generated).unwrap();
+        std::fs::write(&support, "class C {} C make() => C();").unwrap();
+        assert_idle_warning(true);
+        client.drain();
         client.finish();
     }
 
