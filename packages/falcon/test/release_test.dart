@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:falcon/src/release.dart';
+import 'package:falcon/src/version.dart';
 import 'package:test/test.dart';
 
 import '../bin/falcon.dart' as launcher;
@@ -39,6 +40,57 @@ void main() {
       () => checksumFor('invalid  falcon.tar.gz\n', 'falcon.tar.gz'),
       throwsFormatException,
     );
+  });
+
+  group('launcher selection', () {
+    late Directory cache;
+
+    setUp(() async {
+      cache = await Directory.systemTemp.createTemp('falcon-selection-test-');
+    });
+
+    tearDown(() async {
+      await cache.delete(recursive: true);
+    });
+
+    test('defaults to the launcher package version', () async {
+      expect(await launcher.selectedVersion(cache), version);
+    });
+
+    test('honors a selection from the same launcher version', () async {
+      await File('${cache.path}/active-version').writeAsString(
+        '$version\n1.2.3\n',
+      );
+      expect(await launcher.selectedVersion(cache), '1.2.3');
+    });
+
+    for (final previousLauncher in ['0.0.0', '999.0.0']) {
+      test('ignores a selection from launcher $previousLauncher', () async {
+        await File('${cache.path}/active-version').writeAsString(
+          '$previousLauncher\n1.2.3\n',
+        );
+        expect(await launcher.selectedVersion(cache), version);
+        expect(
+          await launcher.selectedVersion(cache, pinnedVersion: 'v3.4.5'),
+          '3.4.5',
+        );
+      });
+    }
+
+    test('ignores a legacy selection without a launcher version', () async {
+      await File('${cache.path}/active-version').writeAsString('1.2.3\n');
+      expect(await launcher.selectedVersion(cache), version);
+    });
+
+    test('environment pin overrides a current launcher selection', () async {
+      await File('${cache.path}/active-version').writeAsString(
+        '$version\n1.2.3\n',
+      );
+      expect(
+        await launcher.selectedVersion(cache, pinnedVersion: 'v3.4.5'),
+        '3.4.5',
+      );
+    });
   });
 
   group('launcher updates', () {
@@ -112,6 +164,10 @@ void main() {
         'new binary',
       );
       expect(await launcher.selectedVersion(cache), '2.3.4');
+      expect(
+        await File('${cache.path}/active-version').readAsString(),
+        '$version\n2.3.4\n',
+      );
       expect(requests, contains('/latest'));
       expect(
         requests,
@@ -125,7 +181,9 @@ void main() {
         final directory = await Directory('${cache.path}/2.3.4').create();
         final binary = File('${directory.path}/falcon');
         await binary.writeAsString('installed binary');
-        await File('${cache.path}/active-version').writeAsString('1.2.3');
+        await File('${cache.path}/active-version').writeAsString(
+          '$version\n1.2.3\n',
+        );
         corruptChecksum = true;
 
         await expectLater(update(requested: '2.3.4'), throwsStateError);
@@ -141,7 +199,9 @@ void main() {
     test(
       'environment pin bypasses latest and overrides saved selection',
       () async {
-        await File('${cache.path}/active-version').writeAsString('2.3.4');
+        await File('${cache.path}/active-version').writeAsString(
+          '$version\n2.3.4\n',
+        );
         expect(await update(pinned: 'v1.2.3'), '1.2.3');
         expect(await launcher.selectedVersion(cache), '1.2.3');
         expect(requests, isNot(contains('/latest')));

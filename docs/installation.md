@@ -65,13 +65,17 @@ FALCON_VERSION=X.Y.Z falcon check .
 ```
 
 `self-update` is a pub-launcher command, not a command in the standalone native
-binary. A successful update selects that version for future launcher invocations.
-`FALCON_VERSION` overrides the selected version; an explicit `self-update` version
-overrides the environment. Without either selection, the launcher uses its pub
-package version. An update with `FALCON_VERSION` set and no explicit version
-updates that pinned version instead of fetching latest. Downloads are checked
-before atomic installation; a checksum failure leaves the installed binary and
-version selection unchanged. Update the Dart wrapper itself with
+binary. A successful update selects that version for future invocations of the
+same pub launcher version. Upgrading or downgrading the Dart package ignores
+selections saved by a different launcher version, including legacy selections
+without a launcher version, and defaults to the newly installed package version.
+Run `self-update` again to select a different native release.
+`FALCON_VERSION` always overrides the selected version; an explicit `self-update`
+version overrides the environment. Without either selection, the launcher uses
+its pub package version. An update with `FALCON_VERSION` set and no explicit
+version updates that pinned version instead of fetching latest. Downloads are
+checked before atomic installation; a checksum failure leaves the installed
+binary and version selection unchanged. Update the Dart wrapper itself with
 `dart pub global activate falcon`.
 
 ## Homebrew

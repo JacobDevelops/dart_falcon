@@ -119,7 +119,10 @@ Future<String> selectedVersion(Directory cache, {String? pinnedVersion}) async {
   if (pinnedVersion != null) return releaseVersion(pinnedVersion);
   final selection = File('${cache.path}/active-version');
   if (await selection.exists()) {
-    return releaseVersion((await selection.readAsString()).trim());
+    final saved = await selection.readAsLines();
+    if (saved.length == 2 && saved.first == version) {
+      return releaseVersion(saved[1].trim());
+    }
   }
   return version;
 }
@@ -161,7 +164,7 @@ Future<String> selfUpdate(
   final temporary = await cache.createTemp('.selection-');
   try {
     final selection = File('${temporary.path}/active-version');
-    await selection.writeAsString('$selected\n', flush: true);
+    await selection.writeAsString('$version\n$selected\n', flush: true);
     await selection.rename('${cache.path}/active-version');
   } finally {
     await temporary.delete(recursive: true);
