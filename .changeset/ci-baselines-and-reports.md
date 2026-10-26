@@ -8,7 +8,7 @@ Add counted, content-based existing-debt baselines with `--write-baseline [PATH]
 
 Report missing input paths without panicking when a path component is a regular file or canonicalization is otherwise unavailable.
 
-Anchor baseline fingerprints to the workspace, configuration, or Git root so checks from subdirectories match baselines recorded at the root.
+Anchor baseline fingerprints to the nearest Git/Jujutsu repository root, then the workspace or configuration root, so checks from subdirectories match baselines recorded at the root, including nested workspaces and user-level configuration.
 
 Bare `--write-baseline` writes to the configured baseline destination, or to `falcon-baseline.json` in the anchored project root, instead of creating a stray file in the current subdirectory.
 

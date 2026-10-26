@@ -9,7 +9,13 @@ fn check(directory: &Path, arguments: &[&str]) -> Output {
         .current_dir(directory)
         .env_remove("DART_SDK")
         .env_remove("FLUTTER_ROOT")
-        .env("HOME", directory)
+        .env(
+            "HOME",
+            directory
+                .ancestors()
+                .find(|path| path.join(".git").exists() || path.join(".jj").exists())
+                .unwrap_or(directory),
+        )
         .env("PATH", "")
         .output()
         .unwrap()
@@ -17,7 +23,7 @@ fn check(directory: &Path, arguments: &[&str]) -> Output {
 
 #[test]
 fn baseline_written_at_root_matches_from_subdirectory() {
-    for workspace in [false, true] {
+    for (marker, workspace) in [(Some(".git"), false), (Some(".jj"), false), (None, true)] {
         let project = tempfile::tempdir().unwrap();
         let root = project.path();
         let member = root.join("app");
@@ -33,8 +39,10 @@ fn baseline_written_at_root_matches_from_subdirectory() {
                 "name: app\nresolution: workspace\n",
             )
             .unwrap();
-        } else {
-            fs::create_dir(root.join(".git")).unwrap();
+        }
+        if let Some(marker) = marker {
+            fs::create_dir(root.join(marker)).unwrap();
+            fs::write(root.join(".falcon.json"), "{}").unwrap();
         }
         fs::write(
             member.join("main.dart"),
@@ -118,4 +126,36 @@ fn explicit_baseline_write_stays_relative_to_current_directory() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(!project.path().join("local.json").exists());
+}
+
+#[test]
+fn nested_pub_workspace_uses_the_enclosing_repository_baseline() {
+    for marker in [".git", ".jj"] {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        let workspace = root.join("dart");
+        fs::create_dir(&workspace).unwrap();
+        fs::create_dir(root.join(marker)).unwrap();
+        fs::write(root.join("falcon.json"), r#"{"baseline":"debt.json"}"#).unwrap();
+        fs::write(
+            workspace.join("pubspec.yaml"),
+            "name: dart_workspace\nworkspace: []\n",
+        )
+        .unwrap();
+        fs::write(
+            workspace.join("main.dart"),
+            "void main() { print('hello'); }\n",
+        )
+        .unwrap();
+        let written = check(root, &[".", "--write-baseline"]);
+        assert!(root.join("debt.json").is_file(), "{written:?}");
+        let output = check(&workspace, &[".", "--format", "json"]);
+        assert!(output.status.success(), "{output:?}");
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains("0 fixed (stale)"), "{stderr}");
+        assert!(!stderr.contains("Baseline: 0 suppressed"), "{stderr}");
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let diagnostics = json.get("diagnostics").unwrap_or(&json).as_array().unwrap();
+        assert!(diagnostics.is_empty(), "{json}");
+    }
 }
