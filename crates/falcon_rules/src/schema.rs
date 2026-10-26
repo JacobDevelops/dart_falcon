@@ -24,7 +24,7 @@ pub fn rule_options_schemas() -> Vec<(&'static str, Value)> {
 
 fn rule_config(options: Value) -> Value {
     json!({
-        "description": "A severity level, or an object with a severity level and rule-specific options.",
+        "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
         "oneOf": [
             {"$ref": "#/definitions/ruleLevel"},
             {
@@ -33,6 +33,7 @@ fn rule_config(options: Value) -> Value {
                 "required": ["level"],
                 "properties": {
                     "level": {"$ref": "#/definitions/ruleLevel"},
+                    "fix": {"$ref": "#/definitions/ruleFix"},
                     "options": {"anyOf": [options, {"type": "null"}]}
                 }
             }
@@ -245,6 +246,12 @@ pub fn config_schema() -> Value {
                     reports at its default severity; `info`, `warn`, and `error` set an \
                     explicit severity."
             },
+            "ruleFix": {
+                "enum": ["none", "safe", "unsafe"],
+                "description": "Autofix policy: `none` removes fixes; `safe` or `unsafe` \
+                    sets their safety classification. When omitted, inherit the previous \
+                    matching policy or the rule's default classification."
+            },
             "overrideLinter": {
                 "type": "object",
                 "additionalProperties": false,
@@ -311,6 +318,22 @@ mod tests {
         let overrides = &properties["overrides"]["items"]["properties"];
         assert!(overrides.get("baseline").is_none());
         assert!(overrides.get("error-on-warnings").is_none());
+    }
+
+    #[test]
+    fn every_rule_object_accepts_an_optional_fix_policy() {
+        let schema = config_schema();
+        assert_eq!(
+            schema["definitions"]["ruleFix"]["enum"],
+            json!(["none", "safe", "unsafe"])
+        );
+        for name in std::iter::once("ruleWithoutOptions")
+            .chain(rule_options_schemas().iter().map(|(name, _)| *name))
+        {
+            let object = &schema["definitions"][name]["oneOf"][1];
+            assert_eq!(object["properties"]["fix"]["$ref"], "#/definitions/ruleFix");
+            assert_eq!(object["required"], json!(["level"]));
+        }
     }
 
     #[test]

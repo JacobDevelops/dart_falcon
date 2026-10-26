@@ -201,6 +201,59 @@ Levels:
 | `warn`  | enabled, reported as warning              |
 | `error` | enabled, reported as error                |
 
+### Autofix policy
+
+Rule objects also accept `"fix": "none" | "safe" | "unsafe"` alongside `level`
+and `options`. Omitting `fix` keeps the rule's declared fix classification.
+`none` hides the fix without hiding its diagnostic; `safe` and `unsafe`
+reclassify an existing fix rather than creating a fix for a rule that has none.
+
+```json
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "unnecessary-new": { "level": "warn", "fix": "unsafe" }
+      }
+    }
+  },
+  "overrides": [{
+    "includes": ["generated/**"],
+    "linter": {
+      "rules": {
+        "style": {
+          "unnecessary-new": { "level": "warn", "fix": "none" }
+        }
+      }
+    }
+  }]
+}
+```
+
+Matching overrides resolve `fix` independently of severity and options: the last
+explicit `fix` wins, and an override that omits it leaves the earlier policy
+intact. Package configurations select fix policy just like rule severity.
+The same option is accepted for cross-file rules, but automatic fixing currently
+applies only file-rule fixes. Cross-file diagnostics remain visible after fixing.
+
+`falcon check --write` applies safe fixes; add `--unsafe` to include unsafe fixes.
+`--write --dry-run` previews a unified diff without modifying files. Each file
+is reanalyzed after one atomic fix, so overlapping edits are never merged.
+Repeated file text stops fixing and reports the rules in the cycle; a limit of
+100 applied fixes per file also stops non-repeating growth and reports the
+involved rules. Remaining diagnostics are reported against the resulting text.
+Invalid fixes, cycles, and the iteration limit abort before any
+file is written. Dry-run diffs go to stdout for text reports and stderr for
+machine-readable report formats, keeping their stdout parseable.
+`--dry-run` cannot be combined with `--write-baseline`; previewing never writes a
+baseline for source changes that were not saved.
+
+Editors offer individual safe and unsafe quick fixes. Safe fixes are preferred;
+unsafe fixes are labeled. `source.fixAll.falcon` applies safe fixes only and is
+suitable for code actions on save. The separately named unsafe fix-all action
+requires explicit selection.
+
+
 ### Resolution order
 
 For each rule falcon resolves an effective severity (or "disabled"):
@@ -557,8 +610,8 @@ given.
 ### `overrides[].linter` and `overrides[].cross-file`
 
 Each block accepts an optional `enabled` switch and a `rules` object with grouped
-rule levels and options. Unlike base rule blocks, override rule blocks do not
-accept `recommended`; set explicit rule levels or use `enabled` instead. Neither
+rule levels, options, and fix policies. Unlike base rule blocks, override rule blocks
+do not accept `recommended`; set explicit rule levels or use `enabled` instead. Neither
 block accepts `domains`, nested `overrides`, or `files`. An override may carry
 either or both blocks. The legacy cross-file keys `project` and `cross_file`
 still load with deprecation warnings.
@@ -571,6 +624,8 @@ sections such as base `linter.domains` likewise treat `null` as absent.
 - A rule entry's `options` block **replaces** the base rule's options on matching
   files (options are not deep-merged). An override that sets only a level leaves
   the base options intact.
+- A rule entry's `fix` replaces the earlier fix policy independently. Omitting it
+  preserves the earlier policy, including when severity or options change.
 - `"enabled": false` disables every rule in that section for matching files (a
   later override may re-enable a specific one).
 

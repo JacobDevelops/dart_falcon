@@ -29,6 +29,8 @@ use falcon_project::{
 use falcon_syntax::{LanguageVersion, cst::Program};
 use tracing::{debug, warn};
 
+pub(crate) mod code_actions;
+
 struct DocumentParse {
     tree: falcon_syntax::cst::SyntaxTree,
     diagnostics: Vec<Diagnostic>,

@@ -73,6 +73,36 @@
           "positional": false
         },
         {
+          "name": "write",
+          "long": "--write",
+          "short": null,
+          "valueName": null,
+          "default": "false",
+          "help": "Apply safe fixes to selected Dart files",
+          "possibleValues": [],
+          "positional": false
+        },
+        {
+          "name": "unsafe_fixes",
+          "long": "--unsafe",
+          "short": null,
+          "valueName": null,
+          "default": "false",
+          "help": "Also apply fixes classified as unsafe (requires --write)",
+          "possibleValues": [],
+          "positional": false
+        },
+        {
+          "name": "dry_run",
+          "long": "--dry-run",
+          "short": null,
+          "valueName": null,
+          "default": "false",
+          "help": "Preview fixes as a unified diff without modifying files (requires --write)",
+          "possibleValues": [],
+          "positional": false
+        },
+        {
           "name": "exclude",
           "long": "--exclude",
           "short": null,

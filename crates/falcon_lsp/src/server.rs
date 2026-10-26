@@ -388,6 +388,16 @@ fn server_capabilities() -> ServerCapabilities {
             },
         )),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
+        code_action_provider: Some(lsp_types::CodeActionProviderCapability::Options(
+            lsp_types::CodeActionOptions {
+                code_action_kinds: Some(vec![
+                    lsp_types::CodeActionKind::QUICKFIX,
+                    lsp_types::CodeActionKind::from(crate::state::code_actions::SAFE_FIX_ALL),
+                    lsp_types::CodeActionKind::from(crate::state::code_actions::UNSAFE_FIX_ALL),
+                ]),
+                ..Default::default()
+            },
+        )),
         ..Default::default()
     }
 }
@@ -641,7 +651,7 @@ fn analysis_worker_with(
 
         match message {
             Message::Request(request) => {
-                handle_request(&connection, &state, request)?;
+                handle_request(&connection, &mut state, request)?;
             }
             Message::Notification(ServerNotification { method, params }) => match method.as_str() {
                 DidOpenTextDocument::METHOD => {
@@ -796,10 +806,27 @@ fn publish_config_messages(
 
 fn handle_request(
     connection: &Connection,
-    state: &LspState,
+    state: &mut LspState,
     request: Request,
 ) -> Result<(), ServerError> {
     match request.method.as_str() {
+        "textDocument/codeAction" => {
+            let response =
+                match serde_json::from_value::<lsp_types::CodeActionParams>(request.params) {
+                    Ok(params) => match state.code_actions(&params) {
+                        Ok(actions) => Response::new_ok(request.id, actions),
+                        Err(error) => {
+                            Response::new_err(request.id, ErrorCode::RequestFailed as i32, error)
+                        }
+                    },
+                    Err(error) => Response::new_err(
+                        request.id,
+                        ErrorCode::InvalidParams as i32,
+                        format!("invalid params: {error}"),
+                    ),
+                };
+            connection.sender.send(response.into())?;
+        }
         HoverRequest::METHOD => {
             let params: HoverParams = match serde_json::from_value(request.params) {
                 Ok(params) => params,

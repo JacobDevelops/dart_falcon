@@ -28,6 +28,40 @@ VS Code and use `Run > Start Debugging` with an Extension Development Host.
 | `falcon.binaryPath` | `falcon` | Path to the falcon binary |
 | `falcon.trace.server` | `off` | Log LSP traffic (`messages` / `verbose`) |
 
+## Quick fixes and fix on save
+
+Put the cursor on a Falcon diagnostic and choose **Quick Fix** (`Ctrl+.` /
+`Cmd+.`). Diagnostics with an available fix offer an individual action. Unsafe
+fixes are labeled **(unsafe)** and are never preferred; the effective `fix`
+policy in `falcon.json` can suppress or reclassify a rule's fixes.
+
+Enable safe fixes on explicit save in VS Code's `settings.json`:
+
+```json
+{
+  "[dart]": {
+    "editor.codeActionsOnSave": {
+      "source.fixAll.falcon": "explicit"
+    }
+  }
+}
+```
+
+Use `"always"` instead of `"explicit"` to include supported Auto Saves.
+Generic `"source.fixAll"` also includes only Falcon's safe fixes. Unsafe fix all
+is a separate action, **Fix all Falcon issues (unsafe)**, with kind
+`source.falcon.fixAllUnsafe`; it is deliberately outside `source.fixAll` and
+should not be enabled on save without reviewing the behavior changes.
+
+Fix all processes the current open buffer iteratively. If fixes cycle, hit the
+iteration limit, or contain invalid edits, Falcon reports an error rather than
+returning partially fixed text. Actions include the buffer version so supporting
+clients can reject stale edits. Cross-file fixes are not offered.
+
+See [VS Code's Code Actions on save documentation](https://code.visualstudio.com/docs/editing/refactoring#_code-actions-on-save)
+for the editor's save modes.
+
+
 ## Configuration reloads
 
 The extension watches `**/falcon.json`; saving rule config changes re-lints

@@ -9,7 +9,7 @@
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
 };
-use falcon_diagnostics::Diagnostic;
+use falcon_diagnostics::{Diagnostic, FixKind, TextEdit};
 use falcon_syntax::cst::*;
 
 #[derive(Default)]
@@ -40,9 +40,27 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         if let Expr::New(expression) = node.unparenthesized()
             && !expression.is_const()
         {
-            self.diags.push(self.ctx.diagnostic(
+            let diagnostic = self.ctx.diagnostic(
                 "Remove the optional `new` keyword.",
                 expression.span(),
+            );
+            let start = expression.span().start;
+            let keyword_end = start + "new".len();
+            let whitespace = self.ctx.source()[keyword_end..]
+                .bytes()
+                .take_while(|byte| matches!(*byte, b' ' | b'\t' | b'\r' | b'\n'))
+                .count();
+            self.diags.push(self.ctx.with_fix(
+                diagnostic,
+                "Remove the optional `new` keyword",
+                FixKind::Safe,
+                vec![TextEdit::new(
+                    falcon_diagnostics::Span {
+                        start,
+                        end: keyword_end + whitespace,
+                    },
+                    "",
+                )],
             ));
         }
         StructuralTraversal::Continue

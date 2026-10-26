@@ -1848,6 +1848,14 @@
       ],
       "description": "Severity level for a rule: `off` disables it; `on` reports at its default severity; `info`, `warn`, and `error` set an explicit severity."
     },
+    "ruleFix": {
+      "enum": [
+        "none",
+        "safe",
+        "unsafe"
+      ],
+      "description": "Autofix policy: `none` removes fixes; `safe` or `unsafe` sets their safety classification. When omitted, inherit the previous matching policy or the rule's default classification."
+    },
     "overrideLinter": {
       "type": "object",
       "additionalProperties": false,
@@ -3521,7 +3529,7 @@
       }
     },
     "ruleWithoutOptions": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -3535,6 +3543,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -3553,7 +3564,7 @@
       ]
     },
     "arguments-ordering": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -3567,6 +3578,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -3605,7 +3619,7 @@
       ]
     },
     "avoid-banned-annotations": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -3619,6 +3633,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -3667,7 +3684,7 @@
       ]
     },
     "avoid-banned-exports": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -3681,6 +3698,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -3729,7 +3749,7 @@
       ]
     },
     "avoid-banned-names": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -3743,6 +3763,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -3791,7 +3814,7 @@
       ]
     },
     "avoid-banned-types": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -3805,6 +3828,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -3853,7 +3879,7 @@
       ]
     },
     "avoid-complex-arithmetic-expressions": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -3867,6 +3893,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -3894,7 +3923,7 @@
       ]
     },
     "avoid-complex-conditions": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -3908,6 +3937,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -3935,7 +3967,7 @@
       ]
     },
     "avoid-complex-loop-conditions": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -3949,6 +3981,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -3976,7 +4011,7 @@
       ]
     },
     "avoid-empty-test-groups": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -3990,6 +4025,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4018,7 +4056,7 @@
       ]
     },
     "avoid-if-with-many-branches": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4032,6 +4070,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4059,7 +4100,7 @@
       ]
     },
     "avoid-long-records": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4073,6 +4114,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4100,7 +4144,7 @@
       ]
     },
     "avoid-negated-conditions": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4114,6 +4158,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4139,7 +4186,7 @@
       ]
     },
     "avoid-nested-assignments": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4153,6 +4200,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4178,7 +4228,7 @@
       ]
     },
     "avoid-nested-switch-expressions": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4192,6 +4242,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4219,7 +4272,7 @@
       ]
     },
     "avoid-nested-switches": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4233,6 +4286,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4260,7 +4316,7 @@
       ]
     },
     "avoid-nested-try-statements": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4274,6 +4330,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4301,7 +4360,7 @@
       ]
     },
     "avoid-referencing-subclasses": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4315,6 +4374,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4347,7 +4409,7 @@
       ]
     },
     "avoid-unnecessary-getter": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4361,6 +4423,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4386,7 +4451,7 @@
       ]
     },
     "banned-imports": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4400,6 +4465,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4458,7 +4526,7 @@
       ]
     },
     "banned-usage": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4472,6 +4540,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4520,7 +4591,7 @@
       ]
     },
     "boolean-prefixes": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4534,6 +4605,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4562,7 +4636,7 @@
       ]
     },
     "class-members-ordering": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4576,6 +4650,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4621,7 +4698,7 @@
       ]
     },
     "cognitive-complexity": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4635,6 +4712,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4662,7 +4742,7 @@
       ]
     },
     "cyclomatic-complexity": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4676,6 +4756,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4703,7 +4786,7 @@
       ]
     },
     "enum-constants-ordering": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4717,6 +4800,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4750,7 +4836,7 @@
       ]
     },
     "extend-equatable": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4764,6 +4850,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4800,7 +4889,7 @@
       ]
     },
     "format-comment": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4814,6 +4903,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4848,7 +4940,7 @@
       ]
     },
     "initializers-ordering": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4862,6 +4954,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4895,7 +4990,7 @@
       ]
     },
     "map-keys-ordering": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4909,6 +5004,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4942,7 +5040,7 @@
       ]
     },
     "max-lines-for-file": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4956,6 +5054,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -4983,7 +5084,7 @@
       ]
     },
     "max-lines-for-function": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -4997,6 +5098,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5024,7 +5128,7 @@
       ]
     },
     "max-parameters-for-function": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5038,6 +5142,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5065,7 +5172,7 @@
       ]
     },
     "max-statements": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5079,6 +5186,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5106,7 +5216,7 @@
       ]
     },
     "max-switch-cases": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5120,6 +5230,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5147,7 +5260,7 @@
       ]
     },
     "maximum-nesting-level": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5161,6 +5274,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5188,7 +5304,7 @@
       ]
     },
     "member-ordering": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5202,6 +5318,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5267,7 +5386,7 @@
       ]
     },
     "missing-test-assertion": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5281,6 +5400,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5309,7 +5431,7 @@
       ]
     },
     "move-variable-closer-to-its-usage": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5323,6 +5445,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5353,7 +5478,7 @@
       ]
     },
     "no-magic-number": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5367,6 +5492,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5400,7 +5528,7 @@
       ]
     },
     "no-magic-string": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5414,6 +5542,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5450,7 +5581,7 @@
       ]
     },
     "parameters-ordering": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5464,6 +5595,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5497,7 +5631,7 @@
       ]
     },
     "pattern-fields-ordering": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5511,6 +5645,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5544,7 +5681,7 @@
       ]
     },
     "prefer-commenting-analyzer-ignores": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5558,6 +5695,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5583,7 +5723,7 @@
       ]
     },
     "prefer-container": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5597,6 +5737,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5624,7 +5767,7 @@
       ]
     },
     "prefer-correct-callback-field-name": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5638,6 +5781,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5666,7 +5812,7 @@
       ]
     },
     "prefer-correct-error-name": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5680,6 +5826,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5716,7 +5865,7 @@
       ]
     },
     "prefer-correct-handler-name": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5730,6 +5879,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5763,7 +5915,7 @@
       ]
     },
     "prefer-correct-identifier-length": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5777,6 +5929,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5819,7 +5974,7 @@
       ]
     },
     "prefer-extracting-callbacks": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5833,6 +5988,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5871,7 +6029,7 @@
       ]
     },
     "prefer-moving-to-variable": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5885,6 +6043,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5912,7 +6073,7 @@
       ]
     },
     "prefer-named-parameters": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5926,6 +6087,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5953,7 +6117,7 @@
       ]
     },
     "prefer-unique-test-names": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -5967,6 +6131,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -5995,7 +6162,7 @@
       ]
     },
     "record-fields-ordering": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -6009,6 +6176,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -6042,7 +6212,7 @@
       ]
     },
     "use-design-system-item": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -6056,6 +6226,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [
@@ -6101,7 +6274,7 @@
       ]
     },
     "widget-tree-depth": {
-      "description": "A severity level, or an object with a severity level and rule-specific options.",
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
         {
           "$ref": "#/definitions/ruleLevel"
@@ -6115,6 +6288,9 @@
           "properties": {
             "level": {
               "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
             },
             "options": {
               "anyOf": [

@@ -154,6 +154,7 @@ impl TestClient {
             "text document sync must be advertised"
         );
         assert!(result.capabilities.hover_provider.is_some());
+        assert!(result.capabilities.code_action_provider.is_some());
         assert_eq!(
             result.capabilities.position_encoding,
             Some(lsp_types::PositionEncodingKind::UTF16),
@@ -216,6 +217,278 @@ fn has_rule(params: &PublishDiagnosticsParams, rule: &str) -> bool {
         .diagnostics
         .iter()
         .any(|d| matches!(&d.code, Some(lsp_types::NumberOrString::String(code)) if code == rule))
+}
+
+fn code_actions(
+    client: &mut TestClient,
+    diagnostics: Vec<lsp_types::Diagnostic>,
+    only: Option<Vec<&str>>,
+    range: lsp_types::Range,
+) -> Vec<lsp_types::CodeAction> {
+    let id = client.request(
+        "textDocument/codeAction",
+        serde_json::json!({
+            "textDocument": { "uri": DOC_URI },
+            "range": range,
+            "context": { "diagnostics": diagnostics, "only": only },
+        }),
+    );
+    let response = client.recv_response(&id);
+    assert!(response.error.is_none(), "{response:?}");
+    serde_json::from_value(response.result.unwrap()).unwrap()
+}
+
+fn action_text(action: &lsp_types::CodeAction, version: i32, source: &str) -> String {
+    let edit = action.edit.as_ref().expect("action has an edit");
+    assert!(edit.changes.is_none(), "edits must be versioned");
+    let Some(lsp_types::DocumentChanges::Edits(documents)) = &edit.document_changes else {
+        panic!("expected versioned document edits");
+    };
+    assert_eq!(documents.len(), 1);
+    assert_eq!(documents[0].text_document.version, Some(version));
+    assert_eq!(documents[0].text_document.uri.as_str(), DOC_URI);
+    let mut result = source.to_owned();
+    for edit in documents[0].edits.iter().rev() {
+        let lsp_types::OneOf::Left(edit) = edit else {
+            panic!("expected text edit");
+        };
+        let start = falcon_diagnostics::lsp_position_to_byte(source, edit.range.start);
+        let end = falcon_diagnostics::lsp_position_to_byte(source, edit.range.end);
+        result.replace_range(start..end, &edit.new_text);
+    }
+    result
+}
+
+const FIX_SOURCE: &str = "void main() {\n  final x = new Object();\n  print(\"hello\");\n}\n";
+const FIX_CONFIG: &str = r#"{"linter":{"rules":{"recommended":false,"style":{
+    "unnecessary-new":"warn",
+    "prefer-single-quotes":{"level":"warn","fix":"unsafe"}
+}}}}"#;
+
+fn full_range() -> lsp_types::Range {
+    lsp_types::Range::new(Position::new(0, 0), Position::new(20, 0))
+}
+
+#[test]
+fn quick_fixes_honor_context_range_and_effective_safety() {
+    let mut client = TestClient::start(Duration::ZERO, Some(FIX_CONFIG));
+    client.open(DOC_URI, FIX_SOURCE, 7);
+    let published = client.recv_publish();
+    let actions = code_actions(
+        &mut client,
+        published.diagnostics.clone(),
+        Some(vec!["quickfix"]),
+        full_range(),
+    );
+    assert_eq!(actions.len(), 2, "{actions:?}");
+    let safe = actions
+        .iter()
+        .find(|action| action.is_preferred == Some(true))
+        .unwrap();
+    assert!(!safe.title.contains("unsafe"));
+    assert!(
+        safe.diagnostics
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic.code
+                == Some(lsp_types::NumberOrString::String("unnecessary-new".into())))
+    );
+    assert_eq!(
+        action_text(safe, 7, FIX_SOURCE),
+        FIX_SOURCE.replace("new ", "")
+    );
+    let unsafe_action = actions
+        .iter()
+        .find(|action| action.is_preferred == Some(false))
+        .unwrap();
+    assert!(unsafe_action.title.contains("unsafe"));
+    assert_eq!(
+        action_text(unsafe_action, 7, FIX_SOURCE),
+        FIX_SOURCE.replace("\"hello\"", "'hello'")
+    );
+
+    let quote = published
+        .diagnostics
+        .into_iter()
+        .find(|diagnostic| {
+            diagnostic.code
+                == Some(lsp_types::NumberOrString::String(
+                    "prefer-single-quotes".into(),
+                ))
+        })
+        .unwrap();
+    let selected = code_actions(
+        &mut client,
+        vec![quote.clone()],
+        Some(vec!["quickfix"]),
+        quote.range,
+    );
+    assert_eq!(selected.len(), 1);
+    assert!(selected[0].title.contains("unsafe"));
+    let outside = code_actions(
+        &mut client,
+        vec![quote],
+        Some(vec!["quickfix"]),
+        lsp_types::Range::new(Position::new(0, 0), Position::new(0, 0)),
+    );
+    assert!(outside.is_empty());
+    client.shutdown();
+}
+
+#[test]
+fn generic_fix_all_is_safe_and_unsafe_requires_separate_kind() {
+    let mut client = TestClient::start(Duration::ZERO, Some(FIX_CONFIG));
+    client.open(DOC_URI, FIX_SOURCE, 3);
+    client.recv_publish();
+    let safe = code_actions(
+        &mut client,
+        Vec::new(),
+        Some(vec!["source.fixAll"]),
+        full_range(),
+    );
+    assert_eq!(safe.len(), 1);
+    assert_eq!(
+        safe[0].kind.as_ref().unwrap().as_str(),
+        "source.fixAll.falcon"
+    );
+    let safe_text = action_text(&safe[0], 3, FIX_SOURCE);
+    assert!(!safe_text.contains("new Object"));
+    assert!(safe_text.contains("\"hello\""), "{safe_text}");
+    let unsafe_actions = code_actions(
+        &mut client,
+        Vec::new(),
+        Some(vec!["source.falcon.fixAllUnsafe"]),
+        full_range(),
+    );
+    assert_eq!(unsafe_actions.len(), 1);
+    let unsafe_text = action_text(&unsafe_actions[0], 3, FIX_SOURCE);
+    assert!(!unsafe_text.contains("new Object"));
+    assert!(unsafe_text.contains("'hello'"), "{unsafe_text}");
+    let unsupported = code_actions(
+        &mut client,
+        Vec::new(),
+        Some(vec!["refactor"]),
+        full_range(),
+    );
+    assert!(unsupported.is_empty());
+    client.shutdown();
+}
+
+#[test]
+fn disabled_fix_policy_keeps_diagnostics_without_actions() {
+    let config = FIX_CONFIG
+        .replace("\"fix\":\"unsafe\"", "\"fix\":\"none\"")
+        .replace(
+            "\"unnecessary-new\":\"warn\"",
+            "\"unnecessary-new\":{\"level\":\"warn\",\"fix\":\"none\"}",
+        );
+    let mut client = TestClient::start(Duration::ZERO, Some(&config));
+    client.open(DOC_URI, FIX_SOURCE, 1);
+    let published = client.recv_publish();
+    assert!(has_rule(&published, "unnecessary-new"));
+    assert!(has_rule(&published, "prefer-single-quotes"));
+    assert!(code_actions(&mut client, published.diagnostics, None, full_range()).is_empty());
+    client.shutdown();
+}
+
+#[test]
+fn code_actions_use_pending_buffer_and_reject_stale_context() {
+    let mut client = TestClient::start(Duration::from_secs(60), Some(FIX_CONFIG));
+    client.open(DOC_URI, FIX_SOURCE, 1);
+    let published = client.recv_publish();
+    let current = format!("\n{FIX_SOURCE}");
+    client.change(DOC_URI, &current, 2);
+    let stale = code_actions(
+        &mut client,
+        published.diagnostics,
+        Some(vec!["quickfix"]),
+        full_range(),
+    );
+    assert!(
+        stale.is_empty(),
+        "old diagnostic spans must not produce fixes"
+    );
+    let safe = code_actions(
+        &mut client,
+        Vec::new(),
+        Some(vec!["source.fixAll.falcon"]),
+        full_range(),
+    );
+    assert_eq!(safe.len(), 1);
+    let text = action_text(&safe[0], 2, &current);
+    assert!(text.starts_with('\n'));
+    assert!(!text.contains("new Object"));
+    client.shutdown();
+}
+
+#[test]
+fn cyclic_fix_all_returns_error_instead_of_partial_edits() {
+    let config = r#"{"linter":{"rules":{"recommended":false,"style":{
+        "prefer-single-quotes":"warn","prefer-double-quotes":"warn"
+    }}}}"#;
+    let mut client = TestClient::start(Duration::ZERO, Some(config));
+    client.open(DOC_URI, "void main() { print(\"hello\"); }\n", 1);
+    client.recv_publish();
+    // Merely opening a lightbulb must still return an individual quick fix,
+    // even though explicitly applying all fixes would cycle.
+    let quick = code_actions(&mut client, Vec::new(), None, full_range());
+    assert_eq!(quick.len(), 1);
+    assert_eq!(quick[0].kind, Some(lsp_types::CodeActionKind::QUICKFIX));
+    assert_eq!(
+        action_text(&quick[0], 1, "void main() { print(\"hello\"); }\n"),
+        "void main() { print('hello'); }\n"
+    );
+    let mixed = code_actions(
+        &mut client,
+        Vec::new(),
+        Some(vec!["quickfix", "source.fixAll.falcon"]),
+        full_range(),
+    );
+    assert_eq!(mixed.len(), 2);
+    let quickfix = mixed
+        .iter()
+        .find(|action| action.kind == Some(lsp_types::CodeActionKind::QUICKFIX))
+        .unwrap();
+    assert!(quickfix.disabled.is_none());
+    assert_eq!(
+        action_text(quickfix, 1, "void main() { print(\"hello\"); }\n"),
+        "void main() { print('hello'); }\n"
+    );
+    let stopped = mixed
+        .iter()
+        .find(|action| {
+            action
+                .kind
+                .as_ref()
+                .is_some_and(|kind| kind.as_str() == "source.fixAll.falcon")
+        })
+        .unwrap();
+    assert!(stopped.edit.is_none());
+    assert!(
+        stopped
+            .disabled
+            .as_ref()
+            .unwrap()
+            .reason
+            .contains("prefer-")
+    );
+    let id = client.request(
+        "textDocument/codeAction",
+        serde_json::json!({
+            "textDocument": { "uri": DOC_URI }, "range": full_range(),
+            "context": { "diagnostics": [], "only": ["source.fixAll.falcon"] }
+        }),
+    );
+    let response = client.recv_response(&id);
+    assert!(response.result.is_none(), "{response:?}");
+    let error = response.error.expect("cycle must be reported");
+    assert!(
+        error.message.contains("without returning edits"),
+        "{error:?}"
+    );
+    assert!(error.message.contains("prefer-"), "{error:?}");
+    client.shutdown();
 }
 
 /// Initialize/initialized/shutdown cycle with shape validation.

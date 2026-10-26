@@ -83,6 +83,21 @@ falcon check . --config ./falcon.json   # point at an explicit config
 
 Imported libraries and their parts provide type information even when they are outside the paths you pass. Diagnostics remain limited to the requested files.
 
+Apply safe fixes, explicitly include unsafe fixes, or preview without writing:
+
+```sh
+falcon check . --write
+falcon check . --write --unsafe
+falcon check . --write --dry-run
+```
+
+Fixes run one at a time with re-analysis between edits. Conflicting fixes that
+cycle, invalid edits, and the iteration backstop are reported as errors rather
+than silently stopping. Cross-file findings are checked after fixing, but their
+fixes are not automatically applied. See [autofix policy](./configuration.md#autofix-policy)
+for per-rule classification and overrides.
+
+
 Emit machine-readable output for tooling:
 
 ```sh
@@ -103,7 +118,7 @@ Diagnostic `line` and `col` are one-based, with columns counted in UTF-16 code u
 
 The `eol-at-end-of-file` rule can report a virtual one-character range at EOF. In that case `span.end` is one byte beyond the file; preserve the extra unit when computing the UTF-16 range length.
 
-Diagnostics may include a `fix` object with a `title` (the quick-fix label, such as "Replace `var` with `final`") and a `kind` of `safe` (preserves program behaviour) or `unsafe` (may change behaviour), as declared by the rule. Its non-empty `edits` contain a `span` and `replacement` string. Edit spans are half-open UTF-8 byte offsets into the original source, sorted, non-overlapping, within bounds, and on character boundaries. Rules attach fixes through `AnalyzeContext::with_fix`, which validates them against the original source; invalid fixes panic in debug builds and are omitted in release builds. Apply all edits together against that original source, not successively against changed text. Diagnostics without fixes omit `fix`; fixes are not applied automatically. LSP diagnostics do not carry fix payloads.
+Diagnostics may include a `fix` object with a `title` (the quick-fix label) and a `kind` of `safe` (preserves program behaviour) or `unsafe` (may change behaviour). Its non-empty `edits` contain a `span` and `replacement` string. Edit spans are half-open UTF-8 byte offsets into the original source, sorted, non-overlapping, within bounds, and on character boundaries. Apply all edits of one fix atomically against that original source, then re-analyze before choosing another fix. Diagnostics without fixes omit `fix`. LSP diagnostics do not carry fix payloads; editors request quick fixes and fix-all through code actions.
 
 falcon discovers `falcon.json` automatically: the current directory, then the
 enclosing git root, then `~/.falcon.json`.

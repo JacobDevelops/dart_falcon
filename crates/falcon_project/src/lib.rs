@@ -1,8 +1,10 @@
 //! Project discovery and reusable analysis stages shared by the CLI and LSP.
 
+pub mod autofix;
 mod discovery;
 mod workspace;
 
+pub use autofix::{FixOutcome, FixStop, apply_fix_policies, effective_fix_kind, fix_file};
 pub use workspace::{Workspace, WorkspacePackage, discover_workspace};
 
 pub use discovery::{
@@ -181,6 +183,7 @@ pub fn analyze_document<'a>(
 ) -> Vec<Diagnostic> {
     syntax_diagnostics.extend(registry.run_all(ctx.parsed().program(), ctx));
     falcon_rules::apply_severities(&mut syntax_diagnostics, config);
+    apply_fix_policies(config, &mut syntax_diagnostics);
     syntax_diagnostics
 }
 
@@ -224,6 +227,7 @@ pub fn complete_analysis(
             }
         }
     }
+    apply_fix_policies(config, diagnostics);
     failed
 }
 

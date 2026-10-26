@@ -1,11 +1,12 @@
 //! Analyze pipeline: config loading, file walking, parallel analysis, and diagnostic output.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use clap::{Args, ValueEnum};
 use falcon_analyze::{AnalysisEnvironment, DartSdk, PackageConfig, SdkLocator};
-use falcon_diagnostics::{Diagnostic, Severity, Span, UNMATCHED_PATH_DIAGNOSTIC_ID};
+use falcon_diagnostics::{Diagnostic, FixKind, Severity, Span, UNMATCHED_PATH_DIAGNOSTIC_ID};
 use falcon_project::{
     ProjectAnalysis, analyze_sources, complete_analysis, finalize_diagnostics, load_project_config,
     manifest_file, walk_project,
@@ -34,6 +35,15 @@ pub struct CheckOptions {
     /// Output format for diagnostics
     #[arg(long, default_value = "text", value_name = "FORMAT")]
     pub format: OutputFormat,
+    /// Apply safe fixes to selected Dart files
+    #[arg(long)]
+    pub write: bool,
+    /// Also apply fixes classified as unsafe (requires --write)
+    #[arg(long = "unsafe", requires = "write")]
+    pub unsafe_fixes: bool,
+    /// Preview fixes as a unified diff without modifying files (requires --write)
+    #[arg(long, requires = "write", conflicts_with = "write_baseline")]
+    pub dry_run: bool,
     /// Config-relative glob patterns to exclude (repeatable)
     #[arg(id = "exclude", long = "exclude", value_name = "GLOB")]
     pub exclude_patterns: Vec<String>,
@@ -71,6 +81,9 @@ impl Default for CheckOptions {
         Self {
             paths: vec![],
             config_path: None,
+            write: false,
+            unsafe_fixes: false,
+            dry_run: false,
             exclude_patterns: vec![],
             max_errors: None,
             error_on_warnings: false,
@@ -96,6 +109,8 @@ pub struct CheckOutput {
     pub root: PathBuf,
     /// Workspace member counts, computed before diagnostic print limits.
     pub packages: Vec<crate::report::PackageSummary>,
+    /// Unified diff preview; machine-readable reports send it to stderr.
+    pub diff: String,
 }
 
 /// Run analysis and collect results without printing diagnostics.
@@ -124,6 +139,12 @@ fn collect_check_impl(
     options: &CheckOptions,
     sdk_locator: Option<SdkLocator>,
 ) -> Result<CheckOutput, String> {
+    if (options.unsafe_fixes || options.dry_run) && !options.write {
+        return Err("--unsafe and --dry-run require --write".to_owned());
+    }
+    if options.dry_run && options.write_baseline.is_some() {
+        return Err("--dry-run cannot be combined with --write-baseline".to_owned());
+    }
     let cwd =
         std::env::current_dir().map_err(|e| format!("failed to get current directory: {e}"))?;
     let input_workspace = options.paths.iter().find_map(|path| {
@@ -264,6 +285,7 @@ fn collect_check_impl(
             max_errors,
             root,
             packages,
+            diff: String::new(),
         });
     }
     // Package configurations give every file its language version; resolving
@@ -272,6 +294,57 @@ fn collect_check_impl(
         Some(locator) => AnalysisEnvironment::with_sdk_locator(locator),
         None => AnalysisEnvironment::default(),
     };
+    let mut diff = String::new();
+    if options.write {
+        let (mut initial, _, _) =
+            analyze_sources(&analysis, &files, &manifests, &config, &mut environment);
+        falcon_rules::apply_severities(&mut initial, &config);
+        falcon_project::apply_fix_policies(&config, &mut initial);
+        let fixable: HashSet<_> = initial
+            .into_iter()
+            .filter(|diagnostic| {
+                diagnostic
+                    .fix
+                    .as_ref()
+                    .is_some_and(|fix| fix.kind == FixKind::Safe || options.unsafe_fixes)
+            })
+            .map(|diagnostic| diagnostic.file_path)
+            .collect();
+        let mut changed = Vec::with_capacity(files.len());
+        for (path, source) in &mut files {
+            if !fixable.contains(path.to_string_lossy().as_ref()) {
+                changed.push(false);
+                continue;
+            }
+            let outcome = falcon_project::fix_file(
+                &analysis,
+                &config,
+                &mut environment,
+                path,
+                source,
+                options.unsafe_fixes,
+            );
+            if let Some(stop) = outcome.stop {
+                return Err(format!("failed to fix {}: {stop}", path.display()));
+            }
+            changed.push(outcome.source != *source);
+            if outcome.source != *source {
+                if options.dry_run {
+                    let relative = crate::baseline::relative_path(&path.to_string_lossy(), &root);
+                    append_full_file_diff(&mut diff, &relative, source, &outcome.source);
+                }
+                *source = outcome.source;
+            }
+        }
+        if !options.dry_run {
+            for ((path, source), changed) in files.iter().zip(changed) {
+                if changed {
+                    std::fs::write(path, source)
+                        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+                }
+            }
+        }
+    }
     let (mut diagnostics, mut project_files, indexes) =
         analyze_sources(&analysis, &files, &manifests, &config, &mut environment);
     let total_files = files.len();
@@ -351,7 +424,33 @@ fn collect_check_impl(
         max_errors,
         root,
         packages,
+        diff,
     })
+}
+
+fn append_full_file_diff(output: &mut String, path: &str, before: &str, after: &str) {
+    let old_lines = before.lines().count();
+    let new_lines = after.lines().count();
+    writeln!(output, "--- a/{path}").unwrap();
+    writeln!(output, "+++ b/{path}").unwrap();
+    writeln!(
+        output,
+        "@@ -{},{} +{},{} @@",
+        usize::from(old_lines != 0),
+        old_lines,
+        usize::from(new_lines != 0),
+        new_lines
+    )
+    .unwrap();
+    for (prefix, source) in [('-', before), ('+', after)] {
+        for line in source.split_inclusive('\n') {
+            output.push(prefix);
+            output.push_str(line);
+            if !line.ends_with('\n') {
+                output.push_str("\n\\ No newline at end of file\n");
+            }
+        }
+    }
 }
 
 /// Run the check pipeline and print diagnostics. Errors fail, warnings fail
@@ -377,6 +476,13 @@ fn run_check_impl(options: CheckOptions, sdk_locator: Option<SdkLocator>) -> i32
         }
     };
 
+    if !result.diff.is_empty() {
+        if options.format == OutputFormat::Text {
+            print!("{}", result.diff);
+        } else {
+            eprint!("{}", result.diff);
+        }
+    }
     let print_count = result
         .max_errors
         .unwrap_or(usize::MAX)

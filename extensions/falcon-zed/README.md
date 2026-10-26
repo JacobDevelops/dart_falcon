@@ -36,6 +36,44 @@ Zed's standard per-server override selects the binary if it is not on PATH:
 }
 ```
 
+## Quick fixes and safe fixes on save
+
+Open the code actions menu on a Falcon diagnostic to apply its individual quick
+fix. Unsafe fixes are labeled **(unsafe)** and are never preferred. Falcon honors
+the effective per-rule `fix` policy in `falcon.json`, including suppression and
+safety overrides.
+
+Run safe Falcon fixes on save using a code-action formatter in Zed's
+`settings.json`:
+
+```json
+{
+  "languages": {
+    "Dart": {
+      "formatter": [
+        { "code_action": "source.fixAll.falcon" },
+        "language_server"
+      ],
+      "format_on_save": "on"
+    }
+  }
+}
+```
+
+The second formatter retains your Dart language server's formatting. If you
+already use a formatter array, add the Falcon code action to that array.
+See [Zed's formatting and linting documentation](https://zed.dev/docs/configuring-languages#integrating-formatting-and-linting).
+
+Generic `source.fixAll` requests never include unsafe Falcon fix all. The
+explicit **Fix all Falcon issues (unsafe)** action uses
+`source.falcon.fixAllUnsafe`, outside the generic fix-all hierarchy; leave it out
+of save settings unless you intend to allow behavior-changing edits.
+
+Fix all iterates over the current buffer, and reports cycles, iteration limits,
+or invalid edits without returning partial results. Actions include the buffer
+version so supporting clients can reject stale edits. Cross-file fixes are not offered.
+
+
 ## Configuration reloads
 
 The server reloads `falcon.json` when the editor reports it changed

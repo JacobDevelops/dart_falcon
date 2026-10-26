@@ -112,7 +112,7 @@
       "warn",
       "error"
     ],
-    "description": "A severity level, or an object with a severity level and rule-specific options."
+    "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy."
   },
   {
     "path": "cross-file.enabled",
@@ -136,7 +136,7 @@
       "warn",
       "error"
     ],
-    "description": "A severity level, or an object with a severity level and rule-specific options."
+    "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy."
   },
   {
     "path": "overrides[].includes",
@@ -158,7 +158,7 @@
       "warn",
       "error"
     ],
-    "description": "A severity level, or an object with a severity level and rule-specific options."
+    "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy."
   },
   {
     "path": "overrides[].cross-file.enabled",
@@ -175,7 +175,7 @@
       "warn",
       "error"
     ],
-    "description": "A severity level, or an object with a severity level and rule-specific options."
+    "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy."
   },
   {
     "path": "max-errors",

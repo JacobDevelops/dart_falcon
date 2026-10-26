@@ -22,6 +22,9 @@ fn check_options_parse_with_stable_argument_ids() {
         "quiet",
         "exit_code",
         "no_errors_on_unmatched",
+        "write",
+        "unsafe_fixes",
+        "dry_run",
     ] {
         assert!(ids.contains(&id), "missing argument id {id}");
     }
@@ -90,6 +93,39 @@ fn ci_adoption_options_parse() {
         assert_eq!(options.write_baseline, Some("falcon-baseline.json".into()));
         assert_eq!(options.error_exit_code, 7);
     }
+}
+
+#[test]
+fn fixing_flags_require_write() {
+    for flag in ["--unsafe", "--dry-run"] {
+        let error = Cli::try_parse_from(["falcon", "check", flag]).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
+        assert!(error.to_string().contains("--write"));
+    }
+    let cli = Cli::try_parse_from(["falcon", "check", "--write", "--unsafe", "--dry-run"]).unwrap();
+    let Command::Check(options) = cli.command else {
+        panic!("expected check")
+    };
+    assert!(options.write);
+    assert!(options.unsafe_fixes);
+    assert!(options.dry_run);
+}
+
+#[test]
+fn dry_run_conflicts_with_baseline_writes() {
+    let error = Cli::try_parse_from([
+        "falcon",
+        "check",
+        "--write",
+        "--dry-run",
+        "--write-baseline",
+    ])
+    .unwrap_err();
+    assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+    assert!(error.to_string().contains("--write-baseline"));
 }
 
 #[test]

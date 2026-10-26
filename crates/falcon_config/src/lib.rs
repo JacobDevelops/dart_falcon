@@ -764,7 +764,19 @@ impl RuleOptions {
     }
 }
 
-/// A single rule's configuration: either a bare level or a level with options.
+/// Per-rule autofix policy, independent of the diagnostic severity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RuleFix {
+    /// Do not offer a fix for this rule.
+    None,
+    /// Treat this rule's fixes as safe.
+    Safe,
+    /// Treat this rule's fixes as unsafe.
+    Unsafe,
+}
+
+/// A single rule's configuration: either a bare level or a level with options and fix policy.
 ///
 /// Deserialization is hand-written (rather than `#[serde(untagged)]`) so that an
 /// invalid level names the offending value and the valid set, instead of the
@@ -778,6 +790,8 @@ pub enum RuleConfiguration {
     WithOptions {
         level: RulePlainConfiguration,
         options: RuleOptions,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fix: Option<RuleFix>,
     },
 }
 
@@ -787,6 +801,14 @@ impl RuleConfiguration {
         match self {
             RuleConfiguration::Plain(level) => *level,
             RuleConfiguration::WithOptions { level, .. } => *level,
+        }
+    }
+
+    /// The explicit autofix policy, or `None` to inherit the previous policy.
+    pub fn fix(&self) -> Option<RuleFix> {
+        match self {
+            Self::Plain(_) => None,
+            Self::WithOptions { fix, .. } => *fix,
         }
     }
 
@@ -826,7 +848,7 @@ impl<'de> Deserialize<'de> for RuleConfiguration {
             type Value = RuleConfiguration;
 
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a level string or a { level, options } object")
+                f.write_str("a level string or a { level, options, fix } object")
             }
 
             fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
@@ -836,6 +858,7 @@ impl<'de> Deserialize<'de> for RuleConfiguration {
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
                 let mut level: Option<RulePlainConfiguration> = None;
                 let mut options: Option<RuleOptions> = None;
+                let mut fix: Option<RuleFix> = None;
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
                         "level" => {
@@ -843,6 +866,7 @@ impl<'de> Deserialize<'de> for RuleConfiguration {
                             level = Some(level_from_str(&raw)?);
                         }
                         "options" => options = Some(map.next_value()?),
+                        "fix" => fix = Some(map.next_value()?),
                         _ => {
                             map.next_value::<de::IgnoredAny>()?;
                         }
@@ -852,6 +876,7 @@ impl<'de> Deserialize<'de> for RuleConfiguration {
                 Ok(RuleConfiguration::WithOptions {
                     level,
                     options: options.unwrap_or_default(),
+                    fix,
                 })
             }
         }
@@ -936,6 +961,52 @@ impl FalconConfig {
     ) -> Option<&RuleOptions> {
         self.options_data_for(path, group, rule_name, Section::CrossFile)
             .0
+    }
+
+    /// Return the effective file-rule autofix policy for `path`.
+    ///
+    /// Matching overrides apply in order. An absent fix policy inherits the
+    /// previous policy independently of levels and options.
+    pub fn rule_fix_for(&self, path: &str, group: &str, rule_name: &str) -> Option<RuleFix> {
+        self.fix_for(path, group, rule_name, Section::Linter)
+    }
+
+    /// Return the effective cross-file-rule autofix policy for `path`.
+    ///
+    /// Matching overrides apply in order; an absent policy leaves the previous
+    /// policy intact. Package configurations replace the workspace configuration.
+    pub fn cross_file_fix_for(&self, path: &str, group: &str, rule_name: &str) -> Option<RuleFix> {
+        self.fix_for(path, group, rule_name, Section::CrossFile)
+    }
+
+    fn fix_for(
+        &self,
+        path: &str,
+        group: &str,
+        rule_name: &str,
+        section: Section,
+    ) -> Option<RuleFix> {
+        let config = self.config_for_path(path);
+        let rules = match section {
+            Section::Linter => &config.linter.rules,
+            Section::CrossFile => &config.cross_file.rules,
+        };
+        let mut result = rules
+            .groups
+            .get(group)
+            .and_then(|rules| rules.get(rule_name))
+            .and_then(RuleConfiguration::fix);
+        for ov in config.overrides.iter().filter(|ov| ov.matches(path)) {
+            if let Some(fix) = section
+                .override_rules(ov)
+                .and_then(|block| block.rules.groups.get(group))
+                .and_then(|rules| rules.get(rule_name))
+                .and_then(RuleConfiguration::fix)
+            {
+                result = Some(fix);
+            }
+        }
+        result
     }
 
     /// Return the full configuration path of effective file-rule options.
@@ -1422,7 +1493,7 @@ fn validate_keys(
             | (Object::Files | Object::Override, "includes")
             | (Object::Linter | Object::CrossFile | Object::OverrideRules, "enabled")
             | (Object::Rules, "recommended")
-            | (Object::Rule, "level" | "options") => None,
+            | (Object::Rule, "level" | "options" | "fix") => None,
             (Object::Root, "files") => Some(Object::Files),
             (Object::Root, "linter") => Some(Object::Linter),
             (Object::Root, "cross-file") => Some(Object::CrossFile),
@@ -2034,7 +2105,7 @@ mod warning_tests {
 
 #[cfg(test)]
 mod option_tests {
-    use super::{FalconConfig, RuleConfiguration, RuleOptions};
+    use super::{FalconConfig, RuleConfiguration, RuleFix, RuleOptions};
     use serde_json::json;
 
     #[test]
@@ -2165,6 +2236,180 @@ mod option_tests {
                     .cross_file_options_data_for("test/main.dart", "wrong-group", "example")
                     .is_none()
             );
+        }
+    }
+
+    #[test]
+    fn fix_policies_parse_serialize_and_validate_at_every_section() {
+        for (name, expected) in [
+            ("none", RuleFix::None),
+            ("safe", RuleFix::Safe),
+            ("unsafe", RuleFix::Unsafe),
+        ] {
+            for options in [serde_json::Value::Null, json!({ "limit": 4 })] {
+                let value = json!({ "level": "warn", "fix": name, "options": options });
+                let configuration: RuleConfiguration =
+                    serde_json::from_value(value.clone()).unwrap();
+                assert_eq!(configuration.fix(), Some(expected));
+                assert_eq!(serde_json::to_value(configuration).unwrap(), value);
+            }
+            for section in ["linter", "cross-file"] {
+                let value = json!({
+                    section: { "rules": { "style": {
+                        "example": { "level": "warn", "fix": name }
+                    } } },
+                    "overrides": [{
+                        section: { "rules": { "style": {
+                            "example": { "level": "error", "fix": name }
+                        } } }
+                    }]
+                });
+                let loaded =
+                    super::deserialize_config_value(&value, std::path::Path::new("falcon.json"))
+                        .unwrap();
+                let selected = if section == "linter" {
+                    loaded
+                        .config
+                        .rule_fix_for("lib/main.dart", "style", "example")
+                } else {
+                    loaded
+                        .config
+                        .cross_file_fix_for("lib/main.dart", "style", "example")
+                };
+                assert_eq!(selected, Some(expected));
+            }
+        }
+        for value in [json!("invalid"), json!(true), json!(1), json!(null)] {
+            assert!(
+                serde_json::from_value::<RuleConfiguration>(
+                    json!({ "level": "warn", "fix": value })
+                )
+                .is_err()
+            );
+        }
+        let plain: RuleConfiguration = serde_json::from_value(json!("warn")).unwrap();
+        let object: RuleConfiguration = serde_json::from_value(json!({ "level": "warn" })).unwrap();
+        assert_eq!(plain.fix(), None);
+        assert_eq!(object.fix(), None);
+        assert!(serde_json::to_value(object).unwrap().get("fix").is_none());
+    }
+
+    #[test]
+    fn fix_selectors_inherit_and_apply_last_explicit_matching_override() {
+        for section in ["linter", "cross-file"] {
+            let other_section = if section == "linter" {
+                "cross-file"
+            } else {
+                "linter"
+            };
+            let config: FalconConfig = serde_json::from_value(json!({
+                section: { "rules": { "style": {
+                    "example": { "level": "warn", "fix": "safe", "options": {} }
+                } } },
+                "overrides": [
+                    {
+                        "includes": ["test/**"],
+                        section: { "rules": { "style": {
+                            "example": { "level": "warn", "fix": "none" }
+                        } } }
+                    },
+                    {
+                        "includes": ["test/**"],
+                        section: { "rules": { "style": { "example": "off" } } }
+                    },
+                    {
+                        "includes": ["test/**"],
+                        section: { "rules": { "style": {
+                            "example": { "level": "error", "options": {} }
+                        } } },
+                        other_section: { "rules": { "style": {
+                            "example": { "level": "warn", "fix": "safe" }
+                        } } }
+                    },
+                    {
+                        "includes": ["test/special/**"],
+                        section: { "rules": { "style": {
+                            "example": { "level": "warn", "fix": "unsafe" }
+                        } } }
+                    }
+                ]
+            }))
+            .unwrap();
+            for (path, expected) in [
+                ("lib/main.dart", RuleFix::Safe),
+                ("test/main.dart", RuleFix::None),
+                ("test/special/main.dart", RuleFix::Unsafe),
+            ] {
+                let selected = if section == "linter" {
+                    config.rule_fix_for(path, "style", "example")
+                } else {
+                    config.cross_file_fix_for(path, "style", "example")
+                };
+                assert_eq!(selected, Some(expected));
+            }
+            assert_eq!(
+                config.rule_fix_for("test/main.dart", "wrong", "example"),
+                None
+            );
+            assert_eq!(
+                config.cross_file_fix_for("test/main.dart", "wrong", "example"),
+                None
+            );
+            assert_eq!(
+                config.rule_fix_for("lib/main.dart", "style", "missing"),
+                None
+            );
+            assert_eq!(
+                config.cross_file_fix_for("lib/main.dart", "style", "missing"),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn fix_selectors_use_nearest_package_replacement_and_package_overrides() {
+        for section in ["linter", "cross-file"] {
+            let root = std::env::current_dir()
+                .unwrap()
+                .join("fix-policy-workspace");
+            let mut config: FalconConfig = serde_json::from_value(json!({
+                section: { "rules": { "style": {
+                    "example": { "level": "warn", "fix": "unsafe" }
+                } } }
+            }))
+            .unwrap();
+            config.resolve_paths(&root);
+            let mut package: FalconConfig = serde_json::from_value(json!({
+                section: { "rules": { "style": {
+                    "example": { "level": "warn", "fix": "none" }
+                } } },
+                "overrides": [{
+                    "includes": ["test/**"],
+                    section: { "rules": { "style": {
+                        "example": { "level": "warn", "fix": "safe" }
+                    } } }
+                }]
+            }))
+            .unwrap();
+            package.resolve_paths(&root.join("packages/app"));
+            let mut nested = FalconConfig::default();
+            nested.resolve_paths(&root.join("packages/app/nested"));
+            config.set_package_configs(vec![package, nested]);
+            for (relative, expected) in [
+                ("lib/main.dart", Some(RuleFix::Unsafe)),
+                ("packages/app/lib/main.dart", Some(RuleFix::None)),
+                ("packages/app/test/main.dart", Some(RuleFix::Safe)),
+                ("packages/app/nested/main.dart", None),
+            ] {
+                let path = root.join(relative);
+                let path = path.to_str().unwrap();
+                let selected = if section == "linter" {
+                    config.rule_fix_for(path, "style", "example")
+                } else {
+                    config.cross_file_fix_for(path, "style", "example")
+                };
+                assert_eq!(selected, expected, "{relative}");
+            }
         }
     }
 }
