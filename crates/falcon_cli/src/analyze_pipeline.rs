@@ -215,7 +215,19 @@ fn collect_check_impl(
         eprintln!("warning: {warning}");
     }
     let config = loaded.config;
-    let root = config.root_dir().unwrap_or(&cwd).to_path_buf();
+    let root = workspace
+        .as_ref()
+        .map(|workspace| workspace.root.clone())
+        .or_else(|| config.root_dir().map(Path::to_path_buf))
+        .or_else(|| {
+            paths.iter().find_map(|path| {
+                let path = falcon_analyze::canonical_or_lexical(path);
+                path.ancestors()
+                    .find(|ancestor| ancestor.join(".git").exists())
+                    .map(Path::to_path_buf)
+            })
+        })
+        .unwrap_or_else(|| cwd.clone());
     let error_on_warnings = options.error_on_warnings || config.error_on_warnings;
 
     let mut cli_filter;

@@ -15,7 +15,10 @@ pub(crate) fn apply_baseline(
     diagnostics: &mut Vec<Diagnostic>,
     sources: &HashMap<Cow<'_, str>, &str>,
 ) -> Result<(), String> {
-    let configured = config.baseline.as_ref().map(|path| root.join(path));
+    let configured = config
+        .baseline
+        .as_ref()
+        .map(|path| config.root_dir().unwrap_or(root).join(path));
     let baseline_path = options.baseline.as_ref().or(configured.as_ref());
     if let Some(path) = &options.write_baseline {
         if diagnostics.iter().any(|diagnostic| {
