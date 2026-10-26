@@ -420,6 +420,109 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn package_discovery_releases_the_shared_lock_before_io() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("lib/src")).unwrap();
+        std::fs::write(root.path().join("pubspec.yaml"), "name: shared\n").unwrap();
+        let mut environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+        environment.io_observer = Some(|environment| {
+            assert!(environment.package_discovery.try_lock().is_ok());
+            assert!(environment.config_fingerprints.try_lock().is_ok());
+        });
+        for directory in ["lib", "lib/src"] {
+            let source = root.path().join(directory).join("source.dart");
+            assert_eq!(
+                environment.file_package(&source).identity().unwrap().name,
+                "shared"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repeated_config_stamps_do_not_reread_unchanged_contents() {
+        let root = tempfile::tempdir().unwrap();
+        let mut environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+        environment.io_observer = Some(|environment| {
+            assert!(environment.config_fingerprints.try_lock().is_ok());
+        });
+        for index in 0..32 {
+            let path = root.path().join(format!("config-{index}.json"));
+            std::fs::write(&path, format!("{{\"index\": {index}}}")).unwrap();
+            environment.config_candidates.insert(path);
+        }
+        environment
+            .config_candidates
+            .insert(root.path().join("missing.json"));
+        let original = environment.config_stamps();
+        let reads = environment.config_fingerprints.lock().unwrap().reads;
+        assert!(reads >= 32);
+        for _ in 0..16 {
+            let current = environment.config_stamps();
+            assert_eq!(original, current);
+            for (previous, current) in original.files.iter().zip(&current.files) {
+                if let (Some(previous), Some(current)) = (&previous.2, &current.2) {
+                    assert!(Arc::ptr_eq(previous, current));
+                }
+            }
+        }
+        assert_eq!(environment.config_fingerprints.lock().unwrap().reads, reads);
+
+        let changed = root.path().join("config-0.json");
+        std::fs::write(&changed, "{\"changed\": true}").unwrap();
+        assert_ne!(original, environment.config_stamps());
+        assert_eq!(
+            environment.config_fingerprints.lock().unwrap().reads,
+            reads + 1
+        );
+    }
+
+    #[test]
+    fn config_stamps_track_creation_deletion_and_metadata_only_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("pubspec.yaml");
+        let mut environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+        environment.config_candidates.insert(path.clone());
+        let missing = environment.config_stamps();
+        std::fs::write(&path, "name: original\n").unwrap();
+        let original = environment.config_stamps();
+        assert_ne!(missing, original);
+        let metadata = std::fs::metadata(&path).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(
+                metadata.modified().unwrap() + std::time::Duration::from_secs(1),
+            ))
+            .unwrap();
+        assert_eq!(original, environment.config_stamps());
+        std::fs::write(&path, "name: modified\n").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(metadata.modified().unwrap()))
+            .unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), metadata.len());
+        let modified = environment.config_stamps();
+        assert_ne!(original, modified);
+        let replacement = root.path().join("replacement.yaml");
+        std::fs::write(&replacement, "name: replaced\n").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&replacement)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(metadata.modified().unwrap()))
+            .unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), metadata.len());
+        assert_ne!(modified, environment.config_stamps());
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(missing, environment.config_stamps());
+    }
+
     #[cfg(unix)]
     #[test]
     fn symlinked_files_do_not_poison_neighboring_package_metadata() {

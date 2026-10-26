@@ -30,8 +30,8 @@ struct Context {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnvironmentCacheKey {
-    files: Vec<(PathBuf, PathBuf, Option<Vec<u8>>)>,
-    discovered_files: Vec<(PathBuf, PathBuf, Option<Vec<u8>>)>,
+    files: Vec<(PathBuf, PathBuf, Option<Arc<[u8]>>)>,
+    discovered_files: Vec<(PathBuf, PathBuf, Option<Arc<[u8]>>)>,
     roots: Vec<(PathBuf, PathBuf)>,
     aliases: Vec<PathBuf>,
     sdk_environment: [Option<std::ffi::OsString>; 3],
@@ -127,18 +127,54 @@ fn canonical_event_path(path: &Path) -> PathBuf {
     }
 }
 
-fn file_fingerprint(path: &Path) -> (PathBuf, Option<Vec<u8>>) {
+fn file_fingerprint(path: &Path) -> (PathBuf, Option<Arc<[u8]>>) {
     // Fingerprints include synthetic probes; real loads report read failures.
-    let contents = std::fs::read(path).ok();
+    let contents = std::fs::read(path).ok().map(Arc::from);
     let resolved = packages::canonical_comparison_path(path);
     (resolved, contents)
+}
+
+#[derive(Debug)]
+struct CachedFingerprint {
+    resolved: PathBuf,
+    metadata: Option<std::fs::Metadata>,
+    contents: Option<Arc<[u8]>>,
+}
+
+#[derive(Debug, Default)]
+struct FingerprintCache {
+    files: HashMap<PathBuf, CachedFingerprint>,
+    #[cfg(test)]
+    reads: usize,
+}
+
+fn same_file_metadata(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        // ctime and inode identity also detect same-size writes with restored
+        // mtimes and atomic replacements; metadata itself is not part of the key.
+        left.dev() == right.dev()
+            && left.ino() == right.ino()
+            && left.len() == right.len()
+            && left.mtime() == right.mtime()
+            && left.mtime_nsec() == right.mtime_nsec()
+            && left.ctime() == right.ctime()
+            && left.ctime_nsec() == right.ctime_nsec()
+    }
+    #[cfg(not(unix))]
+    {
+        // Without a reliable change timestamp, retain exact content comparison.
+        let _ = (left, right);
+        false
+    }
 }
 
 #[derive(Debug, Default)]
 struct PackageDiscovery {
     directories: HashMap<PathBuf, Option<Arc<PackageMetadata>>>,
     manifests: HashMap<PathBuf, Arc<PackageMetadata>>,
-    fingerprints: std::collections::BTreeMap<PathBuf, (PathBuf, Option<Vec<u8>>)>,
+    fingerprints: std::collections::BTreeMap<PathBuf, (PathBuf, Option<Arc<[u8]>>)>,
 }
 
 #[derive(Debug, Default)]
@@ -167,6 +203,9 @@ pub struct AnalysisEnvironment {
     mutable_roots: std::collections::BTreeSet<PathBuf>,
     directory_packages: HashMap<PathBuf, Option<Arc<PackageMetadata>>>,
     package_discovery: Arc<Mutex<PackageDiscovery>>,
+    config_fingerprints: Arc<Mutex<FingerprintCache>>,
+    #[cfg(test)]
+    io_observer: Option<fn(&Self)>,
     warnings: Arc<Mutex<EnvironmentWarnings>>,
 }
 
@@ -193,6 +232,9 @@ impl AnalysisEnvironment {
             mutable_roots: std::collections::BTreeSet::new(),
             directory_packages: HashMap::new(),
             package_discovery: Arc::default(),
+            config_fingerprints: Arc::default(),
+            #[cfg(test)]
+            io_observer: None,
             warnings: Arc::default(),
         }
     }
@@ -397,9 +439,55 @@ impl AnalysisEnvironment {
         })
     }
 
-    /// Capture exact resolution inputs on discovery or a configuration event.
-    /// This is deliberately not polled on project text edits: versioned hosted
-    /// packages and SDK sources are immutable, while mutable roots use LSP events.
+    fn config_fingerprint(&self, path: &Path) -> (PathBuf, Option<Arc<[u8]>>) {
+        let resolved = packages::canonical_comparison_path(path);
+        let metadata = std::fs::metadata(path);
+        let missing = metadata.as_ref().is_err_and(|error| {
+            matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            )
+        });
+        let metadata = metadata.ok();
+        if let Some(cached) = self.config_fingerprints.lock().unwrap().files.get(path)
+            && cached.resolved == resolved
+            && match (&cached.metadata, &metadata) {
+                (Some(previous), Some(current)) => {
+                    cached.contents.is_some() && same_file_metadata(previous, current)
+                }
+                (None, None) => missing,
+                _ => false,
+            }
+        {
+            return (resolved, cached.contents.clone());
+        }
+        #[cfg(test)]
+        if let Some(observer) = self.io_observer {
+            observer(self);
+        }
+        let contents = if missing {
+            None
+        } else {
+            #[cfg(test)]
+            {
+                self.config_fingerprints.lock().unwrap().reads += 1;
+            }
+            std::fs::read(path).ok().map(Arc::from)
+        };
+        self.config_fingerprints.lock().unwrap().files.insert(
+            path.to_path_buf(),
+            CachedFingerprint {
+                resolved: resolved.clone(),
+                metadata,
+                contents: contents.clone(),
+            },
+        );
+        (resolved, contents)
+    }
+
+    /// Capture exact resolution inputs, reusing bytes while file metadata is stable.
+    /// Metadata-only changes still compare equal; replacements, restored-mtime
+    /// writes and symlink retargeting refresh the contents and resolved paths.
     pub fn config_stamps(&self) -> EnvironmentCacheKey {
         let mut roots = self.root_candidates.clone();
         roots.extend(sdk::discovery_inputs());
@@ -453,7 +541,7 @@ impl AnalysisEnvironment {
             files: files
                 .into_iter()
                 .map(|path| {
-                    let (resolved, contents) = file_fingerprint(&path);
+                    let (resolved, contents) = self.config_fingerprint(&path);
                     (path, resolved, contents)
                 })
                 .collect(),
@@ -528,25 +616,55 @@ impl AnalysisEnvironment {
         if let Some(package) = self.directory_packages.get(directory) {
             return package.clone();
         }
-        let mut discovery = self.package_discovery.lock().unwrap();
-        if let Some(package) = discovery.directories.get(directory) {
-            return package.clone();
+        let probes = {
+            let discovery = self.package_discovery.lock().unwrap();
+            if let Some(package) = discovery.directories.get(directory) {
+                return package.clone();
+            }
+            directory
+                .ancestors()
+                .map(|ancestor| ancestor.join("pubspec.yaml"))
+                .filter(|probe| !discovery.fingerprints.contains_key(probe))
+                .collect::<Vec<_>>()
+        };
+        // Filesystem reads and YAML parsing must not serialize unrelated file
+        // workers behind the shared discovery mutex.
+        #[cfg(test)]
+        if let Some(observer) = self.io_observer {
+            observer(self);
         }
-        // Capture present manifests and absent nearer probes before discovery
-        // reads them, not newer bytes sampled at the next idle boundary.
-        for ancestor in directory.ancestors() {
-            discovery
-                .fingerprints
-                .entry(ancestor.join("pubspec.yaml"))
-                .or_insert_with_key(|path| file_fingerprint(path));
-        }
+        let fingerprints = probes
+            .into_iter()
+            .map(|probe| {
+                let fingerprint = file_fingerprint(&probe);
+                (probe, fingerprint)
+            })
+            .collect::<Vec<_>>();
         let package = packages::enclosing_pubspec_normalized(path).map(|manifest| {
-            Arc::clone(
-                discovery
-                    .manifests
-                    .entry(manifest.clone())
-                    .or_insert_with(|| Arc::new(PackageMetadata::load(&manifest))),
-            )
+            let cached = self
+                .package_discovery
+                .lock()
+                .unwrap()
+                .manifests
+                .get(&manifest)
+                .cloned();
+            let package = cached.unwrap_or_else(|| {
+                #[cfg(test)]
+                if let Some(observer) = self.io_observer {
+                    observer(self);
+                }
+                Arc::new(PackageMetadata::load(&manifest))
+            });
+            (manifest, package)
+        });
+        let mut discovery = self.package_discovery.lock().unwrap();
+        // Another worker may have published while we loaded. Keep its first-read
+        // baseline and shared manifest identity rather than replacing either.
+        for (probe, fingerprint) in fingerprints {
+            discovery.fingerprints.entry(probe).or_insert(fingerprint);
+        }
+        let package = package.map(|(manifest, package)| {
+            Arc::clone(discovery.manifests.entry(manifest).or_insert(package))
         });
         discovery
             .directories
