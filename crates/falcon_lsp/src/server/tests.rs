@@ -1,6 +1,21 @@
 use super::*;
 
 #[test]
+fn unchanged_idle_scans_back_off_and_changes_reset_the_delay() {
+    let mut delay = Duration::from_secs(1);
+    let mut elapsed = Duration::ZERO;
+    let mut scans = 0;
+    while elapsed < Duration::from_secs(600) {
+        elapsed += delay;
+        scans += 1;
+        delay = next_idle_poll_delay(delay, false);
+    }
+    assert_eq!(scans, 15);
+    assert_eq!(delay, Duration::from_secs(60));
+    assert_eq!(next_idle_poll_delay(delay, true), Duration::from_secs(1));
+}
+
+#[test]
 fn initialize_workspace_folders_take_precedence_over_root_uri() {
     let directory = tempfile::tempdir().unwrap();
     let first = directory.path().join("first");

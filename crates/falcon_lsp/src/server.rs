@@ -560,6 +560,14 @@ fn relay(
     }
 }
 
+fn next_idle_poll_delay(current: Duration, changed: bool) -> Duration {
+    if changed {
+        Duration::from_secs(1)
+    } else {
+        (current * 2).min(Duration::from_secs(60))
+    }
+}
+
 fn analysis_worker(
     options: ServerOptions,
     state: LspState,
@@ -587,6 +595,7 @@ fn analysis_worker_with(
     };
     let mut generation = 0;
     let mut debounce = Debounce::default();
+    let mut idle_poll_delay = Duration::from_secs(1);
     watching.refresh(&connection, &state)?;
 
     // Deserialize a notification's params or skip the message: a single
@@ -636,7 +645,7 @@ fn analysis_worker_with(
                 }
                 Err(_) => return Ok(()),
             },
-            None => match receiver.recv_timeout(Duration::from_secs(1)) {
+            None => match receiver.recv_timeout(idle_poll_delay) {
                 Ok((next_generation, message, cancelled)) => {
                     generation = next_generation;
                     Some((message, cancelled))
@@ -650,6 +659,7 @@ fn analysis_worker_with(
             // Revalidate only after a quiet debounce/idle interval.
             let disk_updates = state.revalidate_disk();
             let refreshed = !disk_updates.is_empty();
+            idle_poll_delay = next_idle_poll_delay(idle_poll_delay, refreshed);
             for (uri, diagnostics) in disk_updates {
                 publish(&connection, &state, &uri, &diagnostics)?;
             }

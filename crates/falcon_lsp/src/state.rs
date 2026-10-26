@@ -288,7 +288,7 @@ enum ProjectView {
     CrossFile,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct FileStamp {
     modified: Option<std::time::SystemTime>,
     len: u64,
@@ -317,6 +317,7 @@ struct CachedDiskFile {
     parsed: Arc<ParsedFile>,
     has_parse_errors: bool,
     language_version: Option<LanguageVersion>,
+    stamp: Option<FileStamp>,
 }
 
 struct RootConfig {
@@ -388,7 +389,7 @@ pub struct LspState {
     disk_files: HashMap<PathBuf, CachedDiskFile>,
     /// Quiet-boundary stamps include rejected reads, not just cached syntax.
     fallback_stamps: HashMap<PathBuf, Option<FileStamp>>,
-    fallback_config_stamps: HashMap<PathBuf, Option<Vec<u8>>>,
+    fallback_config_stamps: HashMap<PathBuf, Option<FileStamp>>,
     fallback_dependency_watches: HashMap<PathBuf, Vec<DiscoveryWatch>>,
     project_paths: Option<Vec<(PathBuf, bool)>>,
     project_path_patterns: Vec<String>,
@@ -678,13 +679,6 @@ impl LspState {
         }
     }
 
-    fn disk_stamp(&self, path: &Path) -> Option<FileStamp> {
-        if self.dynamic_file_watching {
-            return None;
-        }
-        FileStamp::read(path)
-    }
-
     fn capture_rule_config_inputs(&mut self) {
         self.fallback_config_stamps = rule_config_stamps(
             self.workspace_roots
@@ -727,7 +721,7 @@ impl LspState {
             }
         }
         for (path, stamp) in &mut self.fallback_config_stamps {
-            let current = std::fs::read(path).ok();
+            let current = FileStamp::read(path);
             if current != *stamp {
                 *stamp = current;
                 changed.push(path.clone());
@@ -1126,9 +1120,9 @@ impl LspState {
     }
 
     /// `textDocument/didChange` (full sync): replace text and re-parse the
-    /// changed document only. Unresolved paths refresh during analysis, while
-    /// resolved identities survive deletion. The server loop defers analysis
-    /// behind the debounce window.
+    /// changed document only. Unresolved paths refresh at watcher and quiet
+    /// boundaries, while resolved identities survive deletion. The server loop
+    /// defers analysis behind the debounce window.
     ///
     /// Returns false if the document is not open.
     pub fn change(&mut self, uri: &str, mut text: String, version: Option<i32>) -> bool {
@@ -2106,8 +2100,10 @@ impl LspState {
                 continue;
             }
             let language_version = self.environment.package_language_version(path);
+            let stamp = FileStamp::read(path);
             if let Some(cached) = self.disk_files.get(path)
                 && cached.language_version == language_version
+                && cached.stamp == stamp
             {
                 files.push(ProjectFile {
                     path: path.to_path_buf(),
@@ -2117,7 +2113,7 @@ impl LspState {
                 continue;
             }
             self.disk_read_count += 1;
-            let fallback_stamp = self.disk_stamp(path);
+            let fallback_stamp = stamp.clone();
             if !self.dynamic_file_watching {
                 self.fallback_stamps
                     .insert(path.to_path_buf(), fallback_stamp);
@@ -2153,6 +2149,7 @@ impl LspState {
                             parsed: Arc::clone(&parsed),
                             has_parse_errors,
                             language_version,
+                            stamp,
                         },
                     );
                     files.push(ProjectFile {
@@ -2364,7 +2361,7 @@ impl LspState {
         for (normalized, is_dart) in &paths {
             if !is_dart && matches!(view, ProjectView::Semantic) {
                 if !self.dynamic_file_watching && !self.fallback_stamps.contains_key(normalized) {
-                    let stamp = self.disk_stamp(normalized);
+                    let stamp = FileStamp::read(normalized);
                     self.fallback_stamps.insert(normalized.clone(), stamp);
                 }
                 continue;
@@ -2386,8 +2383,10 @@ impl LspState {
             let language_version = is_dart
                 .then(|| self.environment.package_language_version(path))
                 .flatten();
+            let stamp = FileStamp::read(path);
             if let Some(cached) = self.disk_files.get(path)
                 && cached.language_version == language_version
+                && cached.stamp == stamp
             {
                 files.push(ProjectFile {
                     path: normalized.clone(),
@@ -2397,7 +2396,7 @@ impl LspState {
                 continue;
             }
             self.disk_read_count += 1;
-            let fallback_stamp = self.disk_stamp(path);
+            let fallback_stamp = stamp.clone();
             if !self.dynamic_file_watching {
                 self.fallback_stamps
                     .insert(path.to_path_buf(), fallback_stamp);
@@ -2438,6 +2437,7 @@ impl LspState {
                         parsed: Arc::clone(&file.parsed),
                         has_parse_errors: file.has_parse_errors,
                         language_version,
+                        stamp,
                     },
                 );
                 files.push(file);
@@ -2453,6 +2453,7 @@ impl LspState {
                     parsed: Arc::clone(&parsed),
                     has_parse_errors,
                     language_version,
+                    stamp,
                 },
             );
             files.push(ProjectFile {
@@ -2633,7 +2634,7 @@ fn load_from(
 fn rule_config_stamps<'a>(
     roots: impl Iterator<Item = &'a Path>,
     explicit: Option<&'a Path>,
-) -> HashMap<PathBuf, Option<Vec<u8>>> {
+) -> HashMap<PathBuf, Option<FileStamp>> {
     let mut stamps = HashMap::new();
     let mut visited = HashSet::new();
     for root in roots.chain(explicit.and_then(Path::parent)) {
@@ -2644,7 +2645,7 @@ fn rule_config_stamps<'a>(
             for name in ["falcon.json", ".falcon.json"] {
                 stamps
                     .entry(ancestor.join(name))
-                    .or_insert_with_key(|path| std::fs::read(path).ok());
+                    .or_insert_with_key(|path| FileStamp::read(path));
             }
         }
         if let Some(workspace) = falcon_project::discover_workspace(root) {
@@ -2655,7 +2656,7 @@ fn rule_config_stamps<'a>(
                     }
                     stamps
                         .entry(directory.join("falcon.json"))
-                        .or_insert_with_key(|path| std::fs::read(path).ok());
+                        .or_insert_with_key(|path| FileStamp::read(path));
                 }
             }
         }
@@ -2663,13 +2664,13 @@ fn rule_config_stamps<'a>(
     if let Some(path) = explicit {
         stamps
             .entry(path.to_path_buf())
-            .or_insert_with(|| std::fs::read(path).ok());
+            .or_insert_with(|| FileStamp::read(path));
     }
     if let Some(home) = std::env::var_os("HOME") {
         let path = PathBuf::from(home).join(".falcon.json");
         stamps
             .entry(path.clone())
-            .or_insert_with(|| std::fs::read(&path).ok());
+            .or_insert_with(|| FileStamp::read(&path));
     }
     stamps
 }
