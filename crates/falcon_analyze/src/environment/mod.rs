@@ -139,6 +139,7 @@ struct CachedFingerprint {
     resolved: PathBuf,
     metadata: Option<std::fs::Metadata>,
     contents: Option<Arc<[u8]>>,
+    observed_at: std::time::SystemTime,
 }
 
 #[derive(Debug, Default)]
@@ -166,6 +167,28 @@ fn same_file_metadata(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bo
     {
         // Without a reliable change timestamp, retain exact content comparison.
         let _ = (left, right);
+        false
+    }
+}
+
+fn metadata_predates_observation(
+    metadata: &std::fs::Metadata,
+    observed_at: std::time::SystemTime,
+) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        // Treat the entire observation second as racy, including filesystems
+        // with coarse timestamps. A later read can establish a stable baseline.
+        observed_at
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|elapsed| i64::try_from(elapsed.as_secs()).ok())
+            .is_some_and(|second| metadata.ctime() < second && metadata.mtime() < second)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (metadata, observed_at);
         false
     }
 }
@@ -205,7 +228,9 @@ pub struct AnalysisEnvironment {
     package_discovery: Arc<Mutex<PackageDiscovery>>,
     config_fingerprints: Arc<Mutex<FingerprintCache>>,
     #[cfg(test)]
-    io_observer: Option<fn(&Self)>,
+    io_observer: Option<fn(&Self, &Path)>,
+    #[cfg(test)]
+    observation_time: Option<std::time::SystemTime>,
     warnings: Arc<Mutex<EnvironmentWarnings>>,
 }
 
@@ -235,6 +260,8 @@ impl AnalysisEnvironment {
             config_fingerprints: Arc::default(),
             #[cfg(test)]
             io_observer: None,
+            #[cfg(test)]
+            observation_time: None,
             warnings: Arc::default(),
         }
     }
@@ -440,6 +467,9 @@ impl AnalysisEnvironment {
     }
 
     fn config_fingerprint(&self, path: &Path) -> (PathBuf, Option<Arc<[u8]>>) {
+        let observed_at = std::time::SystemTime::now();
+        #[cfg(test)]
+        let observed_at = self.observation_time.unwrap_or(observed_at);
         let resolved = packages::canonical_comparison_path(path);
         let metadata = std::fs::metadata(path);
         let missing = metadata.as_ref().is_err_and(|error| {
@@ -453,7 +483,9 @@ impl AnalysisEnvironment {
             && cached.resolved == resolved
             && match (&cached.metadata, &metadata) {
                 (Some(previous), Some(current)) => {
-                    cached.contents.is_some() && same_file_metadata(previous, current)
+                    cached.contents.is_some()
+                        && same_file_metadata(previous, current)
+                        && metadata_predates_observation(previous, cached.observed_at)
                 }
                 (None, None) => missing,
                 _ => false,
@@ -463,7 +495,7 @@ impl AnalysisEnvironment {
         }
         #[cfg(test)]
         if let Some(observer) = self.io_observer {
-            observer(self);
+            observer(self, path);
         }
         let contents = if missing {
             None
@@ -480,6 +512,7 @@ impl AnalysisEnvironment {
                 resolved: resolved.clone(),
                 metadata,
                 contents: contents.clone(),
+                observed_at,
             },
         );
         (resolved, contents)
@@ -631,7 +664,7 @@ impl AnalysisEnvironment {
         // workers behind the shared discovery mutex.
         #[cfg(test)]
         if let Some(observer) = self.io_observer {
-            observer(self);
+            observer(self, path);
         }
         let fingerprints = probes
             .into_iter()
@@ -640,6 +673,10 @@ impl AnalysisEnvironment {
                 (probe, fingerprint)
             })
             .collect::<Vec<_>>();
+        #[cfg(test)]
+        if let Some(observer) = self.io_observer {
+            observer(self, path);
+        }
         let package = packages::enclosing_pubspec_normalized(path).map(|manifest| {
             let cached = self
                 .package_discovery
@@ -651,7 +688,7 @@ impl AnalysisEnvironment {
             let package = cached.unwrap_or_else(|| {
                 #[cfg(test)]
                 if let Some(observer) = self.io_observer {
-                    observer(self);
+                    observer(self, &manifest);
                 }
                 Arc::new(PackageMetadata::load(&manifest))
             });

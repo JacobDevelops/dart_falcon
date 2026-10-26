@@ -421,14 +421,39 @@ mod tests {
     }
 
     #[test]
+    fn interleaved_package_discovery_keeps_the_first_fingerprint_baseline() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("lib")).unwrap();
+        std::fs::write(root.path().join("pubspec.yaml"), "name: original\n").unwrap();
+        let mut environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+        let mut baseline = environment.config_stamps();
+        environment.io_observer = Some(|environment, path| {
+            if !environment.package_discovery.lock().unwrap().manifests.is_empty() {
+                return;
+            }
+            // B has selected its uncached probes but has not read them yet.
+            // Let A publish v1, then make B read v2 and reuse A's manifest v1.
+            let mut first_worker = environment.clone();
+            first_worker.io_observer = None;
+            let first = first_worker.file_package(&path.with_file_name("first.dart"));
+            let metadata = first.metadata().unwrap();
+            assert_eq!(metadata.identity.name, "original");
+            std::fs::write(&metadata.manifest, "name: modified\n").unwrap();
+        });
+        let second = environment.file_package(&root.path().join("lib/second.dart"));
+        assert_eq!(second.identity().unwrap().name, "original");
+        environment.io_observer = None;
+        assert!(baseline.extend_discovery(environment.config_stamps()));
+    }
+
+    #[test]
     fn package_discovery_releases_the_shared_lock_before_io() {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("lib/src")).unwrap();
         std::fs::write(root.path().join("pubspec.yaml"), "name: shared\n").unwrap();
         let mut environment = AnalysisEnvironment::with_sdk_locator(|_| None);
-        environment.io_observer = Some(|environment| {
+        environment.io_observer = Some(|environment, _| {
             assert!(environment.package_discovery.try_lock().is_ok());
-            assert!(environment.config_fingerprints.try_lock().is_ok());
         });
         for directory in ["lib", "lib/src"] {
             let source = root.path().join(directory).join("source.dart");
@@ -444,9 +469,13 @@ mod tests {
     fn repeated_config_stamps_do_not_reread_unchanged_contents() {
         let root = tempfile::tempdir().unwrap();
         let mut environment = AnalysisEnvironment::with_sdk_locator(|_| None);
-        environment.io_observer = Some(|environment| {
+        environment.io_observer = Some(|environment, _| {
             assert!(environment.config_fingerprints.try_lock().is_ok());
         });
+        // Simulate files whose change timestamps predate the sampling tick,
+        // without sleeping or relying on the host filesystem's clock resolution.
+        environment.observation_time =
+            Some(std::time::SystemTime::now() + std::time::Duration::from_secs(3600));
         for index in 0..32 {
             let path = root.path().join(format!("config-{index}.json"));
             std::fs::write(&path, format!("{{\"index\": {index}}}")).unwrap();
@@ -476,6 +505,49 @@ mod tests {
             environment.config_fingerprints.lock().unwrap().reads,
             reads + 1
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_stamps_reread_racy_metadata_until_a_later_observation() {
+        use std::os::unix::fs::MetadataExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("pubspec.yaml");
+        std::fs::write(&path, "name: original\n").unwrap();
+        let metadata = std::fs::metadata(&path).unwrap();
+        let mut environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+        environment.observation_time = Some(
+            std::time::UNIX_EPOCH
+                + std::time::Duration::from_secs(metadata.ctime().try_into().unwrap()),
+        );
+        let original = environment.config_fingerprint(&path);
+        std::fs::write(&path, "name: modified\n").unwrap();
+        let current_metadata = std::fs::metadata(&path).unwrap();
+        // Emulate a coarse filesystem reporting unchanged metadata across the
+        // rewrite: the cached bytes remain v1 while both stat samples match v2.
+        environment
+            .config_fingerprints
+            .lock()
+            .unwrap()
+            .files
+            .get_mut(&path)
+            .unwrap()
+            .metadata = Some(current_metadata.clone());
+        let changed = environment.config_fingerprint(&path);
+        assert_ne!(original, changed);
+        assert_eq!(environment.config_fingerprints.lock().unwrap().reads, 2);
+        environment.observation_time = Some(
+            std::time::UNIX_EPOCH
+                + std::time::Duration::from_secs(
+                    u64::try_from(current_metadata.ctime()).unwrap() + 2,
+                ),
+        );
+        // The first later sample must read again before its bytes become stable.
+        assert_eq!(changed, environment.config_fingerprint(&path));
+        assert_eq!(environment.config_fingerprints.lock().unwrap().reads, 3);
+        assert_eq!(changed, environment.config_fingerprint(&path));
+        assert_eq!(environment.config_fingerprints.lock().unwrap().reads, 3);
     }
 
     #[test]
