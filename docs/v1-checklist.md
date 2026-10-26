@@ -8,54 +8,11 @@ Engine fixes from the October 2026 audit plus the 1.0 workflow features. Every i
 
 ### Stage 6: editor and CI workflows
 
-#### 19. Shared pipeline and incremental LSP
+#### 19. Incremental semantic indexes
 
-Owns `crates/falcon_lsp` and the shared pipeline extracted from `falcon_cli`. Can start any time.
+Owns `crates/falcon_lsp`, the `falcon_project` autofix overlay and the semantic index builders in `falcon_analyze`. Can start any time.
 
-- [ ] **One project pipeline.** The CLI and LSP load config, walk files, build `ProjectFile`s, build indexes and sort diagnostics differently. Share one pipeline and test that both produce the same diagnostics.
-- [ ] **Incremental LSP.** Every edit pause re-walks and re-parses the workspace twice on one thread, with `$/cancelRequest` ignored. Cache disk parses, invalidate via watched files, rebuild only what changed.
-- [ ] **LSP roots from `initialize`.** The workspace root comes from the process cwd; config errors never reach the editor.
-- [ ] **LSP position mapping.** `format_lsp` rescans the file per diagnostic; use one `LineIndex` per publish.
-- [ ] **No cross-file diagnostic flicker.** Per-file publish then merged republish makes cross-file squiggles blink on every edit.
-- [ ] **LSP test placement.** About 1.8k lines of `state.rs` and 770 of `server.rs` are inline tests; move them to child test modules.
-
-#### 20. Autofix delivery
-
-Owns the CLI fix commands and LSP code actions. After batch 19.
-
-- [ ] **Safe autofixes.** `--write` applies safe fixes and `--write --unsafe` also applies unsafe ones, with a preview mode. Fixes apply one at a time with re-analysis in between until nothing changes, so overlapping edits never merge. If a file's text repeats, fixes are undoing each other: stop and report the rules involved. An iteration cap stays as a backstop for fixes that grow the file without repeating, and hitting it is reported, not silent. A per-rule `fix: "none" | "safe" | "unsafe"` option, also allowed in overrides, turns a fix off or reclassifies it. Editors offer both kinds as quick fixes plus fix-all; fix-on-save applies safe fixes only.
-
-#### 21. CI adoption
-
-Owns CLI reporting and exit policy. Can start any time.
-
-- [ ] **Existing-debt baselines.** Let teams adopt falcon without fixing historical findings, matching findings robustly across line changes rather than by rule/path/line/message.
-- [ ] **Severity-based CI thresholds.** Today any diagnostic, warnings included, fails the run (`analyze_pipeline.rs:247-251`). Make warnings non-failing by default and add `--error-on-warnings` plus a config equivalent; this changes CI results for existing users, so it ships with a changeset.
-- [ ] **CI report formats.** Add SARIF first, then CodeClimate/GitLab, Checkstyle, and Sonar where users need them, plus HTML; falcon already supports JSON and text.
-
-#### 23. Package-aware monorepo runs
-
-After batch 19.
-
-- [ ] **Package-aware monorepo runs.** Detect Melos/pub workspaces, apply per-package config, and aggregate per-package reports; falcon already analyses multiple paths.
-
-#### 24. Install and update
-
-Owns release packaging. Independent of the engine; can start any time.
-
-- [ ] **Easier install and update.** Add self-update and version selection to the `falcon` launcher, cargo-binstall metadata, optional signing/notarisation, and Homebrew publishing.
-
-#### 25. End-to-end OSS corpus
-
-Owns a new `cargo xtask e2e` and its CI jobs. Independent of the engine; can start any time.
-
-- [ ] **e2e OSS corpus.** Run falcon over pinned, shallow clones of large Dart/Flutter repos (immich, AppFlowy, flutter/packages, flame, LocalSend, bloc, riverpod, Wonderous, flutter/samples, dart-lang/sdk `tests/language`). Catch panics and parser/internal errors, snapshot diagnostic counts, and smoke-test migration of common `analysis_options.yaml` presets. A fast subset runs in PR CI and the full set nightly.
-
-#### 27. Remaining recursive walkers
-
-Owns the rule and analysis helpers listed below. Can start any time.
-
-- [ ] **Long chains in the remaining walkers.** `falcon check` survives 100,000-operand `+`, `&&`, `||`, `??` and string chains as initializers, arguments and statements, but these walkers still recurse once per operand. Default on: parameter defaults (`default_syntax.rs` `SyntaxCollector`), `==`/`!=` operands in `async_semantics.rs` `BoundNames`, the async-gap fallback in `async_state.rs` `Tree`, switch guards in `avoid_duplicate_switch_case_conditions.rs` `GuardProof`, `kDebugMode` branches in `avoid_print`, `Target` annotation arguments in `library_annotations`, generator bodies in `null_check_on_nullable_type_parameter`, sibling parts in `prefer_final_fields`, and dispose bodies in `controller_disposal.rs`. Default off: `support/constants.rs`, `const_eval.rs`, `logical_operands.rs`, `unnecessary_nullable`, `avoid_complex_arithmetic_expressions`, `move_variable_outside_iteration`, `cascade_invocations`, `prefer_moving_to_variable`, `deprecated_member_use_from_same_package`, `prefer_foreach`, `avoid_catches_without_on_clauses`, `avoid_redundant_argument_values`, `avoid_types_on_closure_parameters`, `prefer_int_literals`, `unreachable_from_main` and `use_late_for_private_fields_and_variables`. Route each through `walk_expr_chain`, and extend `tests/long_expression_chains.rs` with one 100,000-operand case per shape, run with the rule enabled.
+- [ ] **Declaration edits rebuild every index.** Body-only edits and fix passes now reuse the project's identity, type and signature indexes, but an edit that changes a declaration, import, export or part still rebuilds them for the whole project, in the LSP and on each declaration-changing autofix pass. Update only the changed library and its dependents.
 
 ### Stage 7: last
 
