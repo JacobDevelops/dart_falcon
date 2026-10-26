@@ -218,7 +218,11 @@ fn collect_check_impl(
     let root = workspace
         .as_ref()
         .map(|workspace| workspace.root.clone())
-        .or_else(|| config.root_dir().map(Path::to_path_buf))
+        .or_else(|| {
+            (options.config_path.is_some() || falcon_config::find_config(&cwd).is_some())
+                .then(|| config.root_dir().map(Path::to_path_buf))
+                .flatten()
+        })
         .or_else(|| {
             paths.iter().find_map(|path| {
                 let path = falcon_analyze::canonical_or_lexical(path);

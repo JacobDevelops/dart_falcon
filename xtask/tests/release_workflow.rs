@@ -31,7 +31,10 @@ fn check_credentials(configured: [bool; 9], expected_success: bool) {
         .iter()
         .find(|step| step["id"].as_str() == Some("packaging"))
         .unwrap();
-    assert!(step.get("if").is_none(), "credential validation must always run");
+    assert!(
+        step.get("if").is_none(),
+        "credential validation must always run"
+    );
     let directory = tempfile::tempdir().unwrap();
     let output_path = directory.path().join("output");
     fs::write(&output_path, "").unwrap();
