@@ -153,7 +153,7 @@ pub(super) fn empty_named_types() -> Arc<[(String, ResolvedType)]> {
 /// The declaration that introduces a type-parameter list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParameterOwner {
-    /// Keyed by the source offset of the list's first parameter.
+    /// Keyed by the first parameter's body-independent source occurrence.
     Source {
         file: Option<FileId>,
         offset: usize,

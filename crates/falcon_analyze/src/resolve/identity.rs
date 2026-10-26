@@ -342,6 +342,8 @@ pub struct IdentityIndex {
     /// Source paths indexed by [`FileId`], including non-primary instances.
     paths: Vec<Option<PathBuf>>,
     parsed: Vec<Arc<ParsedFile>>,
+    /// Source byte offsets mapped to edit-stable declaration type occurrences.
+    type_occurrences: Vec<SourceTypeOccurrences>,
     source_annotations: SourceAnnotations,
     /// The loaded `dart:core`, when external libraries are indexed.
     core: Option<LibraryId>,
@@ -357,6 +359,12 @@ pub struct IdentityIndex {
     /// The project packages directive URIs resolve against.
     packages: Vec<PackageIdentity>,
     external: Option<Arc<IdentityIndex>>,
+}
+
+#[derive(Debug, Clone)]
+struct SourceTypeOccurrences {
+    original: FxHashMap<usize, usize>,
+    edited: Option<(Arc<ParsedFile>, FxHashMap<usize, usize>)>,
 }
 
 /// Memoized lookups. The index is immutable once built, so answers never go
@@ -569,6 +577,34 @@ impl IdentityIndex {
             return external.parsed_file(file);
         }
         &self.parsed[file.0 & !EXTERNAL_ID]
+    }
+
+    /// Refresh source coordinates without changing declaration identities or templates.
+    /// The caller must first establish an unchanged declaration signature.
+    pub fn refresh_file_body(&mut self, file: FileId, parsed: &Arc<ParsedFile>) {
+        assert_eq!(file.0 & EXTERNAL_ID, 0, "cannot edit external declarations");
+        self.type_occurrences[file.0].edited =
+            Some((Arc::clone(parsed), parsed.type_occurrences()));
+    }
+
+    pub(crate) fn type_occurrence(
+        &self,
+        file: FileId,
+        parsed: &Arc<ParsedFile>,
+        offset: usize,
+    ) -> usize {
+        if file.0 & EXTERNAL_ID != 0
+            && let Some(external) = &self.external
+        {
+            return external.type_occurrence(file, parsed, offset);
+        }
+        let occurrences = &self.type_occurrences[file.0 & !EXTERNAL_ID];
+        let offsets = occurrences
+            .edited
+            .as_ref()
+            .filter(|(edited, _)| Arc::ptr_eq(edited, parsed))
+            .map_or(&occurrences.original, |(_, offsets)| offsets);
+        offsets.get(&offset).copied().unwrap_or(offset)
     }
 
     pub fn from_project_files(files: &[IdentitySource<'_>], packages: &[PackageIdentity]) -> Self {
@@ -963,6 +999,13 @@ impl IdentityIndex {
             by_path,
             external_file_offsets,
             paths,
+            type_occurrences: parsed
+                .iter()
+                .map(|parsed| SourceTypeOccurrences {
+                    original: parsed.type_occurrences(),
+                    edited: None,
+                })
+                .collect(),
             parsed,
             source_annotations: HashMap::new(),
             core,

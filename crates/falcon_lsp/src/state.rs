@@ -6,7 +6,6 @@
 //! open/save/debounce/idle boundaries for clients without dynamic file watching.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -28,10 +27,7 @@ use falcon_project::{
     discover_project_with_watches, load_project_config_with_errors, manifest_file,
     resolve_document_positions, sort_diagnostics,
 };
-use falcon_syntax::{
-    LanguageVersion,
-    cst::{FunctionDecl, GetterDecl, MethodDecl, NodeKind, OperatorDecl, Program},
-};
+use falcon_syntax::{LanguageVersion, cst::Program};
 use tracing::{debug, warn};
 
 pub(crate) mod code_actions;
@@ -41,47 +37,6 @@ struct DocumentParse {
     diagnostics: Vec<Diagnostic>,
     has_errors: bool,
     worker_failed: bool,
-}
-
-fn declaration_signature(parsed: &ParsedFile) -> u64 {
-    let mut signature = DefaultHasher::new();
-    let mut cursor = 0;
-    let mut body_start = 0;
-    let mut body_end = 0;
-    for node in parsed.program().syntax().descendants() {
-        if node.span().start >= body_start && node.span().start < body_end {
-            continue;
-        }
-        // Alias provenance and generic owners use absolute syntax offsets.
-        // Rebuild if an earlier body edit moves their declaration-side types.
-        if matches!(node.kind(), NodeKind::TypeParam | NodeKind::NamedType) {
-            node.span().start.hash(&mut signature);
-        }
-        let body = match node.kind() {
-            NodeKind::FunctionDecl => FunctionDecl::cast(node)
-                .filter(|function| function.return_type().is_some())
-                .and_then(|function| function.body()),
-            NodeKind::MethodDecl => MethodDecl::cast(node)
-                .filter(|method| method.return_type().is_some())
-                .and_then(|method| method.body()),
-            NodeKind::GetterDecl => GetterDecl::cast(node)
-                .filter(|getter| getter.return_type().is_some())
-                .and_then(|getter| getter.body()),
-            NodeKind::OperatorDecl => OperatorDecl::cast(node)
-                .filter(|operator| operator.return_type().is_some())
-                .and_then(|operator| operator.body()),
-            _ => None,
-        };
-        if let Some(body) = body {
-            let span = body.span();
-            parsed.source[cursor..span.start].hash(&mut signature);
-            cursor = span.end;
-            body_start = span.start;
-            body_end = span.end;
-        }
-    }
-    parsed.source[cursor..].hash(&mut signature);
-    signature.finish()
 }
 
 fn document_parse_result(
@@ -1003,7 +958,7 @@ impl LspState {
             doc.declaration_signature = if parsed.worker_failed {
                 0
             } else {
-                declaration_signature(&doc.parsed)
+                doc.parsed.declaration_signature()
             };
             doc.has_parse_errors = parsed.has_errors;
             doc.source_rejected = parsed.worker_failed;
@@ -1077,7 +1032,7 @@ impl LspState {
         let next_signature = if source_rejected {
             0
         } else {
-            declaration_signature(&next_parsed)
+            next_parsed.declaration_signature()
         };
         let unchanged_api = !source_rejected
             && !parsed.has_errors
@@ -1090,7 +1045,7 @@ impl LspState {
                             .get(uri)
                             .filter(|doc| doc.path == path)
                             .map_or_else(
-                                || declaration_signature(&previous.parsed),
+                                || previous.parsed.declaration_signature(),
                                 |doc| doc.declaration_signature,
                             )
                             == next_signature
@@ -1148,7 +1103,7 @@ impl LspState {
         let next_signature = if source_error.is_some() || parsed.worker_failed {
             0
         } else {
-            declaration_signature(&next_parsed)
+            next_parsed.declaration_signature()
         };
         let unchanged_api = !doc.has_parse_errors
             && !doc.source_rejected
@@ -1238,9 +1193,9 @@ impl LspState {
         let language_version = self.environment.package_language_version(&path);
         // Read only this file: an unsaved buffer is never evidence of disk contents.
         self.disk_read_count += 1;
-        let fallback_stamp = self.disk_stamp(&path);
+        let stamp = FileStamp::read(&path);
         if !self.dynamic_file_watching {
-            self.fallback_stamps.insert(path.clone(), fallback_stamp);
+            self.fallback_stamps.insert(path.clone(), stamp.clone());
         }
         let disk = falcon_analyze::read_source(&path).ok().and_then(|source| {
             if let Some(cached) = self.disk_files.get(&path)
@@ -1267,7 +1222,7 @@ impl LspState {
             })
         });
         if let Some((parsed, has_parse_errors)) = disk {
-            let next_signature = declaration_signature(&parsed);
+            let next_signature = parsed.declaration_signature();
             let document = self.documents.get_mut(uri).expect("open document");
             let unchanged_api = !document.source_rejected
                 && !document.has_parse_errors
@@ -1282,6 +1237,7 @@ impl LspState {
                     parsed,
                     has_parse_errors,
                     language_version,
+                    stamp,
                 },
             );
             self.update_document_snapshot(uri, unchanged_api);
@@ -1629,22 +1585,6 @@ impl LspState {
                 .as_ref()
                 .map(|cache| &cache.indexes)
         };
-        let mut files_by_root = vec![Vec::new(); self.workspace_roots.len()];
-        if files_by_root.len() == 1 {
-            files_by_root[0] = files;
-        } else {
-            for (index, root_files) in files_by_root.iter_mut().enumerate() {
-                root_files.reserve(
-                    files
-                        .iter()
-                        .filter(|file| self.root_index(&file.path) == index)
-                        .count(),
-                );
-            }
-            for file in files {
-                files_by_root[self.root_index(&file.path)].push(file);
-            }
-        }
         let result = (0..self.workspace_roots.len()).try_fold(Vec::new(), |mut all, index| {
             let (config, rules) = if index == 0 {
                 (&self.config, &self.cross_file_rules)
@@ -1653,10 +1593,21 @@ impl LspState {
                 (&entry.config, &entry.analysis.cross_file_registry)
             };
             if !rules.is_empty() {
+                let root_files;
+                let files = if self.workspace_roots.len() == 1 {
+                    files.as_slice()
+                } else {
+                    root_files = files
+                        .iter()
+                        .filter(|file| file.path.starts_with(&self.workspace_roots[index]))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    &root_files
+                };
                 let diagnostics = cross_file_diagnostics(
                     &self.environment,
                     rules,
-                    &files_by_root[index],
+                    files,
                     config,
                     indexes,
                 )?;
@@ -1706,8 +1657,8 @@ impl LspState {
                         && (same_revision(file, cached)
                             || (!file.has_parse_errors
                                 && !cached.has_parse_errors
-                                && declaration_signature(&file.parsed)
-                                    == declaration_signature(&cached.parsed)
+                                && file.parsed.declaration_signature()
+                                    == cached.parsed.declaration_signature()
                                 && cache.indexes.identities.file(&file.path).is_some()))
                 })
         }) {
@@ -1721,10 +1672,7 @@ impl LspState {
                     .identities
                     .file(&file.path)
                     .expect("identity checked");
-                cache
-                    .indexes
-                    .signatures
-                    .refresh_file_body(id, file.program());
+                cache.indexes.refresh_file_body(id, &file.parsed);
                 cached.parsed = Arc::clone(&file.parsed);
                 cached.has_parse_errors = file.has_parse_errors;
             }
@@ -1923,10 +1871,7 @@ impl LspState {
             && let Some(&index) = snapshot.by_path.get(&doc.path)
             && let Some(file) = snapshot.indexes.identities.file(&doc.path)
         {
-            snapshot
-                .indexes
-                .signatures
-                .refresh_file_body(file, doc.parsed.program());
+            snapshot.indexes.refresh_file_body(file, &doc.parsed);
             snapshot.files[index].parsed = Arc::clone(&doc.parsed);
             snapshot.files[index].has_parse_errors = doc.has_parse_errors;
             self.body_only_changes.insert(uri.to_string(), index);
@@ -2407,7 +2352,7 @@ impl LspState {
             let stamp = FileStamp::read(path);
             if let Some(cached) = self.disk_files.get(path)
                 && cached.language_version == language_version
-                && cached.stamp == stamp
+                && (self.semantic_snapshot.is_some() || cached.stamp == stamp)
             {
                 files.push(ProjectFile {
                     path: normalized.clone(),
@@ -2420,7 +2365,8 @@ impl LspState {
             let fallback_stamp = stamp.clone();
             if !self.dynamic_file_watching {
                 self.fallback_stamps
-                    .insert(path.to_path_buf(), fallback_stamp);
+                    .entry(path.to_path_buf())
+                    .or_insert(fallback_stamp);
             }
             let source = match falcon_analyze::read_source(path) {
                 Ok(source) => source,

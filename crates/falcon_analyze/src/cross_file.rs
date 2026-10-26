@@ -1,17 +1,29 @@
 //! Cross-file rules receive the full analyzed file set.
 
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{CONFIG_DIAGNOSTIC_ID, Diagnostic};
-use falcon_syntax::cst::{AstNode, Expr, NodeId, Program, SyntaxNode, SyntaxTree};
+use falcon_syntax::cst::{
+    AstNode, Expr, FunctionDecl, GetterDecl, MethodDecl, NodeId, NodeKind, OperatorDecl, Program,
+    SyntaxNode, SyntaxTree,
+};
 
 /// Shared project facts; callers may retain these after per-file analysis.
 pub struct SemanticIndexes {
     pub types: crate::TypeIndex,
     pub identities: crate::IdentityIndex,
     pub signatures: crate::SignatureIndex,
+}
+
+impl SemanticIndexes {
+    /// Retain declaration facts after an edit with an unchanged declaration signature.
+    pub fn refresh_file_body(&mut self, file: crate::FileId, parsed: &Arc<ParsedFile>) {
+        self.identities.refresh_file_body(file, parsed);
+        self.signatures.refresh_file_body(file, parsed.program());
+    }
 }
 
 #[derive(Debug)]
@@ -23,6 +35,76 @@ pub struct ParsedFile {
 impl ParsedFile {
     pub fn program(&self) -> Program<'_> {
         self.tree.program(&self.source)
+    }
+
+    /// Hash declaration text, excluding bodies whose return types are explicit.
+    /// Body edits cannot change these declarations' inferred signatures.
+    pub fn declaration_signature(&self) -> u64 {
+        let mut signature = DefaultHasher::new();
+        let mut cursor = 0;
+        let mut body_start = 0;
+        let mut body_end = 0;
+        for node in self.program().syntax().descendants() {
+            if node.span().start >= body_start && node.span().start < body_end {
+                continue;
+            }
+            if let Some(body) = declaration_body(node) {
+                let span = body.span();
+                self.source[cursor..span.start].hash(&mut signature);
+                cursor = span.end;
+                body_start = span.start;
+                body_end = span.end;
+            }
+        }
+        self.source[cursor..].hash(&mut signature);
+        signature.finish()
+    }
+
+    pub(crate) fn type_occurrences(&self) -> rustc_hash::FxHashMap<usize, usize> {
+        let mut occurrences = rustc_hash::FxHashMap::default();
+        let mut ordinal = 0;
+        let mut body_start = 0;
+        let mut body_end = 0;
+        for node in self.program().syntax().descendants() {
+            let offset = node.span().start;
+            if matches!(node.kind(), NodeKind::NamedType | NodeKind::TypeParam) {
+                // Declaration occurrences keep their ordinal when an earlier body
+                // changes size. Body-local occurrences occupy a separate namespace.
+                let identity = if offset >= body_start && offset < body_end {
+                    offset | (1 << (usize::BITS - 1))
+                } else {
+                    let identity = ordinal;
+                    ordinal += 1;
+                    identity
+                };
+                occurrences.insert(offset, identity);
+            }
+            if (offset < body_start || offset >= body_end)
+                && let Some(body) = declaration_body(node)
+            {
+                body_start = body.span().start;
+                body_end = body.span().end;
+            }
+        }
+        occurrences
+    }
+}
+
+fn declaration_body(node: SyntaxNode<'_>) -> Option<falcon_syntax::cst::FunctionBody<'_>> {
+    match node.kind() {
+        NodeKind::FunctionDecl => FunctionDecl::cast(node)
+            .filter(|function| function.return_type().is_some())
+            .and_then(|function| function.body()),
+        NodeKind::MethodDecl => MethodDecl::cast(node)
+            .filter(|method| method.return_type().is_some())
+            .and_then(|method| method.body()),
+        NodeKind::GetterDecl => GetterDecl::cast(node)
+            .filter(|getter| getter.return_type().is_some())
+            .and_then(|getter| getter.body()),
+        NodeKind::OperatorDecl => OperatorDecl::cast(node)
+            .filter(|operator| operator.return_type().is_some())
+            .and_then(|operator| operator.body()),
+        _ => None,
     }
 }
 

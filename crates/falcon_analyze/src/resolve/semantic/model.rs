@@ -97,7 +97,10 @@ impl TypeParameterScope {
     ) {
         let owner = ParameterOwner::Source {
             file: model.file,
-            offset: params.clone().next().map_or(0, |param| param.span().start),
+            offset: params
+                .clone()
+                .next()
+                .map_or(0, |param| model.type_occurrence(param.span().start)),
         };
         self.scopes.push(HashMap::new());
         for (ordinal, param) in params.clone().enumerate() {
@@ -206,6 +209,13 @@ impl<'a> SemanticModel<'a> {
             parsed: Some(parsed),
             identities,
             types,
+        }
+    }
+
+    fn type_occurrence(&self, offset: usize) -> usize {
+        match (self.file, self.parsed) {
+            (Some(file), Some(parsed)) => self.identities.type_occurrence(file, parsed, offset),
+            _ => offset,
         }
     }
 
@@ -677,7 +687,7 @@ impl<'a> SemanticModel<'a> {
                         alias,
                         &arguments,
                         named.is_nullable(),
-                        Some((self.file, named.span().start)),
+                        Some((self.file, self.type_occurrence(named.span().start))),
                     );
                 }
                 let extension_type = self.types.is_some_and(|types| {

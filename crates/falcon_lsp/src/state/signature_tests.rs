@@ -17,14 +17,15 @@ fn uri(path: &Path) -> String {
 fn signature(source: &str) -> u64 {
     let parsed = try_parse_for_package(source, None).unwrap();
     assert!(parsed.errors.is_empty(), "{source}: {:?}", parsed.errors);
-    declaration_signature(&ParsedFile {
+    ParsedFile {
         source: source.into(),
         tree: parsed.tree,
-    })
+    }
+    .declaration_signature()
 }
 
 #[test]
-fn declaration_signature_skips_bodies_but_tracks_shifted_type_provenance() {
+fn declaration_signature_skips_bodies_and_shifted_type_offsets() {
     assert_eq!(signature("int f() => 1;"), signature("int f() => 2222;"));
     // A body's own named types do not affect the retained declaration index.
     assert_eq!(
@@ -38,7 +39,7 @@ fn declaration_signature_skips_bodies_but_tracks_shifted_type_provenance() {
     ] {
         let before = format!("typedef Alias = int; void f() {{}} {declaration}");
         let after = format!("typedef Alias = int; void f() {{ /* shift */ }} {declaration}");
-        assert_ne!(signature(&before), signature(&after), "{declaration}");
+        assert_eq!(signature(&before), signature(&after), "{declaration}");
     }
 }
 
@@ -129,32 +130,68 @@ fn body_only_part_edits_refresh_open_library_warnings_without_importers_or_rebui
 }
 
 #[test]
-fn body_shift_before_alias_or_generic_owner_rebuilds_declaration_indexes() {
-    for declaration in [
-        "typedef Alias = int; Alias make() => 1;",
-        "class Box<T> { T value(T input) => input; }",
-        "T identity<T>(T value) => value;",
+fn body_shift_before_typed_build_and_generic_class_reuses_indexes_and_positions() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("main.dart");
+    let source = |body: &str| {
+        format!(
+            "typedef Builder = int Function();\n\
+             class Screen {{\n\
+               void initState() {{ {body} }}\n\
+               int build() => 1;\n\
+               Builder callback() => () => 1;\n\
+             }}\n\
+             class Box<T> {{ T identity(T value) => value; }}\n\
+             void main() {{\n\
+               Screen().build();\n\
+               Box<int>().identity(1);\n\
+             }}\n"
+        )
+    };
+    let before = source("");
+    std::fs::write(&path, &before).unwrap();
+    let uri = uri(&path);
+    let mut state = state(directory.path());
+    state.resolve_semantics = true;
+    state.open(&uri, before.clone(), Some(1));
+    let builds = state.semantic_snapshot_build_count;
+    let topologies = state.semantic_topology_build_count;
+    let external = state.external_index_build_count;
+    for (version, source) in [
+        (2, source("final values = <String>[];\n// shifted declarations\n")),
+        (3, source("final values = <int>[1, 2, 3];")),
+        (4, before),
     ] {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("main.dart");
-        let before = format!("void f() {{}} {declaration}");
-        let after = format!("void f() {{ /* shift */ }} {declaration}");
-        std::fs::write(&path, &before).unwrap();
-        let uri = uri(&path);
-        let mut state = state(directory.path());
-        state.open(&uri, before.clone(), Some(1));
-        let mut builds = state.semantic_snapshot_build_count;
-        for (version, source) in [(2, after), (3, before)] {
-            state.change(&uri, source.clone(), Some(version));
-            assert!(state.semantic_snapshot.is_none(), "{declaration}");
-            state.analyze_affected_many(std::slice::from_ref(&uri));
-            builds += 1;
-            assert_eq!(state.semantic_snapshot_build_count, builds);
+        assert!(state.change(&uri, source.clone(), Some(version)));
+        assert!(state.semantic_snapshot.is_some());
+        let published = state.analyze_affected_many(std::slice::from_ref(&uri));
+        assert_eq!(published.len(), 1, "{published:?}");
+        let diagnostics: Vec<_> = published[0]
+            .1
+            .iter()
+            .filter(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
+            .collect();
+        assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
+        for call in ["Screen().build()", "Box<int>().identity(1)"] {
+            let start = source.find(call).unwrap();
+            let diagnostic = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.span.start == start)
+                .unwrap_or_else(|| panic!("missing current diagnostic at {call}: {diagnostics:?}"));
+            assert!(diagnostic.span.end <= start + call.len());
             assert_eq!(
-                state.documents[&uri].declaration_signature,
-                signature(&source)
+                diagnostic.line,
+                u32::try_from(source[..start].bytes().filter(|&byte| byte == b'\n').count() + 1)
+                    .unwrap()
             );
         }
+        assert_eq!(state.semantic_snapshot_build_count, builds);
+        assert_eq!(state.semantic_topology_build_count, topologies);
+        assert_eq!(state.external_index_build_count, external);
+        assert_eq!(
+            state.documents[&uri].declaration_signature,
+            signature(&source)
+        );
     }
 }
 

@@ -24,6 +24,86 @@ fn with_model(source: &str, test: impl FnOnce(&SemanticModel<'_>)) {
 }
 
 #[test]
+fn retained_type_occurrences_survive_body_shifts_without_conflating_alias_uses() {
+    fn parsed(source: String) -> Arc<crate::ParsedFile> {
+        let result = parse(&source);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        Arc::new(crate::ParsedFile {
+            source: source.into_boxed_str(),
+            tree: result.tree,
+        })
+    }
+
+    fn facts(
+        parsed: &Arc<crate::ParsedFile>,
+        identities: &IdentityIndex,
+    ) -> (ResolvedType, Vec<Arc<AliasProvenance>>) {
+        let model = SemanticModel::new(Path::new("/project/aliases.dart"), parsed, identities, None);
+        let mut parameter = None;
+        let mut aliases = Vec::with_capacity(2);
+        for declaration in parsed.program().declarations() {
+            match declaration {
+                TopLevelDecl::Class(class) => {
+                    let mut scope = TypeParameterScope::default();
+                    scope.push(class.type_params(), &model);
+                    parameter = scope.lookup("T");
+                }
+                TopLevelDecl::Function(function) if function.name().name() != "initState" => {
+                    let ty = model.resolve_type_in(
+                        function.return_type().unwrap(),
+                        &TypeParameterScope::default(),
+                    );
+                    let ResolvedTypeKind::Function { alias, .. } = ty.kind else {
+                        panic!("expected alias function type");
+                    };
+                    aliases.push(alias.0.expect("alias source provenance"));
+                }
+                _ => {}
+            }
+        }
+        (parameter.unwrap(), aliases)
+    }
+
+    let source = |body| {
+        format!(
+            "typedef Builder = int Function(); void initState() {{ {body} }} \
+             Builder first() => () => 1; Builder second() => () => 2; \
+             class Box<T> {{ T identity(T value) => value; }}"
+        )
+    };
+    let original = parsed(source(""));
+    let path = Path::new("/project/aliases.dart");
+    let mut identities = IdentityIndex::build(
+        &[IdentitySource {
+            path,
+            parsed: &original,
+            has_parse_errors: false,
+        }],
+        &[],
+        &[],
+        None,
+    );
+    let expected = facts(&original, &identities);
+    assert_ne!(expected.1[0], expected.1[1]);
+    let file = identities.file(path).unwrap();
+    for body in [
+        "final items = <String>[];",
+        "final items = <int>[1, 2, 3]; // a longer body\n",
+        "",
+    ] {
+        let edited = parsed(source(body));
+        assert_eq!(
+            original.declaration_signature(),
+            edited.declaration_signature()
+        );
+        identities.refresh_file_body(file, &edited);
+        assert_eq!(facts(&edited, &identities), expected);
+        // Retained templates still resolve against their original parsed file.
+        assert_eq!(facts(&original, &identities), expected);
+    }
+}
+
+#[test]
 fn exact_function_shapes_support_alpha_binders_and_named_variance() {
     with_model(
         "typedef F = T Function<T extends num>(T value);
