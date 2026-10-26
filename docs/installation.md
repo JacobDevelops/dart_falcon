@@ -218,10 +218,12 @@ These integrations are optional. Without their secrets, ordinary GitHub and pub
 releases continue unchanged.
 
 - **Archive signing:** create a Minisign key pair (`minisign -G`). Store the
-  complete secret key file as the Actions secret `MINISIGN_SECRET_KEY` and its
-  nonempty password as `MINISIGN_PASSWORD`. Configure both secrets or neither;
-  partial configuration fails the release before building. Keep the secret key
-  offline too, and distribute the public key through a trusted channel.
+  complete secret key file as the Actions secret `MINISIGN_SECRET_KEY`. For a
+  password-protected key, store its password as `MINISIGN_PASSWORD`. The password
+  is optional for an unprotected key generated with `minisign -G -W`; setting a
+  password without a key fails the release before building. With neither secret
+  set, archive signing is skipped. Keep the secret key offline too, and distribute
+  the public key through a trusted channel.
   Releases then include `.minisig` signatures for every archive and `SHA256SUMS`.
   Verify them with `minisign -Vm <asset> -P <trusted-public-key>`.
 - **macOS signing and notarisation:** export a **Developer ID Application**

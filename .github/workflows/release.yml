@@ -64,8 +64,8 @@ jobs:
               exit 1
             fi
           done
-          if [ "$HAS_MINISIGN_KEY" != "$HAS_MINISIGN_PASSWORD" ]; then
-            echo "Archive signing requires both MINISIGN_SECRET_KEY and MINISIGN_PASSWORD or neither" >&2
+          if [ "$HAS_MINISIGN_PASSWORD" = true ] && [ "$HAS_MINISIGN_KEY" != true ]; then
+            echo "MINISIGN_PASSWORD requires MINISIGN_SECRET_KEY" >&2
             exit 1
           fi
           if [ "$HAS_TAP" = true ] && [ "$HAS_TAP_TOKEN" != true ]; then

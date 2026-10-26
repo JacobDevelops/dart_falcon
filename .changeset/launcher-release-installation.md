@@ -8,4 +8,4 @@ Scope saved native-version selections to the Dart launcher package version so up
 
 Clarify that the pub launcher's same-release SHA256 manifest check provides integrity, not publisher authenticity, and document manual verification when Minisign signatures and a trusted public key are available.
 
-Fail releases early for partially configured Apple signing or Minisign credentials and custom Homebrew taps without publishing tokens, while keeping unconfigured integrations optional.
+Fail releases early for partially configured Apple signing, a Minisign password without its key, and custom Homebrew taps without publishing tokens, while keeping unconfigured integrations and passwords for unprotected Minisign keys optional.

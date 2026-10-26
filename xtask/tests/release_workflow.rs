@@ -78,12 +78,12 @@ fn release_rejects_every_partial_apple_signing_configuration() {
 }
 
 #[test]
-fn release_requires_both_minisign_secrets_or_neither() {
+fn release_requires_a_minisign_key_when_a_password_is_set() {
     for mask in 0..4 {
         let mut configured = [false; 9];
         configured[5] = mask & 1 != 0;
         configured[6] = mask & 2 != 0;
-        check_credentials(configured, mask == 0 || mask == 3);
+        check_credentials(configured, mask != 2);
     }
 }
 
