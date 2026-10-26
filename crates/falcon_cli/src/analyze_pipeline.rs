@@ -1,28 +1,15 @@
 //! Analyze pipeline: config loading, file walking, parallel analysis, and diagnostic output.
 
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use tracing::info;
+use std::path::PathBuf;
 
-use clap::{Args, ValueEnum};
-use falcon_analyze::package_identities;
-use falcon_analyze::{
-    AnalysisEnvironment, ParsedFile, ProjectFile, Workspace, analyze_parallel_collecting_resolving,
-};
-use falcon_analyze::{DartSdk, PackageConfig, SdkLocator};
-use falcon_dart_parser::lex_tree;
-use falcon_diagnostics::{
-    Diagnostic, LineIndex, RULES_THREAD_ERROR_DIAGNOSTIC_ID, SYNTAX_ERROR_DIAGNOSTIC_ID, Severity,
-    Span, UNMATCHED_PATH_DIAGNOSTIC_ID,
-};
-use falcon_rules::{
-    apply_severities, build_cross_file_registry, build_registry, cross_file_requires_resolution,
-    load_config, load_or_default, requires_resolution, run_cross_file,
-};
-
-use crate::file_walker::walk_project;
 use crate::output;
+use clap::{Args, ValueEnum};
+use falcon_analyze::{AnalysisEnvironment, DartSdk, PackageConfig, SdkLocator};
+use falcon_diagnostics::{Diagnostic, Severity, Span, UNMATCHED_PATH_DIAGNOSTIC_ID};
+use falcon_project::{
+    ProjectAnalysis, analyze_sources, complete_analysis, finalize_diagnostics, load_project_config,
+    manifest_file, walk_project,
+};
 
 /// Output format for diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -115,14 +102,13 @@ fn collect_check_impl(
     options: &CheckOptions,
     sdk_locator: Option<SdkLocator>,
 ) -> Result<CheckOutput, String> {
-    let loaded = match &options.config_path {
-        Some(path) => load_config(path).map_err(|e| e.to_string())?,
-        None => {
-            let cwd = std::env::current_dir()
-                .map_err(|e| format!("failed to get current directory: {}", e))?;
-            load_or_default(&cwd).map_err(|e| e.to_string())?
-        }
+    let start_dir = if options.config_path.is_none() {
+        std::env::current_dir().map_err(|e| format!("failed to get current directory: {e}"))?
+    } else {
+        PathBuf::from(".")
     };
+    let loaded = load_project_config(options.config_path.as_deref(), &start_dir)
+        .map_err(|e| e.to_string())?;
     for warning in loaded.warnings {
         eprintln!("warning: {warning}");
     }
@@ -147,10 +133,8 @@ fn collect_check_impl(
         &cli_filter
     };
     let max_errors = options.max_errors.or(config.max_errors);
-    let registry = build_registry(&config);
-    let cross_file_registry = build_cross_file_registry(&config);
-    let collect_programs = !cross_file_registry.is_empty();
-    let resolve = requires_resolution(&registry) || cross_file_requires_resolution(&config);
+    let analysis = ProjectAnalysis::new(&config);
+    let collect_programs = analysis.collect_programs;
     let walked = walk_project(paths, filter, true)?;
     let mut files = walked.files;
     let mut manifests = walked.manifests;
@@ -189,16 +173,6 @@ fn collect_check_impl(
             ));
         }
     }
-    let packages = if resolve {
-        package_identities(
-            files
-                .iter()
-                .chain(manifests.iter())
-                .map(|(path, _)| path.as_path()),
-        )
-    } else {
-        Vec::new()
-    };
     if files.is_empty() && manifests.is_empty() {
         return Ok(CheckOutput {
             exit_code: i32::from(!unmatched.is_empty()),
@@ -207,126 +181,57 @@ fn collect_check_impl(
             max_errors,
         });
     }
-    info!(
-        file_count = files.len(),
-        rule_count = registry.rules().len(),
-        cross_file_rule_count = cross_file_registry.rules().len(),
-        resolve,
-        "starting check"
-    );
     // Package configurations give every file its language version; resolving
     // runs also load the SDK and dependency libraries project files import.
     let mut environment = match sdk_locator {
         Some(locator) => AnalysisEnvironment::with_sdk_locator(locator),
         None => AnalysisEnvironment::default(),
     };
-    environment.extend(files.iter().map(|(path, _)| path.as_path()));
-    let workspace = Workspace {
-        packages: &packages,
-        environment: Some(&environment),
-    };
-    let (mut diagnostics, mut project_files, indexes) = analyze_parallel_collecting_resolving(
-        &registry,
-        &files,
-        &config,
-        collect_programs,
-        resolve,
-        workspace,
-    );
+    let (mut diagnostics, mut project_files, indexes) =
+        analyze_sources(&analysis, &files, &manifests, &config, &mut environment);
     let total_files = files.len();
     if collect_programs {
-        project_files.extend(manifests.drain(..).map(|(path, source)| {
-            let tree = lex_tree(&source);
-            ProjectFile {
-                path,
-                parsed: std::sync::Arc::new(ParsedFile {
-                    source: source.into_boxed_str(),
-                    tree,
-                }),
-                has_parse_errors: false,
-            }
-        }));
+        project_files.extend(
+            manifests
+                .drain(..)
+                .map(|(path, source)| manifest_file(path, source)),
+        );
         files.clear();
     }
 
-    let mut pipeline_failed = diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.rule == RULES_THREAD_ERROR_DIAGNOSTIC_ID);
-    apply_severities(&mut diagnostics, &config);
+    let pipeline_failed = complete_analysis(
+        &environment,
+        &analysis.cross_file_registry,
+        &project_files,
+        &config,
+        indexes.as_ref(),
+        &mut diagnostics,
+    );
     let has_unmatched = !unmatched.is_empty();
     diagnostics.append(&mut unmatched);
 
-    if collect_programs {
-        match run_cross_file(
-            &environment,
-            &cross_file_registry,
-            &project_files,
-            &config,
-            indexes.as_ref(),
-        ) {
-            Ok(cross_file) => diagnostics.extend(cross_file),
-            Err(error) => {
-                pipeline_failed = true;
-                diagnostics.extend(
-                    project_files
-                        .first()
-                        .map(|file| falcon_analyze::rules_thread_diagnostic(&file.path, &error)),
-                );
-            }
-        }
-    }
     for warning in environment.take_warnings() {
         eprintln!("warning: {warning}");
     }
 
-    diagnostics.retain(|diagnostic| {
-        diagnostic.rule == UNMATCHED_PATH_DIAGNOSTIC_ID
-            || diagnostic.rule == RULES_THREAD_ERROR_DIAGNOSTIC_ID
-            || if Path::new(&diagnostic.file_path)
-                .extension()
-                .is_some_and(|ext| ext == "dart")
-            {
-                filter.admits(&diagnostic.file_path)
-            } else {
-                !filter.excludes(&diagnostic.file_path)
-            }
-    });
-
-    // Resolve 1-based line/col for every diagnostic from its file's source, so
-    // text and JSON output carry navigable positions rather than byte offsets.
-    let sources: HashMap<Cow<'_, str>, &str> = if collect_programs {
-        project_files
-            .iter()
-            .map(|file| (file.path.to_string_lossy(), file.source()))
-            .collect()
+    if collect_programs {
+        finalize_diagnostics(
+            &mut diagnostics,
+            filter,
+            project_files
+                .iter()
+                .map(|file| (file.path.as_path(), file.source())),
+        );
     } else {
-        files
-            .iter()
-            .chain(manifests.iter())
-            .map(|(path, source)| (path.to_string_lossy(), source.as_str()))
-            .collect()
-    };
-    let mut lines: HashMap<&str, LineIndex<'_>> = HashMap::new();
-    for d in &mut diagnostics {
-        if let Some((path, src)) = sources.get_key_value(d.file_path.as_str()) {
-            d.resolve_position_in(lines.entry(path).or_insert_with(|| LineIndex::new(src)));
-        }
+        finalize_diagnostics(
+            &mut diagnostics,
+            filter,
+            files
+                .iter()
+                .chain(manifests.iter())
+                .map(|(path, source)| (path.as_path(), source.as_str())),
+        );
     }
-
-    // File walking order can vary; sort diagnostics so output and max_errors
-    // truncation remain stable across runs.
-    // Syntax errors sort ahead of lints within a file (`false` < `true`).
-    diagnostics.sort_by(|a, b| {
-        a.file_path
-            .cmp(&b.file_path)
-            .then(
-                (a.rule != SYNTAX_ERROR_DIAGNOSTIC_ID).cmp(&(b.rule != SYNTAX_ERROR_DIAGNOSTIC_ID)),
-            )
-            .then(a.span.start.cmp(&b.span.start))
-            .then(a.rule.cmp(b.rule))
-            .then(a.span.end.cmp(&b.span.end))
-            .then(a.message.cmp(&b.message))
-    });
 
     let exit_code = if pipeline_failed || has_unmatched {
         1

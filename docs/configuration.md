@@ -30,6 +30,16 @@ The deprecated spellings `project` and `cross_file` (for `cross-file`) and
 load with warnings. The CLI prints configuration warnings; the language server
 sends them to the editor. The published JSON schema accepts canonical keys only.
 
+The CLI and language server use the same project discovery, analysis and
+diagnostic ordering stages. Both prune excluded directories, include package
+manifests for cross-file rules and apply per-file overrides before publishing
+findings. The CLI analyzes its selected input paths; the language server analyzes
+the workspace and prefers open buffers over disk contents. Unsaved buffers also
+participate in editor semantic analysis. An incomplete editor project does not
+produce cross-file findings that assume a missing file or declaration. Editors
+supporting relative file-watch patterns also watch package manifests above the
+workspace root.
+
 ## Editor autocomplete (`$schema`)
 
 Point the top-level `$schema` at the published JSON schema to get rule-name

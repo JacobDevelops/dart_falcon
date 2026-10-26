@@ -7,6 +7,7 @@ edition.workspace = true
 falcon_analyze     = { path = "../crates/falcon_analyze" }
 falcon_cli         = { path = "../crates/falcon_cli" }
 falcon_diagnostics = { path = "../crates/falcon_diagnostics" }
+falcon_project     = { path = "../crates/falcon_project" }
 falcon_rules       = { path = "../crates/falcon_rules" }
 clap               = { workspace = true }
 glob               = { workspace = true }

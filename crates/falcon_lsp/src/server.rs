@@ -174,6 +174,9 @@ impl FileWatching {
         } else {
             Vec::new()
         };
+        if self.relative {
+            files.extend(state.ancestor_manifests());
+        }
         files.sort_unstable();
         files.dedup();
         if self.registration.is_some()

@@ -331,7 +331,10 @@ mod file_watching_tests {
             registered[0]
                 .watchers
                 .iter()
-                .all(|watcher| matches!(watcher.glob_pattern, GlobPattern::String(_)))
+                .all(|watcher| match &watcher.glob_pattern {
+                    GlobPattern::String(_) => true,
+                    GlobPattern::Relative(relative) => relative.pattern == "pubspec.yaml",
+                })
         );
     }
 
@@ -364,6 +367,17 @@ mod file_watching_tests {
                             .any(|watcher| watcher.glob_pattern
                                 == GlobPattern::String(pattern.to_string()))
                     );
+                }
+                if relative {
+                    let parent = canonical_or_lexical(client.directory.path());
+                    assert!(!parent.join("pubspec.yaml").exists());
+                    assert!(initial[0].watchers.iter().any(|watcher| {
+                        watcher.glob_pattern
+                            == GlobPattern::Relative(RelativePattern {
+                                base_uri: OneOf::Right(file_uri(&parent).unwrap()),
+                                pattern: "pubspec.yaml".to_string(),
+                            })
+                    }));
                 }
             }
             client.open();

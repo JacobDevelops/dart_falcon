@@ -1,5 +1,68 @@
 use super::*;
 
+#[test]
+fn ancestor_manifest_cross_file_findings_refresh_after_disk_change() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(directory.path()).unwrap();
+    let workspace = root.join("tool");
+    std::fs::create_dir(&workspace).unwrap();
+    let manifest = root.join("pubspec.yaml");
+    std::fs::write(
+        &manifest,
+        "name: ancestor_fixture\nhomepage: http://example.com\n",
+    )
+    .unwrap();
+    let config = workspace.join("falcon.json");
+    std::fs::write(
+        &config,
+        r#"{
+          "linter": { "enabled": false },
+          "cross-file": {
+            "rules": {
+              "recommended": false,
+              "security": { "secure-pubspec-urls": "error" }
+            }
+          }
+        }"#,
+    )
+    .unwrap();
+    let dart = workspace.join("main.dart");
+    let source = "void main() {}\n";
+    std::fs::write(&dart, source).unwrap();
+    let uri = format!("file://{}", dart.display());
+    let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
+    assert!(state.open(&uri, source.to_owned(), Some(1)).is_empty());
+    assert!(state.take_config_messages().is_empty());
+    let findings = state.cross_file_diagnostics();
+    assert_eq!(findings.len(), 1, "{findings:#?}");
+    let diagnostics = &findings[manifest.to_string_lossy().as_ref()];
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = &diagnostics[0];
+    assert_eq!(diagnostic.rule, "secure-pubspec-urls");
+    assert_eq!(diagnostic.severity, falcon_diagnostics::Severity::Error);
+    assert_eq!(diagnostic.file_path, manifest.to_string_lossy());
+    assert_eq!(
+        diagnostic.message,
+        "The `http` protocol shouldn't be used because it isn't secure."
+    );
+    assert_eq!(diagnostic.line, 2);
+    assert!(diagnostic.col > 0);
+    // The real server opens Dart documents only; manifest findings remain in
+    // the project map instead of being published as artificial Dart buffers.
+    assert!(state.cross_file_pass().is_empty());
+
+    std::fs::write(
+        &manifest,
+        "name: ancestor_fixture\nhomepage: https://example.com\n",
+    )
+    .unwrap();
+    let refreshed = state.watched_files_changed(std::slice::from_ref(&manifest));
+    assert_eq!(refreshed.len(), 1, "{refreshed:#?}");
+    assert_eq!(refreshed[0].0, uri);
+    assert!(refreshed[0].1.is_empty());
+    assert!(state.cross_file_diagnostics().is_empty());
+}
+
 #[cfg(test)]
 mod source_size_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};

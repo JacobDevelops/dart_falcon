@@ -616,7 +616,7 @@ pub fn run(options: &Options) -> Result<()> {
         write_json(&config_path, &project_config)?;
         let filter = serde_json::from_value(project_config["files"]["includes"].clone())?;
         std::env::set_current_dir(&project)?;
-        let discovered = falcon_cli::walk_project(&[PathBuf::from(".")], &filter, false)
+        let discovered = falcon_project::walk_project(&[PathBuf::from(".")], &filter, false)
             .map(|output| output.files.len());
         std::env::set_current_dir(&root)?;
         let discovered = discovered?;
@@ -992,7 +992,7 @@ mod tests {
         let excluded: Vec<_> = EXCLUDED.iter().map(|path| (*path).to_owned()).collect();
         let filter = serde_json::from_value(json!(falcon_includes(&excluded))).unwrap();
         assert!(
-            falcon_cli::walk_project(&[], &filter, false)
+            falcon_project::walk_project(&[], &filter, false)
                 .unwrap()
                 .files
                 .is_empty()

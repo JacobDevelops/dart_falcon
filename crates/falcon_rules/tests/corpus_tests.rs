@@ -941,7 +941,7 @@ fn cross_file_corpus_matches_expectations() {
 /// resolving pipeline.
 #[test]
 fn resolver_dependent_per_file_project_corpus() {
-    use falcon_analyze::{LibrarySource, group_libraries, library_unit};
+    use falcon_analyze::{SemanticIndexes, build_semantic_indexes, library_unit};
     use falcon_syntax::cst::Program;
 
     let rules = all_rules();
@@ -995,12 +995,6 @@ fn resolver_dependent_per_file_project_corpus() {
             .collect();
         let programs: Vec<Program<'_>> = parsed.iter().map(|parsed| parsed.program()).collect();
         let parsed_refs: Vec<_> = parsed.iter().collect();
-        let path_prog: Vec<(PathBuf, Program<'_>)> = paths
-            .iter()
-            .cloned()
-            .zip(programs.iter().copied())
-            .collect();
-        let grouping = group_libraries(&path_prog);
         let identity_sources: Vec<_> = paths
             .iter()
             .zip(&has_parse_errors)
@@ -1030,35 +1024,22 @@ fn resolver_dependent_per_file_project_corpus() {
                 paths.iter().any(|local| local == path)
             });
         let packages = falcon_analyze::package_identities(paths.iter().map(PathBuf::as_path));
-        let identities = IdentityIndex::build(
+        let (
+            SemanticIndexes {
+                types: type_index,
+                identities,
+                signatures,
+            },
+            grouping,
+        ) = build_semantic_indexes(
             &identity_sources,
-            &source_refs,
             &packages,
             Some(falcon_analyze::ExternalSources {
                 libraries: &externals,
                 environment: &environment,
             }),
+            None,
         );
-        let mut type_index = TypeIndex::from_resolved_files(
-            has_parse_errors
-                .iter()
-                .enumerate()
-                .map(|(i, has_parse_errors)| {
-                    (
-                        paths[i].as_path(),
-                        LibrarySource {
-                            program: programs[i],
-                            has_parse_errors: *has_parse_errors,
-                            has_unresolved_parts: grouping.is_unresolved(i),
-                        },
-                    )
-                }),
-            &identities,
-        );
-        type_index.add_external(&externals, &identities);
-        let signature_files: Vec<_> = paths.iter().cloned().zip(parsed.iter().cloned()).collect();
-        let signatures =
-            SignatureIndex::build(&signature_files, Some(&externals), &identities, &type_index);
 
         for (i, path) in paths.iter().enumerate() {
             let unit = library_unit(&grouping, &parsed_refs, i);

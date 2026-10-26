@@ -15,6 +15,7 @@ mod parallel;
 mod registry;
 mod resolve;
 mod rule;
+mod semantic_indexes;
 mod semantic_scope;
 mod source;
 mod structural_scope;
@@ -68,6 +69,7 @@ pub(crate) use resolve::{
     InferenceContext, ParameterOwner, TypeEnvironment, expression_has_dot_shorthand_base,
 };
 pub use rule::{Rule, RuleAnalysis, RulePreparation};
+pub use semantic_indexes::{ExternalIndexParts, build_semantic_indexes};
 pub use semantic_scope::{
     CascadeAssignment, SemanticRuleVisitor, SemanticState, explicit_call_receiver,
     resolved_super_param_type, returned_expressions, visit_program,

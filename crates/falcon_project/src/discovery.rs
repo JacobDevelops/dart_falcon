@@ -12,6 +12,15 @@ thread_local! {
     };
 }
 
+/// Paths discovered without opening source or manifest contents.
+#[derive(Debug)]
+pub struct ProjectDiscovery {
+    pub files: Vec<PathBuf>,
+    pub manifests: Vec<PathBuf>,
+    pub missing_paths: Vec<PathBuf>,
+    pub filtered_paths: Vec<PathBuf>,
+}
+
 #[derive(Debug, Default)]
 pub struct WalkOutput {
     pub files: Vec<(PathBuf, String)>,
@@ -36,7 +45,37 @@ pub fn walk_project(
     filter: &PathFilter,
     collect_manifests: bool,
 ) -> Result<WalkOutput, String> {
-    let mut output = WalkOutput::default();
+    let discovery = discover_project(paths, filter, collect_manifests);
+    let mut output = WalkOutput {
+        missing_paths: discovery.missing_paths,
+        filtered_paths: discovery.filtered_paths,
+        ..WalkOutput::default()
+    };
+    for (paths, sources) in [
+        (discovery.files, &mut output.files),
+        (discovery.manifests, &mut output.manifests),
+    ] {
+        for path in paths {
+            if let Some(source) = read_source(&path)? {
+                sources.push((path, source));
+            }
+        }
+    }
+    Ok(output)
+}
+
+/// Discover supported paths, pruning exclusions without reading file contents.
+pub fn discover_project(
+    paths: &[PathBuf],
+    filter: &PathFilter,
+    collect_manifests: bool,
+) -> ProjectDiscovery {
+    let mut output = ProjectDiscovery {
+        files: Vec::new(),
+        manifests: Vec::new(),
+        missing_paths: Vec::new(),
+        filtered_paths: Vec::new(),
+    };
     let mut seen = HashSet::new();
     for path in paths {
         let metadata = match path.metadata() {
@@ -86,12 +125,12 @@ pub fn walk_project(
             for ancestor in start.ancestors() {
                 let manifest = ancestor.join("pubspec.yaml");
                 if manifest.is_file() {
-                    collect_file(&manifest, filter, true, &mut seen, &mut output)?;
+                    collect_file(&manifest, filter, true, &mut seen, &mut output);
                 }
             }
         }
         if metadata.is_file() {
-            collect_file(path, filter, collect_manifests, &mut seen, &mut output)?;
+            collect_file(path, filter, collect_manifests, &mut seen, &mut output);
         } else if metadata.is_dir() {
             // Flutter plugin symlinks point into dependency caches and may cycle.
             for item in WalkDir::new(path)
@@ -119,14 +158,14 @@ pub fn walk_project(
                         collect_manifests,
                         &mut seen,
                         &mut output,
-                    )?;
+                    );
                 }
             }
         }
     }
-    output.files.sort_by(|a, b| a.0.cmp(&b.0));
-    output.manifests.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(output)
+    output.files.sort();
+    output.manifests.sort();
+    output
 }
 
 fn collect_file(
@@ -134,13 +173,13 @@ fn collect_file(
     filter: &PathFilter,
     collect_manifests: bool,
     seen: &mut HashSet<PathBuf>,
-    output: &mut WalkOutput,
-) -> Result<(), String> {
+    output: &mut ProjectDiscovery,
+) {
     let is_manifest = collect_manifests
         && path.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml");
     let is_dart = path.extension().and_then(|extension| extension.to_str()) == Some("dart");
     if !is_manifest && !is_dart {
-        return Ok(());
+        return;
     }
     let admitted = if is_manifest {
         !filter.excludes(&path.to_string_lossy())
@@ -148,18 +187,15 @@ fn collect_file(
         filter.admits(&path.to_string_lossy())
     };
     if !admitted || seen.contains(path) {
-        return Ok(());
+        return;
     }
     seen.insert(path.to_path_buf());
-    if let Some(source) = read_source(path)? {
-        let results = if is_manifest {
-            &mut output.manifests
-        } else {
-            &mut output.files
-        };
-        results.push((path.to_path_buf(), source));
-    }
-    Ok(())
+    let results = if is_manifest {
+        &mut output.manifests
+    } else {
+        &mut output.files
+    };
+    results.push(path.to_path_buf());
 }
 
 fn read_source(path: &Path) -> Result<Option<String>, String> {

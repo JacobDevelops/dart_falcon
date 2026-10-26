@@ -23,10 +23,11 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use falcon_analyze::{
     Workspace, analyze_parallel_collecting_resolving, analyze_sequential_collecting_resolving,
 };
-use falcon_cli::{format_text, walk_project};
+use falcon_cli::format_text;
 use falcon_config::{FalconConfig, PathFilter};
 use falcon_dart_parser::parse;
 use falcon_diagnostics::Diagnostic;
+use falcon_project::walk_project;
 use falcon_rules::build_registry;
 
 /// Locate the jfit mobile lib corpus, or None when not present.

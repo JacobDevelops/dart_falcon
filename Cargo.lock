@@ -301,6 +301,7 @@ dependencies = [
  "falcon_config",
  "falcon_dart_parser",
  "falcon_diagnostics",
+ "falcon_project",
  "falcon_rules",
  "tempfile",
  "tikv-jemallocator",
@@ -381,6 +382,7 @@ dependencies = [
  "falcon_dart_parser",
  "falcon_diagnostics",
  "falcon_lsp",
+ "falcon_project",
  "falcon_rules",
  "falcon_syntax",
  "insta",
@@ -390,7 +392,6 @@ dependencies = [
  "tempfile",
  "tracing",
  "tracing-subscriber",
- "walkdir",
 ]
 
 [[package]]
@@ -435,12 +436,26 @@ dependencies = [
  "falcon_config",
  "falcon_dart_parser",
  "falcon_diagnostics",
+ "falcon_project",
  "falcon_rules",
  "falcon_syntax",
  "lsp-server",
  "lsp-types",
  "serde",
  "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
+name = "falcon_project"
+version = "0.4.4"
+dependencies = [
+ "falcon_analyze",
+ "falcon_config",
+ "falcon_dart_parser",
+ "falcon_diagnostics",
+ "falcon_rules",
  "tempfile",
  "tracing",
  "walkdir",
@@ -1575,6 +1590,7 @@ dependencies = [
  "falcon_analyze",
  "falcon_cli",
  "falcon_diagnostics",
+ "falcon_project",
  "falcon_rules",
  "glob",
  "rayon",

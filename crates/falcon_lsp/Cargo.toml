@@ -9,13 +9,13 @@ falcon_analyze       = { path = "../falcon_analyze" }
 falcon_dart_parser   = { path = "../falcon_dart_parser" }
 falcon_diagnostics   = { path = "../falcon_diagnostics" }
 falcon_config        = { path = "../falcon_config" }
+falcon_project       = { path = "../falcon_project" }
 falcon_rules         = { path = "../falcon_rules" }
 falcon_syntax        = { path = "../falcon_syntax" }
 lsp-server.workspace = true
 lsp-types.workspace  = true
 serde_json.workspace = true
 crossbeam-channel    = "0.5"
-walkdir.workspace    = true
 tracing.workspace    = true
 
 [dev-dependencies]

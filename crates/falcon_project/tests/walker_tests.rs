@@ -1,5 +1,5 @@
-use falcon_cli::file_walker::walk_project;
 use falcon_config::PathFilter;
+use falcon_project::{discover_project, walk_project};
 use std::fs;
 use std::path::PathBuf;
 use tempfile::tempdir;
@@ -300,4 +300,33 @@ fn dart_includes_do_not_hide_package_manifests() {
             .manifests
             .is_empty()
     );
+}
+
+#[test]
+fn discovery_lists_paths_without_reading_source_or_manifest_contents() {
+    let temp = tempdir().unwrap();
+    let source = temp.path().join("oversized.dart");
+    fs::File::create(&source)
+        .unwrap()
+        .set_len(u64::from(u32::MAX) + 1)
+        .unwrap();
+    let manifest = temp.path().join("pubspec.yaml");
+    fs::write(&manifest, [0xff]).unwrap();
+    let discovery = discover_project(&[temp.path().to_path_buf()], &PathFilter::default(), true);
+    assert_eq!(discovery.files, [source]);
+    assert_eq!(discovery.manifests, [manifest]);
+}
+
+#[test]
+fn discovery_preserves_missing_and_filtered_inputs() {
+    let temp = tempdir().unwrap();
+    let missing = temp.path().join("missing.dart");
+    let filtered = temp.path().join("filtered.dart");
+    fs::write(&filtered, "void main() {}").unwrap();
+    let mut filter = PathFilter::from_includes(&["!filtered.dart".into()]);
+    filter.set_base_dir(temp.path());
+    let discovery = discover_project(&[missing.clone(), filtered.clone()], &filter, true);
+    assert_eq!(discovery.missing_paths, [missing]);
+    assert_eq!(discovery.filtered_paths, [filtered]);
+    assert!(discovery.files.is_empty());
 }

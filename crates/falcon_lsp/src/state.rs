@@ -12,22 +12,21 @@ use std::sync::Arc;
 use lsp_types::{MessageType, ShowMessageParams, Uri};
 
 use falcon_analyze::{
-    AnalysisEnvironment, AnalyzeContext, CrossFileRuleRegistry, ExternalLibraries, ExternalOrigin,
-    ExternalSources, ExternalTarget, IdentityIndex, IdentitySource, LibraryGrouping, LibrarySource,
-    PackageIdentity, ParsedFile, ProjectFile, RuleRegistry, SemanticIndexes, SignatureIndex,
-    TypeIndex, canonical_or_lexical, group_libraries, import_path, library_unit,
-    package_identities, syntax_error_diagnostics,
+    AnalysisEnvironment, AnalyzeContext, CrossFileRuleRegistry, ExternalIndexParts,
+    ExternalLibraries, ExternalOrigin, ExternalSources, ExternalTarget, IdentityIndex,
+    IdentitySource, LibraryGrouping, PackageIdentity, ParsedFile, ProjectFile, RuleRegistry,
+    SemanticIndexes, SignatureIndex, TypeIndex, build_semantic_indexes, canonical_or_lexical,
+    import_path, library_unit, package_identities, syntax_error_diagnostics,
 };
 use falcon_config::FalconConfig;
-use falcon_dart_parser::{lex_tree, try_parse_for_package};
+use falcon_dart_parser::try_parse_for_package;
 use falcon_diagnostics::Diagnostic;
-use falcon_rules::{
-    apply_severities, build_cross_file_registry, build_registry, cross_file_requires_resolution,
-    load_config, load_or_default, requires_resolution, run_cross_file,
+use falcon_project::{
+    ProjectAnalysis, analyze_document, cross_file_diagnostics, discover_project,
+    load_project_config, manifest_file, resolve_document_positions, sort_diagnostics,
 };
 use falcon_syntax::{LanguageVersion, cst::Program};
 use tracing::{debug, warn};
-use walkdir::WalkDir;
 
 struct DocumentParse {
     tree: falcon_syntax::cst::SyntaxTree,
@@ -334,10 +333,11 @@ impl LspState {
             .iter()
             .map(|message| (message.typ, message.message.clone()))
             .collect();
-        let rules = build_registry(&config);
-        let cross_file_rules = build_cross_file_registry(&config);
-        let cross_file_resolve_semantics = cross_file_requires_resolution(&config);
-        let resolve_semantics = requires_resolution(&rules) || cross_file_resolve_semantics;
+        let analysis = ProjectAnalysis::new(&config);
+        let rules = analysis.registry;
+        let cross_file_rules = analysis.cross_file_registry;
+        let cross_file_resolve_semantics = analysis.cross_file_resolve;
+        let resolve_semantics = analysis.resolve;
         Self {
             documents: HashMap::new(),
             config,
@@ -400,6 +400,14 @@ impl LspState {
     /// Loaded local files use exact relative patterns, never recursive parent watches.
     pub fn watched_dependency_files(&self) -> &[PathBuf] {
         &self.watched_local_paths
+    }
+
+    pub(crate) fn ancestor_manifests(&self) -> impl Iterator<Item = PathBuf> + '_ {
+        self.workspace_root
+            .ancestors()
+            .skip(1)
+            .map(|directory| directory.join("pubspec.yaml"))
+            .filter(|path| !self.config.files.includes.excludes(&path.to_string_lossy()))
     }
 
     fn loaded_project_paths(&self) -> impl Iterator<Item = &Path> {
@@ -465,9 +473,11 @@ impl LspState {
                             .is_some_and(|snapshot| snapshot.by_path.contains_key(path))
                         && !self.watched_project_source(path)))
         });
-        let project_changed = paths
-            .iter()
-            .any(|path| path.starts_with(&self.workspace_root) && !open(path));
+        let project_changed = paths.iter().any(|path| {
+            !open(path)
+                && (path.starts_with(&self.workspace_root)
+                    || self.ancestor_manifests().any(|manifest| manifest == *path))
+        });
         if !inputs_changed && !dependency_changed && !project_changed && !rules_changed {
             return Vec::new();
         }
@@ -744,8 +754,7 @@ impl LspState {
         }
     }
 
-    /// Run the enabled rules over the cached CST of `uri`. Diagnostics are
-    /// sorted by span for deterministic publishing.
+    /// Run enabled rules over the cached CST, in shared project diagnostic order.
     pub fn analyze(&mut self, uri: &str) -> Vec<Diagnostic> {
         if !self.documents.contains_key(uri) {
             return Vec::new();
@@ -801,13 +810,17 @@ impl LspState {
                 .with_signatures(&snapshot.indexes.signatures)
                 .with_library(&library);
         }
-        let mut diagnostics = self.rules.run_all(doc.parsed.program(), &ctx);
+        let mut diagnostics = analyze_document(
+            &self.rules,
+            &self.config,
+            &ctx,
+            doc.syntax_diagnostics.clone(),
+        );
         if let Some(error) = &self.semantic_snapshot_error {
             diagnostics.push(falcon_analyze::rules_thread_diagnostic(&doc.path, error));
         }
-        diagnostics.extend(doc.syntax_diagnostics.iter().cloned());
-        apply_severities(&mut diagnostics, &self.config);
-        diagnostics.sort_by(|a, b| a.span.start.cmp(&b.span.start).then(a.rule.cmp(b.rule)));
+        resolve_document_positions(&mut diagnostics, doc.text());
+        sort_diagnostics(&mut diagnostics);
         doc.analyze_count += 1;
         doc.last_diagnostics = diagnostics.clone();
         debug!(uri, count = diagnostics.len(), "analyzed document");
@@ -883,11 +896,12 @@ impl LspState {
         };
         self.workspace_root = workspace_root;
         self.config = config;
-        self.rules = build_registry(&self.config);
-        self.cross_file_resolve_semantics = cross_file_requires_resolution(&self.config);
-        self.resolve_semantics =
-            requires_resolution(&self.rules) || self.cross_file_resolve_semantics;
-        self.cross_file_rules = build_cross_file_registry(&self.config);
+        self.watched_dependency_generation += 1;
+        let analysis = ProjectAnalysis::new(&self.config);
+        self.rules = analysis.registry;
+        self.cross_file_resolve_semantics = analysis.cross_file_resolve;
+        self.resolve_semantics = analysis.resolve;
+        self.cross_file_rules = analysis.cross_file_registry;
         self.cross_file_index_cache = None;
         self.cross_file_external_cache = None;
         self.pending_semantic_affected.clear();
@@ -949,8 +963,13 @@ impl LspState {
             }
             let mut merged = self.analyze(&uri);
             if let Some(diags) = cross_file_diags {
+                let cross_file_start = merged.len();
                 merged.extend(diags.iter().cloned());
-                merged.sort_by(|a, b| a.span.start.cmp(&b.span.start).then(a.rule.cmp(b.rule)));
+                resolve_document_positions(
+                    &mut merged[cross_file_start..],
+                    self.documents[&uri].text(),
+                );
+                sort_diagnostics(&mut merged);
             }
             if let Some(doc) = self.documents.get_mut(&uri) {
                 doc.last_diagnostics = merged.clone();
@@ -1021,7 +1040,7 @@ impl LspState {
                 .as_ref()
                 .map(|cache| &cache.indexes)
         };
-        let diags = match run_cross_file(
+        let diags = match cross_file_diagnostics(
             &self.environment,
             &self.cross_file_rules,
             &files,
@@ -1202,11 +1221,6 @@ impl LspState {
         external: &ExternalLibraries,
         cache: Option<&ExternalIndexCache>,
     ) -> (SemanticIndexes, LibraryGrouping, Vec<PackageIdentity>) {
-        let grouping_files: Vec<_> = files
-            .iter()
-            .map(|file| (file.path.clone(), file.program()))
-            .collect();
-        let grouping = group_libraries(&grouping_files);
         let identity_sources: Vec<_> = files
             .iter()
             .map(|file| IdentitySource {
@@ -1215,62 +1229,21 @@ impl LspState {
                 has_parse_errors: file.has_parse_errors,
             })
             .collect();
-        let sources: Vec<_> = files.iter().map(|file| file.source()).collect();
         let packages = package_identities(files.iter().map(|file| file.path.as_path()));
-        let identities = IdentityIndex::build_layer(
+        let (indexes, grouping) = build_semantic_indexes(
             &identity_sources,
-            &sources,
             &packages,
             Some(ExternalSources {
                 libraries: external,
                 environment: &self.environment,
             }),
-            cache.map(|cache| Arc::clone(&cache.identities)),
-            Some(&grouping),
+            cache.map(|cache| ExternalIndexParts {
+                identities: &cache.identities,
+                types: &cache.types,
+                signatures: &cache.signatures,
+            }),
         );
-        let resolved_files = || {
-            files.iter().enumerate().map(|(index, file)| {
-                (
-                    file.path.as_path(),
-                    LibrarySource {
-                        program: file.program(),
-                        has_parse_errors: file.has_parse_errors,
-                        has_unresolved_parts: grouping.is_unresolved(index),
-                    },
-                )
-            })
-        };
-        let mut types = if let Some(cache) = cache {
-            TypeIndex::with_external(resolved_files(), &identities, Arc::clone(&cache.types))
-        } else {
-            TypeIndex::from_resolved_files(resolved_files(), &identities)
-        };
-        if cache.is_none() {
-            types.add_external(external, &identities);
-        }
-        let signature_files: Vec<_> = files
-            .iter()
-            .map(|file| (file.path.clone(), Arc::clone(&file.parsed)))
-            .collect();
-        let signatures = if let Some(cache) = cache {
-            SignatureIndex::with_external(
-                &signature_files,
-                &identities,
-                &types,
-                Arc::clone(&cache.signatures),
-            )
-        } else {
-            SignatureIndex::build(&signature_files, Some(external), &identities, &types)
-        };
-        (
-            SemanticIndexes {
-                types,
-                identities,
-                signatures,
-            },
-            grouping,
-            packages,
-        )
+        (indexes, grouping, packages)
     }
 
     fn invalidate_semantic_snapshot(&mut self) {
@@ -1569,42 +1542,25 @@ impl LspState {
     /// The boolean is false when oversized ingestion left the workspace incomplete;
     /// cross-file rules must not infer absence from that partial set.
     fn collect_project_files(&mut self, view: ProjectView) -> (Vec<ProjectFile>, bool) {
+        let discovery = discover_project(
+            std::slice::from_ref(&self.workspace_root),
+            &self.config.files.includes,
+            matches!(view, ProjectView::CrossFile),
+        );
         let mut complete = true;
-        let filter = &self.config.files.includes;
-        let mut paths = Vec::new();
-        // Never follow symlinks: Flutter's ephemeral/.plugin_symlinks point into
-        // the pub cache (same hazard the CLI walker fixed) and a long-lived LSP
-        // would hold all of it in memory.
-        for entry in WalkDir::new(&self.workspace_root)
-            .follow_links(false)
+        let mut paths: Vec<_> = discovery
+            .files
             .into_iter()
-            .filter_entry(|entry| {
-                !entry.file_type().is_dir() || !filter.excludes_directory(entry.path())
-            })
-        {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(e) => {
-                    warn!("error walking workspace: {}", e);
-                    continue;
-                }
-            };
-            let path = entry.path();
-            let is_dart = is_dart_file(path);
-            let is_manifest = matches!(view, ProjectView::CrossFile)
-                && path.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml");
-            if !is_dart && !is_manifest {
-                continue;
-            }
-            let path_str = path.to_string_lossy();
-            if !is_dart && filter.excludes(&path_str) {
-                continue;
-            }
-            if is_dart && !self.admits_project_dart(path) {
-                continue;
-            }
-            paths.push((canonical_or_lexical(path), is_dart));
-        }
+            .map(|path| (canonical_or_lexical(&path), true))
+            .chain(
+                discovery
+                    .manifests
+                    .into_iter()
+                    .map(|path| (canonical_or_lexical(&path), false)),
+            )
+            .collect();
+        paths.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        paths.dedup_by(|a, b| a.0 == b.0);
         self.refresh_environment(paths.iter().map(|(path, _)| path.as_path()));
         self.refresh_document_versions();
         let open_by_path: HashMap<&Path, &DocumentState> = self
@@ -1659,7 +1615,8 @@ impl LspState {
                 };
                 (parsed.tree, !parsed.errors.is_empty())
             } else {
-                (lex_tree(&source), false)
+                files.push(manifest_file(normalized, source));
+                continue;
             };
             files.push(ProjectFile {
                 path: normalized,
@@ -1786,10 +1743,7 @@ fn load_from(
         .map(Path::to_path_buf)
         .or_else(|| falcon_config::find_config(start_dir));
     let workspace_root = workspace_root_for(discovered.as_deref(), start_dir);
-    let loaded = match discovered.as_deref() {
-        Some(path) => load_config(path),
-        None => load_or_default(start_dir),
-    };
+    let loaded = load_project_config(discovered.as_deref(), start_dir);
     let label = discovered.as_deref().unwrap_or(start_dir).display();
     match loaded {
         Ok(mut loaded) => {
@@ -1894,4 +1848,3 @@ pub(crate) fn uri_to_path(uri: &str) -> PathBuf {
         })
         .unwrap_or_else(|| PathBuf::from(uri.strip_prefix("file://").unwrap_or(uri)))
 }
-

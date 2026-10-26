@@ -14,10 +14,12 @@ use falcon_syntax::language_version::LanguageVersion;
 
 use crate::environment::{AnalysisEnvironment, ExternalLibraries};
 use crate::resolve::{
-    ExternalSources, IdentityIndex, IdentitySource, LibrarySource, LibraryUnit, PackageIdentity,
-    SignatureIndex, TypeIndex, canonical_or_lexical, group_libraries, library_unit,
+    ExternalSources, IdentitySource, LibraryUnit, PackageIdentity, canonical_or_lexical,
+    library_unit,
 };
-use crate::{AnalyzeContext, ParsedFile, ProjectFile, RuleRegistry, SemanticIndexes};
+use crate::{
+    AnalyzeContext, ParsedFile, ProjectFile, RuleRegistry, SemanticIndexes, build_semantic_indexes,
+};
 
 /// Parse `source`, run every per-file rule (with no project index), and
 /// optionally keep the parsed program for the cross-file pass. This is the fast
@@ -203,11 +205,6 @@ fn analyze_indexed(
         })
         .collect();
     let semantic_parsed: Vec<&Parsed<'_>> = parsed.iter().chain(&companions).collect();
-    let project_files: Vec<(PathBuf, Program<'_>)> = semantic_parsed
-        .iter()
-        .map(|file| (file.path.to_path_buf(), file.parsed.program()))
-        .collect();
-    let grouping = group_libraries(&project_files);
     let identity_sources: Vec<IdentitySource<'_>> = semantic_parsed
         .iter()
         .map(|p| IdentitySource {
@@ -216,13 +213,15 @@ fn analyze_indexed(
             has_parse_errors: !p.parse_errors.is_empty(),
         })
         .collect();
-    let sources: Vec<&str> = semantic_parsed
-        .iter()
-        .map(|p| p.parsed.source.as_ref())
-        .collect();
-    let identities = IdentityIndex::build_layer(
+    let (
+        SemanticIndexes {
+            types: type_index,
+            identities,
+            signatures,
+        },
+        grouping,
+    ) = build_semantic_indexes(
         &identity_sources,
-        &sources,
         workspace.packages,
         externals
             .as_ref()
@@ -231,38 +230,7 @@ fn analyze_indexed(
                 environment,
             }),
         None,
-        Some(&grouping),
     );
-    tracing::debug!("identity index built");
-    let mut type_index = TypeIndex::from_resolved_files(
-        semantic_parsed.iter().enumerate().map(|(i, p)| {
-            (
-                p.path,
-                LibrarySource {
-                    program: p.parsed.program(),
-                    has_parse_errors: !p.parse_errors.is_empty(),
-                    has_unresolved_parts: grouping.is_unresolved(i),
-                },
-            )
-        }),
-        &identities,
-    );
-    if let Some((libraries, _, _)) = &externals {
-        type_index.add_external(libraries, &identities);
-    }
-    tracing::debug!("type index built");
-    let signature_files: Vec<_> = project_files
-        .into_iter()
-        .zip(&semantic_parsed)
-        .map(|((path, _), p)| (path, Arc::clone(&p.parsed)))
-        .collect();
-    let signatures = SignatureIndex::build(
-        &signature_files,
-        externals.as_ref().map(|(libraries, _, _)| libraries),
-        &identities,
-        &type_index,
-    );
-    info!("semantic indexes built");
     // The indexes retain the external declaration nodes they need.
     drop(externals);
     let parsed_files: Vec<_> = semantic_parsed.iter().map(|p| &p.parsed).collect();
