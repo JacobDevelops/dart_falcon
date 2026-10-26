@@ -1,7 +1,8 @@
 use super::LspState;
 
+use falcon_analyze::ExternalIndexParts;
 use falcon_diagnostics::{FixKind, LineIndex};
-use falcon_project::{ProjectAnalysis, effective_fix_kind, fix_file};
+use falcon_project::{FixContext, ProjectAnalysis, effective_fix_kind, fix_file_with_context};
 use lsp_types::{
     CodeAction, CodeActionKind, CodeActionParams, DocumentChanges, OneOf,
     OptionalVersionedTextDocumentIdentifier, Range, TextDocumentEdit, TextEdit, Uri, WorkspaceEdit,
@@ -22,7 +23,18 @@ fn requested(params: &CodeActionParams, kind: &str) -> bool {
     })
 }
 
-fn workspace_edit(uri: &Uri, version: Option<i32>, edits: Vec<TextEdit>) -> WorkspaceEdit {
+fn workspace_edit(
+    uri: &Uri,
+    version: Option<i32>,
+    edits: Vec<TextEdit>,
+    document_changes: bool,
+) -> WorkspaceEdit {
+    if !document_changes {
+        return WorkspaceEdit {
+            changes: Some([(uri.clone(), edits)].into_iter().collect()),
+            ..Default::default()
+        };
+    }
     WorkspaceEdit {
         document_changes: Some(DocumentChanges::Edits(vec![TextDocumentEdit {
             text_document: OptionalVersionedTextDocumentIdentifier {
@@ -70,14 +82,29 @@ fn minimal_edit(source: &str, mut replacement: String, lines: &LineIndex) -> Tex
 }
 
 impl LspState {
+    pub(crate) fn configure_code_actions(&mut self, params: &serde_json::Value) {
+        self.code_action_resolve = params
+            .pointer("/capabilities/textDocument/codeAction/dataSupport")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+            && params
+                .pointer("/capabilities/textDocument/codeAction/resolveSupport/properties")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|properties| properties.iter().any(|property| property == "edit"));
+        self.workspace_document_changes = params
+            .pointer("/capabilities/workspace/workspaceEdit/documentChanges")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true);
+    }
+
     pub(crate) fn code_actions(
         &mut self,
         params: &CodeActionParams,
+        cancelled: &dyn Fn() -> bool,
     ) -> Result<Vec<CodeAction>, String> {
         let quickfix = requested(params, "quickfix");
-        // Unfiltered lightbulb requests must not run iterative whole-file fixes.
-        let safe = params.context.only.is_some() && requested(params, SAFE_FIX_ALL);
-        let unsafe_fixes = params.context.only.is_some() && requested(params, UNSAFE_FIX_ALL);
+        let safe = requested(params, SAFE_FIX_ALL);
+        let unsafe_fixes = requested(params, UNSAFE_FIX_ALL);
         if !quickfix && !safe && !unsafe_fixes {
             return Ok(Vec::new());
         }
@@ -85,32 +112,26 @@ impl LspState {
         let Some(document) = self.documents.get(uri.as_str()) else {
             return Ok(Vec::new());
         };
-        if document.source_rejected || document.version.is_none() {
+        if cancelled()
+            || document.source_rejected
+            || document.version.is_none()
+            || document.diagnostics_parse_count != document.parse_count
+        {
             return Ok(Vec::new());
         }
-        // didChange may still be debounced, so last_diagnostics can be stale.
-        // Keep the last published (possibly cross-file merged) hover diagnostics.
-        let published = std::mem::take(
-            &mut self
-                .documents
-                .get_mut(uri.as_str())
-                .expect("open document")
-                .last_diagnostics,
-        );
-        let diagnostics = self.analyze(uri.as_str());
-        self.documents
-            .get_mut(uri.as_str())
-            .expect("open document")
-            .last_diagnostics = published;
         let document = &self.documents[uri.as_str()];
         let source = document.text();
+        let diagnostics = &document.last_diagnostics;
         let lines = LineIndex::new(source);
         let capacity = if quickfix { diagnostics.len() } else { 0 }
             + usize::from(safe)
             + usize::from(unsafe_fixes);
         let mut actions = Vec::with_capacity(capacity);
-        if quickfix {
-            for diagnostic in &diagnostics {
+        if quickfix && !document.has_parse_errors {
+            for diagnostic in diagnostics {
+                if cancelled() {
+                    return Err("Falcon code actions cancelled".to_owned());
+                }
                 let Some(fix) = &diagnostic.fix else { continue };
                 let Some(kind) =
                     effective_fix_kind(&self.config, &document.path, diagnostic.rule, fix.kind)
@@ -126,7 +147,7 @@ impl LspState {
                         params.range.start <= range.start && range.start < params.range.end
                     }
                 } else if params.range.start == params.range.end {
-                    range.start <= params.range.start && params.range.start < range.end
+                    range.start <= params.range.start && params.range.start <= range.end
                 } else {
                     range.start < params.range.end && params.range.start < range.end
                 };
@@ -174,150 +195,162 @@ impl LspState {
                     kind: Some(CodeActionKind::QUICKFIX),
                     diagnostics: Some(vec![lsp_diagnostic]),
                     is_preferred: Some(kind == FixKind::Safe),
-                    edit: Some(workspace_edit(uri, document.version, edits)),
+                    edit: Some(workspace_edit(
+                        uri,
+                        document.version,
+                        edits,
+                        self.workspace_document_changes,
+                    )),
                     ..Default::default()
                 });
             }
         }
         // Admission checks and fix suppression happen in the normal diagnostic
         // pipeline; do not run the standalone engine on an excluded document.
-        if !diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.fix.is_some())
+        if !document.has_parse_errors
+            && !diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.fix.is_some())
         {
             return Ok(actions);
         }
-        if safe || unsafe_fixes {
-            let analysis = ProjectAnalysis::new(&self.config);
-            for (kind, include_unsafe, title) in [
-                (SAFE_FIX_ALL, false, "Fix all safe Falcon issues"),
-                (UNSAFE_FIX_ALL, true, "Fix all Falcon issues (unsafe)"),
-            ] {
-                if (include_unsafe && !unsafe_fixes) || (!include_unsafe && !safe) {
-                    continue;
-                }
-                let outcome = fix_file(
-                    &analysis,
-                    &self.config,
-                    &mut self.environment,
-                    &document.path,
-                    source,
-                    include_unsafe,
-                );
-                if let Some(stop) = outcome.stop {
-                    let reason = format!("Falcon fix all stopped without returning edits: {stop}");
-                    if !quickfix {
-                        return Err(reason);
-                    }
-                    actions.push(CodeAction {
-                        title: title.to_owned(),
-                        kind: Some(CodeActionKind::from(kind)),
-                        disabled: Some(lsp_types::CodeActionDisabled { reason }),
-                        ..Default::default()
-                    });
-                    continue;
-                }
-                if outcome.source == source {
-                    continue;
-                }
-                actions.push(CodeAction {
-                    title: title.to_string(),
-                    kind: Some(CodeActionKind::from(kind)),
-                    edit: Some(workspace_edit(
-                        uri,
-                        document.version,
-                        vec![minimal_edit(source, outcome.source, &lines)],
-                    )),
-                    ..Default::default()
+        for (kind, include_unsafe, title) in [
+            (SAFE_FIX_ALL, false, "Fix all safe Falcon issues"),
+            (UNSAFE_FIX_ALL, true, "Fix all Falcon issues (unsafe)"),
+        ] {
+            if (include_unsafe && !unsafe_fixes) || (!include_unsafe && !safe) {
+                continue;
+            }
+            if !document.has_parse_errors
+                && !diagnostics.iter().any(|diagnostic| {
+                    diagnostic.fix.as_ref().is_some_and(|fix| {
+                        effective_fix_kind(&self.config, &document.path, diagnostic.rule, fix.kind)
+                            .is_some_and(|kind| include_unsafe || kind == FixKind::Safe)
+                    })
+                })
+            {
+                continue;
+            }
+            let mut action = CodeAction {
+                title: title.to_owned(),
+                kind: Some(CodeActionKind::from(kind)),
+                data: Some(serde_json::json!({
+                    "uri": uri,
+                    "version": document.version,
+                    "includeUnsafe": include_unsafe,
+                })),
+                ..Default::default()
+            };
+            if document.has_parse_errors {
+                action.disabled = Some(lsp_types::CodeActionDisabled {
+                    reason: "Falcon cannot fix a document with syntax errors".to_owned(),
                 });
             }
+            actions.push(action);
+        }
+        if !self.code_action_resolve {
+            for action in &mut actions {
+                if action.data.is_some() && action.disabled.is_none() {
+                    let unresolved = std::mem::take(action);
+                    match self.resolve_code_action(unresolved.clone(), cancelled) {
+                        Ok(resolved) => *action = resolved,
+                        Err(reason) if quickfix => {
+                            *action = unresolved;
+                            action.disabled = Some(lsp_types::CodeActionDisabled { reason });
+                        }
+                        Err(reason) => return Err(reason),
+                    }
+                }
+            }
+            actions.retain(|action| action.edit.is_some() || action.disabled.is_some());
         }
         Ok(actions)
+    }
+
+    pub(crate) fn resolve_code_action(
+        &mut self,
+        mut action: CodeAction,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<CodeAction, String> {
+        let data = action.data.as_ref().ok_or("Missing Falcon fix-all data")?;
+        let uri: Uri =
+            serde_json::from_value(data["uri"].clone()).map_err(|error| error.to_string())?;
+        let version: Option<i32> =
+            serde_json::from_value(data["version"].clone()).map_err(|error| error.to_string())?;
+        let include_unsafe = data["includeUnsafe"]
+            .as_bool()
+            .ok_or("Missing fix-all policy")?;
+        let document = self
+            .documents
+            .get(uri.as_str())
+            .ok_or("Document is no longer open")?;
+        if document.version != version || document.diagnostics_parse_count != document.parse_count {
+            return Err("Document changed since Falcon offered the action".to_owned());
+        }
+        if cancelled() {
+            return Err("Falcon fix all cancelled".to_owned());
+        }
+        if document.has_parse_errors {
+            return Err("Falcon cannot fix a document with syntax errors".to_owned());
+        }
+        if self.resolve_semantics && self.semantic_snapshot.is_none() {
+            self.ensure_semantic_snapshot();
+        }
+        let document = self.documents.get(uri.as_str()).expect("open document");
+        if document.version != version || document.diagnostics_parse_count != document.parse_count {
+            return Err("Document changed since Falcon offered the action".to_owned());
+        }
+        if let Some(error) = &self.semantic_snapshot_error {
+            return Err(format!(
+                "Falcon cannot fix without a valid semantic snapshot: {error}"
+            ));
+        }
+        let analysis = ProjectAnalysis::new(&self.config);
+        let external = self
+            .external_indexes
+            .as_ref()
+            .map(|cache| ExternalIndexParts {
+                identities: &cache.identities,
+                types: &cache.types,
+                signatures: &cache.signatures,
+            });
+        let outcome = fix_file_with_context(
+            &analysis,
+            &self.config,
+            &mut self.environment,
+            &document.path,
+            document.text(),
+            include_unsafe,
+            FixContext {
+                external,
+                project_files: self
+                    .semantic_snapshot
+                    .as_ref()
+                    .map_or(&[], |snapshot| snapshot.files.as_slice()),
+                external_libraries: Some(&self.external_libraries),
+                cancelled,
+            },
+        );
+        if let Some(stop) = outcome.stop {
+            return Err(format!(
+                "Falcon fix all stopped without returning edits: {stop}"
+            ));
+        }
+        if outcome.source != document.text() {
+            action.edit = Some(workspace_edit(
+                &uri,
+                document.version,
+                vec![minimal_edit(
+                    document.text(),
+                    outcome.source,
+                    &LineIndex::new(document.text()),
+                )],
+                self.workspace_document_changes,
+            ));
+        }
+        Ok(action)
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use lsp_types::Position;
-
-    #[test]
-    fn requesting_actions_preserves_published_diagnostic_cache() {
-        let directory = tempfile::tempdir().unwrap();
-        let config = directory.path().join("falcon.json");
-        std::fs::write(
-            &config,
-            r#"{"linter":{"rules":{"recommended":false,"style":{"unnecessary-new":"warn"}}}}"#,
-        )
-        .unwrap();
-        let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
-        let uri = format!("file://{}", directory.path().join("main.dart").display());
-        let source = "void main() { final x = new Object(); }";
-        let mut published = state.open(&uri, source.to_owned(), Some(1));
-        assert_eq!(published.len(), 1);
-        published[0].rule = "avoid-unused-files";
-        published[0].message = "Published cross-file diagnostic".to_owned();
-        state.documents.get_mut(&uri).unwrap().last_diagnostics = published;
-        let params = serde_json::from_value(serde_json::json!({
-            "textDocument": { "uri": uri },
-            "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 100 } },
-            "context": { "diagnostics": [], "only": ["quickfix"] }
-        })).unwrap();
-        let actions = state.code_actions(&params).unwrap();
-        assert_eq!(actions.len(), 1);
-        let cached = &state.documents[&uri].last_diagnostics;
-        assert_eq!(cached.len(), 1);
-        assert_eq!(cached[0].rule, "avoid-unused-files");
-        assert_eq!(cached[0].message, "Published cross-file diagnostic");
-    }
-    #[test]
-    fn minimal_edits_preserve_common_text_and_utf8_boundaries() {
-        for (source, replacement, start, end, text) in [
-            (
-                "a😀z",
-                "a😁z",
-                Position::new(0, 1),
-                Position::new(0, 3),
-                "😁",
-            ),
-            (
-                "a😀z",
-                "a😀!z",
-                Position::new(0, 3),
-                Position::new(0, 3),
-                "!",
-            ),
-            ("a😀z", "az", Position::new(0, 1), Position::new(0, 3), ""),
-            (
-                "one\nsame\nlast",
-                "one\nnew\nlast",
-                Position::new(1, 0),
-                Position::new(1, 4),
-                "new",
-            ),
-            (
-                "a\r\nb",
-                "a\nb",
-                Position::new(0, 1),
-                Position::new(1, 0),
-                "\n",
-            ),
-            (
-                "a\nb",
-                "a\r\nb",
-                Position::new(0, 1),
-                Position::new(1, 0),
-                "\r\n",
-            ),
-        ] {
-            let edit = minimal_edit(source, replacement.to_owned(), &LineIndex::new(source));
-            assert_eq!(edit.range, Range::new(start, end));
-            assert_eq!(edit.new_text, text);
-            let mut applied = source.to_owned();
-            let start = falcon_diagnostics::lsp_position_to_byte(source, edit.range.start);
-            let end = falcon_diagnostics::lsp_position_to_byte(source, edit.range.end);
-            applied.replace_range(start..end, &edit.new_text);
-            assert_eq!(applied, replacement);
-        }
-    }
-}
+mod tests;

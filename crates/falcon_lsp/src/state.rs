@@ -77,6 +77,8 @@ pub struct DocumentState {
     /// Most recent published output (byte spans) — read by hover. May include
     /// cross-file diagnostics after a cross-file pass; never an input to analysis.
     pub last_diagnostics: Vec<Diagnostic>,
+    /// Parse revision represented by the cached diagnostics.
+    diagnostics_parse_count: u64,
     /// Whether the last *cross-file pass* published a set carrying cross-file
     /// diagnostics. Lets the pass republish only docs whose cross-file set changed
     /// (adding new cross-file diags, or clearing ones shown before).
@@ -248,6 +250,8 @@ struct CachedDiskFile {
 /// Server-side cache: open documents, active config, enabled rule set.
 pub struct LspState {
     documents: HashMap<String, DocumentState>,
+    code_action_resolve: bool,
+    workspace_document_changes: bool,
     config: FalconConfig,
     config_path: Option<PathBuf>,
     pending_config_messages: Vec<ShowMessageParams>,
@@ -359,6 +363,8 @@ impl LspState {
         let resolve_semantics = analysis.resolve;
         Self {
             documents: HashMap::new(),
+            code_action_resolve: false,
+            workspace_document_changes: false,
             config,
             config_path,
             pending_config_messages,
@@ -742,6 +748,7 @@ impl LspState {
                 source_rejected,
                 syntax_diagnostics,
                 last_diagnostics: Vec::new(),
+                diagnostics_parse_count: 0,
                 had_cross_file_diags: false,
                 parse_count: 1,
                 analyze_count: 0,
@@ -871,6 +878,8 @@ impl LspState {
         if !self.documents.contains_key(uri) {
             return Vec::new();
         }
+        let doc = self.documents.get_mut(uri).expect("open document");
+        doc.diagnostics_parse_count = doc.parse_count;
         if let Some(doc) = self
             .documents
             .get_mut(uri)
@@ -934,6 +943,7 @@ impl LspState {
         resolve_document_positions(&mut diagnostics, doc.text());
         sort_diagnostics(&mut diagnostics);
         doc.analyze_count += 1;
+        doc.diagnostics_parse_count = doc.parse_count;
         doc.last_diagnostics = diagnostics.clone();
         debug!(uri, count = diagnostics.len(), "analyzed document");
         diagnostics

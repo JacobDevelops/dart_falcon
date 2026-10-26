@@ -395,6 +395,7 @@ fn server_capabilities() -> ServerCapabilities {
                     lsp_types::CodeActionKind::from(crate::state::code_actions::SAFE_FIX_ALL),
                     lsp_types::CodeActionKind::from(crate::state::code_actions::UNSAFE_FIX_ALL),
                 ]),
+                resolve_provider: Some(true),
                 ..Default::default()
             },
         )),
@@ -430,6 +431,7 @@ fn run_with_state(
     // Initialize handshake (JSON-RPC request id is echoed by initialize_finish).
     let (initialize_id, initialize_params) = connection.initialize_start()?;
     let watching = FileWatching::new(&initialize_params);
+    state.configure_code_actions(&initialize_params);
     state.initialize_workspace_roots(watching.workspace_roots.clone());
     let initialize_result = InitializeResult {
         capabilities: server_capabilities(),
@@ -813,7 +815,7 @@ fn handle_request(
         "textDocument/codeAction" => {
             let response =
                 match serde_json::from_value::<lsp_types::CodeActionParams>(request.params) {
-                    Ok(params) => match state.code_actions(&params) {
+                    Ok(params) => match state.code_actions(&params, &|| false) {
                         Ok(actions) => Response::new_ok(request.id, actions),
                         Err(error) => {
                             Response::new_err(request.id, ErrorCode::RequestFailed as i32, error)
@@ -825,6 +827,22 @@ fn handle_request(
                         format!("invalid params: {error}"),
                     ),
                 };
+            connection.sender.send(response.into())?;
+        }
+        "codeAction/resolve" => {
+            let response = match serde_json::from_value::<lsp_types::CodeAction>(request.params) {
+                Ok(action) => match state.resolve_code_action(action, &|| false) {
+                    Ok(action) => Response::new_ok(request.id, action),
+                    Err(error) => {
+                        Response::new_err(request.id, ErrorCode::RequestFailed as i32, error)
+                    }
+                },
+                Err(error) => Response::new_err(
+                    request.id,
+                    ErrorCode::InvalidParams as i32,
+                    format!("invalid params: {error}"),
+                ),
+            };
             connection.sender.send(response.into())?;
         }
         HoverRequest::METHOD => {

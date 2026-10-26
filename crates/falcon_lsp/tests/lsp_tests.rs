@@ -240,6 +240,17 @@ fn code_actions(
 
 fn action_text(action: &lsp_types::CodeAction, version: i32, source: &str) -> String {
     let edit = action.edit.as_ref().expect("action has an edit");
+    if let Some(changes) = &edit.changes {
+        assert!(edit.document_changes.is_none());
+        let edits = &changes[&DOC_URI.parse::<Uri>().unwrap()];
+        let mut result = source.to_owned();
+        for edit in edits.iter().rev() {
+            let start = falcon_diagnostics::lsp_position_to_byte(source, edit.range.start);
+            let end = falcon_diagnostics::lsp_position_to_byte(source, edit.range.end);
+            result.replace_range(start..end, &edit.new_text);
+        }
+        return result;
+    }
     assert!(edit.changes.is_none(), "edits must be versioned");
     let Some(lsp_types::DocumentChanges::Edits(documents)) = &edit.document_changes else {
         panic!("expected versioned document edits");
@@ -393,7 +404,7 @@ fn disabled_fix_policy_keeps_diagnostics_without_actions() {
 }
 
 #[test]
-fn code_actions_use_pending_buffer_and_reject_stale_context() {
+fn code_actions_wait_for_pending_buffer_publication() {
     let mut client = TestClient::start(Duration::from_secs(60), Some(FIX_CONFIG));
     client.open(DOC_URI, FIX_SOURCE, 1);
     let published = client.recv_publish();
@@ -415,10 +426,10 @@ fn code_actions_use_pending_buffer_and_reject_stale_context() {
         Some(vec!["source.fixAll.falcon"]),
         full_range(),
     );
-    assert_eq!(safe.len(), 1);
-    let text = action_text(&safe[0], 2, &current);
-    assert!(text.starts_with('\n'));
-    assert!(!text.contains("new Object"));
+    assert!(
+        safe.is_empty(),
+        "fix-all must also wait for diagnostics publication"
+    );
     client.shutdown();
 }
 
@@ -432,7 +443,12 @@ fn cyclic_fix_all_returns_error_instead_of_partial_edits() {
     client.recv_publish();
     // Merely opening a lightbulb must still return an individual quick fix,
     // even though explicitly applying all fixes would cycle.
-    let quick = code_actions(&mut client, Vec::new(), None, full_range());
+    let quick = code_actions(
+        &mut client,
+        Vec::new(),
+        Some(vec!["quickfix"]),
+        full_range(),
+    );
     assert_eq!(quick.len(), 1);
     assert_eq!(quick[0].kind, Some(lsp_types::CodeActionKind::QUICKFIX));
     assert_eq!(
