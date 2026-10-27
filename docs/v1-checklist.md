@@ -14,6 +14,14 @@ Owns `crates/falcon_lsp`, the `falcon_project` autofix overlay and the semantic 
 
 - [ ] **Declaration edits rebuild every index.** Body-only edits and fix passes now reuse the project's identity, type and signature indexes, but an edit that changes a declaration, import, export or part still rebuilds them for the whole project, in the LSP and on each declaration-changing autofix pass. Update only the changed library and its dependents.
 
+#### 24. Release credentials
+
+Owns the repository's Actions secrets and the Homebrew tap. Releases fail before building until all of these exist; see `docs/installation.md` "Release publishing setup".
+
+- [ ] **Minisign signing.** Generate a Minisign key pair, store the secret key as `MINISIGN_SECRET_KEY` (plus `MINISIGN_PASSWORD` if the key is encrypted), and publish the public key through a trusted channel.
+- [ ] **macOS signing and notarisation.** Get a Developer ID Application certificate and set `APPLE_CERTIFICATE_P12`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID` and `APPLE_APP_PASSWORD`.
+- [ ] **Homebrew tap.** Create the public `JacobDevelops/homebrew-tap` repository with an initial commit and set `HOMEBREW_TAP_TOKEN` to a fine-grained PAT with Contents read and write on it.
+
 ### Stage 7: last
 
 #### 26. Clippy pedantic
