@@ -46,7 +46,7 @@ The checksum manifest comes from the same GitHub release as the archive. Matchin
 it checks integrity, not publisher authenticity if both assets are replaced.
 Provenance verification is a separate check, as shown above.
 
-When Minisign signatures are published, download the archive's matching
+Every release publishes Minisign signatures. Download the archive's matching
 `.minisig` and obtain the publisher's public key through an independent trusted
 channel before extracting:
 
@@ -56,7 +56,7 @@ minisign -Vm falcon-x86_64-linux.tar.gz -P <trusted-public-key>
 
 Substitute your platform's archive name. The same command can verify `SHA256SUMS`
 against `SHA256SUMS.minisig`. No publisher public key is distributed with the
-launcher yet; signatures are optional and the launcher does not verify them.
+launcher yet, and the launcher does not verify signatures.
 
 ## Dart pub
 
@@ -206,7 +206,7 @@ falls back to watching every directory under the project separately.
 1. A maintainer pushes a tag `vX.Y.Z`.
 2. CI (`.github/workflows/release.yml`) cross-builds all four platform binaries
    on Linux with `cargo-zigbuild` (static musl for Linux, zig-linked macOS).
-3. macOS runners optionally sign and notarise the Darwin binaries. The binaries
+3. macOS runners sign and notarise the Darwin binaries. The binaries
    are packaged as `falcon-X.Y.Z-<system>.tar.gz` plus a
    versionless `falcon-<system>.tar.gz` copy for `releases/latest/download/`
    links, checksummed into `SHA256SUMS`, given a build provenance attestation,
@@ -214,33 +214,28 @@ falls back to watching every directory under the project separately.
 
 ### Release publishing setup
 
-These integrations are optional. Without their secrets, ordinary GitHub and pub
-releases continue unchanged.
+Releases require all of these secrets. The release fails before building and
+lists any that are missing.
 
 - **Archive signing:** create a Minisign key pair (`minisign -G`). Store the
   complete secret key file as the Actions secret `MINISIGN_SECRET_KEY`. For a
-  password-protected key, store its password as `MINISIGN_PASSWORD`. The password
-  is optional for an unprotected key generated with `minisign -G -W`; setting a
-  password without a key fails the release before building. With neither secret
-  set, archive signing is skipped. Keep the secret key offline too, and distribute
-  the public key through a trusted channel.
-  Releases then include `.minisig` signatures for every archive and `SHA256SUMS`.
+  password-protected key, store its password as `MINISIGN_PASSWORD`; leave it
+  unset for an unprotected key generated with `minisign -G -W`. Keep the secret
+  key offline too, and distribute the public key through a trusted channel.
+  Releases include `.minisig` signatures for every archive and `SHA256SUMS`.
   Verify them with `minisign -Vm <asset> -P <trusted-public-key>`.
 - **macOS signing and notarisation:** export a **Developer ID Application**
   certificate with its private key as a password-protected `.p12` file. Store
   its base64-encoded contents as `APPLE_CERTIFICATE_P12` and the export password
   as `APPLE_CERTIFICATE_PASSWORD`. Set `APPLE_ID` to the Apple Developer account
   email, `APPLE_TEAM_ID` to its team ID, and `APPLE_APP_PASSWORD` to an
-  app-specific password for that account. All five secrets must be nonempty to
-  enable these steps. With none set, signing and notarisation are skipped;
-  partial configuration fails the release before building.
+  app-specific password for that account.
   CI imports the certificate into a temporary keychain, signs each Darwin
   binary with the hardened runtime and a timestamp, and waits for Apple's
   notarisation service to accept a zip of it before publishing. The release
   tarballs contain the signed binaries. Bare CLI binaries cannot have a ticket
   stapled to them, so the zip is only a submission container; users may need
-  network access for macOS to check the notarisation ticket. Minisign archive
-  signatures remain an independent option.
+  network access for macOS to check the notarisation ticket.
 - **Homebrew:** create the public repository `JacobDevelops/homebrew-tap` with
   an initial commit. Set `HOMEBREW_TAP_TOKEN` to a fine-grained PAT with
   **Contents: read and write** on that tap repository. The single Actions variable
@@ -249,9 +244,7 @@ releases continue unchanged.
   generates `Formula/falcon.rb` from the published `SHA256SUMS`, then commits it
   through GitHub's contents API. Re-releasing an older tag does not roll the tap
   backwards. Prerelease and build-metadata versions do not update the tap.
-  With neither the token nor the tap variable set, publishing is skipped. A custom
-  `HOMEBREW_TAP` without a token fails the release before building; a token without
-  the variable publishes to the default tap.
+  `HOMEBREW_TAP` is optional and only changes the destination.
 
 To inspect a formula locally:
 
