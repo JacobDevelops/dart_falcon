@@ -67,8 +67,7 @@ Downloads are checked against SHA256SUMS from the same GitHub release before
 atomic installation. This checks integrity, not publisher authenticity; see
 [signature verification](./docs/installation.md#prebuilt-binaries-recommended) for the trust limits.
 
-**Homebrew** (once [tap publishing](./docs/installation.md#release-publishing-setup)
-is configured): `brew install JacobDevelops/tap/falcon`, then `brew upgrade falcon`.
+**Homebrew**: `brew install JacobDevelops/tap/falcon`, then `brew upgrade falcon`.
 
 **cargo-binstall**:
 `cargo binstall --git https://github.com/JacobDevelops/dart_falcon dart_falcon`.
