@@ -290,7 +290,7 @@ Inline suppression is handled centrally by `crates/falcon_analyze/src/suppressio
 - Run the four gates before pushing.
 - Keep PR descriptions concrete: what changed, why, and how you verified it.
 
-Each changeset becomes one bullet in `CHANGELOG.md`, so write one changeset per user-facing change: a short plain summary of what changed for users, usually one sentence, with no headings or lists. A pull request with several user-facing changes adds several changesets. A fix to something that hasn't been released yet updates that feature's changeset instead of adding a new one. Name rule ids in backticks.
+Each changeset becomes one bullet in `CHANGELOG.md`, so write one changeset per user-facing change: a short plain summary of what changed for users, usually one sentence, in a single paragraph with no headings, lists or code blocks. Knope turns a multi-paragraph changeset into a heading instead of a bullet, and `makers test` rejects one. A pull request with several user-facing changes adds several changesets. A fix to something that hasn't been released yet updates that feature's changeset instead of adding a new one. Name rule ids in backticks.
 
 Run `makers changeset` (it wraps `knope document-change`) and commit the generated `.changeset/*.md` file with your PR. Choose `patch` for fixes, `minor` for features, or `major` for breaking changes. You can also create a uniquely named file by hand, for example `.changeset/fix-install.md`:
 

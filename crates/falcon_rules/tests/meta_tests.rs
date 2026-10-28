@@ -680,30 +680,73 @@ fn rule_sections_reference_shared_options_definitions() {
     }
 }
 
-#[test]
-fn rule_named_changesets_mention_rule_ids() {
+fn changesets() -> Vec<(std::path::PathBuf, String)> {
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.changeset");
     let entries = match std::fs::read_dir(&directory) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
         Err(error) => panic!("cannot read {}: {error}", directory.display()),
     };
-    for entry in entries {
-        let path = entry.unwrap().path();
-        if path.extension().is_none_or(|extension| extension != "md") {
-            continue;
+    entries
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "md"))
+        .map(|path| {
+            let contents = std::fs::read_to_string(&path).unwrap();
+            let body = contents
+                .strip_prefix("---\n")
+                .and_then(|contents| contents.split_once("\n---"))
+                .map_or(contents.as_str(), |(_, body)| body)
+                .trim()
+                .to_owned();
+            (path, body)
+        })
+        .collect()
+}
+
+fn changeset_format_error(body: &str) -> Option<&'static str> {
+    if body.is_empty() {
+        return Some("is empty");
+    }
+    if body.contains("\n\n") {
+        return Some("has several paragraphs; split it into one changeset per change");
+    }
+    body.lines()
+        .map(str::trim_start)
+        .any(|line| {
+            line.starts_with('#')
+                || line.starts_with("- ")
+                || line.starts_with("* ")
+                || line.starts_with("```")
+        })
+        .then_some("contains headings, lists or code blocks")
+}
+
+#[test]
+fn changesets_are_single_changelog_items() {
+    for (path, body) in changesets() {
+        if let Some(error) = changeset_format_error(&body) {
+            panic!("{} {error}", path.display());
         }
+    }
+}
+
+#[test]
+fn changeset_format_rejects_multi_item_bodies() {
+    assert_eq!(changeset_format_error("Fix installation on Linux."), None);
+    assert!(changeset_format_error("Add a flag.\n\nFix a crash.").is_some());
+    assert!(changeset_format_error("- Add a flag.\n- Fix a crash.").is_some());
+    assert!(changeset_format_error("# Flag\nAdd a flag.").is_some());
+}
+
+#[test]
+fn rule_named_changesets_mention_rule_ids() {
+    for (path, body) in changesets() {
         let filename = path
             .file_stem()
             .unwrap()
             .to_str()
             .unwrap()
             .replace('_', "-");
-        let contents = std::fs::read_to_string(&path).unwrap();
-        let body = contents
-            .strip_prefix("---\n")
-            .and_then(|contents| contents.split_once("\n---"))
-            .map_or(contents.as_str(), |(_, body)| body);
         for rule in RULE_METADATA {
             if filename.match_indices(rule.name).any(|(start, _)| {
                 (start == 0 || filename.as_bytes()[start - 1] == b'-')
