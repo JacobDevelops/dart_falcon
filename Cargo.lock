@@ -293,7 +293,7 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "dart_falcon"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "criterion",
  "falcon_analyze",
@@ -359,7 +359,7 @@ dependencies = [
 
 [[package]]
 name = "falcon_analyze"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "falcon_config",
  "falcon_dart_parser",
@@ -375,7 +375,7 @@ dependencies = [
 
 [[package]]
 name = "falcon_cli"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "clap",
  "falcon_analyze",
@@ -397,7 +397,7 @@ dependencies = [
 
 [[package]]
 name = "falcon_config"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "glob",
  "serde",
@@ -408,7 +408,7 @@ dependencies = [
 
 [[package]]
 name = "falcon_dart_parser"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "criterion",
  "falcon_syntax",
@@ -420,7 +420,7 @@ dependencies = [
 
 [[package]]
 name = "falcon_diagnostics"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "falcon_syntax",
  "lsp-types",
@@ -430,7 +430,7 @@ dependencies = [
 
 [[package]]
 name = "falcon_lsp"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "crossbeam-channel",
  "falcon_analyze",
@@ -450,7 +450,7 @@ dependencies = [
 
 [[package]]
 name = "falcon_project"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "falcon_analyze",
  "falcon_config",
@@ -468,7 +468,7 @@ dependencies = [
 
 [[package]]
 name = "falcon_rules"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "criterion",
  "falcon_analyze",
@@ -491,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "falcon_syntax"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "falcon_dart_parser",
 ]
@@ -1649,7 +1649,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "clap",
  "falcon_analyze",

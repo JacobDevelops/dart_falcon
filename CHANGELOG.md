@@ -1,9 +1,10 @@
 # Changelog
 
-## 0.4.5 (2026-10-28)
+## 0.4.6 (2026-10-28)
 
 ### Features
 
+- Stop publishing Intel macOS binaries; macOS releases now support Apple Silicon only.
 - Add baselines of existing findings with `--write-baseline [PATH]`, `--baseline PATH` and the `baseline` configuration key, matched from any subdirectory of the project.
 - Support installing prebuilt releases with cargo-binstall.
 - Offer quick fixes and a safe fix-all on save in the editor.

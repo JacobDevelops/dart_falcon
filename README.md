@@ -55,7 +55,7 @@ wrapper is MIT/Apache-2.0 licensed; bundled jemalloc is
 
 ```toml
 [tools]
-"github:JacobDevelops/dart_falcon" = { version = "0.4.5", matching = "falcon-" }
+"github:JacobDevelops/dart_falcon" = { version = "0.4.6", matching = "falcon-" }
 ```
 
 Run `mise exec -- falcon check .`, or use `falcon` directly with mise activated.
