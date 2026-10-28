@@ -76,7 +76,7 @@ reviews:
       - name: "Changeset for user-facing changes"
         mode: warning
         instructions: |
-          Pass if the PR adds a `.changeset/*.md` file, or if it changes no user-facing behaviour. User-facing means new or changed lint rules, diagnostic fixes, CLI or LSP behaviour, config handling, or installation and packaging. Changes limited to tests, internal refactors, xtask, CI, the website, or docs pass without a changeset. A changeset for a rule must name the rule id.
+          Pass if the PR adds `.changeset/*.md` files, or if it changes no user-facing behaviour. User-facing means new or changed lint rules, diagnostic fixes, CLI or LSP behaviour, config handling, or installation and packaging. Changes limited to tests, internal refactors, xtask, CI, the website, or docs pass without a changeset. Each changeset must be a short plain summary of one user-facing change, usually one sentence, with no headings or lists; a PR with several changes adds several changesets. A changeset for a rule must name the rule id.
   tools:
     clippy:
       enabled: true

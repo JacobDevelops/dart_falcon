@@ -18,9 +18,10 @@ Project skills live in `.agents/skills/`.
 - For configuration changes, read `docs/configuration.md` and
   `crates/falcon_config/src/lib.rs`. Preserve the Biome-shaped grouped surface;
   new JSON keys and rule ids use kebab-case, while Rust fields use snake_case.
-- A user-facing change ships with a changeset (`makers changeset`); read
-  CONTRIBUTING's **Commits & pull requests** for the policy and **Releasing
-  (maintainers)** before touching versions or release workflows.
+- Each user-facing change ships with its own short changeset
+  (`makers changeset`); read CONTRIBUTING's **Commits & pull requests** for the
+  format and policy and **Releasing (maintainers)** before touching versions or
+  release workflows.
 - Docs pin the current falcon version only where a pin is the point (mise and
   CI snippets); `cargo xtask version` rewrites those, and an xtask test fails if
   one drifts. Install links use the versionless `releases/latest/download/` form.
