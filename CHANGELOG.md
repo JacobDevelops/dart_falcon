@@ -46,52 +46,85 @@
 ### Features
 
 - Make `falcon check` lint the current directory when no paths are supplied.
-- Report missing input paths and runs that process no files as error diagnostics with a nonzero exit status; use `--no-errors-on-unmatched` to allow these inputs in automation. Package manifests count as processed inputs, and explicit paths excluded by file filters are explained instead of reported as processing no files.
-- Resolve file filters, exclusions and overrides relative to the configuration file in both the CLI and editor. User-level `~/.falcon.json` settings instead resolve globs from the CLI current directory or the editor workspace root. Single-star globs now stop at directory separators, while double-star globs match nested paths, so `!build/**` excludes build output when checking the current directory.
+- Report missing input paths and runs that process no files as errors with a nonzero exit status; use `--no-errors-on-unmatched` to allow them in automation.
+- Count package manifests as processed inputs and explain when explicit paths are excluded by file filters.
+- Resolve file filters, exclusions and overrides relative to the configuration file in the CLI and editor.
+- Resolve user-level `~/.falcon.json` globs from the CLI current directory or editor workspace root.
+- Make single-star globs stop at directory separators and double-star globs match nested paths.
 - Reject rules configured under the wrong group or section and unsupported override preset toggles, rather than accepting settings that have no effect; the published override schema matches.
 - Serialize JSON diagnostic severities as lowercase `error`, `warning`, and `info`.
-- `falcon migrate` translates legacy flat settings and rule-level YAML exclusions, preserves legacy severity aliases and recursive exclusion patterns where possible, and warns how many formerly implicit rules need explicit enablement.
-- `falcon migrate` normalizes keys, resolves collisions, moves known rules to their declared group and section, and uses structured error paths to report and repair invalid entries without deleting unrelated settings.
+- Translate legacy flat settings and rule-level YAML exclusions with `falcon migrate`, preserving severity aliases and recursive exclusions where possible.
+- Warn how many formerly implicit rules need explicit enablement during migration.
+- Normalize keys and resolve collisions during `falcon migrate`.
+- Move known rules to their declared group and section during migration.
+- Report invalid migration entries with structured error paths and repair them without deleting unrelated settings.
 - Omit unresolved source positions from diagnostics: JSON output leaves out `line` and `col` instead of emitting zero, and text output no longer prints `0:0`.
 - Remove `prefer-any-or-every`, which reported the same `where(predicate).isEmpty` calls as `prefer-iterable-every`. Existing `prefer-any-or-every` config keys and suppressions are reported with a pointer to `complexity/prefer-iterable-every`.
 - Reject unknown configuration keys, rule names, rule groups, and domains with their full key paths, including inside overrides, instead of silently ignoring typos. Legacy spellings remain accepted with deprecation warnings.
-- Add typed rule options with kebab-case keys, rule-specific JSON schema completion, and load-time errors that identify the configuration path for invalid options. Loading rejects unsupported options, invalid values, mixed lists, and unknown member-order tokens instead of falling back to defaults. Whole-number numeric options and max-errors values such as `1.0` are accepted, out-of-range integers name their allowed range, and optional sections accept null in both the loader and editor schema. Recognized legacy snake_case option keys remain accepted with deprecation warnings.
+- Add typed rule options with kebab-case keys and rule-specific JSON schema completion.
+- Identify invalid rule options by configuration path and reject unsupported options, invalid values, mixed lists and unknown member-order tokens instead of falling back to defaults.
+- Accept whole-number numeric options and `max-errors` values such as `1.0`; report allowed ranges for out-of-range integers.
+- Accept null optional sections in the loader and editor schema.
+- Accept recognized legacy snake_case option keys with deprecation warnings.
 
 ### Fixes
 
-- Match globs when the configuration root or one of its subdirectories is reached through a directory alias, such as macOS `/var` resolving to `/private/var`, and treat a `~/.falcon.json` reached through a symlinked home directory as user-level settings. Reuse resolved document directories across file filters and overrides without filesystem lookups for paths inside the lexical root.
+- Match globs when the configuration root or a subdirectory is reached through a directory alias, such as macOS `/var` resolving to `/private/var`.
+- Treat `~/.falcon.json` reached through a symlinked home directory as user-level settings.
+- Reuse resolved document directories across file filters and overrides.
 - `avoid-returning-widgets`, `avoid-unused-parameters`, `provide-deprecation-message`, `boolean-prefixes`, `member-ordering`, and `avoid-unused-constructor-parameters` now use resolved analysis and report nothing for files without semantic resolution.
 - Make checks of long chains of arithmetic operations scale with the expression size instead of repeatedly analyzing earlier operands.
-- Bound constant evaluation memory, share cached constant values across a file's rules, and evaluate reference chains iteratively without a depth limit while preserving the independent constructor nesting limit. Avoid quadratic repeated folding of constant aliases in async-safety rules.
+- Bound constant-evaluation memory and share cached constant values across a file's rules.
+- Evaluate reference chains iteratively without a depth limit while preserving the independent constructor nesting limit.
+- Avoid quadratic repeated folding of constant aliases in async-safety rules.
 - Keep all diagnostics when determining the `falcon check` exit status, so `--max-errors` limits printed output only.
 - Discover Dart sources and package manifests in one directory walk that prunes excluded directories.
-- The no-logic-in-create-state rule now reports createState methods that return a constructed type whose fully known inheritance hierarchy does not include State. Types with unresolved ancestors remain conservatively unreported.
+- Report no-logic-in-create-state when a `createState` method returns a constructed type whose fully known inheritance hierarchy does not include `State`.
+- Conservatively skip types with unresolved ancestors.
 - Canonicalize rule aliases when loading configuration with the same severity and options collision policy as `falcon migrate`, and report the configuration discarded when legacy and canonical rule names collide.
 - Deliver configuration warnings and errors to the editor through the language server; the CLI reports them instead of the library printing them directly.
 - Recognize `const (...)` constant patterns as constant contexts, so named-constant suggestions and redundant `const` checks analyze their operands.
 - Standardize lint diagnostic messages as complete sentences with terminal punctuation, backtick-quoting code keywords, types, operators, and interpolated identifiers.
-- A block documentation comment immediately after a group of line documentation comments now replaces that group as the declaration's documentation, and documentation queries include comments inside string interpolation bodies.
-- Report unreadable or malformed package configuration, lockfiles, SDK and embedder library mappings, SDK version files, and external Dart sources as warnings in the CLI and editor instead of silently dropping them. Missing optional files remain silent.
+- Let a block documentation comment immediately after line documentation comments replace that group's documentation for the declaration.
+- Include comments inside string interpolation bodies in documentation queries.
+- Warn in the CLI and editor about unreadable or malformed package configuration, lockfiles, SDK and embedder library mappings, SDK version files, and external Dart sources instead of silently dropping them.
+- Keep missing optional files silent.
 - `exhaustive-cases` uses resolved deprecation identities when choosing between static constants with the same value, so a user-defined `Deprecated` annotation no longer changes the suggested case.
 - Use faster lookups during generic type analysis while preserving type bounds, alias identities, and diagnostics.
-- Fix package ownership checks and analysis-environment invalidation through directory aliases, including missing files and macOS temporary directories.
-- Fix crashes when checking very long arithmetic, logical, null-coalescing, and string expressions, including variable initializers and call arguments.
-- Avoid exponential parsing time for nested nullable-declaration and conditional-expression statement heads, while preserving nullable declarations with conditional initializers. Ensure statement recovery makes progress when nested closures reach the parser depth ceiling.
+- Fix package ownership checks through directory aliases.
+- Fix analysis-environment invalidation through directory aliases, including missing files and macOS temporary directories.
+- Fix crashes when checking very long arithmetic, logical, null-coalescing and string expressions.
+- Cover long expressions in variable initializers and call arguments.
+- Avoid exponential parsing time for nested nullable-declaration and conditional-expression statement heads while preserving nullable declarations with conditional initializers.
+- Ensure statement recovery progresses when nested closures reach the parser depth ceiling.
 - Recognize test_core and test_api consistently in test assertion rules, including framework import gating and duplicate matcher checks.
 - `avoid-catches-without-on-clauses` requires a resolved SDK `Future` identity before treating `.error(...)` as error forwarding, so ordinary logger calls still report an untyped catch.
-- Fix `unnecessary-nullable` false positives for method tear-offs, cascade references, parameter writes that may be null (including compound assignments and `++`/`--`), and arguments typed `FutureOr<T?>` or as an extension type that doesn't implement `Object`. Resolve cross-file rules consistently even when no file rules require semantic resolution.
+- Fix `unnecessary-nullable` false positives for method tear-offs, cascade references, and parameter writes that may be null, including compound assignments and `++`/`--`.
+- Fix `unnecessary-nullable` false positives for arguments typed `FutureOr<T?>` or as extension types that do not implement `Object`.
+- Resolve cross-file rules consistently even when no file rules require semantic resolution.
 - Do not treat parameter defaults, relational-pattern operands, or map-pattern keys as implicit constant contexts when suggesting named constants or removing redundant arguments. These positions require constant expressions but still require explicit `const` on constructor calls and collection literals.
-- Avoid repeated path canonicalization for CLI inputs that are already indexed, while preserving symlink and parent-component resolution.
+- Avoid repeated path canonicalization for CLI inputs that are already indexed while preserving symlink and parent-component resolution.
 - Prevent the language server from crashing when a dependency exports many files on machines with few available processors. Dependency loading and analysis now stay on the shared workers with enough stack space.
 - Distinguish user declarations from SDK and package declarations with colliding names, and resolve part-file uses in their own file context.
-- Keep binary-chain analysis linear when operands write local variables, and avoid repeatedly scanning expression prefixes in `use-existing-variable`. Carry each evaluated left operand's type into the next operator and its right-hand context, matching Dart's left-to-right evaluation even when a later operand changes that local's promoted type. The rule also evaluates declarations in order, fixing missed reuse diagnostics when a computation depends on an earlier variable in the same declaration statement.
+- Keep binary-chain analysis linear when operands write local variables.
+- Avoid repeatedly scanning expression prefixes in `use-existing-variable`.
+- Carry each evaluated left operand's type into the next operator and its right-hand context, matching Dart's left-to-right evaluation when later operands change local promotion.
+- Evaluate declarations in order so `use-existing-variable` detects reuse when a computation depends on an earlier variable in the same declaration statement.
 - Falcon now keeps cached type results tied to their source values, preventing stale results when analysis reuses memory after discarding temporary values.
 - Fix crashes when checking very long binary expressions.
 - `falcon migrate` refuses ambiguous legacy exclusions and repairs that would erase a whole section. Unusable or unsupported override scopes discard the whole override with its original index, while invalid top-level file scopes fail without writing.
-- Make checks of deeply nested closures finish promptly without repeatedly analyzing the same closure bodies. Fix closure return types to match Dart when a call that never returns uses a block-scoped variable or a promoted callable that is later assigned a different type.
+- Make checks of deeply nested closures finish promptly without repeatedly analyzing the same closure bodies.
+- Fix closure return types to match Dart when a non-returning call uses a block-scoped variable or a promoted callable is later assigned a different type.
 - Prevent nested virtual directory aliases from crossing package boundaries when resolving package identities.
-- Prevent exponential parsing of nested collection literals and malformed lambdas, and recover from deeply nested patterns and types without crashing. Preserve valid long expression and pattern chains while making their default syntax traversal stack-safe. Parse top-level metadata once and ensure malformed switch arms cannot stall the parser.
-- Recover unclosed string interpolations without swallowing subsequent declarations, preserve constructor-initializer parsing state across nested brackets and speculative rollback, and discard diagnostics from abandoned member and typedef parses. Keep cascade and postfix selectors on the same parsing path, retain written identifiers rather than speculative type nodes in typedefs and binding patterns, and scan nested language-version header comments in linear time.
+- Prevent exponential parsing of nested collection literals and malformed lambdas, and recover from deeply nested patterns and types without crashing.
+- Preserve valid long expression and pattern chains while making default syntax traversal stack-safe.
+- Parse top-level metadata once and ensure malformed switch arms cannot stall the parser.
+- Recover unclosed string interpolations without swallowing subsequent declarations.
+- Preserve constructor-initializer parsing state across nested brackets and speculative rollback.
+- Discard diagnostics from abandoned member and typedef parses.
+- Keep cascade and postfix selectors on the same parsing path.
+- Retain written identifiers rather than speculative type nodes in typedefs and binding patterns.
+- Scan nested language-version header comments in linear time.
 - Fix `prefer-iterable-every` to flag non-negated filtered emptiness and recommend negating its predicate. Negated filtered emptiness, including equality with `false` and inequality with `true`, is no longer reported, and filtered-length comparisons continue to recommend the original predicate.
 - `prefer-iterable-every` now uses resolved analysis and matches only SDK `Iterable.where` calls, so files without semantic resolution no longer report.
 - `prefer-iterable-every` reports filtered-length comparisons only when both sides use the same simple receiver or explicit `this` field, not unrelated collections or repeated calls.
@@ -100,10 +133,14 @@
 - Enable resolution when running `avoid-private-typedef-functions` or `avoid-duplicate-mixins` so they analyze declarations in sibling part files even when no other resolved rule is enabled.
 - Resolve Flutter widget and state types and SDK asynchronous error APIs by declaration identity in `avoid-returning-widgets`, `member-ordering`, `avoid-returning-null-for-void`, and `avoid-catches-without-on-clauses`. User-defined lookalike types no longer receive framework-specific treatment, and prefixed imports and type aliases retain their original identities.
 - Resolve override and deprecation annotations to their `dart:core` identities, including prefixed SDK annotations and one-hop constant aliases of `override` and `deprecated`. User-defined lookalikes no longer suppress override-related diagnostics, exempt unused constructor parameters, or trigger deprecation-message diagnostics, and deprecated-member usage recognizes the same `Deprecated` constructor identities as deprecation consistency checks.
-- Reuse stack-sized workers for parsing and lint rules instead of starting a thread for each pass. Worker panics now produce an analysis diagnostic rather than escaping the worker boundary, while deeply nested Dart code keeps the same stack space.
-- Share resolved type aliases across analysis threads without making recursive aliases wait on one another, and allow alias resolution to recover after an interrupted expansion.
-- Resolve declaration references the same way across reachability, same-package deprecation, private-field initialization, and nullable-parameter analysis, looking up declared members first, then library scope, then inherited members.
-- Falcon now revisits only declarations affected by newly inferred types instead of repeatedly scanning every file. Inference preserves known types and reports an internal error if unresolved dependencies keep changing rather than returning incomplete results. The `avoid-dynamic-calls` rule no longer reports members whose inherited type cannot be resolved.
+- Reuse stack-sized workers for parsing and lint rules instead of starting a thread for each pass.
+- Report worker panics as analysis diagnostics rather than allowing them to escape the worker boundary.
+- Keep the same stack space for deeply nested Dart code.
+- Share resolved type aliases across analysis threads without recursive aliases waiting on one another.
+- Allow alias resolution to recover after an interrupted expansion.
+- Revisit only declarations affected by newly inferred types instead of repeatedly scanning every file.
+- Preserve known types during inference and report an internal error if unresolved dependencies keep changing rather than returning incomplete results.
+- Avoid reporting inherited members with unresolved types in `avoid-dynamic-calls`.
 - Pin the VS Code configuration schema to the extension release and write a release-pinned `$schema` URL when `falcon migrate` creates a configuration. Keep both editor extension versions synchronized with releases.
 - Keep unknown generic arity unknown instead of inventing zero type parameters for types such as `ValueNotifier` and `Provider`, while retaining explicitly curated zero-arity types.
 - `unreachable-from-main` now uses the shared Dartdoc reference parser: Markdown link display text and link definitions, inline and block code (fenced or indented), Dartdoc directives, and trailing inline line-documentation comments no longer keep declarations reachable, while reference-style destination labels still count as references.
@@ -249,40 +286,47 @@
 - `record-fields-ordering`: Flags named record type fields that violate the configured order.
 - `use-existing-destructuring`: Add an optional rule to reuse or extend existing record destructuring instead of rereading a field.
 - `use-existing-variable`: Add an optional rule to reuse a local for stable SDK arithmetic and `String.length`/`int` parity getters.
-- Add the `bloc` rules `emit-new-bloc-state-instances`, `prefer-sealed-bloc-events`, `prefer-sealed-bloc-state`, `prefer-immutable-bloc-events`, `prefer-immutable-bloc-state`, `avoid-duplicate-bloc-event-handlers`, `check-is-not-closed-after-async-gap` and `avoid-emit-outside-bloc`. This completes the must-have rules in the 1.0 checklist.
-- Add `avoid-complex-conditions` and `avoid-complex-loop-conditions` (both take a `threshold` option), `avoid-collapsible-if`, `avoid-slow-collection-methods` and `move-variable-outside-iteration`.
-- Add `avoid-duplicate-map-keys`, `avoid-duplicate-collection-elements`, `avoid-duplicate-switch-case-conditions`, `avoid-missing-interpolation`, `avoid-contradictory-expressions` and `avoid-unmodified-loop-condition`. All but `avoid-duplicate-collection-elements` are recommended, since repeated list values are often intentional.
-- Add the cross-file rules `unused-dependencies`, `undeclared-dependencies`, `no-import-cycles` and `banned-imports`, all opt-in. When `undeclared-dependencies` is enabled it takes over the cases it shares with `depend-on-referenced-packages`. `banned-imports` takes `files`/`deny` glob rules; see the configuration docs.
-- Add `avoid-undisposed-instances`, `dispose-focus-node-and-timer`, `dispose-fields`, `always-remove-listener`, `avoid-recursive-widget-calls` and `avoid-unnecessary-stateful-widgets`. A disposable passed to another call counts as handed over, so `Navigator.push(MaterialPageRoute(...))` isn't flagged.
-- Add `test`, `bloc`, `riverpod`, `provider`, `flutter_hooks` and `equatable` to the `linter.domains` config. They gate the package-specific rules that follow, so each can be set to `all`, `recommended` or `none` like `flutter`.
-- Add the Flutter lifecycle rules `use-setstate-synchronously`, `require-super-dispose`, `avoid-empty-setstate`, `avoid-unnecessary-setstate`, `use-closest-build-context`, `avoid-late-context` and `avoid-inherited-widget-in-initstate`. `use-setstate-synchronously` shares the async-gap analysis behind `use-build-context-synchronously`.
-- Add the `flutter_hooks` rules `avoid-conditional-hooks`, `avoid-hooks-outside-build`, `avoid-misused-hooks` and `avoid-unnecessary-hook-widgets`.
-- Add the `provider` rules `avoid-read-inside-build`, `avoid-watch-outside-build`, `dispose-providers` and `prefer-read-for-methods`.
-- Add the `riverpod` rules `use-ref-read-synchronously`, `use-ref-and-state-synchronously`, `dispose-provided-instances` and `dispose-provider-resources`.
-- Add the `riverpod` rules `avoid-ref-watch-outside-build`, `avoid-ref-read-inside-build`, `prefer-ref-read-for-methods`, `avoid-calling-notifier-members-inside-build` and `avoid-unnecessary-consumer-widgets`.
-- Add `prefer-early-return`, `prefer-returning-condition`, `prefer-switch-expression`, `prefer-for-in` and `prefer-named-boolean-parameters`. `prefer-named-boolean-parameters` covers the private functions and closures that `avoid-positional-boolean-parameters` skips, so enabling both covers every positional `bool`.
+- Add `emit-new-bloc-state-instances`.
+- Add `prefer-sealed-bloc-events` and `prefer-sealed-bloc-state`.
+- Add `prefer-immutable-bloc-events` and `prefer-immutable-bloc-state`.
+- Add `avoid-duplicate-bloc-event-handlers`.
+- Add `check-is-not-closed-after-async-gap`.
+- Add `avoid-emit-outside-bloc`.
+- Add `avoid-complex-conditions` and `avoid-complex-loop-conditions`, with a `threshold` option.
+- Add `avoid-collapsible-if`.
+- Add `avoid-slow-collection-methods`.
+- Add `move-variable-outside-iteration`.
+- Add `avoid-duplicate-map-keys`, `avoid-duplicate-collection-elements`, `avoid-duplicate-switch-case-conditions`, `avoid-missing-interpolation`, `avoid-contradictory-expressions` and `avoid-unmodified-loop-condition`.
+- Add the opt-in cross-file rules `unused-dependencies`, `undeclared-dependencies`, `no-import-cycles` and `banned-imports`.
+- Add `avoid-undisposed-instances`, `dispose-focus-node-and-timer`, `dispose-fields`, `always-remove-listener`, `avoid-recursive-widget-calls` and `avoid-unnecessary-stateful-widgets`.
+- Add the `test`, `bloc`, `riverpod`, `provider`, `flutter_hooks` and `equatable` values for `linter.domains`.
+- Add Flutter lifecycle rules `use-setstate-synchronously`, `require-super-dispose`, `avoid-empty-setstate`, `avoid-unnecessary-setstate`, `use-closest-build-context`, `avoid-late-context` and `avoid-inherited-widget-in-initstate`.
+- Add `avoid-conditional-hooks`, `avoid-hooks-outside-build`, `avoid-misused-hooks` and `avoid-unnecessary-hook-widgets`.
+- Add `avoid-read-inside-build`, `avoid-watch-outside-build`, `dispose-providers` and `prefer-read-for-methods`.
+- Add `use-ref-read-synchronously`, `use-ref-and-state-synchronously`, `dispose-provided-instances` and `dispose-provider-resources`.
+- Add `avoid-ref-watch-outside-build`, `avoid-ref-read-inside-build`, `prefer-ref-read-for-methods`, `avoid-calling-notifier-members-inside-build` and `avoid-unnecessary-consumer-widgets`.
+- Add `prefer-early-return`, `prefer-returning-condition`, `prefer-switch-expression`, `prefer-for-in` and `prefer-named-boolean-parameters`.
 - Add `avoid-commented-out-code`, `avoid-shadowing`, `avoid-shadowed-extension-methods`, `avoid-assignments-as-conditions`, `avoid-bitwise-operators-with-booleans` and `cascade-after-null-coalescing`.
-- Add `avoid-duplicate-test-assertions` and `missing-test-assertion` for `*_test.dart` files, and `list-all-equatable-fields`, `add-equatable-props` and `avoid-mutable-equatable-subclass-fields` for `package:equatable` classes.
-- Add `avoid-collection-equality-checks`, `avoid-unrelated-type-casts`, `avoid-unsafe-collection-methods`, `avoid-uncaught-future-errors` and the first `security` rule, `avoid-weak-cryptographic-algorithms`. All but `avoid-unsafe-collection-methods` are recommended, since it flags every `.first` on a list that might be empty.
-- Add `avoid-unnecessary-if`, `avoid-unnecessary-return` and `avoid-redundant-else`. `avoid-unnecessary-conditionals` is accepted as an alias of `avoid-bool-literals-in-conditional-expressions`, which already covers it.
-- Add the Flutter widget rules `avoid-shrink-wrap-in-lists`, `prefer-align-over-container`, `prefer-center-over-align`, `prefer-padding-over-container`, `prefer-constrained-box-over-container`, `prefer-transform-over-container`, `prefer-container` (with a `min_sequence` option) and `prefer-for-loop-in-children`, plus the first `a11y` rule, `prefer-action-button-tooltip`.
+- Add `avoid-duplicate-test-assertions` and `missing-test-assertion` for `*_test.dart` files.
+- Add `list-all-equatable-fields`, `add-equatable-props` and `avoid-mutable-equatable-subclass-fields` for `package:equatable` classes.
+- Add `avoid-collection-equality-checks`, `avoid-unrelated-type-casts`, `avoid-unsafe-collection-methods` and `avoid-uncaught-future-errors`.
+- Add the `security` rule `avoid-weak-cryptographic-algorithms`.
+- Add `avoid-unnecessary-if`, `avoid-unnecessary-return` and `avoid-redundant-else`.
+- Accept `avoid-unnecessary-conditionals` as an alias of `avoid-bool-literals-in-conditional-expressions`.
+- Add Flutter widget rules `avoid-shrink-wrap-in-lists`, `prefer-align-over-container`, `prefer-center-over-align`, `prefer-padding-over-container`, `prefer-constrained-box-over-container`, `prefer-transform-over-container`, `prefer-container` (with a `min_sequence` option) and `prefer-for-loop-in-children`.
+- Add the `a11y` rule `prefer-action-button-tooltip`.
 - `widget-tree-depth`: Limits the depth of an inline Flutter widget construction tree.
 
-#### `banned-usage`: Add configurable bans on resolved API references, matching top-level names or `DeclaringType.member`. Covers calls, tear-offs, properties, cascades, context-typed dot shorthands, constructor invocations, initializers and redirecting factories. Lexical declarations take precedence over inherited members; unresolved targets are ignored. Matching stays inactive until configured with deny patterns and diagnostic messages.
-
-Unqualified instance and static fields remain checked unless shadowed by a local declaration. Named extensions resolve their own members without consulting the on-type. Property reads and writes use their respective declaring owners, including extension setters. Compound updates prefer matching setter bans and fall back to getter bans, preserving all configured messages for the selected owner.
-
-Cascade assignment targets resolve only against the cascade receiver; assigned values retain normal lexical resolution.
-
-#### `no-magic-string`: Extract inline string literals into named variables or constants. Invocation exemptions apply only to direct arguments, interpolation expressions are checked, and `allow_only_once` counts exempt literals too.
-
-Count string literal patterns for `allow_only_once` while keeping pattern literals and annotations exempt from diagnostics. Directive URIs and conditional-import configuration strings remain excluded from occurrence counts.
+- `banned-usage`: Ban configured resolved API references by top-level name or `DeclaringType.member`, including calls, properties, constructors, cascades and initializers.
+- `banned-usage` resolves lexical declarations, inherited members, named extensions, property setters and cascade targets.
+- `no-magic-string`: Extract inline string literals into named variables or constants; invocation exemptions apply only to direct arguments, and interpolation expressions are checked.
+- `no-magic-string` counts exempt literals for `allow_only_once`, while excluding pattern literals, annotations, directive URIs and conditional-import configuration strings from diagnostics or counts as applicable.
 
 ### Fixes
 
-- Fix string interpolation parsing. `'${await x}'` inside an async function was dropped from the syntax tree, so anything used only there looked unused (for example to `avoid-unused-parameters`). An escaped brace such as `${a\\}b}` is now rejected with a parse error, matching Dart.
+- Fix string interpolation parsing so `'${await x}'` is retained in the syntax tree and escaped braces such as `${a\\}b}` produce a parse error.
 - `newline-before-return`: Count blank lines above attached comments, avoiding diagnostics on already separated return statements.
-- Parse switch-expression guards with a parenthesized operand, like `when (a = b) => 1`, as guards. They were read as closures, which broke the arm and anything checking the guard.
+- Parse switch-expression guards with parenthesized operands, such as `when (a = b) => 1`, as guards rather than closures.
 
 ## 0.4.2 (2026-10-17)
 
@@ -297,14 +341,16 @@ Count string literal patterns for `allow_only_once` while keeping pattern litera
 
 ### Fixes
 
-- Resolve `package:` imports in each package's dependency context, so workspaces containing different versions of the same dependency no longer share the wrong library identities or produce false positives.
-- Recognize Flutter and meta declarations across multiple dependency copies, and cache import path canonicalization to reduce analysis time.
-- Fix package discovery, language versions, project membership, and cross-file diagnostics when a workspace is opened through a symlink.
-- Retry dependency and companion parsing after a parser thread fails to start instead of caching the failure as a completed parse.
-- Publish cross-file thread-spawn failures on every open LSP document, and prevent suppression comments from hiding those failures.
-- Fix the Zed extension's repository URL to point at `JacobDevelops/dart_falcon`.
-- Quick-start install links now download the latest release without a version pin via `releases/latest/download/falcon-<platform>.tar.gz`, and releases include versionless platform tarballs alongside versioned archives.
-- Manual re-releases now build the requested tag rather than the current main branch.
+- Resolve `package:` imports in each package's dependency context so workspaces with different versions of a dependency do not share incorrect library identities or produce false positives.
+- Recognize Flutter and meta declarations across multiple dependency copies.
+- Fix package discovery, language versions and project membership when a workspace is opened through a symlink.
+- Fix cross-file diagnostics when a workspace is opened through a symlink.
+- Retry dependency and companion parsing when a parser thread fails to start.
+- Publish cross-file thread-spawn failures on every open LSP document.
+- Prevent suppression comments from hiding cross-file thread-spawn failures.
+- Fix the Zed extension repository URL to point to `JacobDevelops/dart_falcon`.
+- Make quick-start links install the latest release without a version pin and include versionless platform tarballs alongside versioned archives.
+- Build the requested tag for manual re-releases instead of the current main branch.
 
 ## 0.4.1 (2026-10-17)
 
@@ -322,8 +368,8 @@ Count string literal patterns for `allow_only_once` while keeping pattern litera
 - Choose falcon's own recommended set of 165 rules out of 290 shipped rules instead of following upstream presets. `unused-files`, `unused-code`, and `unnecessary-nullable` are now opt-in; `depend-on-referenced-packages`, `package-names`, and `secure-pubspec-urls` are recommended.
 - Add `a11y` and `security` rule groups, and move `secure-pubspec-urls` from `suspicious` to `security`. Update its configuration and suppression paths to use the new group.
 - Remove the SDK-retired `unsafe-html`, `package-prefixed-library-names`, and `package-api-docs` rules.
-- Always analyze files in parallel and remove `--parallel`. Use `RAYON_NUM_THREADS` to limit workers; diagnostic ordering remains deterministic.
-- Count constructors, setters, operators, closures, local functions, and function types in `max-parameters-for-function`, including constructors and `copyWith` methods that were previously exempt.
+- Always analyze files in parallel and remove `--parallel`; use `RAYON_NUM_THREADS` to limit workers while preserving deterministic diagnostic ordering.
+- Count constructors, setters, operators, closures, local functions and function types in `max-parameters-for-function`, including constructors and `copyWith` methods that were previously exempt.
 
 ### Features
 
@@ -366,8 +412,10 @@ Count string literal patterns for `allow_only_once` while keeping pattern litera
 ### Fixes
 
 - Count same-file references as usage in `unused-code` so declarations used within their own file are not reported as unused.
-- Align argument, dynamic-type, literal-formatting, magic-number, comment-formatting, nesting, and nullable-return checks with dart_code_linter and pyramid_lint behavior, including their documented exemptions.
-- Restrict identifier-length and boolean-prefix checks to declarations, honor member-ordering options, and exempt constructors from parameter-count checks.
+- Align argument, dynamic-type, literal-formatting, magic-number, comment-formatting, nesting and nullable-return checks with dart_code_linter and pyramid_lint behavior, including documented exemptions.
+- Restrict identifier-length and boolean-prefix checks to declarations.
+- Honor member-ordering options.
+- Exempt constructors from parameter-count checks.
 - Make `no-boolean-literal-compare` opt-in until type information is available to avoid false positives.
 - Parse statement-form pattern destructuring, pattern `for-in` bindings, and null-aware collection elements.
 
