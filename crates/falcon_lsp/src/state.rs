@@ -18,6 +18,7 @@ use falcon_analyze::{
     IdentitySource, LibraryGrouping, PackageIdentity, ParsedFile, ProjectFile, RuleRegistry,
     SemanticIndexes, SignatureIndex, TypeIndex, build_semantic_indexes, canonical_or_lexical,
     import_path, library_unit, package_identities, syntax_error_diagnostics,
+    update_semantic_indexes,
 };
 use falcon_config::FalconConfig;
 use falcon_dart_parser::try_parse_for_package;
@@ -113,6 +114,7 @@ struct SemanticSnapshot {
     packages: Vec<PackageIdentity>,
     grouping: LibraryGrouping,
     by_path: HashMap<PathBuf, usize>,
+    external_identity: Option<Arc<IdentityIndex>>,
     reverse_dependencies: Vec<Vec<usize>>,
 }
 
@@ -236,6 +238,7 @@ struct CrossFileIndexCache {
     files: Vec<ProjectFile>,
     packages: Vec<PackageIdentity>,
     indexes: SemanticIndexes,
+    external_identity: Option<Arc<IdentityIndex>>,
 }
 
 enum ProjectView {
@@ -326,6 +329,8 @@ pub struct LspState {
     resolve_semantics: bool,
     /// Lazily rebuilt after document, config, or watched-workspace changes.
     semantic_snapshot: Option<SemanticSnapshot>,
+    /// Retained only across declaration edits; never exposed as current facts.
+    previous_semantic_snapshot: Option<SemanticSnapshot>,
     /// A failed project parse or semantic build invalidates the complete view until its inputs change.
     semantic_snapshot_error: Option<std::io::Error>,
     #[cfg(test)]
@@ -337,6 +342,8 @@ pub struct LspState {
     body_only_changes: HashMap<String, usize>,
     /// Instrumentation for incremental tests: number of semantic snapshot builds.
     semantic_snapshot_build_count: u64,
+    semantic_library_rebuild_count: u64,
+    cross_file_library_rebuild_count: u64,
     /// Instrumentation for incremental tests: number of dependency topology builds.
     semantic_topology_build_count: u64,
     /// Package configurations, language versions and SDKs of analyzed files.
@@ -447,6 +454,7 @@ impl LspState {
             workspace_root,
             resolve_semantics,
             semantic_snapshot: None,
+            previous_semantic_snapshot: None,
             semantic_snapshot_error: None,
             #[cfg(test)]
             parser_failure_path: None,
@@ -455,6 +463,8 @@ impl LspState {
             pending_semantic_affected: HashMap::new(),
             body_only_changes: HashMap::new(),
             semantic_snapshot_build_count: 0,
+            semantic_library_rebuild_count: 0,
+            cross_file_library_rebuild_count: 0,
             semantic_topology_build_count: 0,
             environment,
             environment_stamps: None,
@@ -922,6 +932,7 @@ impl LspState {
         self.cross_file_index_cache = None;
         self.cross_file_external_cache = None;
         self.external_topology = None;
+        self.previous_semantic_snapshot = None;
         self.external_reset_count += 1;
         self.watched_dependency_generation += 1;
     }
@@ -1199,7 +1210,7 @@ impl LspState {
             return;
         };
         let path = document.path.clone();
-        if self.semantic_snapshot.is_none() {
+        if self.semantic_snapshot.is_none() && self.previous_semantic_snapshot.is_none() {
             self.disk_files.remove(&path);
             self.documents.remove(uri);
             self.invalidate_semantic_snapshot();
@@ -1590,6 +1601,7 @@ impl LspState {
                 warn!("cross-file index worker failed: {error}");
                 // Per-file publication carries the failure until inputs change, without reloading.
                 self.semantic_snapshot = None;
+                self.previous_semantic_snapshot = None;
                 self.semantic_snapshot_error = Some(error);
                 return HashMap::new();
             }
@@ -1689,7 +1701,8 @@ impl LspState {
             }
             return;
         }
-        let indexes = self.cross_file_indexes(files);
+        let previous = self.cross_file_index_cache.take();
+        let (indexes, rebuilt, external_identity) = self.cross_file_indexes(files, previous);
         self.cross_file_index_cache = Some(CrossFileIndexCache {
             files: dart_files()
                 .map(|file| ProjectFile {
@@ -1700,13 +1713,19 @@ impl LspState {
                 .collect(),
             indexes,
             packages,
+            external_identity,
         });
         self.cross_file_index_build_count += 1;
+        self.cross_file_library_rebuild_count += rebuilt as u64;
     }
 
     /// Resolve the cross-file view independently when open buffers or disk edits
     /// prevent reuse of the semantic snapshot.
-    fn cross_file_indexes(&mut self, files: &[ProjectFile]) -> SemanticIndexes {
+    fn cross_file_indexes(
+        &mut self,
+        files: &[ProjectFile],
+        previous: Option<CrossFileIndexCache>,
+    ) -> (SemanticIndexes, usize, Option<Arc<IdentityIndex>>) {
         let files: Vec<_> = files
             .iter()
             .filter(|file| is_dart_file(&file.path))
@@ -1744,9 +1763,19 @@ impl LspState {
             })
         });
         if let Some(cache) = cache {
-            return self
-                .build_semantic_indexes(&files, &self.external_libraries, Some(cache))
-                .0;
+            let previous = previous.filter(|previous| {
+                previous
+                    .external_identity
+                    .as_ref()
+                    .is_some_and(|identity| Arc::ptr_eq(identity, &cache.identities))
+            });
+            let (indexes, _, _, rebuilt) = self.semantic_indexes(
+                &files,
+                &self.external_libraries,
+                Some(cache),
+                previous.map(|previous| previous.indexes),
+            );
+            return (indexes, rebuilt, Some(Arc::clone(&cache.identities)));
         }
         let graph_roots: Vec<_> = files
             .iter()
@@ -1833,17 +1862,54 @@ impl LspState {
             self.cross_file_external_load_count += 1;
         }
         let cache = self.cross_file_external_cache.as_ref().unwrap();
-        self.build_semantic_indexes(&files, &cache.libraries, cache.indexes.as_ref())
-            .0
+        let previous = previous.filter(|previous| {
+            cache.indexes.as_ref().is_some_and(|external| {
+                previous
+                    .external_identity
+                    .as_ref()
+                    .is_some_and(|identity| Arc::ptr_eq(identity, &external.identities))
+            })
+        });
+        let (indexes, _, _, rebuilt) = self.semantic_indexes(
+            &files,
+            &cache.libraries,
+            cache.indexes.as_ref(),
+            previous.map(|previous| previous.indexes),
+        );
+        (
+            indexes,
+            rebuilt,
+            cache
+                .indexes
+                .as_ref()
+                .map(|external| Arc::clone(&external.identities)),
+        )
     }
 
     /// Build both LSP views with identical grouping and resolver layering.
+    #[cfg(test)]
     fn build_semantic_indexes(
         &self,
         files: &[&ProjectFile],
         external: &ExternalLibraries,
         cache: Option<&ExternalIndexCache>,
     ) -> (SemanticIndexes, LibraryGrouping, Vec<PackageIdentity>) {
+        let (indexes, grouping, packages, _) = self.semantic_indexes(files, external, cache, None);
+        (indexes, grouping, packages)
+    }
+
+    fn semantic_indexes(
+        &self,
+        files: &[&ProjectFile],
+        external: &ExternalLibraries,
+        cache: Option<&ExternalIndexCache>,
+        previous: Option<SemanticIndexes>,
+    ) -> (
+        SemanticIndexes,
+        LibraryGrouping,
+        Vec<PackageIdentity>,
+        usize,
+    ) {
         let identity_sources: Vec<_> = files
             .iter()
             .map(|file| IdentitySource {
@@ -1853,24 +1919,43 @@ impl LspState {
             })
             .collect();
         let packages = package_identities(files.iter().map(|file| file.path.as_path()));
-        let (indexes, grouping) = build_semantic_indexes(
-            &identity_sources,
-            &packages,
-            Some(ExternalSources {
-                libraries: external,
-                environment: &self.environment,
-            }),
-            cache.map(|cache| ExternalIndexParts {
-                identities: &cache.identities,
-                types: &cache.types,
-                signatures: &cache.signatures,
-            }),
-        );
-        (indexes, grouping, packages)
+        let external = Some(ExternalSources {
+            libraries: external,
+            environment: &self.environment,
+        });
+        let cache = cache.map(|cache| ExternalIndexParts {
+            identities: &cache.identities,
+            types: &cache.types,
+            signatures: &cache.signatures,
+        });
+        let (indexes, grouping, rebuilt) = if let Some(mut indexes) = previous {
+            let (grouping, rebuilt) = update_semantic_indexes(
+                &mut indexes,
+                &identity_sources,
+                &packages,
+                external,
+                cache,
+            );
+            (indexes, grouping, rebuilt)
+        } else {
+            let (indexes, grouping) =
+                build_semantic_indexes(&identity_sources, &packages, external, cache);
+            let rebuilt = (0..grouping.len())
+                .filter(|&index| {
+                    grouping
+                        .siblings(index)
+                        .iter()
+                        .all(|&sibling| sibling > index)
+                })
+                .count();
+            (indexes, grouping, rebuilt)
+        };
+        (indexes, grouping, packages, rebuilt)
     }
 
     fn invalidate_semantic_snapshot(&mut self) {
         self.semantic_snapshot = None;
+        self.previous_semantic_snapshot = None;
         self.semantic_snapshot_error = None;
         self.body_only_changes.clear();
     }
@@ -1878,6 +1963,7 @@ impl LspState {
     fn update_document_snapshot(&mut self, uri: &str, unchanged_api: bool) {
         let doc = &self.documents[uri];
         if unchanged_api
+            && self.previous_semantic_snapshot.is_none()
             && let Some(snapshot) = self.semantic_snapshot.as_mut()
             && let Some(&index) = snapshot.by_path.get(&doc.path)
             && let Some(file) = snapshot.indexes.identities.file(&doc.path)
@@ -1888,7 +1974,11 @@ impl LspState {
             self.body_only_changes.insert(uri.to_string(), index);
             return;
         }
-        if let Some(snapshot) = self.semantic_snapshot.as_ref() {
+        if let Some(snapshot) = self
+            .semantic_snapshot
+            .as_ref()
+            .or(self.previous_semantic_snapshot.as_ref())
+        {
             self.pending_semantic_affected
                 .entry(uri.to_string())
                 .or_default()
@@ -1898,11 +1988,28 @@ impl LspState {
                     &self.documents,
                 ));
         }
-        self.invalidate_semantic_snapshot();
+        let retained = self
+            .semantic_snapshot
+            .as_ref()
+            .or(self.previous_semantic_snapshot.as_ref());
+        if doc.source_rejected
+            || retained.is_some_and(|snapshot| !snapshot.by_path.contains_key(&doc.path))
+        {
+            self.invalidate_semantic_snapshot();
+            return;
+        }
+        if self.previous_semantic_snapshot.is_none() {
+            self.previous_semantic_snapshot = self.semantic_snapshot.take();
+        } else {
+            self.semantic_snapshot = None;
+        }
+        self.semantic_snapshot_error = None;
+        self.body_only_changes.clear();
     }
 
     fn record_semantic_worker_failure(&mut self, path: &Path, error: std::io::Error) {
         self.semantic_snapshot = None;
+        self.previous_semantic_snapshot = None;
         self.semantic_snapshot_error = Some(error);
         if !self
             .watched_local_sources
@@ -1993,11 +2100,13 @@ impl LspState {
         {
             return;
         }
-        self.invalidate_semantic_snapshot();
+        self.semantic_snapshot = None;
+        self.body_only_changes.clear();
         // Dependency waves and recursive index builds need the large-stack workers.
         if let Err(error) = falcon_dart_parser::with_stack(|| self.build_semantic_snapshot()) {
             // Keep the environment so its dependency roots stay watched for recovery.
             self.reset_external_layer();
+            self.previous_semantic_snapshot = None;
             self.semantic_snapshot_error = Some(error);
         }
     }
@@ -2155,6 +2264,9 @@ impl LspState {
             self.record_semantic_worker_failure(&path, error);
             return;
         }
+        // Open buffers and promoted companions can arrive in graph traversal
+        // order. Declaration edits must not renumber unchanged project files.
+        files.sort_unstable_by(|left, right| left.path.cmp(&right.path));
         let external = ExternalSources {
             libraries: &self.external_libraries,
             environment: &self.environment,
@@ -2211,10 +2323,27 @@ impl LspState {
             self.external_index_build_count += 1;
         }
         let project_files: Vec<_> = files.iter().collect();
-        let (indexes, grouping, packages) = self.build_semantic_indexes(
+        let previous = self.previous_semantic_snapshot.take().filter(|snapshot| {
+            topology_matches
+                && !external_depends_on_project
+                && self.external_indexes.as_ref().is_some_and(|external| {
+                    snapshot
+                        .external_identity
+                        .as_ref()
+                        .is_some_and(|identity| Arc::ptr_eq(identity, &external.identities))
+                })
+                && snapshot.files.len() == files.len()
+                && snapshot
+                    .files
+                    .iter()
+                    .zip(&files)
+                    .all(|(before, after)| before.path == after.path)
+        });
+        let (indexes, grouping, packages, rebuilt) = self.semantic_indexes(
             &project_files,
             &self.external_libraries,
             self.external_indexes.as_ref(),
+            previous.map(|snapshot| snapshot.indexes),
         );
         let by_path: HashMap<_, _> = files
             .iter()
@@ -2243,8 +2372,13 @@ impl LspState {
             grouping,
             by_path,
             reverse_dependencies,
+            external_identity: self
+                .external_indexes
+                .as_ref()
+                .map(|cache| Arc::clone(&cache.identities)),
         });
         self.semantic_snapshot_build_count += 1;
+        self.semantic_library_rebuild_count += rebuilt as u64;
     }
 
     fn admits_project_dart(&self, path: &Path) -> bool {

@@ -6,6 +6,138 @@ use super::*;
 use crate::resolve::{IdentitySource, LibrarySource};
 
 #[test]
+fn project_signature_update_replaces_dirty_facts_and_clears_forwarder_backflow() {
+    fn parsed(source: &str) -> Arc<crate::ParsedFile> {
+        let result = parse(source);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        Arc::new(crate::ParsedFile {
+            source: source.into(),
+            tree: result.tree,
+        })
+    }
+
+    fn build(
+        files: &[(PathBuf, Arc<crate::ParsedFile>)],
+    ) -> (IdentityIndex, TypeIndex, SignatureIndex) {
+        let sources: Vec<_> = files
+            .iter()
+            .map(|(path, parsed)| IdentitySource {
+                path,
+                parsed,
+                has_parse_errors: false,
+            })
+            .collect();
+        let identities = IdentityIndex::from_project_files(&sources, &[]);
+        let types = TypeIndex::from_resolved_files(
+            sources.iter().map(|source| {
+                (
+                    source.path,
+                    LibrarySource {
+                        program: source.parsed.program(),
+                        has_parse_errors: false,
+                        has_unresolved_parts: false,
+                    },
+                )
+            }),
+            &identities,
+        );
+        let signatures = SignatureIndex::from_project_files(files, &identities, &types);
+        (identities, types, signatures)
+    }
+
+    let mut files = [
+        (
+            PathBuf::from("/project/lib/api.dart"),
+            parsed("abstract class Api { int? get _value; } var a = b; var b = a;"),
+        ),
+        (
+            PathBuf::from("/project/lib/impl.dart"),
+            parsed(
+                "import 'api.dart'; \
+                 class Removed<T extends num> implements Api { \
+                   dynamic noSuchMethod(Invocation invocation) => null; \
+                 } \
+                 extension RemovedExtension on int { int get twice => this * 2; } \
+                 int get removedGetter => 1; var x = y; var y = x;",
+            ),
+        ),
+    ];
+    let (identities, _, mut signatures) = build(&files);
+    let unchanged_file = identities.file(&files[0].0).unwrap();
+    let unchanged_library = identities.library(unchanged_file);
+    let dirty_file = identities.file(&files[1].0).unwrap();
+    let dirty_library = identities.library(dirty_file);
+    let unchanged_flow = Arc::clone(signatures.flow_writes(unchanged_file).unwrap());
+    let dirty_flow = Arc::clone(signatures.flow_writes(dirty_file).unwrap());
+    assert!(
+        signatures
+            .blocked_field_promotions
+            .get(&unchanged_library)
+            .unwrap()
+            .contains("_value")
+    );
+    assert!(!signatures.owner_defaults.local.is_empty());
+    assert!(!signatures.bound_declared.local.is_empty());
+    assert!(!signatures.extensions.is_empty());
+    assert!(!signatures.value_getters.is_empty());
+
+    files[1].1 = parsed("import 'api.dart'; class Replacement {} final replacement = 42;");
+    let (identities, types, fresh) = build(&files);
+    let sources: Vec<_> = files
+        .iter()
+        .map(|(path, parsed)| IdentitySource {
+            path,
+            parsed,
+            has_parse_errors: false,
+        })
+        .collect();
+    signatures.update_project(
+        &sources,
+        &identities,
+        &types,
+        &HashSet::from([dirty_library]),
+    );
+
+    assert!(Arc::ptr_eq(
+        signatures.flow_writes(unchanged_file).unwrap(),
+        &unchanged_flow
+    ));
+    assert!(!Arc::ptr_eq(
+        signatures.flow_writes(dirty_file).unwrap(),
+        &dirty_flow
+    ));
+    assert!(
+        !signatures
+            .owner_defaults
+            .local
+            .keys()
+            .any(|parameter| { matches!(parameter.owner, ParameterOwner::Source { .. }) })
+    );
+    assert!(
+        !signatures
+            .bound_declared
+            .local
+            .keys()
+            .any(|parameter| { matches!(parameter.owner, ParameterOwner::Source { .. }) })
+    );
+    assert!(signatures.extensions.is_empty());
+    assert!(signatures.value_getters.is_empty());
+    assert_eq!(signatures.cyclic_values, fresh.cyclic_values);
+    assert_eq!(signatures.cyclic_supertypes, fresh.cyclic_supertypes);
+    assert!(
+        !signatures
+            .blocked_field_promotions
+            .get(&unchanged_library)
+            .is_some_and(|names| names.contains("_value"))
+    );
+    assert_eq!(
+        signatures.type_facts.local.keys().collect::<HashSet<_>>(),
+        fresh.type_facts.local.keys().collect::<HashSet<_>>(),
+    );
+    assert_eq!(signatures.value_types.local, fresh.value_types.local);
+}
+
+#[test]
 fn fallback_generic_arities_live_in_the_signature_index() {
     let mut signatures = SignatureIndex::default();
     let list = DeclarationIdentity::sdk("dart:core", "List");

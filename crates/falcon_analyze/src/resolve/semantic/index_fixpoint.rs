@@ -908,7 +908,10 @@ impl SignatureIndex {
                 }
             }
         }
-        self.cyclic_values = Self::cyclic_value_identities(&dependencies);
+        self.cyclic_values
+            .retain(|identity| !dependencies.contains_key(identity));
+        self.cyclic_values
+            .extend(Self::cyclic_value_identities(&dependencies));
         let mut headers = std::collections::VecDeque::with_capacity(entries.len());
         let mut bodies = std::collections::VecDeque::with_capacity(entries.len());
         let mut queued = vec![true; entries.len()];
@@ -1454,6 +1457,17 @@ impl SignatureIndex {
         !unresolved
     }
 
+    pub(super) fn clear_field_forwarders(&mut self) {
+        for (library, names) in self.field_forwarder_blockers.drain() {
+            if let Some(blocked) = self.blocked_field_promotions.local.get_mut(&library) {
+                blocked.retain(|name| !names.contains(name));
+                if blocked.is_empty() {
+                    self.blocked_field_promotions.local.remove(&library);
+                }
+            }
+        }
+    }
+
     /// Block promotion of private getters that a concrete `noSuchMethod`
     /// forwards. Each lookup views members from the library that owns the
     /// declaration or private name, never from an arbitrary indexed file.
@@ -1462,6 +1476,7 @@ impl SignatureIndex {
         identities: &IdentityIndex,
         types: Option<&TypeIndex>,
     ) {
+        self.clear_field_forwarders();
         self.has_field_forwarders = self
             .external
             .as_ref()
@@ -1560,6 +1575,10 @@ impl SignatureIndex {
             .collect();
         for (library, name) in blockers {
             self.blocked_field_promotions
+                .entry(library)
+                .or_default()
+                .insert(name.clone());
+            self.field_forwarder_blockers
                 .entry(library)
                 .or_default()
                 .insert(name);

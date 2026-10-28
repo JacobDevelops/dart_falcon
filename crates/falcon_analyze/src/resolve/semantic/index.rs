@@ -488,6 +488,8 @@ signature_index! {
         value_getters: FxHashSet<DeclarationIdentity>,
         /// Cached after member ingestion; overlays consult this without scanning the base.
         has_field_forwarders: bool,
+        /// Promotion blockers added by forwarding, removed before recomputing backflow.
+        field_forwarder_blockers: FxHashMap<LibraryId, FxHashSet<String>>,
         extensions: Vec<ExtensionFacts>,
         /// Every identity whose supertype graph reaches a cycle, once the index
         /// is complete; `None` while building, when lookups walk the graph.

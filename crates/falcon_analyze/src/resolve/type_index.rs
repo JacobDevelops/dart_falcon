@@ -196,6 +196,32 @@ impl TypeIndex {
         index
     }
 
+    pub(crate) fn update_project(
+        &mut self,
+        files: &[super::IdentitySource<'_>],
+        identities: &IdentityIndex,
+        grouping: &super::LibraryGrouping,
+        dirty: &HashSet<super::LibraryId>,
+    ) {
+        self.declarations.retain(|identity, _| {
+            identities
+                .declaration_library(identity)
+                .is_none_or(|library| !dirty.contains(&library))
+        });
+        for (ordinal, file) in files.iter().enumerate() {
+            let id = identities.file(file.path).expect("indexed project file");
+            if dirty.contains(&identities.library(id)) {
+                self.add_resolved_program(
+                    Some(id),
+                    file.parsed.program(),
+                    file.has_parse_errors,
+                    grouping.is_unresolved(ordinal),
+                    identities,
+                );
+            }
+        }
+    }
+
     fn declaration(&self, identity: &DeclarationIdentity) -> Option<&IdentityEntry> {
         self.declarations
             .get(identity)

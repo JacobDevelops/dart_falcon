@@ -9,6 +9,7 @@ use falcon_analyze::{
     ProjectFile, SemanticIndexes, SignatureIndex, TypeIndex, build_semantic_indexes,
     canonical_or_lexical, library_unit_by, package_identities, read_source,
     rules_thread_diagnostic, source_size_diagnostic, syntax_error_diagnostics,
+    update_semantic_indexes,
 };
 use falcon_config::FalconConfig;
 use falcon_diagnostics::Diagnostic;
@@ -58,6 +59,7 @@ impl ExternalIndexes {
 
 /// The external graph and unopened library companions remain fixed for one run.
 /// Declaration-preserving passes refresh only the requested file's body facts.
+/// Declaration edits rebuild only affected libraries and their dependents.
 pub(crate) struct AutofixAnalyzer<'a> {
     analysis: &'a ProjectAnalysis,
     config: &'a FalconConfig,
@@ -72,6 +74,8 @@ pub(crate) struct AutofixAnalyzer<'a> {
     overlay: Option<ProjectOverlay>,
     #[cfg(test)]
     overlay_builds: usize,
+    #[cfg(test)]
+    declaration_library_rebuilds: usize,
     #[cfg(test)]
     body_refreshes: usize,
 }
@@ -117,6 +121,8 @@ impl<'a> AutofixAnalyzer<'a> {
             overlay: None,
             #[cfg(test)]
             overlay_builds: 0,
+            #[cfg(test)]
+            declaration_library_rebuilds: 0,
             #[cfg(test)]
             body_refreshes: 0,
         }
@@ -164,26 +170,46 @@ impl<'a> AutofixAnalyzer<'a> {
                     has_parse_errors: file.has_parse_errors,
                 })
                 .collect();
-            let (indexes, grouping) = build_semantic_indexes(
-                &sources,
-                &self.packages,
-                self.external_libraries
-                    .or(self.libraries.as_ref())
-                    .map(|libraries| ExternalSources {
-                        libraries,
-                        environment: self.environment,
-                    }),
-                self.indexes.as_ref().map(ExternalIndexes::borrowed),
-            );
-            self.overlay = Some(ProjectOverlay {
-                indexes,
-                grouping,
-                declaration_signature,
-                has_parse_errors: file.has_parse_errors,
-            });
-            #[cfg(test)]
-            {
-                self.overlay_builds += 1;
+            let external = self
+                .external_libraries
+                .or(self.libraries.as_ref())
+                .map(|libraries| ExternalSources {
+                    libraries,
+                    environment: self.environment,
+                });
+            let cache = self.indexes.as_ref().map(ExternalIndexes::borrowed);
+            if let Some(overlay) = self.overlay.as_mut() {
+                // The environment, companions, and external graph are fixed for
+                // this analyzer's lifetime, so its project indexes are reusable.
+                let (grouping, rebuilt) = update_semantic_indexes(
+                    &mut overlay.indexes,
+                    &sources,
+                    &self.packages,
+                    external,
+                    cache,
+                );
+                overlay.grouping = grouping;
+                overlay.declaration_signature = declaration_signature;
+                overlay.has_parse_errors = file.has_parse_errors;
+                #[cfg(test)]
+                {
+                    self.declaration_library_rebuilds += rebuilt;
+                }
+                #[cfg(not(test))]
+                let _ = rebuilt;
+            } else {
+                let (indexes, grouping) =
+                    build_semantic_indexes(&sources, &self.packages, external, cache);
+                self.overlay = Some(ProjectOverlay {
+                    indexes,
+                    grouping,
+                    declaration_signature,
+                    has_parse_errors: file.has_parse_errors,
+                });
+                #[cfg(test)]
+                {
+                    self.overlay_builds += 1;
+                }
             }
         }
         let overlay = self.overlay.as_ref().unwrap();
@@ -334,8 +360,133 @@ mod tests {
         assert_eq!(analyzer.overlay_builds, 1);
         assert_eq!(analyzer.body_refreshes, 3);
         analyzer.analyze("void main() {} int after(int value) => value;");
-        assert_eq!(analyzer.overlay_builds, 2);
+        assert_eq!(analyzer.overlay_builds, 1);
+        assert_eq!(analyzer.declaration_library_rebuilds, 1);
         assert_eq!(analyzer.body_refreshes, 3);
+    }
+
+    struct SemanticSnapshot;
+
+    impl falcon_analyze::Rule for SemanticSnapshot {
+        fn prepare<'a>(
+            &self,
+            _program: falcon_syntax::cst::Program<'a>,
+            ctx: &'a AnalyzeContext<'a>,
+        ) -> falcon_analyze::RulePreparation<'a> {
+            let identities = ctx.identities().unwrap();
+            let mut visible = Vec::with_capacity(10);
+            for path in [ctx.file_path(), Path::new("/virtual/dependent.dart")] {
+                let library = identities.library(identities.file(path).unwrap());
+                for name in ["Target", "Changed", "Imported", "Alternate", "FromPart"] {
+                    if identities
+                        .resolve_declaration(
+                            library,
+                            falcon_analyze::QualifiedName { prefix: None, name },
+                        )
+                        .is_some()
+                    {
+                        visible.push(format!("{}:{name}", path.display()));
+                    }
+                }
+            }
+            falcon_analyze::RulePreparation::Diagnostics(vec![Diagnostic::new(
+                "semantic-snapshot",
+                falcon_diagnostics::Severity::Warning,
+                visible.join(", "),
+                ctx.file_path().to_string_lossy(),
+                falcon_diagnostics::Span { start: 0, end: 0 },
+            )])
+        }
+    }
+
+    #[test]
+    fn declaration_passes_update_dependents_without_rebuilding_unrelated_libraries() {
+        let config = FalconConfig::default();
+        let mut analysis = ProjectAnalysis::new(&config);
+        analysis.resolve = true;
+        analysis.registry = falcon_analyze::RuleRegistry::new();
+        analysis
+            .registry
+            .register("semantic-snapshot", Box::new(SemanticSnapshot));
+        let files: Vec<_> = [
+            ("/virtual/dependent.dart", "import 'main.dart';"),
+            ("/virtual/unrelated.dart", "class Unrelated {}"),
+            ("/virtual/imported.dart", "class Imported {}"),
+            ("/virtual/alternate.dart", "class Alternate {}"),
+            ("/virtual/shared.dart", "part of shared; class FromPart {}"),
+        ]
+        .into_iter()
+        .map(|(path, source)| ProjectFile {
+            path: path.into(),
+            parsed: Arc::new(ParsedFile {
+                source: source.into(),
+                tree: falcon_dart_parser::parse(source).tree,
+            }),
+            has_parse_errors: false,
+        })
+        .collect();
+        let libraries = ExternalLibraries::default();
+        for (before, after, expected_rebuilds) in [
+            ("class Target {}", "class Changed {}", Some(2)),
+            (
+                "import 'imported.dart'; class Target {}",
+                "import 'alternate.dart'; class Target {}",
+                Some(2),
+            ),
+            (
+                "export 'imported.dart'; class Target {}",
+                "export 'alternate.dart'; class Target {}",
+                Some(2),
+            ),
+            (
+                "class Target {}",
+                "library shared; part 'shared.dart'; class Target {}",
+                None,
+            ),
+            (
+                "library shared; part 'shared.dart'; class Target {}",
+                "class Target {}",
+                None,
+            ),
+        ] {
+            let mut environment = AnalysisEnvironment::default();
+            let mut analyzer = AutofixAnalyzer::new(
+                &analysis,
+                &config,
+                &mut environment,
+                Path::new("/virtual/main.dart"),
+                FixContext {
+                    external_libraries: Some(&libraries),
+                    external: None,
+                    project_files: &files,
+                    cancelled: &|| false,
+                },
+            );
+            let original = analyzer.analyze(before);
+            let updated = analyzer.analyze(after);
+            assert_eq!(analyzer.overlay_builds, 1, "{after}");
+            assert_eq!(analyzer.body_refreshes, 0, "{after}");
+            if let Some(expected) = expected_rebuilds {
+                assert_eq!(analyzer.declaration_library_rebuilds, expected, "{after}");
+            }
+            let mut fresh_environment = AnalysisEnvironment::default();
+            let mut fresh = AutofixAnalyzer::new(
+                &analysis,
+                &config,
+                &mut fresh_environment,
+                Path::new("/virtual/main.dart"),
+                FixContext {
+                    external_libraries: Some(&libraries),
+                    external: None,
+                    project_files: &files,
+                    cancelled: &|| false,
+                },
+            );
+            let expected = fresh.analyze(after);
+            assert!(!updated.is_empty(), "{after}");
+            assert_ne!(format!("{original:?}"), format!("{updated:?}"), "{after}");
+            assert_eq!(format!("{updated:?}"), format!("{expected:?}"), "{after}");
+        }
     }
 
     struct CompanionFailure;

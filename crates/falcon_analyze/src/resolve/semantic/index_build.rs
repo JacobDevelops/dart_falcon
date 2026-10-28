@@ -179,6 +179,99 @@ impl SignatureIndex {
         Self::build_programs(Self::default(), all, identities, types)
     }
 
+    /// Replace facts owned by dirty project libraries, retaining all other
+    /// declarations and the immutable external-only overlay. File IDs must be
+    /// stable, and `dirty` must include transitive import/export dependents and
+    /// both sides of any part regrouping.
+    pub fn update_project(
+        &mut self,
+        files: &[crate::resolve::IdentitySource<'_>],
+        identities: &IdentityIndex,
+        types: &TypeIndex,
+        dirty: &HashSet<LibraryId>,
+    ) {
+        if dirty.is_empty() {
+            return;
+        }
+        self.clear_field_forwarders();
+        let keep_identity = |identity: &DeclarationIdentity| {
+            !identities
+                .declaration_library(identity)
+                .is_some_and(|library| dirty.contains(&library))
+        };
+        self.functions
+            .local
+            .retain(|identity, _| keep_identity(identity));
+        self.value_types
+            .local
+            .retain(|identity, _| keep_identity(identity));
+        self.member_entries
+            .local
+            .retain(|identity, _| keep_identity(identity));
+        self.type_facts
+            .local
+            .retain(|identity, _| keep_identity(identity));
+        self.constants
+            .local
+            .retain(|identity, _| keep_identity(identity));
+        self.constant_types
+            .local
+            .retain(|identity, _| keep_identity(identity));
+        self.function_annotations
+            .local
+            .retain(|identity, _| keep_identity(identity));
+        self.value_getters.retain(keep_identity);
+        self.cyclic_values.retain(keep_identity);
+        self.blocked_field_promotions
+            .local
+            .retain(|library, _| !dirty.contains(library));
+        let keep_file = |file: Option<FileId>| {
+            !file.is_some_and(|file| dirty.contains(&identities.library(file)))
+        };
+        self.flow_writes.retain(|file, _| keep_file(*file));
+        let keep_parameter = |parameter: &TypeParameterId| match parameter.owner {
+            ParameterOwner::Source { file, .. } => keep_file(file),
+            ParameterOwner::Sdk(_) => true,
+        };
+        self.owner_defaults
+            .local
+            .retain(|parameter, _| keep_parameter(parameter));
+        self.bound_declared
+            .local
+            .retain(|parameter, _| keep_parameter(parameter));
+        self.extensions.retain(|extension| {
+            !extension
+                .declaring_library
+                .is_some_and(|library| dirty.contains(&library))
+        });
+        self.cyclic_supertypes = None;
+        self.extension_members = None;
+        let programs: Vec<_> = files
+            .iter()
+            .filter_map(|source| {
+                let file = identities.file(source.path)?;
+                dirty.contains(&identities.library(file)).then(|| {
+                    (
+                        source.parsed.program(),
+                        SemanticModel::from_file(
+                            Some(file),
+                            source.parsed,
+                            identities,
+                            Some(types),
+                        ),
+                    )
+                })
+            })
+            .collect();
+        for (program, model) in &programs {
+            self.add_declarations(*program, model, true);
+        }
+        self.finish();
+        self.infer_programs(&programs);
+        self.mark_library_subclasses();
+        self.mark_field_forwarders(identities, Some(types));
+    }
+
     fn build_programs(
         mut index: Self,
         all: Vec<IndexedProgram<'_>>,
@@ -1462,6 +1555,11 @@ impl SignatureIndex {
     /// `extends` chain (not `implements`, `with`, or mixin `on` clauses)
     /// reaches a declaration of its own library marks that declaration.
     fn mark_library_subclasses(&mut self) {
+        for facts in self.type_facts.local.values_mut() {
+            if let Some(declaration) = &mut facts.declaration {
+                declaration.has_subclass_in_library = false;
+            }
+        }
         let mut marked = Vec::new();
         let mut visited = HashSet::new();
         for subtype in self.type_facts.local.keys() {

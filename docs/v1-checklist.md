@@ -8,12 +8,6 @@ Engine fixes from the October 2026 audit plus the 1.0 workflow features. Every i
 
 ### Stage 6: editor and CI workflows
 
-#### 19. Incremental semantic indexes
-
-Owns `crates/falcon_lsp`, the `falcon_project` autofix overlay and the semantic index builders in `falcon_analyze`. Can start any time.
-
-- [ ] **Declaration edits rebuild every index.** Body-only edits and fix passes now reuse the project's identity, type and signature indexes, but an edit that changes a declaration, import, export or part still rebuilds them for the whole project, in the LSP and on each declaration-changing autofix pass. Update only the changed library and its dependents.
-
 #### 24. Release credentials
 
 Owns the repository's Actions secrets and the Homebrew tap. Releases fail before building until all of these exist; see `docs/installation.md` "Release publishing setup".

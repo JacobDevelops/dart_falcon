@@ -661,6 +661,228 @@ fn return_type_edits_rebuild_indexes_and_refresh_dependent_diagnostics() {
 }
 
 #[test]
+fn declaration_updates_rebuild_only_affected_libraries_in_both_views() {
+    for semantic in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("falcon.json");
+        std::fs::write(&config, "{}").unwrap();
+        for (name, source) in [
+            ("api.dart", "void api() {}"),
+            ("main.dart", "import 'api.dart'; void main() { api(); }"),
+            ("unrelated.dart", "class Unrelated {}"),
+        ] {
+            std::fs::write(directory.path().join(name), source).unwrap();
+        }
+        let uri = format!("file://{}", directory.path().join("api.dart").display());
+        let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
+        state.resolve_semantics = semantic;
+        state.open(&uri, "void api() {}".into(), Some(1));
+        let rebuilds = if semantic {
+            state.ensure_semantic_snapshot();
+            state.semantic_library_rebuild_count
+        } else {
+            let (files, _) = state.collect_project_files(ProjectView::CrossFile);
+            state.ensure_cross_file_indexes(&files);
+            state.cross_file_library_rebuild_count
+        };
+        state.change(&uri, "int api() => 1;".into(), Some(2));
+        let after = if semantic {
+            state.ensure_semantic_snapshot();
+            state.semantic_library_rebuild_count
+        } else {
+            let (files, _) = state.collect_project_files(ProjectView::CrossFile);
+            state.ensure_cross_file_indexes(&files);
+            state.cross_file_library_rebuild_count
+        };
+        assert_eq!(after - rebuilds, 2, "semantic={semantic}");
+    }
+}
+
+#[test]
+fn coalesced_part_regrouping_keeps_old_and_new_dependents() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, "{}").unwrap();
+    let sources = [
+        ("a.dart", "part 'shared.dart';"),
+        ("b.dart", "class B {}"),
+        ("shared.dart", "part of 'a.dart'; class Shared {}"),
+        ("uses_a.dart", "import 'a.dart'; void use(Shared value) {}"),
+        ("uses_b.dart", "import 'b.dart'; void use(B value) {}"),
+    ];
+    let uris: Vec<_> = sources
+        .iter()
+        .map(|(name, source)| {
+            let path = directory.path().join(name);
+            std::fs::write(&path, source).unwrap();
+            format!("file://{}", path.display())
+        })
+        .collect();
+    let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
+    state.resolve_semantics = true;
+    for (uri, (_, source)) in uris.iter().zip(sources) {
+        state.open(uri, source.into(), Some(1));
+    }
+    state.change(&uris[0], "class A {}".into(), Some(2));
+    state.change(&uris[1], "part 'shared.dart'; class B {}".into(), Some(2));
+    state.change(
+        &uris[2],
+        "part of 'b.dart'; class Shared {}".into(),
+        Some(2),
+    );
+    let affected = state.affected_open_uris(&uris[2]);
+    assert!(affected.contains(&uris[3]), "{affected:?}");
+    assert!(affected.contains(&uris[4]), "{affected:?}");
+}
+
+#[test]
+fn closing_coalesced_declaration_edit_restores_disk_before_incremental_update() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, "{}").unwrap();
+    let path = directory.path().join("api.dart");
+    std::fs::write(&path, "void api() {}").unwrap();
+    std::fs::write(
+        directory.path().join("main.dart"),
+        "import 'api.dart'; void main() { api(); }",
+    )
+    .unwrap();
+    std::fs::write(
+        directory.path().join("unrelated.dart"),
+        "class Unrelated {}",
+    )
+    .unwrap();
+    let uri = format!("file://{}", path.display());
+    let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
+    state.resolve_semantics = true;
+    state.open(&uri, "void api() {}".into(), Some(1));
+    let rebuilds = state.semantic_library_rebuild_count;
+    state.change(&uri, "int api() => 1;".into(), Some(2));
+    state.change(&uri, "String api() => 'value';".into(), Some(3));
+    state.close(&uri);
+    state.ensure_semantic_snapshot();
+    assert_eq!(state.semantic_library_rebuild_count, rebuilds);
+    let snapshot = state.semantic_snapshot.as_ref().unwrap();
+    assert_eq!(
+        snapshot.files[snapshot.by_path[&path]].source(),
+        "void api() {}"
+    );
+}
+
+#[test]
+fn coalesced_declaration_and_directive_edits_match_fresh_semantics() {
+    use falcon_analyze::SemanticModel;
+
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-ignoring-return-values":"warn"}}}}"#).unwrap();
+    let sources = [
+        ("api.dart", "void api() {}"),
+        ("barrel.dart", "export 'api.dart';"),
+        ("main.dart", "import 'barrel.dart'; void main() { api(); }"),
+        ("part.dart", "part of 'api.dart'; class Helper {}"),
+        ("unrelated.dart", "class Unrelated {}"),
+    ];
+    let mut state = LspState::new_from(
+        Some(config.clone()),
+        |_| None,
+        directory.path().to_path_buf(),
+    );
+    state.resolve_semantics = true;
+    let uris: Vec<_> = sources
+        .iter()
+        .map(|(name, source)| {
+            let path = directory.path().join(name);
+            std::fs::write(&path, source).unwrap();
+            format!("file://{}", path.display())
+        })
+        .collect();
+    for (uri, (_, source)) in uris.iter().zip(sources) {
+        state.open(uri, source.into(), Some(1));
+    }
+    let (files, _) = state.collect_project_files(ProjectView::CrossFile);
+    state.ensure_cross_file_indexes(&files);
+    for edits in [
+        vec![(0, "int api() => 1;"), (1, "export 'api.dart' show api;")],
+        vec![
+            (0, "part 'part.dart'; int api() => 1;"),
+            (2, "import 'api.dart'; void main() { api(); }"),
+        ],
+        vec![(0, "void api() {}"), (3, "class Helper {}")],
+    ] {
+        for (index, source) in edits {
+            state.change(&uris[index], source.into(), Some(2));
+        }
+        state.analyze_affected_many(&uris);
+        let mut fresh = LspState::new_from(
+            Some(config.clone()),
+            |_| None,
+            directory.path().to_path_buf(),
+        );
+        fresh.resolve_semantics = true;
+        for uri in &uris {
+            fresh.open(uri, state.documents[uri].text().into(), Some(2));
+        }
+        for uri in &uris {
+            assert_eq!(
+                format!("{:?}", state.analyze(uri)),
+                format!("{:?}", fresh.analyze(uri))
+            );
+        }
+        let snapshot = state.semantic_snapshot.as_ref().unwrap();
+        let rebuilt = fresh.semantic_snapshot.as_ref().unwrap();
+        for file in &snapshot.files {
+            let cached = SemanticModel::new(
+                &file.path,
+                &file.parsed,
+                &snapshot.indexes.identities,
+                Some(&snapshot.indexes.types),
+            );
+            let fresh_file = &rebuilt.files[rebuilt.by_path[&file.path]];
+            let model = SemanticModel::new(
+                &file.path,
+                &fresh_file.parsed,
+                &rebuilt.indexes.identities,
+                Some(&rebuilt.indexes.types),
+            );
+            for name in ["api", "Helper", "Unrelated"] {
+                assert_eq!(cached.resolve_value(name), model.resolve_value(name));
+            }
+        }
+        // Exercise the independently retained cache too, rather than borrowing
+        // the current semantic snapshot through cross_file_pass.
+        let (files, _) = state.collect_project_files(ProjectView::CrossFile);
+        state.ensure_cross_file_indexes(&files);
+        let (fresh_files, _) = fresh.collect_project_files(ProjectView::CrossFile);
+        fresh.ensure_cross_file_indexes(&fresh_files);
+        let cache = state.cross_file_index_cache.as_ref().unwrap();
+        let rebuilt = fresh.cross_file_index_cache.as_ref().unwrap();
+        for file in &cache.files {
+            let fresh_file = rebuilt
+                .files
+                .iter()
+                .find(|candidate| candidate.path == file.path)
+                .unwrap();
+            let cached = SemanticModel::new(
+                &file.path,
+                &file.parsed,
+                &cache.indexes.identities,
+                Some(&cache.indexes.types),
+            );
+            let model = SemanticModel::new(
+                &file.path,
+                &fresh_file.parsed,
+                &rebuilt.indexes.identities,
+                Some(&rebuilt.indexes.types),
+            );
+            for name in ["api", "Helper", "Unrelated"] {
+                assert_eq!(cached.resolve_value(name), model.resolve_value(name));
+            }
+        }
+    }
+}
+
+#[test]
 fn body_only_edits_refresh_loop_mutation_facts_without_rebuilding_indexes() {
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("falcon.json");

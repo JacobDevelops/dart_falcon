@@ -11,6 +11,7 @@
 //! repeated accessors and collisions with other declarations remain ambiguous.
 
 use crate::InternedString;
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -334,7 +335,7 @@ type SourceAnnotations = HashMap<LibraryId, HashMap<String, DeclarationAnnotatio
 /// Project-wide library/name identity index.
 #[derive(Debug, Clone, Default)]
 pub struct IdentityIndex {
-    libraries: Vec<Library>,
+    libraries: Vec<Arc<Library>>,
     file_library: Vec<LibraryId>,
     by_path: HashMap<PathBuf, FileId>,
     /// File ranges for external instances, in loader order, including an end sentinel.
@@ -359,6 +360,9 @@ pub struct IdentityIndex {
     /// The project packages directive URIs resolve against.
     packages: Vec<PackageIdentity>,
     external: Option<Arc<IdentityIndex>>,
+    project_snapshots: Vec<(u64, bool)>,
+    external_snapshot: Option<(usize, usize, u64)>,
+    external_files: Vec<(Arc<ParsedFile>, bool)>,
 }
 
 #[derive(Debug, Clone)]
@@ -415,6 +419,29 @@ impl TypeAlias {
 pub struct ExternalSources<'a> {
     pub libraries: &'a ExternalLibraries,
     pub environment: &'a AnalysisEnvironment,
+}
+
+impl ExternalSources<'_> {
+    fn snapshot(self) -> (usize, usize, u64) {
+        use std::hash::{Hash, Hasher};
+        let mut signature = std::hash::DefaultHasher::new();
+        for library in self.libraries.libraries() {
+            library.origin.hash(&mut signature);
+            library.context.hash(&mut signature);
+            library.copy_context.hash(&mut signature);
+            library.has_unresolved_parts.hash(&mut signature);
+            library.files.len().hash(&mut signature);
+            for file in library.files.iter() {
+                file.path.hash(&mut signature);
+                file.doc_imports.hash(&mut signature);
+            }
+        }
+        (
+            std::ptr::from_ref(self.libraries) as usize,
+            std::ptr::from_ref(self.environment) as usize,
+            signature.finish(),
+        )
+    }
 }
 
 /// Translate source-graph targets into IDs without losing external instances.
@@ -523,7 +550,7 @@ struct PackageInstance<'a> {
 
 /// A root needs context-specific copies only when one of its paths splits.
 fn assign_package_copies(
-    libraries: &mut [Library],
+    libraries: &mut [Arc<Library>],
     instances: &mut [PackageInstance<'_>],
     has_aliases: bool,
 ) {
@@ -559,7 +586,7 @@ fn assign_package_copies(
         })
         .collect();
     for instance in instances {
-        libraries[instance.library.0].copy = copies
+        Arc::make_mut(&mut libraries[instance.library.0]).copy = copies
             .get(&(instance.package, instance.root, instance.context))
             .copied();
     }
@@ -649,6 +676,7 @@ impl IdentityIndex {
             *offset |= EXTERNAL_ID;
         }
         for library in &mut index.libraries {
+            let library = Arc::make_mut(library);
             for (_, file) in library.declarations.values_mut() {
                 file.0 |= EXTERNAL_ID;
             }
@@ -700,6 +728,154 @@ impl IdentityIndex {
         Self::build_layer(files, sources, packages, Some(external), Some(base), None)
     }
 
+    /// Replace changed project libraries and old/new transitive dependents.
+    /// `None` requests a full build when IDs or external facts are incompatible.
+    pub fn update_project(
+        &mut self,
+        files: &[IdentitySource<'_>],
+        packages: &[PackageIdentity],
+        external: Option<ExternalSources<'_>>,
+        grouping: &super::LibraryGrouping,
+    ) -> Option<HashSet<LibraryId>> {
+        let external_snapshot = external.map(ExternalSources::snapshot);
+        if files.len() != self.project_snapshots.len()
+            || grouping.len() != files.len()
+            || self.external_snapshot != external_snapshot
+            || (external.is_some_and(|sources| !sources.libraries.libraries().is_empty())
+                && self.external.is_none())
+            || packages.len() != self.packages.len()
+            || external.is_some_and(|external| {
+                let mut old = self.external_files.iter();
+                external
+                    .libraries
+                    .libraries()
+                    .iter()
+                    .flat_map(|library| library.files.iter())
+                    .any(|file| {
+                        old.next().is_none_or(|(parsed, errors)| {
+                            !Arc::ptr_eq(parsed, &file.parsed) || *errors != file.has_parse_errors
+                        })
+                    })
+                    || old.next().is_some()
+            })
+            || packages.iter().zip(&self.packages).any(|(new, old)| {
+                new.name != old.name || canonical_or_lexical(&new.lib_root) != old.lib_root
+            })
+            || files.iter().enumerate().any(|(file, source)| {
+                self.paths[file].as_ref() != Some(&canonical_or_lexical(source.path))
+            })
+        {
+            return None;
+        }
+        let current: Vec<_> = (0..files.len())
+            .map(|file| {
+                LibraryId(
+                    grouping
+                        .siblings(file)
+                        .iter()
+                        .copied()
+                        .fold(file, usize::min),
+                )
+            })
+            .collect();
+        let snapshots: Vec<_> = files
+            .iter()
+            .enumerate()
+            .map(|(file, source)| {
+                let unchanged = Arc::ptr_eq(&self.parsed[file], source.parsed)
+                    || self.type_occurrences[file]
+                        .edited
+                        .as_ref()
+                        .is_some_and(|(parsed, _)| Arc::ptr_eq(parsed, source.parsed));
+                let signature = if unchanged {
+                    self.project_snapshots[file].0
+                } else {
+                    source.parsed.declaration_signature()
+                };
+                (signature, source.has_parse_errors)
+            })
+            .collect();
+        let mut dirty = HashSet::with_capacity(files.len());
+        for file in 0..files.len() {
+            if self.project_snapshots[file] != snapshots[file]
+                || current[file] != self.file_library[file]
+            {
+                dirty.insert(self.file_library[file]);
+                dirty.insert(current[file]);
+            }
+        }
+        let resolver = LibraryResolver {
+            by_path: &self.by_path,
+            file_library: &current,
+            packages: &self.packages,
+            external,
+            base: self.external.as_deref(),
+            external_file_offsets: &[],
+            project_library_count: files.len(),
+        };
+        // A removed import or moved part invalidates its former dependents too.
+        let mut reverse: FxHashMap<LibraryId, Vec<LibraryId>> =
+            FxHashMap::with_capacity_and_hasher(files.len(), Default::default());
+        for (file, source) in files.iter().enumerate() {
+            let old = self.file_library[file];
+            let new = current[file];
+            reverse.entry(old).or_default().push(new);
+            reverse.entry(new).or_default().push(old);
+            let library = self.get(old);
+            for target in library
+                .imports
+                .iter()
+                .map(|import| &import.target)
+                .chain(library.exports.iter().map(|export| &export.target))
+                .chain(library.doc_imports.iter())
+            {
+                if let ImportTarget::Library(target) = target {
+                    reverse.entry(*target).or_default().push(old);
+                }
+            }
+            let program = source.parsed.program();
+            let uris = program
+                .imports()
+                .map(|import| import.uri().value())
+                .chain(program.exports().map(|export| export.uri().value()))
+                .chain(doc_imports(program, &source.parsed.source).map(Cow::Borrowed));
+            for uri in uris {
+                if let ImportTarget::Library(target) = resolver.resolve(source.path, None, &uri) {
+                    reverse.entry(target).or_default().push(new);
+                }
+            }
+        }
+        let mut pending: Vec<_> = dirty.iter().copied().collect();
+        while let Some(library) = pending.pop() {
+            for dependent in reverse.get(&library).into_iter().flatten() {
+                if dirty.insert(*dependent) {
+                    pending.push(*dependent);
+                }
+            }
+        }
+        let sources: Vec<_> = files
+            .iter()
+            .map(|file| file.parsed.source.as_ref())
+            .collect();
+        self.project_snapshots = snapshots;
+        let mut next = Self::build_selected(
+            files,
+            &sources,
+            packages,
+            external,
+            self.external.clone(),
+            Some(grouping),
+            Some((self, &dirty)),
+        );
+        for (file, source) in files.iter().enumerate() {
+            if !dirty.contains(&current[file]) && !Arc::ptr_eq(&self.parsed[file], source.parsed) {
+                next.refresh_file_body(FileId(file), source.parsed);
+            }
+        }
+        *self = next;
+        Some(dirty)
+    }
+
     /// Build project facts using an optional immutable external index and grouping.
     /// `base` must come from `build_external`; `grouping` must describe `files`
     /// in the same order, including any promoted companions.
@@ -710,6 +886,18 @@ impl IdentityIndex {
         external: Option<ExternalSources<'_>>,
         base: Option<Arc<Self>>,
         grouping: Option<&super::LibraryGrouping>,
+    ) -> Self {
+        Self::build_selected(files, sources, packages, external, base, grouping, None)
+    }
+
+    fn build_selected(
+        files: &[IdentitySource<'_>],
+        sources: &[&str],
+        packages: &[PackageIdentity],
+        external: Option<ExternalSources<'_>>,
+        base: Option<Arc<Self>>,
+        grouping: Option<&super::LibraryGrouping>,
+        mut reuse: Option<(&mut Self, &HashSet<LibraryId>)>,
     ) -> Self {
         let packages: Vec<_> = packages
             .iter()
@@ -728,38 +916,55 @@ impl IdentityIndex {
         let grouping = grouping.or(owned_grouping.as_ref()).unwrap();
         debug_assert_eq!(grouping.len(), files.len());
 
-        let mut root_to_library = HashMap::new();
-        let mut libraries = Vec::<Library>::new();
-        let mut file_library: Vec<LibraryId> = (0..files.len())
+        // A project library occupies its minimum member FileId. Vacant part
+        // slots keep every unrelated library ID stable when parts regroup.
+        let file_library_ids: Vec<_> = (0..files.len())
+            .map(|i| LibraryId(grouping.siblings(i).iter().copied().fold(i, usize::min)))
+            .collect();
+        let mut libraries: Vec<_> = (0..files.len())
             .map(|i| {
-                let root = grouping.siblings(i).iter().copied().fold(i, usize::min);
-                *root_to_library.entry(root).or_insert_with(|| {
-                    libraries.push(Library {
-                        declarations: FxHashMap::default(),
-                        imports: Vec::new(),
-                        exports: Vec::new(),
-                        configurable: false,
-                        incomplete: grouping.is_unresolved(i),
-                        missing_parts_only: grouping.is_unresolved(i),
-                        missing_generated_parts_only: grouping.missing_generated_parts_only(i),
-                        implicit_core: true,
-                        origin: None,
-                        doc_imports: Vec::new(),
-                        extensions: HashSet::new(),
-                        uri: None,
-                        copy: None,
-                        named: false,
-                    });
-                    LibraryId(libraries.len() - 1)
+                if let Some((previous, dirty)) = reuse.as_ref()
+                    && !dirty.contains(&LibraryId(i))
+                {
+                    return Arc::clone(&previous.libraries[i]);
+                }
+                Arc::new(Library {
+                    declarations: FxHashMap::default(),
+                    imports: Vec::new(),
+                    exports: Vec::new(),
+                    configurable: false,
+                    incomplete: grouping.is_unresolved(i),
+                    missing_parts_only: grouping.is_unresolved(i),
+                    missing_generated_parts_only: grouping.missing_generated_parts_only(i),
+                    implicit_core: true,
+                    origin: None,
+                    doc_imports: Vec::new(),
+                    extensions: HashSet::new(),
+                    uri: None,
+                    copy: None,
+                    named: false,
                 })
             })
             .collect();
+        let mut file_library = file_library_ids;
+        let dirty = reuse.as_ref().map(|(_, dirty)| *dirty);
+        let rebuild = |library: LibraryId| dirty.is_none_or(|dirty| dirty.contains(&library));
         // Every indexed file: its path, program and parse-error flag.
         let mut all: Vec<(&Path, Program<'_>, bool)> = files
             .iter()
             .map(|file| (file.path, file.parsed.program(), file.has_parse_errors))
             .collect();
-        let mut parsed: Vec<_> = files.iter().map(|file| Arc::clone(file.parsed)).collect();
+        let mut parsed: Vec<_> = files
+            .iter()
+            .enumerate()
+            .map(|(file, source)| {
+                let retained = reuse
+                    .as_ref()
+                    .filter(|_| !rebuild(file_library[file]))
+                    .map_or(source.parsed, |(previous, _)| &previous.parsed[file]);
+                Arc::clone(retained)
+            })
+            .collect();
         let mut core = base.as_ref().and_then(|index| index.core);
         let mut package_copies = Vec::new();
         let external_library_start = libraries.len();
@@ -775,7 +980,7 @@ impl IdentityIndex {
         {
             let id = LibraryId(libraries.len());
             external_file_offsets.push(all.len());
-            libraries.push(Library {
+            libraries.push(Arc::new(Library {
                 declarations: FxHashMap::default(),
                 imports: Vec::new(),
                 exports: Vec::new(),
@@ -795,7 +1000,7 @@ impl IdentityIndex {
                 }),
                 copy: None,
                 named: false,
-            });
+            }));
             if matches!(&library.origin, ExternalOrigin::Sdk(uri) if uri.as_str() == "dart:core") {
                 core = Some(id);
             }
@@ -856,8 +1061,12 @@ impl IdentityIndex {
             if primary {
                 by_path.insert(canonical.clone(), FileId(index));
             }
+            paths.push(Some(canonical.clone()));
+            if !rebuild(library) {
+                continue;
+            }
             let library_id = library;
-            let library = &mut libraries[library.0];
+            let library = Arc::make_mut(&mut libraries[library.0]);
             library.incomplete |= has_parse_errors;
             library.configurable |= program
                 .imports()
@@ -873,7 +1082,6 @@ impl IdentityIndex {
             if library.origin.is_none() && program.part_of_directive().is_none() {
                 library.uri = package_uri(&canonical, &packages);
             }
-            paths.push(Some(canonical));
             for declaration in program.declarations() {
                 if let TopLevelDecl::Extension(extension) = declaration
                     && let Some(name) = extension.name()
@@ -919,6 +1127,9 @@ impl IdentityIndex {
             project_library_count: external_library_start,
         };
         for (&(path, program, _), &library) in all.iter().zip(&file_library) {
+            if !rebuild(library) {
+                continue;
+            }
             let external_instance = library.0.checked_sub(external_library_start);
             let mut imports = Vec::with_capacity(program.imports().len());
             let mut implicit_core = true;
@@ -937,13 +1148,16 @@ impl IdentityIndex {
                 target: resolver.resolve(path, external_instance, &export.uri().value()),
                 combinators: Combinators::collect(export.combinators(), &mut interner),
             });
-            let library = &mut libraries[library.0];
+            let library = Arc::make_mut(&mut libraries[library.0]);
             library.implicit_core &= implicit_core;
             library.imports.extend(imports);
             library.exports.extend(exports);
         }
         drop(interner);
         for ((file, source), &library) in files.iter().zip(sources).zip(&file_library) {
+            if !rebuild(library) {
+                continue;
+            }
             // A doc import of a library that does not exist contributes nothing.
             let targets = doc_imports(file.parsed.program(), source)
                 .filter(|uri| {
@@ -951,7 +1165,9 @@ impl IdentityIndex {
                         .is_some_and(|external| uri_missing(external.environment, file.path, uri))
                 })
                 .map(|uri| resolver.resolve(file.path, None, uri));
-            libraries[library.0].doc_imports.extend(targets);
+            Arc::make_mut(&mut libraries[library.0])
+                .doc_imports
+                .extend(targets);
         }
         if base.is_none()
             && let Some(external) = external
@@ -964,7 +1180,9 @@ impl IdentityIndex {
                         .iter()
                         .filter(|uri| !resolver.doc_uri_missing(&file.path, instance, uri))
                         .map(|uri| resolver.resolve(&file.path, Some(instance), uri));
-                    libraries[id.0].doc_imports.extend(targets);
+                    Arc::make_mut(&mut libraries[id.0])
+                        .doc_imports
+                        .extend(targets);
                 }
             }
         }
@@ -1012,16 +1230,42 @@ impl IdentityIndex {
             type_occurrences: parsed
                 .iter()
                 .take(files.len())
-                .map(|parsed| SourceTypeOccurrences {
-                    original: parsed.type_occurrences(),
-                    edited: None,
+                .enumerate()
+                .map(|(file, parsed)| {
+                    if let Some((previous, _)) = reuse.as_mut()
+                        && !rebuild(LibraryId(
+                            grouping
+                                .siblings(file)
+                                .iter()
+                                .copied()
+                                .fold(file, usize::min),
+                        ))
+                    {
+                        return std::mem::replace(
+                            &mut previous.type_occurrences[file],
+                            SourceTypeOccurrences {
+                                original: FxHashMap::default(),
+                                edited: None,
+                            },
+                        );
+                    }
+                    SourceTypeOccurrences {
+                        original: parsed.type_occurrences(),
+                        edited: None,
+                    }
                 })
                 .collect(),
             parsed,
             source_annotations: HashMap::new(),
             core,
             colliding,
-            aliases: HashMap::new(),
+            aliases: reuse
+                .as_mut()
+                .map_or_else(HashMap::new, |(previous, dirty)| {
+                    let mut aliases = std::mem::take(&mut previous.aliases);
+                    aliases.retain(|_, alias| !dirty.contains(&alias.library));
+                    aliases
+                }),
             declaration_libraries: FxHashMap::with_capacity_and_hasher(
                 declaration_capacity,
                 Default::default(),
@@ -1029,6 +1273,27 @@ impl IdentityIndex {
             memos: LookupMemos::default(),
             external: base,
             packages,
+            project_snapshots: reuse.as_mut().map_or_else(
+                || {
+                    files
+                        .iter()
+                        .map(|file| (file.parsed.declaration_signature(), file.has_parse_errors))
+                        .collect()
+                },
+                |(previous, _)| std::mem::take(&mut previous.project_snapshots),
+            ),
+            external_snapshot: external.map(ExternalSources::snapshot),
+            external_files: reuse.as_mut().map_or_else(
+                || {
+                    external
+                        .into_iter()
+                        .flat_map(|external| external.libraries.libraries())
+                        .flat_map(|library| library.files.iter())
+                        .map(|file| (Arc::clone(&file.parsed), file.has_parse_errors))
+                        .collect()
+                },
+                |(previous, _)| std::mem::take(&mut previous.external_files),
+            ),
         };
         for (ordinal, library) in index.libraries.iter().enumerate() {
             if library.origin.is_none() {
@@ -1053,6 +1318,9 @@ impl IdentityIndex {
         }
         for (file, (_, program, _)) in all.iter().enumerate() {
             let library = index.file_library[file];
+            if !rebuild(library) {
+                continue;
+            }
             for declaration in program.declarations() {
                 let TopLevelDecl::TypeAlias(alias) = declaration else {
                     continue;
@@ -1076,9 +1344,19 @@ impl IdentityIndex {
             }
         }
         // Resolve metadata only after aliases and declaration identities exist.
-        let mut source_annotations = HashMap::new();
+        let mut source_annotations =
+            reuse
+                .as_mut()
+                .map_or_else(HashMap::new, |(previous, dirty)| {
+                    let mut annotations = std::mem::take(&mut previous.source_annotations);
+                    annotations.retain(|library, _| !dirty.contains(library));
+                    annotations
+                });
         for (file, (_, program, _)) in all.iter().enumerate() {
             let library = index.file_library[file];
+            if !rebuild(library) {
+                continue;
+            }
             if matches!(
                 index.libraries[library.0].origin,
                 Some(ExternalOrigin::Sdk(_))
@@ -3510,6 +3788,289 @@ mod tests {
         }
     }
 
+    #[test]
+    fn incremental_updates_match_full_build_and_retain_unaffected_libraries() {
+        let before = [
+            ("/project/a.dart", "class A {}"),
+            ("/project/b.dart", "export 'a.dart';"),
+            ("/project/c.dart", "import 'b.dart'; class C {}"),
+            ("/project/alone.dart", "class Alone {}"),
+        ];
+        for replacement in ["class Renamed {}", "class A {} class Added {}"] {
+            let mut incremental = index(&before, &[]);
+            let unchanged = Arc::clone(&incremental.libraries[3]);
+            let mut after = before;
+            after[0].1 = replacement;
+            let full = index(&after, &[]);
+            let files: Vec<_> = after
+                .iter()
+                .zip(&full.parsed)
+                .map(|((path, _), parsed)| IdentitySource {
+                    path: Path::new(path),
+                    parsed,
+                    has_parse_errors: false,
+                })
+                .collect();
+            let programs = files
+                .iter()
+                .map(|file| (file.path.to_path_buf(), file.parsed.program()))
+                .collect::<Vec<_>>();
+            let grouping = group_libraries(&programs);
+            let dirty = incremental
+                .update_project(&files, &[], None, &grouping)
+                .unwrap();
+            assert_eq!(
+                dirty,
+                HashSet::from([LibraryId(0), LibraryId(1), LibraryId(2)])
+            );
+            assert!(Arc::ptr_eq(&unchanged, &incremental.libraries[3]));
+            for file in &files {
+                for name in ["A", "Renamed", "Added", "Alone"] {
+                    assert_eq!(
+                        incremental.resolve_declaration(
+                            library(&incremental, file.path.to_str().unwrap()),
+                            name.into()
+                        ),
+                        full.resolve_declaration(
+                            library(&full, file.path.to_str().unwrap()),
+                            name.into()
+                        ),
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn incremental_directive_edits_match_fresh_resolution() {
+        let before = [
+            ("/project/a.dart", "class A {}"),
+            ("/project/b.dart", "class B {}"),
+            ("/project/barrel.dart", "export 'a.dart';"),
+            ("/project/use.dart", "import 'barrel.dart';"),
+            ("/project/alone.dart", "class Alone {}"),
+        ];
+        for (changed, replacement, expected) in [
+            (
+                2,
+                "export 'b.dart';",
+                HashSet::from([LibraryId(2), LibraryId(3)]),
+            ),
+            (2, "library;", HashSet::from([LibraryId(2), LibraryId(3)])),
+            (3, "import 'b.dart';", HashSet::from([LibraryId(3)])),
+            (
+                3,
+                "import 'barrel.dart' show Missing;",
+                HashSet::from([LibraryId(3)]),
+            ),
+        ] {
+            let mut incremental = index(&before, &[]);
+            let unchanged = Arc::clone(&incremental.libraries[4]);
+            let mut after = before;
+            after[changed].1 = replacement;
+            let full = index(&after, &[]);
+            let files = after
+                .iter()
+                .zip(&full.parsed)
+                .map(|((path, _), parsed)| IdentitySource {
+                    path: Path::new(path),
+                    parsed,
+                    has_parse_errors: false,
+                })
+                .collect::<Vec<_>>();
+            let programs = files
+                .iter()
+                .map(|file| (file.path.to_path_buf(), file.parsed.program()))
+                .collect::<Vec<_>>();
+            let grouping = group_libraries(&programs);
+            assert_eq!(
+                incremental.update_project(&files, &[], None, &grouping),
+                Some(expected)
+            );
+            assert!(Arc::ptr_eq(&unchanged, &incremental.libraries[4]));
+            for (path, _) in &after {
+                for name in ["A", "B", "Alone"] {
+                    assert_eq!(
+                        incremental.resolve_declaration(library(&incremental, path), name.into()),
+                        full.resolve_declaration(library(&full, path), name.into()),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn incremental_part_regrouping_preserves_unrelated_ids() {
+        let before = [
+            ("/project/a.dart", "part 'p.dart'; class A {}"),
+            ("/project/p.dart", "part of 'a.dart'; class P {}"),
+            ("/project/b.dart", "class B {}"),
+            ("/project/use.dart", "import 'a.dart';"),
+        ];
+        let mut incremental = index(&before, &[]);
+        let unchanged = Arc::clone(&incremental.libraries[2]);
+        let after = [
+            ("/project/a.dart", "class A {}"),
+            ("/project/p.dart", "part of 'b.dart'; class P {}"),
+            ("/project/b.dart", "part 'p.dart'; class B {}"),
+            ("/project/use.dart", "import 'b.dart';"),
+        ];
+        let full = index(&after, &[]);
+        let files = after
+            .iter()
+            .zip(&full.parsed)
+            .map(|((path, _), parsed)| IdentitySource {
+                path: Path::new(path),
+                parsed,
+                has_parse_errors: false,
+            })
+            .collect::<Vec<_>>();
+        let programs = files
+            .iter()
+            .map(|file| (file.path.to_path_buf(), file.parsed.program()))
+            .collect::<Vec<_>>();
+        let grouping = group_libraries(&programs);
+        incremental
+            .update_project(&files, &[], None, &grouping)
+            .unwrap();
+        assert!(!Arc::ptr_eq(&unchanged, &incremental.libraries[2]));
+        for file in &files {
+            let path = file.path.to_str().unwrap();
+            assert_eq!(library(&incremental, path), library(&full, path));
+            for name in ["A", "B", "P"] {
+                assert_eq!(
+                    resolve(&incremental, path, name),
+                    resolve(&full, path, name)
+                );
+            }
+        }
+        assert_eq!(library(&incremental, "/project/use.dart"), LibraryId(3));
+    }
+
+    #[test]
+    fn incremental_parse_error_transitions_invalidate_dependents() {
+        let inputs = [
+            ("/project/a.dart", "class A {}"),
+            ("/project/use.dart", "import 'a.dart';"),
+            ("/project/alone.dart", "class Alone {}"),
+        ];
+        let parsed = index(&inputs, &[]).parsed;
+        let mut incremental = index(&inputs, &[]);
+        let unchanged = Arc::clone(&incremental.libraries[2]);
+        for has_parse_errors in [true, false] {
+            let files = inputs
+                .iter()
+                .zip(&parsed)
+                .enumerate()
+                .map(|(file, ((path, _), parsed))| IdentitySource {
+                    path: Path::new(path),
+                    parsed,
+                    has_parse_errors: file == 0 && has_parse_errors,
+                })
+                .collect::<Vec<_>>();
+            let programs = files
+                .iter()
+                .map(|file| (file.path.to_path_buf(), file.parsed.program()))
+                .collect::<Vec<_>>();
+            let grouping = group_libraries(&programs);
+            let full = IdentityIndex::from_project_files(&files, &[]);
+            let dirty = incremental
+                .update_project(&files, &[], None, &grouping)
+                .unwrap();
+            assert_eq!(dirty, HashSet::from([LibraryId(0), LibraryId(1)]));
+            assert!(Arc::ptr_eq(&unchanged, &incremental.libraries[2]));
+            assert_eq!(incremental.get(LibraryId(0)).incomplete, has_parse_errors);
+            for name in ["A", "Missing", "Object"] {
+                assert_eq!(
+                    incremental.resolve(library(&incremental, inputs[1].0), name.into()),
+                    full.resolve(library(&full, inputs[1].0), name.into()),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn incremental_doc_imports_propagate_and_incompatible_inputs_fall_back() {
+        let inputs = [
+            ("/project/a.dart", "class A {}"),
+            ("/project/doc.dart", "/// @docImport 'a.dart';\nlibrary;"),
+            ("/project/alone.dart", "class Alone {}"),
+        ];
+        let initial = index(&inputs, &[]);
+        let old_files = inputs
+            .iter()
+            .zip(&initial.parsed)
+            .map(|((path, _), parsed)| IdentitySource {
+                path: Path::new(path),
+                parsed,
+                has_parse_errors: false,
+            })
+            .collect::<Vec<_>>();
+        let text = inputs.iter().map(|(_, text)| *text).collect::<Vec<_>>();
+        let mut incremental = IdentityIndex::build(&old_files, &text, &[], None);
+        let after = [(inputs[0].0, "class Changed {}"), inputs[1], inputs[2]];
+        let full = index(&after, &[]);
+        let files = after
+            .iter()
+            .zip(&full.parsed)
+            .map(|((path, _), parsed)| IdentitySource {
+                path: Path::new(path),
+                parsed,
+                has_parse_errors: false,
+            })
+            .collect::<Vec<_>>();
+        let programs = files
+            .iter()
+            .map(|file| (file.path.to_path_buf(), file.parsed.program()))
+            .collect::<Vec<_>>();
+        let grouping = group_libraries(&programs);
+        assert_eq!(
+            incremental
+                .update_project(&files, &[], None, &grouping)
+                .unwrap(),
+            HashSet::from([LibraryId(0), LibraryId(1)]),
+        );
+        assert!(
+            incremental
+                .update_project(&files[..2], &[], None, &grouping)
+                .is_none()
+        );
+        let reordered = [
+            IdentitySource {
+                path: files[1].path,
+                parsed: files[1].parsed,
+                has_parse_errors: false,
+            },
+            IdentitySource {
+                path: files[0].path,
+                parsed: files[0].parsed,
+                has_parse_errors: false,
+            },
+            IdentitySource {
+                path: files[2].path,
+                parsed: files[2].parsed,
+                has_parse_errors: false,
+            },
+        ];
+        assert!(
+            incremental
+                .update_project(&reordered, &[], None, &grouping)
+                .is_none()
+        );
+        assert!(
+            incremental
+                .update_project(
+                    &files,
+                    &[PackageIdentity {
+                        name: "new".into(),
+                        lib_root: "/project".into(),
+                    }],
+                    None,
+                    &grouping
+                )
+                .is_none()
+        );
+    }
+
     fn index(inputs: &[(&str, &str)], packages: &[PackageIdentity]) -> IdentityIndex {
         let parsed: Vec<_> = inputs
             .iter()
@@ -3684,7 +4245,7 @@ mod tests {
             }
         }
         assert!(index.target_may_hide_declaration(&ImportTarget::Library(box_library), "Missing"));
-        index.libraries[box_library.0].origin =
+        Arc::make_mut(&mut index.libraries[box_library.0]).origin =
             Some(ExternalOrigin::Package(InternedString::Static("example")));
         index.memos = LookupMemos::default();
         assert_eq!(
@@ -3748,8 +4309,8 @@ mod tests {
             &[],
         );
         let incomplete = library(&index, "/project/lib/incomplete.dart");
-        index.libraries[incomplete.0].incomplete = true;
-        index.libraries[incomplete.0].origin =
+        Arc::make_mut(&mut index.libraries[incomplete.0]).incomplete = true;
+        Arc::make_mut(&mut index.libraries[incomplete.0]).origin =
             Some(ExternalOrigin::Sdk(InternedString::Static("dart:test")));
         let file = "/project/lib/main.dart";
         for name in ["Known", "int", "dynamic", "Never"] {
@@ -3770,8 +4331,8 @@ mod tests {
             &[],
         );
         let core = library(&index, "/project/lib/core.dart");
-        index.libraries[core.0].incomplete = true;
-        index.libraries[core.0].origin =
+        Arc::make_mut(&mut index.libraries[core.0]).incomplete = true;
+        Arc::make_mut(&mut index.libraries[core.0]).origin =
             Some(ExternalOrigin::Sdk(InternedString::Static("dart:core")));
         index.core = Some(core);
         for name in ["dynamic", "Never"] {
@@ -4411,8 +4972,8 @@ mod tests {
             &[],
         );
         let broken = library(&index, "/project/lib/broken.dart");
-        index.libraries[broken.0].incomplete = true;
-        index.libraries[broken.0].origin =
+        Arc::make_mut(&mut index.libraries[broken.0]).incomplete = true;
+        Arc::make_mut(&mut index.libraries[broken.0]).origin =
             Some(ExternalOrigin::Package(InternedString::Static("example")));
         let main = library(&index, "/project/lib/main.dart");
         let known = library(&index, "/project/lib/known.dart");
@@ -4431,7 +4992,7 @@ mod tests {
         );
         // Missing project input can hide any exported name.
         let mut project_incomplete = index.clone();
-        project_incomplete.libraries[broken.0].origin = None;
+        Arc::make_mut(&mut project_incomplete.libraries[broken.0]).origin = None;
         assert_eq!(
             project_incomplete.resolve_extension_declaration(main, "Known".into()),
             None
@@ -4462,8 +5023,8 @@ mod tests {
             &[],
         );
         let broken = library(&index, "/project/lib/broken.dart");
-        index.libraries[broken.0].incomplete = true;
-        index.libraries[broken.0].origin =
+        Arc::make_mut(&mut index.libraries[broken.0]).incomplete = true;
+        Arc::make_mut(&mut index.libraries[broken.0]).origin =
             Some(ExternalOrigin::Package(InternedString::Static("example")));
         let main = library(&index, "/project/lib/main.dart");
         let known = library(&index, "/project/lib/known.dart");
@@ -4528,7 +5089,7 @@ mod tests {
             }
         }
         let mut project_incomplete = index.clone();
-        project_incomplete.libraries[broken.0].origin = None;
+        Arc::make_mut(&mut project_incomplete.libraries[broken.0]).origin = None;
         assert_eq!(
             project_incomplete.resolve_extension_declaration(main, "Known".into()),
             None
@@ -4628,7 +5189,7 @@ mod tests {
             })
             .collect();
         for project_count in [1, 3] {
-            let overlay = IdentityIndex::with_external(
+            let mut overlay = IdentityIndex::with_external(
                 &project[..project_count],
                 &[source; 3][..project_count],
                 &[PackageIdentity {
@@ -4663,6 +5224,24 @@ mod tests {
                 "dep",
                 "_limit",
             ));
+            let programs = project[..project_count]
+                .iter()
+                .map(|file| (file.path.to_path_buf(), file.parsed.program()))
+                .collect::<Vec<_>>();
+            let grouping = group_libraries(&programs);
+            let dirty = overlay
+                .update_project(
+                    &project[..project_count],
+                    &[PackageIdentity {
+                        name: "dep".into(),
+                        lib_root: dep.join("lib"),
+                    }],
+                    Some(sources),
+                    &grouping,
+                )
+                .unwrap();
+            assert!(dirty.is_empty());
+            assert!(Arc::ptr_eq(overlay.external.as_ref().unwrap(), &base));
         }
     }
 
@@ -4857,7 +5436,7 @@ mod tests {
                 &[],
             );
             let extension_library = library(&index, "/project/lib/ext.dart");
-            index.libraries[extension_library.0].origin = Some(origin);
+            Arc::make_mut(&mut index.libraries[extension_library.0]).origin = Some(origin);
             assert_eq!(
                 index.resolve_extension_declaration(
                     library(&index, "/project/lib/main.dart"),
