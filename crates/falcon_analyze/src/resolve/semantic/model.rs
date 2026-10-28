@@ -181,7 +181,7 @@ impl TypeParameterScope {
 pub struct SemanticModel<'a> {
     pub(super) file: Option<FileId>,
     pub(super) library: Option<LibraryId>,
-    parsed: Option<&'a Arc<crate::ParsedFile>>,
+    pub(super) parsed: Option<&'a Arc<crate::ParsedFile>>,
     pub(super) identities: &'a IdentityIndex,
     pub(super) types: Option<&'a TypeIndex>,
 }

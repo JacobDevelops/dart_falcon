@@ -2,6 +2,7 @@
 //! with lexical resolution; flow analysis forgets their promotions where
 //! control may re-enter the region (a loop's back edge, a `catch`).
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Weak};
 
 use falcon_syntax::cst::visit::{
     Visitor, walk_class_member, walk_element, walk_expr, walk_expr_chain, walk_function_decl,
@@ -26,6 +27,8 @@ pub struct FlowWrites {
     /// Enclosing bindings each nested callable itself writes, directly or in
     /// deeper closures: the captures its declaration actually performs.
     pub callable_captured_writes: HashMap<usize, HashSet<String>>,
+    /// Parsed revision that produced cached facts, independent of declaration retention.
+    pub(crate) source_revision: Weak<crate::ParsedFile>,
     scopes: LexicalScopes<HashMap<String, usize>>,
     callable_scopes: Vec<usize>,
     callable_ids: Vec<Option<usize>>,
@@ -38,6 +41,13 @@ pub struct FlowWrites {
 }
 
 impl FlowWrites {
+    pub(crate) fn from_parsed(parsed: &Arc<crate::ParsedFile>) -> Self {
+        Self {
+            source_revision: Arc::downgrade(parsed),
+            ..Self::program(parsed.program())
+        }
+    }
+
     pub fn program(program: Program<'_>) -> Self {
         let mut visitor = Self {
             scopes: LexicalScopes::new(),

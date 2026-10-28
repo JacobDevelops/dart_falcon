@@ -22,11 +22,20 @@ impl SignatureIndex {
         self.flow_writes.get(&Some(file))
     }
 
+    pub(crate) fn file_body_is_current(
+        &self,
+        file: FileId,
+        parsed: &Arc<crate::ParsedFile>,
+    ) -> bool {
+        self.flow_writes(file)
+            .is_some_and(|writes| writes.source_revision.ptr_eq(&Arc::downgrade(parsed)))
+    }
+
     /// Replace body-local flow facts while retaining unchanged declaration indexes.
-    pub fn refresh_file_body(&mut self, file: FileId, program: Program<'_>) {
+    pub fn refresh_file_body(&mut self, file: FileId, parsed: &Arc<crate::ParsedFile>) {
         self.flow_writes.insert(
             Some(file),
-            Arc::new(super::flow_writes::FlowWrites::program(program)),
+            Arc::new(super::flow_writes::FlowWrites::from_parsed(parsed)),
         );
     }
 
@@ -311,9 +320,12 @@ impl SignatureIndex {
         analyze_bodies: bool,
     ) {
         if analyze_bodies {
-            self.flow_writes
-                .entry(model.file)
-                .or_insert_with(|| Arc::new(super::flow_writes::FlowWrites::program(program)));
+            self.flow_writes.entry(model.file).or_insert_with(|| {
+                Arc::new(model.parsed.map_or_else(
+                    || super::flow_writes::FlowWrites::program(program),
+                    super::flow_writes::FlowWrites::from_parsed,
+                ))
+            });
         }
         for declaration in program.declarations() {
             if !model.owns_top_level_declaration(declaration) {

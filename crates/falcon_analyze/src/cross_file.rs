@@ -22,7 +22,7 @@ impl SemanticIndexes {
     /// Retain declaration facts after an edit with an unchanged declaration signature.
     pub fn refresh_file_body(&mut self, file: crate::resolve::FileId, parsed: &Arc<ParsedFile>) {
         self.identities.refresh_file_body(file, parsed);
-        self.signatures.refresh_file_body(file, parsed.program());
+        self.signatures.refresh_file_body(file, parsed);
     }
 }
 

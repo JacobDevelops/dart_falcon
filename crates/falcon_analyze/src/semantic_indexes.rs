@@ -138,11 +138,9 @@ pub fn update_semantic_indexes(
             .file(file.path)
             .expect("indexed project file");
         if !dirty.contains(&indexes.identities.library(id))
-            && !Arc::ptr_eq(indexes.identities.parsed_file(id), file.parsed)
+            && !indexes.signatures.file_body_is_current(id, file.parsed)
         {
-            indexes
-                .signatures
-                .refresh_file_body(id, file.parsed.program());
+            indexes.signatures.refresh_file_body(id, file.parsed);
         }
     }
     indexes
@@ -291,6 +289,53 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn restored_original_body_after_refresh_matches_fresh_flow_indexes() {
+        let original = parsed(
+            "void run(bool flag) { int value = 0; while (flag) { value; final write = () { value; }; write(); } }",
+        );
+        let edited = parsed(
+            "void run(bool flag) { int value = 0; while (flag) { value = 1; final write = () { value = 2; }; write(); } }",
+        );
+        assert_eq!(
+            original.declaration_signature(),
+            edited.declaration_signature(),
+        );
+        let mut files = vec![
+            (PathBuf::from("/project/body.dart"), Arc::clone(&original)),
+            (
+                PathBuf::from("/project/other.dart"),
+                parsed("class Other {}"),
+            ),
+        ];
+        let (mut indexes, _) = build_semantic_indexes(&sources(&files), &[], None, None);
+        let file = indexes.identities.file(&files[0].0).unwrap();
+        indexes.refresh_file_body(file, &edited);
+        let discarded = Arc::clone(indexes.signatures.flow_writes(file).unwrap());
+        assert!(!discarded.region_writes.is_empty());
+        assert!(!discarded.callable_captured_writes.is_empty());
+
+        files[1].1 = parsed("class Other { int value = 0; }");
+        let input = sources(&files);
+        let (_, rebuilt) = update_semantic_indexes(&mut indexes, &input, &[], None, None);
+        assert_eq!(rebuilt, 1);
+        let (fresh, _) = build_semantic_indexes(&input, &[], None, None);
+        let actual = indexes.signatures.flow_writes(file).unwrap();
+        let expected = fresh.signatures.flow_writes(file).unwrap();
+        assert!(!Arc::ptr_eq(actual, &discarded));
+        assert_eq!(actual.region_writes, expected.region_writes);
+        assert_eq!(
+            actual.captured_region_writes,
+            expected.captured_region_writes
+        );
+        assert_eq!(actual.anywhere_writes, expected.anywhere_writes);
+        assert_eq!(actual.anywhere_captured, expected.anywhere_captured);
+        assert_eq!(
+            actual.callable_captured_writes,
+            expected.callable_captured_writes,
+        );
     }
 
     #[test]

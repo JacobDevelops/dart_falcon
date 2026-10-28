@@ -1838,12 +1838,6 @@ impl LspState {
             let depends_on_project = files
                 .iter()
                 .any(|file| topology.project_dependency_targets.contains(&file.path));
-            let indexes = (!depends_on_project).then(|| {
-                ExternalIndexCache::build(ExternalSources {
-                    libraries: &libraries,
-                    environment: &self.environment,
-                })
-            });
             let watched_paths = libraries
                 .libraries()
                 .iter()
@@ -1853,12 +1847,27 @@ impl LspState {
                 .chain(libraries.project_companions())
                 .map(watched_path)
                 .collect();
-            self.cross_file_external_cache = Some(CrossFileExternalCache {
-                roots: graph_roots,
-                libraries,
-                indexes,
-                watched_paths,
-            });
+            if let Some(cache) = self.cross_file_external_cache.as_mut().filter(|cache| {
+                !depends_on_project
+                    && cache.indexes.is_some()
+                    && cache.libraries.same_index_inputs(&libraries)
+            }) {
+                cache.roots = graph_roots;
+                cache.watched_paths = watched_paths;
+            } else {
+                let indexes = (!depends_on_project).then(|| {
+                    ExternalIndexCache::build(ExternalSources {
+                        libraries: &libraries,
+                        environment: &self.environment,
+                    })
+                });
+                self.cross_file_external_cache = Some(CrossFileExternalCache {
+                    roots: graph_roots,
+                    libraries,
+                    indexes,
+                    watched_paths,
+                });
+            }
             self.cross_file_external_load_count += 1;
         }
         let cache = self.cross_file_external_cache.as_ref().unwrap();

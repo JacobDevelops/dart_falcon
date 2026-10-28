@@ -880,6 +880,54 @@ impl ExternalLibraries {
         &self.libraries
     }
 
+    /// Whether external indexes can be retained under the same environment.
+    ///
+    /// Path IDs are load-local: compare resolution mappings by physical path,
+    /// including aliases for contexts that share an existing library instance.
+    pub fn same_index_inputs(&self, other: &Self) -> bool {
+        self.paths.len() == other.paths.len()
+            && self.paths.iter().all(|(path, &id)| {
+                other.paths.get(path).is_some_and(|&other_id| {
+                    let cached = &self.states[id as usize];
+                    let current = &other.states[other_id as usize];
+                    cached.context == current.context
+                        && cached.sdk == current.sdk
+                        && cached.primary == current.primary
+                })
+            })
+            && self.aliases.len() == other.aliases.len()
+            && self.aliases.iter().all(|(&(_, context), &instance)| {
+                let path = &self.libraries[instance].files[0].path;
+                other
+                    .paths
+                    .get(path)
+                    .is_some_and(|&id| other.aliases.get(&(id, context)) == Some(&instance))
+            })
+            && self.libraries.len() == other.libraries.len()
+            && self
+                .libraries
+                .iter()
+                .zip(&other.libraries)
+                .all(|(cached, current)| {
+                    cached.origin == current.origin
+                        && cached.context == current.context
+                        && cached.copy_context == current.copy_context
+                        && cached.has_unresolved_parts == current.has_unresolved_parts
+                        && cached.files.len() == current.files.len()
+                        && cached
+                            .files
+                            .iter()
+                            .zip(current.files.iter())
+                            .all(|(cached, current)| {
+                                cached.path == current.path
+                                    && cached.has_parse_errors == current.has_parse_errors
+                                    && cached.doc_imports == current.doc_imports
+                                    && (Arc::ptr_eq(&cached.parsed, &current.parsed)
+                                        || cached.parsed.source == current.parsed.source)
+                            })
+                })
+    }
+
     pub fn is_empty(&self) -> bool {
         self.libraries.is_empty()
     }
@@ -1345,6 +1393,90 @@ impl AnalysisEnvironment {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn index_inputs_reject_new_context_aliases_for_existing_instances() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let shared = root.join("shared");
+        std::fs::create_dir_all(shared.join("lib")).unwrap();
+        std::fs::write(
+            shared.join("lib/shared.dart"),
+            "export 'package:foo/foo.dart';",
+        )
+        .unwrap();
+        let source = "import 'package:shared/shared.dart';";
+        let apps = [
+            ("first", "first"),
+            ("second", "second"),
+            ("third", "second"),
+        ]
+        .map(|(name, copy)| {
+            let app = root.join(name);
+            let foo = root.join(format!("packages/{copy}/foo"));
+            std::fs::create_dir_all(foo.join("lib")).unwrap();
+            std::fs::write(foo.join("lib/foo.dart"), "class Foo {}").unwrap();
+            std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
+            std::fs::create_dir_all(app.join("lib")).unwrap();
+            std::fs::write(
+                app.join(".dart_tool/package_config.json"),
+                format!(
+                    r#"{{"configVersion":2,"packages":[
+                            {{"name":"foo","rootUri":"file://{}","packageUri":"lib/"}},
+                            {{"name":"shared","rootUri":"file://{}","packageUri":"lib/"}}
+                        ]}}"#,
+                    foo.display(),
+                    shared.display(),
+                ),
+            )
+            .unwrap();
+            let path = app.join("lib/main.dart");
+            std::fs::write(&path, source).unwrap();
+            path
+        });
+        let environment = AnalysisEnvironment::discover_with_sdk_locator(
+            apps.iter().map(PathBuf::as_path),
+            |_| None,
+        );
+        let parsed = falcon_dart_parser::parse(source);
+        assert!(parsed.errors.is_empty());
+        let roots = apps
+            .each_ref()
+            .map(|path| (path.as_path(), parsed.tree.program(source), source));
+        let is_project = |path: &Path| apps.iter().any(|app| app == path);
+        let before = ExternalLibraries::load(&environment, &roots[..2], is_project);
+        let unchanged = ExternalLibraries::load(&environment, &roots[..2], is_project);
+        assert!(before.same_index_inputs(&unchanged));
+        let after = ExternalLibraries::load(&environment, &roots, is_project);
+        // The third context shares the second context's existing instances.
+        assert_eq!(before.libraries.len(), after.libraries.len());
+        assert!(
+            before
+                .libraries
+                .iter()
+                .zip(&after.libraries)
+                .all(|(left, right)| {
+                    left.origin == right.origin
+                        && left.context == right.context
+                        && left.copy_context == right.copy_context
+                        && left
+                            .files
+                            .iter()
+                            .map(|file| &file.path)
+                            .eq(right.files.iter().map(|file| &file.path))
+                })
+        );
+        assert!(after.aliases.len() > before.aliases.len());
+        assert!(matches!(
+            (
+                before.resolve_target(&environment, &apps[2], None, "package:shared/shared.dart"),
+                after.resolve_target(&environment, &apps[2], None, "package:shared/shared.dart"),
+            ),
+            (Some(ExternalTarget::Instance(left)), Some(ExternalTarget::Instance(right)))
+                if left != right
+        ));
+        assert!(!before.same_index_inputs(&after));
+    }
 
     #[test]
     fn source_observer_runs_before_library_part_and_companion_reads() {

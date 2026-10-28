@@ -699,6 +699,94 @@ fn declaration_updates_rebuild_only_affected_libraries_in_both_views() {
 }
 
 #[test]
+fn import_and_part_edits_rebuild_only_affected_libraries_in_both_views() {
+    for semantic in [false, true] {
+        for (directive, expected_rebuilds) in [("import", 1), ("part", 2)] {
+            let directory = tempfile::tempdir().unwrap();
+            let config = directory.path().join("falcon.json");
+            std::fs::write(&config, "{}").unwrap();
+            let before = format!("import 'external.dart'; {directive} 'a.dart'; void main() {{}}");
+            for (name, source) in [
+                ("main.dart", before.as_str()),
+                ("a.dart", "class A {}"),
+                ("b.dart", "class B {}"),
+                ("unrelated.dart", "class Unrelated {}"),
+                ("external.dart", "class External {}"),
+            ] {
+                std::fs::write(directory.path().join(name), source).unwrap();
+            }
+            let uri = format!("file://{}", directory.path().join("main.dart").display());
+            let mut state =
+                LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
+            state.resolve_semantics = semantic;
+            let external = directory.path().join("external.dart");
+            state
+                .config
+                .files
+                .includes
+                .extend_excludes(&[external.to_string_lossy().into_owned()]);
+            state.open(&uri, before, Some(1));
+            if semantic {
+                state.ensure_semantic_snapshot();
+            } else {
+                let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+                assert!(complete);
+                state.ensure_cross_file_indexes(&files);
+            }
+            for (version, target) in [(2, "b.dart"), (3, "a.dart")] {
+                let rebuilds = if semantic {
+                    state.semantic_library_rebuild_count
+                } else {
+                    state.cross_file_library_rebuild_count
+                };
+                let external_identity = (!semantic).then(|| {
+                    Arc::clone(
+                        &state
+                            .cross_file_external_cache
+                            .as_ref()
+                            .unwrap()
+                            .indexes
+                            .as_ref()
+                            .unwrap()
+                            .identities,
+                    )
+                });
+                assert!(state.change(
+                    &uri,
+                    format!("import 'external.dart'; {directive} '{target}'; void main() {{}}"),
+                    Some(version),
+                ));
+                let after = if semantic {
+                    state.ensure_semantic_snapshot();
+                    state.semantic_library_rebuild_count
+                } else {
+                    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+                    assert!(complete);
+                    state.ensure_cross_file_indexes(&files);
+                    assert!(Arc::ptr_eq(
+                        external_identity.as_ref().unwrap(),
+                        &state
+                            .cross_file_external_cache
+                            .as_ref()
+                            .unwrap()
+                            .indexes
+                            .as_ref()
+                            .unwrap()
+                            .identities,
+                    ));
+                    state.cross_file_library_rebuild_count
+                };
+                assert_eq!(
+                    after - rebuilds,
+                    expected_rebuilds,
+                    "semantic={semantic}, directive={directive}, target={target}",
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn coalesced_part_regrouping_keeps_old_and_new_dependents() {
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("falcon.json");
