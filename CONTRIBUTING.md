@@ -318,7 +318,37 @@ For a manual release, update the version and changelog, commit and merge, then r
 
 Each tarball ships twice: `falcon-X.Y.Z-<platform>.tar.gz` for pinned installs and `falcon-<platform>.tar.gz` for the unpinned `releases/latest/download/` quick-start links. Releases include SHA256 checksums and build provenance attestations.
 
-Reruns update the existing GitHub Release and Homebrew formula, and skip pub.dev publishing if that version already exists. macOS signing and verification happen in CI, but notarisation is submitted without waiting for Apple. Pending submissions fail the job and leave a draft release holding the exact signed binary, so no macOS runner stays occupied and nothing is published before acceptance. Check the submission ID, name and status in the job summary, then use `xcrun notarytool history --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"` or `xcrun notarytool info <id>` with the same credentials. Once accepted, rerun the failed jobs or redispatch at the original ref. Supply `tag` only if it already exists; a tagless draft creates its tag when published. Redispatching from a different commit fails rather than mixing binaries from different commits.
+Reruns update the existing GitHub Release and Homebrew formula, and skip pub.dev
+publishing if that version already exists. Signing and notarisation run on
+Ubuntu using the pinned `rcodesign` 0.29.0 Linux musl build (verified against
+its SHA-256 checksum). The signed binary is retained as
+`falcon-X.Y.Z-aarch64-darwin.signed` on the draft release. A rerun reuses it and
+its SHA-256 code-directory hash (CDHash), so the same named notary submission
+can be found without resigning or resubmitting. The draft is tied to its source
+commit; resume with that commit rather than a different one. The tag is created
+only when publishing, and the existing pub.dev dispatch still happens at that
+tag.
 
-Submissions are named with the version, platform and signed binary's CDHash. Reruns reuse the draft's signed binary and matching submission; rejected or invalid submissions fail the release. Before publishing, CI replaces the temporary signed-binary asset with the normal signed archives. Already-published reruns recover the binary from the versioned archive.
-
+Apple's notary service accepts a team App Store Connect API key; see Apple's
+[API key guide](https://developer.apple.com/documentation/appstoreconnectapi/creating-api-keys-for-app-store-connect-api)
+for team-key roles and its
+[Notary API guide](https://developer.apple.com/documentation/notaryapi/submitting-software-for-notarization-over-the-web)
+for notarisation authentication. Configure `APPLE_CERTIFICATE_P12`
+(base64-encoded Developer ID Application certificate and private key),
+`APPLE_CERTIFICATE_PASSWORD`, `APPLE_TEAM_ID`, `APPLE_API_ISSUER_ID`,
+`APPLE_API_KEY_ID`, and `APPLE_API_KEY_P8` (the raw `.p8` private-key
+contents) as repository Actions secrets. Give the team API key the
+**Developer** role or higher. Also configure the `notarisation` Actions
+environment with a 10-minute wait timer and no required reviewers or
+deployment branch/tag restrictions that prevent automatic runs. The release
+invokes a reusable wait/check: the environment wait is followed by a Linux
+status check about 10 minutes after submission. If accepted, the original
+release run proceeds to packaging and publishing. If still pending, it
+dispatches standalone polling attempts 2 through 6. Six checks total span about
+an hour, using Linux runners only—no macOS or paid runner is held while Apple
+processes the request. If status remains pending after the bound, manually
+rerun the poll workflow. Acceptance during a standalone poll redispatches the
+release workflow on the default branch with the original immutable commit and
+tag; the commit must be on that branch and CI verifies the draft still targets
+it. Invalid or Rejected submissions fail and print Apple's notary log. The
+submission ID, name, and status are available in the job output.

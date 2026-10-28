@@ -1,0 +1,157 @@
+name: Await notarisation
+
+on:
+  workflow_call:
+    inputs:
+      release-ref:
+        type: string
+        required: true
+      release-tag:
+        type: string
+        required: true
+      submission-id:
+        type: string
+        required: true
+      submission-name:
+        type: string
+        required: true
+      attempt:
+        type: string
+        default: "1"
+      continue-in-caller:
+        type: boolean
+        default: false
+    secrets:
+      APPLE_API_ISSUER_ID:
+        required: true
+      APPLE_API_KEY_ID:
+        required: true
+      APPLE_API_KEY_P8:
+        required: true
+    outputs:
+      status:
+        value: ${{ jobs.check.outputs.status }}
+  workflow_dispatch:
+    inputs:
+      release-ref:
+        description: "Immutable release commit"
+        required: true
+      release-tag:
+        description: "Release version tag (not created until publication)"
+        required: true
+      submission-id:
+        description: "Apple notarisation submission ID"
+        required: true
+      submission-name:
+        description: "CDHash-derived submission name"
+        required: true
+      attempt:
+        description: "Check number, from 1 to 6"
+        required: true
+        default: "1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notarisation-${{ inputs.release-tag }}
+  cancel-in-progress: false
+
+jobs:
+  wait:
+    name: Wait without a runner
+    environment: notarisation
+    runs-on: ubuntu-latest
+    steps:
+      - run: ":"
+
+  check:
+    name: Check notarisation and continue
+    needs: wait
+    runs-on: ubuntu-latest
+    permissions:
+      # Draft release metadata requires push access.
+      contents: write
+      actions: write
+    outputs:
+      id: ${{ steps.notary.outputs.id }}
+      status: ${{ steps.notary.outputs.status }}
+    steps:
+      - name: Install pinned Apple signing tool
+        run: |
+          set -euo pipefail
+          archive=apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz
+          curl --fail --silent --show-error --location "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign/0.29.0/$archive" -o "$RUNNER_TEMP/$archive"
+          echo "dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002  $RUNNER_TEMP/$archive" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/apple-codesign-0.29.0-x86_64-unknown-linux-musl" >> "$GITHUB_PATH"
+      - name: Check submission and continue release
+        id: notary
+        env:
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_REF: ${{ inputs.release-ref }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+          SUBMISSION_ID: ${{ inputs.submission-id }}
+          SUBMISSION_NAME: ${{ inputs.submission-name }}
+          ATTEMPT: ${{ inputs.attempt }}
+          CONTINUE_IN_CALLER: ${{ inputs.continue-in-caller || false }}
+        run: |
+          set -euo pipefail
+          [[ "$ATTEMPT" =~ ^[1-6]$ ]]
+          [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]
+          umask 077
+          key="$RUNNER_TEMP/notary.p8"
+          auth="$RUNNER_TEMP/notary-key.json"
+          history="$RUNNER_TEMP/notary-history"
+          trap 'rm -f "$key" "$auth" "$history"' EXIT
+          releases="$(gh api --paginate "repos/$GH_REPO/releases" --slurp)"
+          target="$(jq -er --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | first | .target_commitish' <<< "$releases")"
+          if [ "$target" != "$RELEASE_REF" ]; then
+            echo "Release $RELEASE_TAG no longer targets $RELEASE_REF; refusing continuation" >&2
+            exit 1
+          fi
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$key"
+          rcodesign encode-app-store-connect-api-key "$APPLE_API_ISSUER_ID" "$APPLE_API_KEY_ID" "$key" --output-path "$auth"
+          rcodesign notary-list --api-key-file "$auth" > "$history"
+          status=""
+          while read -r candidate date name type candidate_status; do
+            if [ "$candidate" = "$SUBMISSION_ID" ] && [ "$name" = "$SUBMISSION_NAME" ]; then
+              case "$candidate_status" in
+                accepted) status=Accepted ;;
+                "in progress") status="In Progress" ;;
+                invalid) status=Invalid ;;
+                rejected) status=Rejected ;;
+                *) status="$candidate_status" ;;
+              esac
+              break
+            fi
+          done < "$history"
+          printf 'id=%s\nstatus=%s\n' "$SUBMISSION_ID" "$status" >> "$GITHUB_OUTPUT"
+          printf 'Notarisation submission: `%s`\n\nName: `%s`\n\nStatus: **%s**\n\nCheck: **%s / 6**\n' "$SUBMISSION_ID" "$SUBMISSION_NAME" "$status" "$ATTEMPT" >> "$GITHUB_STEP_SUMMARY"
+          case "$status" in
+            Accepted)
+              if [ "$CONTINUE_IN_CALLER" != true ]; then
+                gh workflow run release.yml --ref "$DEFAULT_BRANCH" -f commit="$RELEASE_REF" -f tag="$RELEASE_TAG"
+              fi
+              ;;
+            Invalid|Rejected)
+              rcodesign notary-log --api-key-file "$auth" "$SUBMISSION_ID"
+              echo "Notarisation submission $SUBMISSION_ID has status $status" >&2
+              exit 1
+              ;;
+            "In Progress")
+              if [ "$ATTEMPT" -ge 6 ]; then
+                echo "Notarisation still pending after six checks ($SUBMISSION_ID); manually rerun Release from commit $RELEASE_REF" >&2
+                exit 1
+              fi
+              gh workflow run notarisation.yml --ref "$DEFAULT_BRANCH" \
+                -f release-ref="$RELEASE_REF" -f release-tag="$RELEASE_TAG" \
+                -f submission-id="$SUBMISSION_ID" -f submission-name="$SUBMISSION_NAME" -f attempt="$((ATTEMPT + 1))"
+              ;;
+            *) echo "Missing submission or unknown notarisation status: $status" >&2; exit 1 ;;
+          esac

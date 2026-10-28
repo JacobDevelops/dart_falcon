@@ -207,50 +207,67 @@ falls back to watching every directory under the project separately.
    at the selected ref; supplying `tag` reruns an existing tagged version.
 2. CI (`.github/workflows/release.yml`) cross-builds all three platform binaries
    on Linux with `cargo-zigbuild` (static musl for Linux, zig-linked macOS).
-3. A macOS runner signs and verifies the Apple Silicon binary, saves it on a
-   draft release, and submits it to Apple without waiting. A pending submission
-   fails the job with its ID in the summary, releasing the runner. Check its
-   status and rerun once Apple accepts it. Reruns reuse the saved signed binary
-   and submission, and refuse a different source commit for the same draft.
-4. Only accepted binaries are packaged as `falcon-X.Y.Z-<system>.tar.gz` plus a
-   versionless `falcon-<system>.tar.gz` copy for `releases/latest/download/`
-   links, checksummed into `SHA256SUMS`, signed with Minisign, given a build
-   provenance attestation, and published on GitHub. CI removes the temporary
-   signed-binary asset before publishing, then dispatches pub.dev publishing
-   at the newly created tag and updates Homebrew. Existing pub.dev versions
-   are skipped.
+3. An Ubuntu runner uses the pinned `rcodesign` 0.29.0 build to sign and verify
+   the Apple Silicon binary, then submits it to Apple's notary service without
+   waiting. The release workflow invokes `.github/workflows/notarisation.yml`
+   as a reusable wait/check: its wait job uses the `notarisation` environment,
+   then a Linux job checks the submission after about 10 minutes. If accepted,
+   packaging and publishing continue in that same release run. If still
+   pending, the workflow dispatches standalone polling attempts 2 through 6;
+   each waits and checks on Linux. Rejected or invalid submissions fail. If
+   still pending after six checks (about an hour total), rerun the poll workflow
+   manually. No macOS or paid runner stays occupied while Apple processes the
+   request.
+4. Only an accepted submission allows packaging as
+   `falcon-X.Y.Z-<system>.tar.gz` plus a versionless `falcon-<system>.tar.gz`
+   copy for `releases/latest/download/` links, checksumming into `SHA256SUMS`,
+   signing with Minisign, adding a build provenance attestation, and publishing
+   on GitHub. CI removes the temporary signed-binary asset before publishing,
+   then dispatches pub.dev publishing at the newly created tag and updates
+   Homebrew. Existing pub.dev versions are skipped.
+
+The signed binary is kept on the draft release as
+`falcon-X.Y.Z-aarch64-darwin.signed`. On a rerun, CI reuses that exact binary
+and its SHA-256 code-directory hash (CDHash) to find the named notarisation
+submission, rather than signing or submitting it again. If the first delayed
+check accepts, the original release run continues. Later polling attempts run
+standalone; on acceptance they redispatch the release workflow with the same
+immutable commit and tag. The commit must be on the default branch, and CI
+confirms the draft still targets that commit. The tag is created only at publish
+time. This process does not alter the existing pub.dev dispatch behaviour.
 
 ### Release publishing setup
 
-Releases require all of these secrets. The release fails before building and
-lists any that are missing.
+Configure the required repository Actions secrets:
 
-- **Archive signing:** create a Minisign key pair (`minisign -G`). Store the
-  complete secret key file as the Actions secret `MINISIGN_SECRET_KEY`. For a
-  password-protected key, store its password as `MINISIGN_PASSWORD`; leave it
-  unset for an unprotected key generated with `minisign -G -W`. Keep the secret
-  key offline too, and distribute the public key through a trusted channel.
-  Releases include `.minisig` signatures for every archive and `SHA256SUMS`.
-  Verify them with `minisign -Vm <asset> -P <trusted-public-key>`.
 - **macOS signing and notarisation:** export a **Developer ID Application**
   certificate with its private key as a password-protected `.p12` file. Store
-  its base64-encoded contents as `APPLE_CERTIFICATE_P12` and the export password
-  as `APPLE_CERTIFICATE_PASSWORD`. Set `APPLE_ID` to the Apple Developer account
-  email, `APPLE_TEAM_ID` to its team ID, and `APPLE_APP_PASSWORD` to an
-  app-specific password for that account.
-  CI imports the certificate into a temporary keychain and signs the Darwin
-  binary with the hardened runtime and a timestamp. Submission names include
-  the version, platform and CDHash. Matching accepted submissions are reused;
-  in-progress ones fail as pending without resubmitting, and invalid or
-  rejected ones fail the release. Check status with `xcrun notarytool history`
-  or `xcrun notarytool info <id>`, passing `--apple-id "$APPLE_ID" --team-id
-  "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"`. Rerun the failed jobs or
-  redispatch at the original ref; supply `tag` only if it already exists.
-  Tagless drafts do not create a tag until publishing. The release tarballs
-  contain the signed binaries; published reruns recover them from the versioned
-  tarball. Bare CLI binaries cannot have a ticket stapled to them, so the zip
-  is only a submission container; users may need network access for macOS to
-  check the notarisation ticket.
+  its base64-encoded contents as `APPLE_CERTIFICATE_P12`, the export password
+  as `APPLE_CERTIFICATE_PASSWORD`, and the team ID as `APPLE_TEAM_ID`. Create
+  a **team** App Store Connect API key and set `APPLE_API_ISSUER_ID`,
+  `APPLE_API_KEY_ID`, and `APPLE_API_KEY_P8` to its issuer ID, key ID, and raw
+  `.p8` private-key contents, respectively. Set the key's role to **Developer**
+  or higher. Apple documents team-key roles in its
+  [API key guide](https://developer.apple.com/documentation/appstoreconnectapi/creating-api-keys-for-app-store-connect-api)
+  and use of App Store Connect API keys for notarisation in its
+  [Notary API guide](https://developer.apple.com/documentation/notaryapi/submitting-software-for-notarization-over-the-web).
+  CI signs with hardened runtime and a timestamp, verifies the binary, and
+  obtains the CDHash from its code directory. A raw CLI binary cannot have a
+  notarisation ticket stapled to it; the published archive contains the signed
+  binary, and macOS may need network access to check the ticket.
+- **Automatic polling:** create a GitHub Actions environment named
+  `notarisation` with a **10-minute wait timer** and no required reviewers or
+  deployment branch/tag restrictions that would block automatic workflow
+  runs. Configure the environment timer in repository settings. The workflow
+  makes up to six automatic status checks (about one hour total); after that,
+  manually rerun the poll workflow.
+- **Archive signing:** create a Minisign key pair (`minisign -G`). Store the
+  complete secret key file as `MINISIGN_SECRET_KEY`. For a password-protected
+  key, store its password as `MINISIGN_PASSWORD`; leave it unset for an
+  unprotected key generated with `minisign -G -W`. Keep the secret key offline
+  too, and distribute the public key through a trusted channel. Releases
+  include `.minisig` signatures for every archive and `SHA256SUMS`. Verify
+  them with `minisign -Vm <asset> -P <trusted-public-key>`.
 - **Homebrew:** create the public repository `JacobDevelops/homebrew-tap` with
   an initial commit. Set `HOMEBREW_TAP_TOKEN` to a fine-grained PAT with
   **Contents: read and write** on that tap repository. The single Actions variable
@@ -261,11 +278,18 @@ lists any that are missing.
   backwards. Prerelease and build-metadata versions do not update the tap.
   `HOMEBREW_TAP` is optional and only changes the destination.
 
+`rcodesign` is pinned to 0.29.0, including the Linux musl release tarball's
+SHA-256 checksum, so release signing uses a reproducible, verified tool build.
+The workflow uses `rcodesign encode-app-store-connect-api-key` to create the
+temporary API-key JSON and `rcodesign notary-list` to match existing submissions
+by name and poll by submission ID.
+
 To inspect a formula locally:
 
 ```sh
 cargo xtask homebrew --version X.Y.Z --checksums SHA256SUMS --output falcon.rb
 ```
+
 
 ## Next steps
 
