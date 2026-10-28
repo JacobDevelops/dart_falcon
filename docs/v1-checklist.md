@@ -6,15 +6,6 @@ Every hardening item and rule row below must be resolved before falcon 1.0; ther
 
 Engine fixes from the October 2026 audit plus the 1.0 workflow features. Every item blocks 1.0. Items are grouped into batches sized for one agent: each batch says what code it owns and what it waits on. Batches in the same stage can run in parallel unless a batch says otherwise. Each fix lands with a regression test built from its repro.
 
-### Stage 6: editor and CI workflows
-
-#### 24. Release credentials
-
-Owns the repository's Actions secrets and the Homebrew tap. Releases fail before building until all of these exist; see `docs/installation.md` "Release publishing setup".
-
-- [ ] **macOS signing and notarisation.** Get a Developer ID Application certificate and set `APPLE_CERTIFICATE_P12`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID` and `APPLE_APP_PASSWORD`.
-- [ ] **Homebrew tap.** Create the public `JacobDevelops/homebrew-tap` repository with an initial commit and set `HOMEBREW_TAP_TOKEN` to a fine-grained PAT with Contents read and write on it.
-
 ### Stage 7: last
 
 #### 26. Clippy pedantic
