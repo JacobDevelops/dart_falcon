@@ -34,18 +34,18 @@ environment pin, the launcher uses its package version.
 `self-update` belongs to this launcher, not the standalone native binary.
 Update the launcher itself with `dart pub global activate falcon`.
 
-Every release publishes Minisign signatures. Download the archive and matching
-`.minisig` before extracting it. Obtain the publisher's public key independently
-through a trusted channel, then run:
+Every release publishes Minisign signatures made with the publisher key
+`RWRlvxXpBM715oZAT+91h6njpynlhlrZcueq2mV2yr1gfuc2B0mnmRwm` (key ID
+`E6F5CE04E915BF65`). Download the archive and matching `.minisig`, then verify
+it before extracting:
 
 ```sh
-minisign -Vm falcon-x86_64-linux.tar.gz -P <trusted-public-key>
+minisign -Vm falcon-x86_64-linux.tar.gz -P RWRlvxXpBM715oZAT+91h6njpynlhlrZcueq2mV2yr1gfuc2B0mnmRwm
 ```
 
 Substitute your platform's archive name. A successful signature check authenticates
-the archive against that trusted key; a key downloaded only alongside the archive
-does not establish trust. No publisher public key is distributed by this launcher
-yet.
+the archive against that key; a key downloaded only alongside the archive does not
+establish trust. This launcher does not verify signatures itself.
 
 Supports Linux and macOS on x86_64 and arm64. Windows is not supported.
 

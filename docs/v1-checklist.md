@@ -18,7 +18,6 @@ Owns `crates/falcon_lsp`, the `falcon_project` autofix overlay and the semantic 
 
 Owns the repository's Actions secrets and the Homebrew tap. Releases fail before building until all of these exist; see `docs/installation.md` "Release publishing setup".
 
-- [ ] **Minisign signing.** Generate a Minisign key pair, store the secret key as `MINISIGN_SECRET_KEY` (plus `MINISIGN_PASSWORD` if the key is encrypted), and publish the public key through a trusted channel.
 - [ ] **macOS signing and notarisation.** Get a Developer ID Application certificate and set `APPLE_CERTIFICATE_P12`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID` and `APPLE_APP_PASSWORD`.
 - [ ] **Homebrew tap.** Create the public `JacobDevelops/homebrew-tap` repository with an initial commit and set `HOMEBREW_TAP_TOKEN` to a fine-grained PAT with Contents read and write on it.
 

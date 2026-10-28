@@ -46,17 +46,17 @@ The checksum manifest comes from the same GitHub release as the archive. Matchin
 it checks integrity, not publisher authenticity if both assets are replaced.
 Provenance verification is a separate check, as shown above.
 
-Every release publishes Minisign signatures. Download the archive's matching
-`.minisig` and obtain the publisher's public key through an independent trusted
-channel before extracting:
+Every release publishes Minisign signatures made with the publisher key
+`RWRlvxXpBM715oZAT+91h6njpynlhlrZcueq2mV2yr1gfuc2B0mnmRwm` (key ID
+`E6F5CE04E915BF65`). Download the archive's matching `.minisig` and verify it
+before extracting:
 
 ```sh
-minisign -Vm falcon-x86_64-linux.tar.gz -P <trusted-public-key>
+minisign -Vm falcon-x86_64-linux.tar.gz -P RWRlvxXpBM715oZAT+91h6njpynlhlrZcueq2mV2yr1gfuc2B0mnmRwm
 ```
 
 Substitute your platform's archive name. The same command can verify `SHA256SUMS`
-against `SHA256SUMS.minisig`. No publisher public key is distributed with the
-launcher yet, and the launcher does not verify signatures.
+against `SHA256SUMS.minisig`. The launcher does not verify signatures.
 
 ## Dart pub
 
