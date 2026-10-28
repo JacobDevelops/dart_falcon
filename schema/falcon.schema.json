@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v0.4.5/schema/falcon.schema.json",
+  "$id": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v0.4.6/schema/falcon.schema.json",
   "title": "falcon.json",
   "description": "Configuration for the falcon Dart linter.",
   "type": "object",

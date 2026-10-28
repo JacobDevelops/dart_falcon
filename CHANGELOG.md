@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.6 (2026-10-28)
+
+### Features
+
+- Stop publishing Intel macOS binaries; macOS releases now support Apple Silicon only.
+
 ## 0.4.5 (2026-10-28)
 
 ### Features

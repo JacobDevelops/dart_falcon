@@ -1,7 +1,7 @@
 {
   "name": "falcon",
   "about": "A fast Dart linter",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "usage": "falcon [OPTIONS] <COMMAND>",
   "globalArgs": [
     {
