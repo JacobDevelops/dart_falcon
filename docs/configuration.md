@@ -95,7 +95,7 @@ Point the top-level `$schema` at the published JSON schema to get rule-name
 autocomplete and validation in editors:
 
 ```json
-"$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v0.4.4/schema/falcon.schema.json"
+"$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v0.4.5/schema/falcon.schema.json"
 ```
 
 The VS Code extension enables the [published schema](../schema/falcon.schema.json) automatically for files named `falcon.json`.
@@ -104,7 +104,7 @@ The VS Code extension enables the [published schema](../schema/falcon.schema.jso
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v0.4.4/schema/falcon.schema.json",
+  "$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v0.4.5/schema/falcon.schema.json",
   "files": {
     "includes": ["**", "!.dart_tool/**", "!build/**", "!**/*.g.dart", "!**/*.freezed.dart"]
   },
