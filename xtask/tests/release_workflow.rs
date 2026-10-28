@@ -93,7 +93,7 @@ fn dispatch_resolves_versions_without_moving_existing_tags() {
     assert_eq!(checkout["fetch-depth"], 0);
     assert_eq!(
         checkout["ref"],
-        "${{ github.event.pull_request.merge_commit_sha || (github.event.inputs.tag && format('refs/tags/{0}', github.event.inputs.tag)) || github.ref }}"
+        "${{ github.event.pull_request.merge_commit_sha || (github.event.inputs.tag && format('refs/tags/{0}', github.event.inputs.tag)) || github.sha }}"
     );
     for (event, input, existing, succeeds) in [
         ("workflow_dispatch", "", "", true),
