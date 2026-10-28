@@ -143,6 +143,8 @@ jobs:
           password="$(openssl rand -base64 32)"
           security create-keychain -p "$password" "$keychain"
           security unlock-keychain -p "$password" "$keychain"
+          # codesign only finds identities in keychains on the user search list.
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
           security import "$certificate" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
           identity=""
