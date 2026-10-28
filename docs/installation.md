@@ -8,7 +8,6 @@ falcon ships as a single binary. It doesn't run the Dart analyzer or analysis se
 | ------------------- | ----------------------------- |
 | Linux x86_64        | fully static (musl)           |
 | Linux aarch64       | fully static (musl)           |
-| macOS Intel         | native, macOS 11.7.1 or later |
 | macOS Apple Silicon | native, macOS 11.7.1 or later |
 
 Windows binaries are not published yet. Windows users can
@@ -22,7 +21,7 @@ tarball contains a single `falcon` executable.
 
 ```sh
 # Substitute your platform:
-#   x86_64-linux | aarch64-linux | x86_64-darwin | aarch64-darwin
+#   x86_64-linux | aarch64-linux | aarch64-darwin
 curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/latest/download/falcon-x86_64-linux.tar.gz \
   | tar -xz
 sudo mv falcon /usr/local/bin/   # or anywhere on your PATH
@@ -66,8 +65,8 @@ On Linux and macOS, install falcon from pub.dev:
 dart pub global activate falcon
 ```
 
-The first invocation downloads the matching native binary for Linux or macOS
-on x86_64 or arm64. Make sure Dart's pub cache `bin` directory is on your
+The first invocation downloads the matching native binary for Linux on x86_64 or
+arm64, or macOS on arm64. Make sure Dart's pub cache `bin` directory is on your
 `PATH` to run `falcon`.
 
 The pub launcher checks the archive's SHA256 checksum against `SHA256SUMS`
@@ -117,7 +116,7 @@ cargo binstall --git https://github.com/JacobDevelops/dart_falcon dart_falcon
 
 The package is not published to crates.io, so `--git` supplies its manifest.
 The manifest maps Linux GNU and musl targets to the static Linux release assets
-and macOS targets to their native assets. It disables compilation and third-party
+and macOS arm64 to its native asset. It disables compilation and third-party
 QuickInstall fallbacks. To install from a particular release, use a checkout of
 that release with `cargo binstall --manifest-path Cargo.toml dart_falcon`.
 
@@ -204,7 +203,7 @@ falls back to watching every directory under the project separately.
 ## How releases work
 
 1. A maintainer pushes a tag `vX.Y.Z`.
-2. CI (`.github/workflows/release.yml`) cross-builds all four platform binaries
+2. CI (`.github/workflows/release.yml`) cross-builds all three platform binaries
    on Linux with `cargo-zigbuild` (static musl for Linux, zig-linked macOS).
 3. macOS runners sign and notarise the Darwin binaries. The binaries
    are packaged as `falcon-X.Y.Z-<system>.tar.gz` plus a

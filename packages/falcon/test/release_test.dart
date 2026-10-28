@@ -13,12 +13,16 @@ void main() {
   test('maps supported ABIs to release platforms', () {
     expect(releasePlatform(Abi.linuxX64), 'x86_64-linux');
     expect(releasePlatform(Abi.linuxArm64), 'aarch64-linux');
-    expect(releasePlatform(Abi.macosX64), 'x86_64-darwin');
     expect(releasePlatform(Abi.macosArm64), 'aarch64-darwin');
   });
 
   test('rejects unsupported operating systems and architectures', () {
-    for (final abi in [Abi.windowsX64, Abi.linuxArm, Abi.androidArm64]) {
+    for (final abi in [
+      Abi.macosX64,
+      Abi.windowsX64,
+      Abi.linuxArm,
+      Abi.androidArm64,
+    ]) {
       expect(() => releasePlatform(abi), throwsUnsupportedError);
     }
   });

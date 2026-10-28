@@ -6,7 +6,7 @@ falcon is a standalone linter for Dart and Flutter, written in Rust. It doesn't 
 
 falcon ships as a single binary. [installation.md](./installation.md) covers all platforms and channels.
 
-**Prebuilt binary** (Linux x86_64/aarch64 static, macOS Intel/Apple Silicon):
+**Prebuilt binary** (Linux x86_64/aarch64 static, macOS Apple Silicon):
 
 ```sh
 curl -fsSL https://github.com/JacobDevelops/dart_falcon/releases/latest/download/falcon-x86_64-linux.tar.gz | tar -xz

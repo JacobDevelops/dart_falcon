@@ -4,10 +4,9 @@ import 'dart:ffi';
 String releasePlatform(Abi abi) => switch (abi) {
   Abi.linuxX64 => 'x86_64-linux',
   Abi.linuxArm64 => 'aarch64-linux',
-  Abi.macosX64 => 'x86_64-darwin',
   Abi.macosArm64 => 'aarch64-darwin',
   _ => throw UnsupportedError(
-    'falcon supports only Linux and macOS on x86_64 or arm64 (found $abi).',
+    'falcon supports only Linux on x86_64 or arm64 and macOS on arm64 (found $abi).',
   ),
 };
 

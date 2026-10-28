@@ -30,7 +30,7 @@ With cold analyzer state, falcon runs **3.9–6.0× faster than `dart analyze` a
 
 falcon ships as a single binary.
 
-**Prebuilt binaries** (Linux x86_64/aarch64 static, macOS Intel/Apple Silicon)
+**Prebuilt binaries** (Linux x86_64/aarch64 static, macOS Apple Silicon)
 are attached to every [GitHub Release](https://github.com/JacobDevelops/dart_falcon/releases):
 
 ```sh

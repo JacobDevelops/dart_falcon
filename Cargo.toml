@@ -71,9 +71,6 @@ pkg-fmt             = "tgz"
 bin-dir             = "{ bin }"
 disabled-strategies = [ "quick-install", "compile" ]
 
-[package.metadata.binstall.overrides.x86_64-apple-darwin]
-pkg-url = "{ repo }/releases/download/v{ version }/falcon-{ version }-x86_64-darwin.tar.gz"
-
 [package.metadata.binstall.overrides.aarch64-apple-darwin]
 pkg-url = "{ repo }/releases/download/v{ version }/falcon-{ version }-aarch64-darwin.tar.gz"
 

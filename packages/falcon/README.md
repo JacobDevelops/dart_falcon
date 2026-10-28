@@ -47,6 +47,6 @@ Substitute your platform's archive name. A successful signature check authentica
 the archive against that key; a key downloaded only alongside the archive does not
 establish trust. This launcher does not verify signatures itself.
 
-Supports Linux and macOS on x86_64 and arm64. Windows is not supported.
+Supports Linux on x86_64 and arm64, and macOS on arm64. Windows is not supported.
 
 See the [installation guide](https://dart-falcon.jacobdevelops.com/docs/installation) for other installation methods.

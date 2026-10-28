@@ -6,7 +6,7 @@ pub(crate) struct Options {
     /// Release version without the v prefix, e.g. 0.4.2.
     #[arg(long)]
     pub(crate) version: String,
-    /// SHA256SUMS from the release containing all four versioned archives.
+    /// SHA256SUMS from the release containing all three versioned archives.
     #[arg(long)]
     pub(crate) checksums: PathBuf,
     /// Destination formula file, e.g. dist/falcon.rb.
@@ -59,9 +59,16 @@ fn generate(version: &str, sums: &str) -> Result<String, String> {
     let mut formula = format!(
         "class Falcon < Formula\n  desc \"Fast Dart linter built in Rust\"\n  homepage \"https://dart-falcon.jacobdevelops.com\"\n  version \"{version}\"\n  license \"MIT\"\n"
     );
-    for (os, platform) in [("macos", "darwin"), ("linux", "linux")] {
+    for (os, platform, architectures) in [
+        ("macos", "darwin", &[("arm", "aarch64")][..]),
+        (
+            "linux",
+            "linux",
+            &[("arm", "aarch64"), ("intel", "x86_64")][..],
+        ),
+    ] {
         writeln!(formula, "\n  on_{os} do").unwrap();
-        for (cpu, architecture) in [("arm", "aarch64"), ("intel", "x86_64")] {
+        for (cpu, architecture) in architectures {
             let asset = format!("falcon-{version}-{architecture}-{platform}.tar.gz");
             let checksum = checksums
                 .get(asset.as_str())
@@ -85,12 +92,7 @@ mod tests {
     use super::*;
 
     const VERSION: &str = "9.8.7";
-    const PLATFORMS: [&str; 4] = [
-        "aarch64-darwin",
-        "x86_64-darwin",
-        "aarch64-linux",
-        "x86_64-linux",
-    ];
+    const PLATFORMS: [&str; 3] = ["aarch64-darwin", "aarch64-linux", "x86_64-linux"];
 
     fn checksums() -> String {
         PLATFORMS
@@ -131,10 +133,6 @@ mod tests {
       url "https://github.com/JacobDevelops/dart_falcon/releases/download/v9.8.7/falcon-9.8.7-aarch64-darwin.tar.gz"
       sha256 "{}"
     end
-    on_intel do
-      url "https://github.com/JacobDevelops/dart_falcon/releases/download/v9.8.7/falcon-9.8.7-x86_64-darwin.tar.gz"
-      sha256 "{}"
-    end
   end
 
   on_linux do
@@ -160,7 +158,6 @@ end
             "1".repeat(64),
             "2".repeat(64),
             "3".repeat(64),
-            "4".repeat(64),
         );
         assert_eq!(formula, expected);
     }
@@ -268,7 +265,7 @@ end
         let matrix = workflow["jobs"]["build"]["strategy"]["matrix"]["include"]
             .as_sequence()
             .unwrap();
-        assert_eq!(matrix.len(), 4);
+        assert_eq!(matrix.len(), 3);
         assert_eq!(metadata["pkg-fmt"].as_str(), Some("tgz"));
         assert_eq!(metadata["bin-dir"].as_str(), Some("{ bin }"));
         for entry in matrix {
