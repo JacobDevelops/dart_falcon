@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.4.5 (2026-10-28)
+
+### Features
+
+- Add baselines of existing findings with `--write-baseline [PATH]`, `--baseline PATH` and the `baseline` configuration key, matched from any subdirectory of the project.
+- Support installing prebuilt releases with cargo-binstall.
+- Offer quick fixes and a safe fix-all on save in the editor.
+- Configure each rule's fix as `none`, `safe` or `unsafe` with the `fix` key, including in path overrides.
+- Publish a Homebrew formula to `JacobDevelops/homebrew-tap` with each release.
+- Add `self-update` and native version selection to the Dart pub launcher, verified against the release's `SHA256SUMS`.
+- Sign and notarise macOS binaries with a Developer ID certificate.
+- Sign release archives and `SHA256SUMS` with Minisign; the public key is in the installation guide.
+- Add safe fixes for `unnecessary-new`, `prefer-single-quotes` and `prefer-double-quotes`.
+- Add SARIF 2.1.0, GitLab Code Quality, Checkstyle XML, Sonar generic issue JSON and HTML report formats.
+- Warnings no longer fail `falcon check` by default; pass `--error-on-warnings` or set `"error-on-warnings": true` to fail on them.
+- Resolve imports and exports across workspace packages, so `unused-files`, `unused-code` and `no-import-cycles` cover sibling packages.
+- Detect pub and Melos workspaces and apply each member package's `falcon.json` in the CLI and editor.
+- Name the owning package on workspace diagnostics, with per-package summaries in text and SARIF reports.
+- Add `falcon check --write` to apply safe fixes until each file stops changing, with `--unsafe` for unsafe fixes and `--dry-run` to preview a diff.
+
+### Fixes
+
+- Discover configuration from the current directory the same way whether or not input paths are given.
+- Analyze every workspace folder the editor initializes, not only the first.
+- Include ancestor package manifests in the editor's cross-file analysis, matching the CLI.
+- Cancel queued editor requests and stop fix-all runs when the client cancels them.
+- Publish each file's merged editor diagnostics once, with UTF-16 positions, and drop diagnostics superseded by newer edits.
+- Keep the editor responsive by caching workspace parses and reusing project indexes for edits that don't change declarations.
+- Resolve configuration and cross-file rules per editor workspace folder, matching a CLI check of that folder.
+- Pick up created, changed and removed files from `workspace/didChangeWatchedFiles` events, and revalidate closed files in editors without file watching.
+- Fix `falcon check` hanging on expressions nested past the parser's depth limit, such as thousands of nested list literals; the excess nesting now reports one syntax error.
+- Fix parsing of const record-typed local declarations and nullable record fields in casts and type tests.
+- Reuse semantic indexes for unrelated libraries after declaration, import, export and part edits in the editor and during autofixes.
+- Fix stack overflows and repeated analysis when lint rules inspect long expression chains.
+- Fix stack overflows on very long expression chains in parameter defaults, async safety checks, switch guards, `avoid-print`, `library-annotations`, `null-check-on-nullable-type-parameter`, `prefer-final-fields`, and controller disposal checks.
+- Report a malformed member configuration in the editor without dropping the base or other members' configurations.
+- Warn when a member configuration sets `max-errors`, `error-on-warnings` or `baseline`, which only the base configuration controls.
+- Report a missing input path instead of panicking when part of the path is a regular file.
+- Sort syntax errors before lint findings in both the CLI and editor.
+- Skip files with syntax errors, symlinks or concurrent disk changes when writing fixes.
+
 ## 0.4.4 (2026-10-23)
 
 ### Features
