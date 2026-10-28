@@ -10,8 +10,8 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to (re)release, e.g. v0.1.0"
-        required: true
+        description: "Existing tag to (re)release; omit to release the version at the selected ref"
+        required: false
 
 permissions:
   contents: read
@@ -27,17 +27,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha || (github.event.inputs.tag && format('refs/tags/{0}', github.event.inputs.tag)) || github.ref }}
+          fetch-depth: 0
           persist-credentials: false
       - name: Resolve release version
         id: version
         env:
-          INPUT_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
         run: |
           set -euo pipefail
           version="$(cargo metadata --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "dart_falcon") | .version')"
           tag="v$version"
-          if [ "$GITHUB_EVENT_NAME" != pull_request ] && [ "$INPUT_TAG" != "$tag" ]; then
+          if [ -n "$INPUT_TAG" ] && [ "$INPUT_TAG" != "$tag" ]; then
             echo "Tag $INPUT_TAG does not match workspace version $version" >&2
+            exit 1
+          fi
+          if git show-ref --verify --quiet "refs/tags/$tag" && [ "$(git rev-parse "refs/tags/$tag^{commit}")" != "$(git rev-parse HEAD)" ]; then
+            echo "Tag $tag already exists at a different commit; refusing to retarget it" >&2
             exit 1
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -77,7 +82,6 @@ jobs:
         include:
           - { target: x86_64-unknown-linux-musl, platform: x86_64-linux }
           - { target: aarch64-unknown-linux-musl, platform: aarch64-linux }
-          - { target: x86_64-apple-darwin, platform: x86_64-darwin }
           - { target: aarch64-apple-darwin, platform: aarch64-darwin }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -104,23 +108,21 @@ jobs:
           path: stage/falcon
           if-no-files-found: error
 
-  package:
-    name: Package ${{ matrix.platform }}
+  notarise:
+    name: Notarise macOS binary
     needs: [resolve, build]
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        include:
-          - { platform: x86_64-linux, runner: ubuntu-latest }
-          - { platform: aarch64-linux, runner: ubuntu-latest }
-          - { platform: x86_64-darwin, runner: macos-latest }
-          - { platform: aarch64-darwin, runner: macos-latest }
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ needs.resolve.outputs.tag }}
+      cancel-in-progress: false
     env:
       RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: binary-${{ matrix.platform }}
+          name: binary-aarch64-darwin
           path: stage
       - name: Restore executable permission
         run: chmod 755 stage/falcon
@@ -132,46 +134,118 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          PLATFORM: aarch64-darwin
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_REF: ${{ needs.resolve.outputs.ref }}
         run: |
           set -euo pipefail
           certificate="$RUNNER_TEMP/signing.p12"
           keychain="$RUNNER_TEMP/signing.keychain-db"
-          submission="$RUNNER_TEMP/notarization.zip"
+          submission=""
           result="$RUNNER_TEMP/notarization.json"
           trap 'security delete-keychain "$keychain" >/dev/null 2>&1 || :; rm -f "$certificate" "$submission" "$result"' EXIT
-          printf '%s' "$APPLE_CERTIFICATE_P12" | base64 -D > "$certificate"
-          password="$(openssl rand -base64 32)"
-          security create-keychain -p "$password" "$keychain"
-          security unlock-keychain -p "$password" "$keychain"
-          # codesign only finds identities in keychains on the user search list.
-          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
-          security import "$certificate" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
-          identity=""
-          while IFS= read -r line; do
-            case "$line" in
-              *'"Developer ID Application:'*)
-                identity="${line#*\"}"
-                identity="${identity%%\"*}"
-                break
-                ;;
-            esac
-          done < <(security find-identity -v -p codesigning "$keychain")
-          if [ -z "$identity" ]; then
-            echo "Certificate must include a Developer ID Application signing identity and private key" >&2
+          stored="falcon-${RELEASE_TAG#v}-$PLATFORM.signed"
+          archive="falcon-${RELEASE_TAG#v}-$PLATFORM.tar.gz"
+          releases="$(gh api --paginate "repos/$GH_REPO/releases" --slurp)"
+          release="$(jq -c --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | first // empty' <<< "$releases")"
+          if [ -n "$release" ] && [ "$(jq -r .draft <<< "$release")" = true ] && [ "$(jq -r .target_commitish <<< "$release")" != "$RELEASE_REF" ]; then
+            echo "Draft release $RELEASE_TAG targets $(jq -r .target_commitish <<< "$release"), not $RELEASE_REF; rerun the original ref" >&2
             exit 1
           fi
-          codesign --force --options runtime --timestamp --sign "$identity" --keychain "$keychain" stage/falcon
+          if [ -n "$release" ] && { [ "$(jq -r .draft <<< "$release")" = false ] || jq -e --arg name "$archive" 'any(.assets[]; .name == $name)' <<< "$release" > /dev/null; }; then
+            gh release download "$RELEASE_TAG" --pattern "$archive" --dir "$RUNNER_TEMP"
+            tar -xzf "$RUNNER_TEMP/$archive" -C stage falcon
+          elif [ -n "$release" ] && jq -e --arg name "$stored" 'any(.assets[]; .name == $name)' <<< "$release" > /dev/null; then
+            gh release download "$RELEASE_TAG" --pattern "$stored" --dir "$RUNNER_TEMP"
+            install -m755 "$RUNNER_TEMP/$stored" stage/falcon
+          else
+            printf '%s' "$APPLE_CERTIFICATE_P12" | base64 -D > "$certificate"
+            password="$(openssl rand -base64 32)"
+            security create-keychain -p "$password" "$keychain"
+            security unlock-keychain -p "$password" "$keychain"
+            # codesign only finds identities in keychains on the user search list.
+            security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+            security import "$certificate" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
+            identity=""
+            while IFS= read -r line; do
+              case "$line" in
+                *'"Developer ID Application:'*)
+                  identity="${line#*\"}"
+                  identity="${identity%%\"*}"
+                  break
+                  ;;
+              esac
+            done < <(security find-identity -v -p codesigning "$keychain")
+            if [ -z "$identity" ]; then
+              echo "Certificate must include a Developer ID Application signing identity and private key" >&2
+              exit 1
+            fi
+            codesign --force --options runtime --timestamp --sign "$identity" --keychain "$keychain" stage/falcon
+            codesign --verify --strict --verbose stage/falcon
+            if [ -z "$release" ]; then
+              gh release create "$RELEASE_TAG" --draft --target "$RELEASE_REF" --title "$RELEASE_TAG" --notes ""
+            fi
+            cp stage/falcon "$RUNNER_TEMP/$stored"
+            gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/$stored"
+          fi
           codesign --verify --strict --verbose stage/falcon
-          ditto -c -k --keepParent stage/falcon "$submission"
-          xcrun notarytool submit "$submission" --wait --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --output-format json > "$result" || { cat "$result"; exit 1; }
-          cat "$result"
-          jq -e '.status == "Accepted"' "$result" > /dev/null
+          cdhash="$(codesign -dvvv stage/falcon 2>&1 | awk -F= '/^CDHash=/{print $2}')"
+          test -n "$cdhash"
+          name="falcon-${RELEASE_TAG#v}-$PLATFORM-$cdhash.zip"
+          submission="$RUNNER_TEMP/$name"
+          auth=(--apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --output-format json)
+          xcrun notarytool history "${auth[@]}" > "$result"
+          matches="$(jq -ec --arg name "$name" '[.history[] | select(.name == $name)]' "$result")"
+          if [ "$(jq 'length' <<< "$matches")" -gt 0 ]; then
+            jq 'sort_by(if .status == "Invalid" or .status == "Rejected" then 0 elif .status == "Accepted" then 1 else 2 end) | first' <<< "$matches" > "$result"
+          else
+            ditto -c -k --keepParent stage/falcon "$submission"
+            xcrun notarytool submit "$submission" "${auth[@]}" > "$result"
+            id="$(jq -er .id "$result")"
+            xcrun notarytool info "$id" "${auth[@]}" > "$result"
+          fi
+          id="$(jq -er .id "$result")"
+          status="$(jq -er .status "$result")"
+          printf 'Notarisation submission: `%s`\n\nName: `%s`\n\nStatus: **%s**\n' "$id" "$name" "$status" >> "$GITHUB_STEP_SUMMARY"
+          case "$status" in
+            Accepted) ;;
+            "In Progress")
+              echo "Notarisation pending ($id): rerun this release from its original ref once Apple accepts (use tag $RELEASE_TAG only if it already exists)" >&2
+              exit 1
+              ;;
+            *) echo "Notarisation submission $id has status $status" >&2; exit 1 ;;
+          esac
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-aarch64-darwin
+          path: stage/falcon
+          if-no-files-found: error
+
+  package:
+    name: Package ${{ matrix.platform }}
+    needs: [resolve, build, notarise]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { platform: x86_64-linux }
+          - { platform: aarch64-linux }
+          - { platform: aarch64-darwin }
+    env:
+      RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ matrix.platform == 'aarch64-darwin' && 'signed-aarch64-darwin' || format('binary-{0}', matrix.platform) }}
+          path: stage
       - name: Package
         run: |
           set -euo pipefail
           VERSION="${RELEASE_TAG#v}"
           mkdir -p dist
+          chmod 755 stage/falcon
           COPYFILE_DISABLE=1 tar -C stage -czf "dist/falcon-${VERSION}-${{ matrix.platform }}.tar.gz" falcon
           # Versionless copy so `releases/latest/download/falcon-<platform>.tar.gz` always resolves.
           cp "dist/falcon-${VERSION}-${{ matrix.platform }}.tar.gz" "dist/falcon-${{ matrix.platform }}.tar.gz"
@@ -185,6 +259,9 @@ jobs:
     name: Publish GitHub Release
     needs: [resolve, package]
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ needs.resolve.outputs.tag }}
+      cancel-in-progress: false
     permissions:
       contents: write
       actions: write
@@ -230,8 +307,19 @@ jobs:
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-checksums: dist/SHA256SUMS
+      - name: Check release state
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          releases="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --slurp)"
+          draft="$(jq -er --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | first | .draft | tostring' <<< "$releases")"
+          echo "draft=$draft" >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        id: github-release
         with:
+          draft: ${{ steps.state.outputs.draft == 'true' }}
           tag_name: ${{ needs.resolve.outputs.tag }}
           target_commitish: ${{ needs.resolve.outputs.ref }}
           body_path: release-notes.md
@@ -240,6 +328,23 @@ jobs:
           make_latest: legacy
           files: dist/*
           fail_on_unmatched_files: true
+      - name: Publish accepted release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.github-release.outputs.id }}
+        run: |
+          set -euo pipefail
+          remote="$(git ls-remote origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          target="$(awk 'NR == 1 { direct = $1 } /\^\{\}$/ { peeled = $1 } END { print peeled ? peeled : direct }' <<< "$remote")"
+          if [ -n "$target" ] && [ "$target" != "$(git rev-parse HEAD)" ]; then
+            echo "Refusing to publish $RELEASE_TAG: its remote tag targets $target, not this release commit" >&2
+            exit 1
+          fi
+          assets="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --slurp)"
+          while IFS= read -r id; do
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$id"
+          done < <(jq -r '.[][] | select(.name | endswith(".signed")) | .id' <<< "$assets")
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -f make_latest=legacy
       # pub.dev only accepts tokens from tag-scoped runs, and this run may come from the release PR merge.
       - name: Dispatch package publishing
         env:

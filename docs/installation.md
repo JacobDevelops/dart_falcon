@@ -202,14 +202,23 @@ falls back to watching every directory under the project separately.
 
 ## How releases work
 
-1. A maintainer pushes a tag `vX.Y.Z`.
+1. A maintainer merges the release PR, pushes a tag `vX.Y.Z`, or dispatches the
+   **Release** workflow. Dispatch without `tag` releases the workspace version
+   at the selected ref; supplying `tag` reruns an existing tagged version.
 2. CI (`.github/workflows/release.yml`) cross-builds all three platform binaries
    on Linux with `cargo-zigbuild` (static musl for Linux, zig-linked macOS).
-3. macOS runners sign and notarise the Darwin binaries. The binaries
-   are packaged as `falcon-X.Y.Z-<system>.tar.gz` plus a
+3. A macOS runner signs and verifies the Apple Silicon binary, saves it on a
+   draft release, and submits it to Apple without waiting. A pending submission
+   fails the job with its ID in the summary, releasing the runner. Check its
+   status and rerun once Apple accepts it. Reruns reuse the saved signed binary
+   and submission, and refuse a different source commit for the same draft.
+4. Only accepted binaries are packaged as `falcon-X.Y.Z-<system>.tar.gz` plus a
    versionless `falcon-<system>.tar.gz` copy for `releases/latest/download/`
-   links, checksummed into `SHA256SUMS`, given a build provenance attestation,
-   and attached to a GitHub Release.
+   links, checksummed into `SHA256SUMS`, signed with Minisign, given a build
+   provenance attestation, and published on GitHub. CI removes the temporary
+   signed-binary asset before publishing, then dispatches pub.dev publishing
+   at the newly created tag and updates Homebrew. Existing pub.dev versions
+   are skipped.
 
 ### Release publishing setup
 
@@ -229,12 +238,19 @@ lists any that are missing.
   as `APPLE_CERTIFICATE_PASSWORD`. Set `APPLE_ID` to the Apple Developer account
   email, `APPLE_TEAM_ID` to its team ID, and `APPLE_APP_PASSWORD` to an
   app-specific password for that account.
-  CI imports the certificate into a temporary keychain, signs each Darwin
-  binary with the hardened runtime and a timestamp, and waits for Apple's
-  notarisation service to accept a zip of it before publishing. The release
-  tarballs contain the signed binaries. Bare CLI binaries cannot have a ticket
-  stapled to them, so the zip is only a submission container; users may need
-  network access for macOS to check the notarisation ticket.
+  CI imports the certificate into a temporary keychain and signs the Darwin
+  binary with the hardened runtime and a timestamp. Submission names include
+  the version, platform and CDHash. Matching accepted submissions are reused;
+  in-progress ones fail as pending without resubmitting, and invalid or
+  rejected ones fail the release. Check status with `xcrun notarytool history`
+  or `xcrun notarytool info <id>`, passing `--apple-id "$APPLE_ID" --team-id
+  "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"`. Rerun the failed jobs or
+  redispatch at the original ref; supply `tag` only if it already exists.
+  Tagless drafts do not create a tag until publishing. The release tarballs
+  contain the signed binaries; published reruns recover them from the versioned
+  tarball. Bare CLI binaries cannot have a ticket stapled to them, so the zip
+  is only a submission container; users may need network access for macOS to
+  check the notarisation ticket.
 - **Homebrew:** create the public repository `JacobDevelops/homebrew-tap` with
   an initial commit. Set `HOMEBREW_TAP_TOKEN` to a fine-grained PAT with
   **Contents: read and write** on that tap repository. The single Actions variable
