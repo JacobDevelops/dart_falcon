@@ -103,3 +103,6 @@ harness = false
 # without slowing the optimized code (M6.1 profiling setup).
 [profile.bench]
 debug = true
+
+[profile.dev]
+debug = "line-tables-only"
