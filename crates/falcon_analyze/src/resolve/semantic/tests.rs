@@ -5,46 +5,46 @@ use falcon_dart_parser::parse;
 use super::*;
 use crate::resolve::{IdentitySource, LibrarySource};
 
+fn parsed(source: &str) -> Arc<crate::ParsedFile> {
+    let result = parse(source);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    Arc::new(crate::ParsedFile {
+        source: source.into(),
+        tree: result.tree,
+    })
+}
+
+fn build_project_indexes(
+    files: &[(PathBuf, Arc<crate::ParsedFile>)],
+) -> (IdentityIndex, TypeIndex, SignatureIndex) {
+    let sources: Vec<_> = files
+        .iter()
+        .map(|(path, parsed)| IdentitySource {
+            path,
+            parsed,
+            has_parse_errors: false,
+        })
+        .collect();
+    let identities = IdentityIndex::from_project_files(&sources, &[]);
+    let types = TypeIndex::from_resolved_files(
+        sources.iter().map(|source| {
+            (
+                source.path,
+                LibrarySource {
+                    program: source.parsed.program(),
+                    has_parse_errors: false,
+                    has_unresolved_parts: false,
+                },
+            )
+        }),
+        &identities,
+    );
+    let signatures = SignatureIndex::from_project_files(files, &identities, &types);
+    (identities, types, signatures)
+}
+
 #[test]
 fn project_signature_update_replaces_dirty_facts_and_clears_forwarder_backflow() {
-    fn parsed(source: &str) -> Arc<crate::ParsedFile> {
-        let result = parse(source);
-        assert!(result.errors.is_empty(), "{:?}", result.errors);
-        Arc::new(crate::ParsedFile {
-            source: source.into(),
-            tree: result.tree,
-        })
-    }
-
-    fn build(
-        files: &[(PathBuf, Arc<crate::ParsedFile>)],
-    ) -> (IdentityIndex, TypeIndex, SignatureIndex) {
-        let sources: Vec<_> = files
-            .iter()
-            .map(|(path, parsed)| IdentitySource {
-                path,
-                parsed,
-                has_parse_errors: false,
-            })
-            .collect();
-        let identities = IdentityIndex::from_project_files(&sources, &[]);
-        let types = TypeIndex::from_resolved_files(
-            sources.iter().map(|source| {
-                (
-                    source.path,
-                    LibrarySource {
-                        program: source.parsed.program(),
-                        has_parse_errors: false,
-                        has_unresolved_parts: false,
-                    },
-                )
-            }),
-            &identities,
-        );
-        let signatures = SignatureIndex::from_project_files(files, &identities, &types);
-        (identities, types, signatures)
-    }
-
     let mut files = [
         (
             PathBuf::from("/project/lib/api.dart"),
@@ -62,7 +62,7 @@ fn project_signature_update_replaces_dirty_facts_and_clears_forwarder_backflow()
             ),
         ),
     ];
-    let (identities, _, mut signatures) = build(&files);
+    let (identities, _, mut signatures) = build_project_indexes(&files);
     let unchanged_file = identities.file(&files[0].0).unwrap();
     let unchanged_library = identities.library(unchanged_file);
     let dirty_file = identities.file(&files[1].0).unwrap();
@@ -82,7 +82,7 @@ fn project_signature_update_replaces_dirty_facts_and_clears_forwarder_backflow()
     assert!(!signatures.value_getters.is_empty());
 
     files[1].1 = parsed("import 'api.dart'; class Replacement {} final replacement = 42;");
-    let (identities, types, fresh) = build(&files);
+    let (identities, types, fresh) = build_project_indexes(&files);
     let sources: Vec<_> = files
         .iter()
         .map(|(path, parsed)| IdentitySource {
@@ -349,10 +349,7 @@ fn fallback_merge_covers_shared_maps_with_each_key_type() {
     });
 }
 
-#[test]
-fn sdk_identities_remain_canonical_across_plain_and_embedded_contexts() {
-    let directory = tempfile::tempdir().unwrap();
-    let root = &directory.path().canonicalize().unwrap();
+fn write_canonical_sdk_libraries(root: &Path) -> PathBuf {
     let sdk = root.join("flutter/bin/cache/dart-sdk/lib");
     let embedded = root.join("embedder/lib");
     std::fs::create_dir_all(&sdk).unwrap();
@@ -389,14 +386,10 @@ fn sdk_identities_remain_canonical_across_plain_and_embedded_contexts() {
         )
         .unwrap();
     }
-    let paths = [
-        root.join("plain/lib/main.dart"),
-        root.join("embedded/lib/main.dart"),
-    ];
-    let source = "import 'dart:async'; import 'package:dependency/dependency.dart'; final error = ArgumentError('x'); \
-                  final state = StateError('x'); int number = 0; String text = ''; \
-                  final done = Completer<void>(); class LocalError extends Error {} \
-                  class NotAnError {}";
+    embedded
+}
+
+fn write_canonical_sdk_projects(root: &Path, paths: &[PathBuf], source: &str) {
     for (index, path) in paths.iter().enumerate() {
         let app = path.parent().unwrap().parent().unwrap();
         std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
@@ -427,6 +420,136 @@ fn sdk_identities_remain_canonical_across_plain_and_embedded_contexts() {
         .unwrap();
         std::fs::write(path, source).unwrap();
     }
+}
+
+fn assert_canonical_constructor_signatures(
+    model: &SemanticModel<'_>,
+    identities: &IdentityIndex,
+    signatures: &SignatureIndex,
+    root: &Path,
+    embedded: &Path,
+) {
+    for name in ["Canonical", "PackageCanonical"] {
+        let identity = model.resolve_name(name).unwrap();
+        let library = identities.declaration_library(&identity).unwrap();
+        let file = identities.declaration_file(library, name).unwrap();
+        let source = identities.source_path(file).unwrap();
+        let parameter = if source.starts_with(embedded) || source.starts_with(root.join("embedded"))
+        {
+            "String"
+        } else {
+            "int"
+        };
+        assert_eq!(
+            signatures.constructor(&identity, "new").unwrap().positional,
+            [model.core_type(parameter, false)],
+            "{identity:?} from {source:?}",
+        );
+        if name == "Canonical" {
+            let facts = signatures.declared_member_facts(&identity, "==");
+            assert_eq!(facts.len(), 1);
+            assert_eq!(facts[0].is_abstract, parameter == "String");
+        }
+    }
+}
+
+fn assert_canonical_sdk_names_and_errors(model: &SemanticModel<'_>, signatures: &SignatureIndex) {
+    for (name, library) in [
+        ("int", "dart:core"),
+        ("String", "dart:core"),
+        ("Type", "dart:core"),
+        ("Completer", "dart:async"),
+    ] {
+        assert_eq!(
+            model.resolve_name(name),
+            Some(DeclarationIdentity::sdk(library, name))
+        );
+    }
+    for name in ["error", "state"] {
+        let ty = signatures
+            .value_type(&model.resolve_value(name).unwrap())
+            .unwrap();
+        assert_eq!(
+            signatures.interface_check_sdk(ty, "dart:core", "Error", model),
+            Truth::Yes
+        );
+    }
+    for name in ["number", "text", "done", "NotAnError"] {
+        let ty = model
+            .resolve_value(name)
+            .and_then(|id| signatures.value_type(&id).cloned())
+            .unwrap_or_else(|| model.declared_type(&model.resolve_name(name).unwrap()));
+        assert_eq!(
+            signatures.interface_check_sdk(&ty, "dart:core", "Error", model),
+            Truth::No
+        );
+    }
+}
+
+fn assert_canonical_sdk_type_relations(model: &SemanticModel<'_>, signatures: &SignatureIndex) {
+    let number = signatures
+        .value_type(&model.resolve_value("number").unwrap())
+        .unwrap();
+    let text = signatures
+        .value_type(&model.resolve_value("text").unwrap())
+        .unwrap();
+    assert_eq!(
+        signatures.relation(
+            number,
+            crate::TypeRelation::RuntimeUnrelatedTo(&model.core_type("int", false)),
+            model
+        ),
+        Truth::No
+    );
+    assert_eq!(
+        signatures.relation(
+            text,
+            crate::TypeRelation::RuntimeUnrelatedTo(&model.core_type("String", false)),
+            model
+        ),
+        Truth::No
+    );
+    assert_eq!(
+        signatures.relation(number, crate::TypeRelation::RuntimeUnrelatedTo(text), model),
+        Truth::Yes
+    );
+    let done = signatures
+        .value_type(&model.resolve_value("done").unwrap())
+        .unwrap();
+    assert_eq!(
+        signatures.interface_check_sdk(done, "dart:async", "Completer", model),
+        Truth::Yes
+    );
+    let local = model.declared_type(&model.resolve_name("LocalError").unwrap());
+    assert_eq!(
+        signatures.interface_check_sdk(&local, "dart:core", "Error", model),
+        Truth::Yes
+    );
+}
+
+fn assert_canonical_sdk_library_origins(external: &ExternalLibraries) {
+    assert_eq!(
+        external.libraries().iter().filter(|library| {
+            matches!(&library.origin, crate::environment::ExternalOrigin::Sdk(uri) if uri.as_str() == "dart:core")
+        }).count(),
+        2,
+    );
+}
+
+#[test]
+fn sdk_identities_remain_canonical_across_plain_and_embedded_contexts() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = &directory.path().canonicalize().unwrap();
+    let embedded = write_canonical_sdk_libraries(root);
+    let paths = [
+        root.join("plain/lib/main.dart"),
+        root.join("embedded/lib/main.dart"),
+    ];
+    let source = "import 'dart:async'; import 'package:dependency/dependency.dart'; final error = ArgumentError('x'); \
+                  final state = StateError('x'); int number = 0; String text = ''; \
+                  final done = Completer<void>(); class LocalError extends Error {} \
+                  class NotAnError {}";
+    write_canonical_sdk_projects(root, &paths, source);
     let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let parsed = Arc::new(crate::ParsedFile {
         source: source.into(),
@@ -449,12 +572,7 @@ fn sdk_identities_remain_canonical_across_plain_and_embedded_contexts() {
     let external = ExternalLibraries::load(&environment, &project, |path| {
         paths.iter().any(|project| project == path)
     });
-    assert_eq!(
-        external.libraries().iter().filter(|library| {
-            matches!(&library.origin, crate::environment::ExternalOrigin::Sdk(uri) if uri.as_str() == "dart:core")
-        }).count(),
-        2,
-    );
+    assert_canonical_sdk_library_origins(&external);
     let files: Vec<_> = paths
         .iter()
         .map(|path| (path.clone(), parsed.clone()))
@@ -509,100 +627,15 @@ fn sdk_identities_remain_canonical_across_plain_and_embedded_contexts() {
         };
         for path in &paths {
             let model = SemanticModel::new(path, &parsed, identities, Some(&types));
-            for name in ["Canonical", "PackageCanonical"] {
-                let identity = model.resolve_name(name).unwrap();
-                let library = identities.declaration_library(&identity).unwrap();
-                let file = identities.declaration_file(library, name).unwrap();
-                let source = identities.source_path(file).unwrap();
-                let parameter =
-                    if source.starts_with(&embedded) || source.starts_with(root.join("embedded")) {
-                        "String"
-                    } else {
-                        "int"
-                    };
-                assert_eq!(
-                    signatures.constructor(&identity, "new").unwrap().positional,
-                    [model.core_type(parameter, false)],
-                    "{identity:?} from {source:?}",
-                );
-                if name == "Canonical" {
-                    let facts = signatures.declared_member_facts(&identity, "==");
-                    assert_eq!(facts.len(), 1);
-                    assert_eq!(facts[0].is_abstract, parameter == "String");
-                }
-            }
-            for (name, library) in [
-                ("int", "dart:core"),
-                ("String", "dart:core"),
-                ("Type", "dart:core"),
-                ("Completer", "dart:async"),
-            ] {
-                assert_eq!(
-                    model.resolve_name(name),
-                    Some(DeclarationIdentity::sdk(library, name))
-                );
-            }
-            for name in ["error", "state"] {
-                let ty = signatures
-                    .value_type(&model.resolve_value(name).unwrap())
-                    .unwrap();
-                assert_eq!(
-                    signatures.interface_check_sdk(ty, "dart:core", "Error", &model),
-                    Truth::Yes
-                );
-            }
-            for name in ["number", "text", "done", "NotAnError"] {
-                let ty = model
-                    .resolve_value(name)
-                    .and_then(|id| signatures.value_type(&id).cloned())
-                    .unwrap_or_else(|| model.declared_type(&model.resolve_name(name).unwrap()));
-                assert_eq!(
-                    signatures.interface_check_sdk(&ty, "dart:core", "Error", &model),
-                    Truth::No
-                );
-            }
-            let number = signatures
-                .value_type(&model.resolve_value("number").unwrap())
-                .unwrap();
-            let text = signatures
-                .value_type(&model.resolve_value("text").unwrap())
-                .unwrap();
-            assert_eq!(
-                signatures.relation(
-                    number,
-                    crate::TypeRelation::RuntimeUnrelatedTo(&model.core_type("int", false)),
-                    &model
-                ),
-                Truth::No
+            assert_canonical_constructor_signatures(
+                &model,
+                identities,
+                &signatures,
+                root,
+                &embedded,
             );
-            assert_eq!(
-                signatures.relation(
-                    text,
-                    crate::TypeRelation::RuntimeUnrelatedTo(&model.core_type("String", false)),
-                    &model
-                ),
-                Truth::No
-            );
-            assert_eq!(
-                signatures.relation(
-                    number,
-                    crate::TypeRelation::RuntimeUnrelatedTo(text),
-                    &model
-                ),
-                Truth::Yes
-            );
-            let done = signatures
-                .value_type(&model.resolve_value("done").unwrap())
-                .unwrap();
-            assert_eq!(
-                signatures.interface_check_sdk(done, "dart:async", "Completer", &model),
-                Truth::Yes
-            );
-            let local = model.declared_type(&model.resolve_name("LocalError").unwrap());
-            assert_eq!(
-                signatures.interface_check_sdk(&local, "dart:core", "Error", &model),
-                Truth::Yes
-            );
+            assert_canonical_sdk_names_and_errors(&model, &signatures);
+            assert_canonical_sdk_type_relations(&model, &signatures);
         }
     }
 }
@@ -717,22 +750,20 @@ fn extension_setter_lookup_borrows_unindexed_stored_spelling() {
     );
 }
 
-#[test]
-fn external_overlays_share_facts_and_replace_project_snapshots() {
-    let root = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(root.path().join("app/.dart_tool")).unwrap();
-    std::fs::create_dir_all(root.path().join("app/lib")).unwrap();
-    std::fs::create_dir_all(root.path().join("dep/lib")).unwrap();
+fn write_external_overlay_fixture(root: &Path) -> (PathBuf, PathBuf) {
+    std::fs::create_dir_all(root.join("app/.dart_tool")).unwrap();
+    std::fs::create_dir_all(root.join("app/lib")).unwrap();
+    std::fs::create_dir_all(root.join("dep/lib")).unwrap();
     std::fs::write(
-        root.path().join("app/.dart_tool/package_config.json"),
+        root.join("app/.dart_tool/package_config.json"),
         r#"{"configVersion":2,"packages":[
             {"name":"app","rootUri":"../","packageUri":"lib/"},
             {"name":"dep","rootUri":"../../dep","packageUri":"lib/"}
         ]}"#,
     )
     .unwrap();
-    let path = root.path().join("app/lib/main.dart");
-    let external_path = root.path().join("dep/lib/external.dart");
+    let path = root.join("app/lib/main.dart");
+    let external_path = root.join("dep/lib/external.dart");
     std::fs::write(
         &external_path,
         "class Base<T> { T field; Base(this.field); T method() => field; } \
@@ -744,6 +775,175 @@ fn external_overlays_share_facts_and_replace_project_snapshots() {
     )
     .unwrap();
     let external_path = std::fs::canonicalize(&external_path).unwrap();
+    (path, external_path)
+}
+
+fn assert_external_overlay_shared_facts(
+    model: &SemanticModel<'_>,
+    types: &TypeIndex,
+    signatures: &SignatureIndex,
+    base_signatures: &SignatureIndex,
+    expected: &str,
+) -> DeclarationIdentity {
+    let base = model.resolve_name("Base").unwrap();
+    let child = model.resolve_name("Child").unwrap();
+    assert_eq!(types.type_kind_identity(&base), Some(TypeKind::Class));
+    assert_eq!(
+        types.supertype_matches_identity(&child, |identity| identity.matches(&base)),
+        Truth::Yes
+    );
+    assert_eq!(
+        types.member_lookup_identity(&child, "method"),
+        crate::resolve::MemberResult::Found(MemberKind::Method),
+    );
+    let imported = model.resolve_value("imported").unwrap();
+    assert!(std::ptr::eq(
+        signatures.function(&imported).unwrap(),
+        base_signatures.function(&imported).unwrap(),
+    ));
+    assert!(std::ptr::eq(
+        signatures.constructor(&base, "new").unwrap(),
+        base_signatures.constructor(&base, "new").unwrap(),
+    ));
+    assert!(signatures.is_value_getter(&model.resolve_value("answer").unwrap()));
+    assert!(
+        signatures
+            .value_type(&model.resolve_value("result").unwrap())
+            .unwrap()
+            .interface("dart:core", expected)
+    );
+    base
+}
+
+fn assert_external_overlay_extensions(model: &SemanticModel<'_>, signatures: &SignatureIndex) {
+    let choice = model.resolve_name("Choice").unwrap();
+    assert!(signatures.is_enum_value(&choice, "first"));
+    let tools = model.resolve_extension("Tools").unwrap();
+    assert!(signatures.extension_on_type(&tools).is_some());
+    assert!(
+        signatures
+            .extension_override_method(&tools, "tool")
+            .is_some()
+    );
+    let (resolved, _) = signatures
+        .resolved_extension_override_method(
+            &tools,
+            signatures.extension_on_type(&tools).unwrap(),
+            &[],
+            "tool",
+            model,
+        )
+        .unwrap();
+    assert!(resolved.return_type.interface("dart:core", "int"));
+    assert!(
+        signatures
+            .value_type(&model.resolve_value("viaExplicit").unwrap())
+            .unwrap()
+            .interface("dart:core", "int")
+    );
+    assert!(
+        signatures
+            .value_type(&model.resolve_value("viaGeneric").unwrap())
+            .unwrap()
+            .interface("dart:core", "int")
+    );
+    assert!(
+        signatures
+            .value_type(&model.resolve_value("viaGenericMethod").unwrap())
+            .unwrap()
+            .interface("dart:core", "String")
+    );
+    for name in ["viaNullable", "viaNonNull"] {
+        let ty = signatures
+            .value_type(&model.resolve_value(name).unwrap())
+            .unwrap();
+        assert!(ty.interface("dart:core", "int"), "{name}: {ty:?}");
+        assert!(ty.nullable(), "{name}: {ty:?}");
+    }
+    let inferred = signatures
+        .value_type(&model.resolve_value("viaInferredMethod").unwrap())
+        .unwrap();
+    assert!(inferred.interface("dart:core", "String"));
+    assert!(!inferred.nullable());
+}
+
+fn assert_external_overlay_snapshot(
+    path: &Path,
+    snapshot: (&str, &Arc<crate::ParsedFile>, &str),
+    external_sources: crate::ExternalSources<'_>,
+    bases: (&Arc<IdentityIndex>, &Arc<TypeIndex>, &Arc<SignatureIndex>),
+    old_identity: &mut Option<DeclarationIdentity>,
+) {
+    let (source, parsed, expected) = snapshot;
+    let (base_ids, base_types, base_signatures) = bases;
+    let program = parsed.program();
+    let identities = IdentityIndex::with_external(
+        &[IdentitySource {
+            path,
+            parsed,
+            has_parse_errors: false,
+        }],
+        &[source],
+        &[],
+        external_sources,
+        Arc::clone(base_ids),
+    );
+    let types = TypeIndex::with_external(
+        [(
+            path,
+            LibrarySource {
+                program,
+                has_parse_errors: false,
+                has_unresolved_parts: false,
+            },
+        )],
+        &identities,
+        Arc::clone(base_types),
+    );
+    let signatures = SignatureIndex::with_external(
+        &[(path.to_path_buf(), parsed.clone())],
+        &identities,
+        &types,
+        Arc::clone(base_signatures),
+    );
+    let model = SemanticModel::new(path, parsed, &identities, Some(&types));
+    let base = assert_external_overlay_shared_facts(
+        &model,
+        &types,
+        &signatures,
+        base_signatures,
+        expected,
+    );
+    assert_external_overlay_extensions(&model, &signatures);
+    if let Some(identity) = &*old_identity {
+        assert!(signatures.value_type(identity).is_none());
+        assert!(
+            signatures
+                .value_type(&model.resolve_value("freshValue").unwrap())
+                .unwrap()
+                .interface("dart:core", "int")
+        );
+    } else {
+        *old_identity = Some(model.resolve_value("oldValue").unwrap());
+        assert!(
+            signatures
+                .value_type(&model.resolve_value("viaExtension").unwrap())
+                .unwrap()
+                .interface("dart:core", "int")
+        );
+    }
+    let empty_types = TypeIndex::with_external([], &identities, Arc::clone(base_types));
+    assert_eq!(empty_types.type_kind_identity(&base), Some(TypeKind::Class));
+    assert!(Arc::ptr_eq(
+        signatures.external.as_ref().unwrap(),
+        base_signatures
+    ));
+}
+
+#[test]
+fn external_overlays_share_facts_and_replace_project_snapshots() {
+    let root = tempfile::tempdir().unwrap();
+    let (path, external_path) = write_external_overlay_fixture(root.path());
     let old_source = "import 'package:dep/external.dart'; \
         class Child extends Base<int> { Child(): super(1); } \
         final oldValue = answer; final result = Child().method(); \
@@ -813,136 +1013,13 @@ fn external_overlays_share_facts_and_replace_project_snapshots() {
         (old_source, &old_program_parsed, "int"),
         (new_source, &new_program_parsed, "String"),
     ] {
-        let program = parsed.program();
-        let identities = IdentityIndex::with_external(
-            &[IdentitySource {
-                path: &path,
-                parsed,
-                has_parse_errors: false,
-            }],
-            &[source],
-            &[],
+        assert_external_overlay_snapshot(
+            &path,
+            (source, parsed, expected),
             external_sources(),
-            Arc::clone(&base_ids),
+            (&base_ids, &base_types, &base_signatures),
+            &mut old_identity,
         );
-        let types = TypeIndex::with_external(
-            [(
-                path.as_path(),
-                LibrarySource {
-                    program,
-                    has_parse_errors: false,
-                    has_unresolved_parts: false,
-                },
-            )],
-            &identities,
-            Arc::clone(&base_types),
-        );
-        let signatures = SignatureIndex::with_external(
-            &[(path.clone(), parsed.clone())],
-            &identities,
-            &types,
-            Arc::clone(&base_signatures),
-        );
-        let model = SemanticModel::new(&path, parsed, &identities, Some(&types));
-        let base = model.resolve_name("Base").unwrap();
-        let child = model.resolve_name("Child").unwrap();
-        assert_eq!(types.type_kind_identity(&base), Some(TypeKind::Class));
-        assert_eq!(
-            types.supertype_matches_identity(&child, |identity| identity.matches(&base)),
-            Truth::Yes
-        );
-        assert_eq!(
-            types.member_lookup_identity(&child, "method"),
-            crate::resolve::MemberResult::Found(MemberKind::Method),
-        );
-        let imported = model.resolve_value("imported").unwrap();
-        assert!(std::ptr::eq(
-            signatures.function(&imported).unwrap(),
-            base_signatures.function(&imported).unwrap(),
-        ));
-        assert!(std::ptr::eq(
-            signatures.constructor(&base, "new").unwrap(),
-            base_signatures.constructor(&base, "new").unwrap(),
-        ));
-        assert!(signatures.is_value_getter(&model.resolve_value("answer").unwrap()));
-        assert!(
-            signatures
-                .value_type(&model.resolve_value("result").unwrap())
-                .unwrap()
-                .interface("dart:core", expected)
-        );
-        let choice = model.resolve_name("Choice").unwrap();
-        assert!(signatures.is_enum_value(&choice, "first"));
-        let tools = model.resolve_extension("Tools").unwrap();
-        assert!(signatures.extension_on_type(&tools).is_some());
-        assert!(
-            signatures
-                .extension_override_method(&tools, "tool")
-                .is_some()
-        );
-        let (resolved, _) = signatures
-            .resolved_extension_override_method(
-                &tools,
-                signatures.extension_on_type(&tools).unwrap(),
-                &[],
-                "tool",
-                &model,
-            )
-            .unwrap();
-        assert!(resolved.return_type.interface("dart:core", "int"));
-        assert!(
-            signatures
-                .value_type(&model.resolve_value("viaExplicit").unwrap())
-                .unwrap()
-                .interface("dart:core", "int")
-        );
-        assert!(
-            signatures
-                .value_type(&model.resolve_value("viaGeneric").unwrap())
-                .unwrap()
-                .interface("dart:core", "int")
-        );
-        assert!(
-            signatures
-                .value_type(&model.resolve_value("viaGenericMethod").unwrap())
-                .unwrap()
-                .interface("dart:core", "String")
-        );
-        for name in ["viaNullable", "viaNonNull"] {
-            let ty = signatures
-                .value_type(&model.resolve_value(name).unwrap())
-                .unwrap();
-            assert!(ty.interface("dart:core", "int"), "{name}: {ty:?}");
-            assert!(ty.nullable(), "{name}: {ty:?}");
-        }
-        let inferred = signatures
-            .value_type(&model.resolve_value("viaInferredMethod").unwrap())
-            .unwrap();
-        assert!(inferred.interface("dart:core", "String"));
-        assert!(!inferred.nullable());
-        if let Some(identity) = &old_identity {
-            assert!(signatures.value_type(identity).is_none());
-            assert!(
-                signatures
-                    .value_type(&model.resolve_value("freshValue").unwrap())
-                    .unwrap()
-                    .interface("dart:core", "int")
-            );
-        } else {
-            old_identity = Some(model.resolve_value("oldValue").unwrap());
-            assert!(
-                signatures
-                    .value_type(&model.resolve_value("viaExtension").unwrap())
-                    .unwrap()
-                    .interface("dart:core", "int")
-            );
-        }
-        let empty_types = TypeIndex::with_external([], &identities, Arc::clone(&base_types));
-        assert_eq!(empty_types.type_kind_identity(&base), Some(TypeKind::Class));
-        assert!(Arc::ptr_eq(
-            signatures.external.as_ref().unwrap(),
-            &base_signatures
-        ));
     }
 }
 
@@ -2264,101 +2341,102 @@ class ConflictChild extends Conflict {
   void run(num value) {}
 }
 "#,
-        |program, model| {
-            let mut signatures = SignatureIndex::from_program(program, model);
-            for (owner, expected) in [
-                ("Shadowed", false),
-                ("PlainChild", false),
-                ("CovariantChild", true),
-                ("Concrete", false),
-                ("Redeclared", false),
-                ("InheritedMixinChild", false),
-                ("ConflictChild", false),
-            ] {
-                let identity = model.resolve_name(owner).unwrap();
-                let receiver = ResolvedType::interface_identity(identity);
-                let contracts = signatures
-                    .effective_parameter_contracts(&receiver, "run", false, model)
-                    .unwrap();
-                assert_eq!(contracts[0].is_covariant, expected, "{owner}.run");
-            }
-            for (owner, name, write, expected) in [
-                ("Concrete", "run", false, false),
-                ("Inherited", "run", false, true),
-                ("Deeper", "run", false, true),
-                ("Concrete", "value", true, false),
-                ("Inherited", "value", true, true),
-                ("Deeper", "value", true, true),
-                ("Redeclared", "value", true, false),
-            ] {
-                let receiver = ResolvedType::interface_identity(model.resolve_name(owner).unwrap());
-                let contracts = signatures
-                    .effective_parameter_contracts(&receiver, name, write, model)
-                    .unwrap();
-                assert_eq!(contracts[0].is_covariant, expected, "{owner}.{name}");
-            }
-            for (owner, expected) in [("Redeclared", true), ("ConstraintMixin", false)] {
-                let receiver = ResolvedType::interface_identity(model.resolve_name(owner).unwrap());
-                let contracts = signatures
-                    .super_parameter_contracts(&receiver, "run", false, model)
-                    .unwrap();
-                assert_eq!(contracts[0].is_covariant, expected, "{owner}.super.run");
-            }
-            for (owner, expected) in [
-                ("FirstPair", [true, false]),
-                ("ThroughPair", [true, false]),
-                ("ChangedPair", [false, true]),
-            ] {
-                let receiver = ResolvedType::interface_identity(model.resolve_name(owner).unwrap());
-                let contracts = signatures
-                    .effective_parameter_contracts(&receiver, "pair", false, model)
-                    .unwrap();
-                assert_eq!(
-                    [contracts[0].is_covariant, contracts[1].is_covariant],
-                    expected,
-                    "{owner}.pair",
-                );
-            }
-            let receiver =
-                ResolvedType::interface_identity(model.resolve_name("ConcreteContract").unwrap());
-            for name in ["defaults", "covariance"] {
-                let own = signatures
-                    .effective_parameter_contracts(&receiver, name, false, model)
-                    .unwrap();
-                let inherited = signatures
-                    .super_parameter_contracts(&receiver, name, false, model)
-                    .unwrap();
-                let base = signatures
-                    .declared_member_facts(&model.resolve_name("ContractBase").unwrap(), name)[0]
-                    .parameter_contracts
-                    .as_ref()
-                    .unwrap();
-                assert_eq!(&inherited, base, "{name} concrete super");
-                assert_ne!(own, inherited, "{name} abstract redeclaration");
-            }
-            let plain = model.resolve_name("PlainInterface").unwrap();
-            signatures
-                .member_entries
-                .get_mut(&plain)
-                .unwrap()
-                .get_mut("run")
-                .unwrap()
-                .facts[0]
-                .parameter_contracts = None;
-            for (owner, expected) in [("ContextWithUnknown", Some(true)), ("UnknownOnly", None)] {
-                let receiver = ResolvedType::interface_identity(model.resolve_name(owner).unwrap());
-                let contracts =
-                    signatures.effective_parameter_contracts(&receiver, "run", false, model);
-                assert_eq!(
-                    contracts
-                        .as_ref()
-                        .map(|parameters| parameters[0].is_covariant),
-                    expected,
-                    "{owner}.run",
-                );
-            }
-        },
+        assert_covariance_implementation_contracts,
     );
+}
+
+fn assert_covariance_implementation_contracts(program: Program<'_>, model: &SemanticModel<'_>) {
+    let mut signatures = SignatureIndex::from_program(program, model);
+    for (owner, expected) in [
+        ("Shadowed", false),
+        ("PlainChild", false),
+        ("CovariantChild", true),
+        ("Concrete", false),
+        ("Redeclared", false),
+        ("InheritedMixinChild", false),
+        ("ConflictChild", false),
+    ] {
+        let identity = model.resolve_name(owner).unwrap();
+        let receiver = ResolvedType::interface_identity(identity);
+        let contracts = signatures
+            .effective_parameter_contracts(&receiver, "run", false, model)
+            .unwrap();
+        assert_eq!(contracts[0].is_covariant, expected, "{owner}.run");
+    }
+    for (owner, name, write, expected) in [
+        ("Concrete", "run", false, false),
+        ("Inherited", "run", false, true),
+        ("Deeper", "run", false, true),
+        ("Concrete", "value", true, false),
+        ("Inherited", "value", true, true),
+        ("Deeper", "value", true, true),
+        ("Redeclared", "value", true, false),
+    ] {
+        let receiver = ResolvedType::interface_identity(model.resolve_name(owner).unwrap());
+        let contracts = signatures
+            .effective_parameter_contracts(&receiver, name, write, model)
+            .unwrap();
+        assert_eq!(contracts[0].is_covariant, expected, "{owner}.{name}");
+    }
+    for (owner, expected) in [("Redeclared", true), ("ConstraintMixin", false)] {
+        let receiver = ResolvedType::interface_identity(model.resolve_name(owner).unwrap());
+        let contracts = signatures
+            .super_parameter_contracts(&receiver, "run", false, model)
+            .unwrap();
+        assert_eq!(contracts[0].is_covariant, expected, "{owner}.super.run");
+    }
+    for (owner, expected) in [
+        ("FirstPair", [true, false]),
+        ("ThroughPair", [true, false]),
+        ("ChangedPair", [false, true]),
+    ] {
+        let receiver = ResolvedType::interface_identity(model.resolve_name(owner).unwrap());
+        let contracts = signatures
+            .effective_parameter_contracts(&receiver, "pair", false, model)
+            .unwrap();
+        assert_eq!(
+            [contracts[0].is_covariant, contracts[1].is_covariant],
+            expected,
+            "{owner}.pair",
+        );
+    }
+    let receiver =
+        ResolvedType::interface_identity(model.resolve_name("ConcreteContract").unwrap());
+    for name in ["defaults", "covariance"] {
+        let own = signatures
+            .effective_parameter_contracts(&receiver, name, false, model)
+            .unwrap();
+        let inherited = signatures
+            .super_parameter_contracts(&receiver, name, false, model)
+            .unwrap();
+        let base = signatures
+            .declared_member_facts(&model.resolve_name("ContractBase").unwrap(), name)[0]
+            .parameter_contracts
+            .as_ref()
+            .unwrap();
+        assert_eq!(&inherited, base, "{name} concrete super");
+        assert_ne!(own, inherited, "{name} abstract redeclaration");
+    }
+    let plain = model.resolve_name("PlainInterface").unwrap();
+    signatures
+        .member_entries
+        .get_mut(&plain)
+        .unwrap()
+        .get_mut("run")
+        .unwrap()
+        .facts[0]
+        .parameter_contracts = None;
+    for (owner, expected) in [("ContextWithUnknown", Some(true)), ("UnknownOnly", None)] {
+        let receiver = ResolvedType::interface_identity(model.resolve_name(owner).unwrap());
+        let contracts = signatures.effective_parameter_contracts(&receiver, "run", false, model);
+        assert_eq!(
+            contracts
+                .as_ref()
+                .map(|parameters| parameters[0].is_covariant),
+            expected,
+            "{owner}.run",
+        );
+    }
 }
 
 #[test]
@@ -2716,65 +2794,67 @@ final joinedNested = (condition ? nested.$1() : nested.$2())();
 final sharedJoinedNested = (condition ? nested.$1() : nested.$1())();
 final intermediate = nested.$1();
 "#;
-    with_model(source, |program, model| {
-        let signatures = SignatureIndex::from_program(program, model);
-        let g = model.resolve_name("G").unwrap();
-        for (name, retains_alias) in [
-            ("separateReturns", false),
-            ("sharedReturn", true),
-            ("separateCalls", false),
-            ("separateMemberCalls", false),
-            ("namedCalls", false),
-            ("sharedNamedCalls", true),
-            ("sharedProjection", true),
-            ("siblingProjection", false),
-            ("repeatedMemberProjection", false),
-            ("sharedDirectProjection", true),
-            ("separateDirectProjection", false),
-            ("repeatedMemberArgument", false),
-            ("sharedDirectArgument", true),
-            ("sharedDirectCalls", true),
-            ("separateMemberFunctionCalls", false),
-            ("siblingRecordReturns", false),
-            ("sharedRecordReturn", true),
-            ("siblingRecordCalls", false),
-            ("sharedDirectRecordCalls", true),
-            ("joinedRecordReturn", false),
-            ("sharedJoinedRecordReturn", true),
-            ("siblingInterfaceCalls", false),
-            ("sharedDirectInterfaceCalls", true),
-            ("joinedCallbacks", false),
-            ("joinedRecordCallbacks", false),
-            ("sharedJoinedCallbacks", true),
-            ("sharedJoinedRecordCallbacks", true),
-            ("siblingAliases", false),
-            ("sharedAliases", true),
-            ("siblingRecordAliases", false),
-            ("sharedRecordAliases", true),
-            ("siblingNested", false),
-            ("sharedNested", true),
-            ("joinedNested", false),
-            ("sharedJoinedNested", true),
-        ] {
-            let identity = model.resolve_value(name).unwrap();
-            let ResolvedType {
-                kind: ResolvedTypeKind::Function { alias, .. },
-            } = signatures.value_type(&identity).unwrap()
-            else {
-                panic!("lost function type for {name}")
-            };
-            assert_eq!(alias.identity(), retains_alias.then_some(&g), "{name}");
-        }
+    with_model(source, assert_nested_alias_projection_provenance);
+}
+
+fn assert_nested_alias_projection_provenance(program: Program<'_>, model: &SemanticModel<'_>) {
+    let signatures = SignatureIndex::from_program(program, model);
+    let g = model.resolve_name("G").unwrap();
+    for (name, retains_alias) in [
+        ("separateReturns", false),
+        ("sharedReturn", true),
+        ("separateCalls", false),
+        ("separateMemberCalls", false),
+        ("namedCalls", false),
+        ("sharedNamedCalls", true),
+        ("sharedProjection", true),
+        ("siblingProjection", false),
+        ("repeatedMemberProjection", false),
+        ("sharedDirectProjection", true),
+        ("separateDirectProjection", false),
+        ("repeatedMemberArgument", false),
+        ("sharedDirectArgument", true),
+        ("sharedDirectCalls", true),
+        ("separateMemberFunctionCalls", false),
+        ("siblingRecordReturns", false),
+        ("sharedRecordReturn", true),
+        ("siblingRecordCalls", false),
+        ("sharedDirectRecordCalls", true),
+        ("joinedRecordReturn", false),
+        ("sharedJoinedRecordReturn", true),
+        ("siblingInterfaceCalls", false),
+        ("sharedDirectInterfaceCalls", true),
+        ("joinedCallbacks", false),
+        ("joinedRecordCallbacks", false),
+        ("sharedJoinedCallbacks", true),
+        ("sharedJoinedRecordCallbacks", true),
+        ("siblingAliases", false),
+        ("sharedAliases", true),
+        ("siblingRecordAliases", false),
+        ("sharedRecordAliases", true),
+        ("siblingNested", false),
+        ("sharedNested", true),
+        ("joinedNested", false),
+        ("sharedJoinedNested", true),
+    ] {
+        let identity = model.resolve_value(name).unwrap();
         let ResolvedType {
             kind: ResolvedTypeKind::Function { alias, .. },
-        } = signatures
-            .value_type(&model.resolve_value("intermediate").unwrap())
-            .unwrap()
+        } = signatures.value_type(&identity).unwrap()
         else {
-            panic!("lost unaliased intermediate function")
+            panic!("lost function type for {name}")
         };
-        assert_eq!(alias.identity(), None);
-    });
+        assert_eq!(alias.identity(), retains_alias.then_some(&g), "{name}");
+    }
+    let ResolvedType {
+        kind: ResolvedTypeKind::Function { alias, .. },
+    } = signatures
+        .value_type(&model.resolve_value("intermediate").unwrap())
+        .unwrap()
+    else {
+        panic!("lost unaliased intermediate function")
+    };
+    assert_eq!(alias.identity(), None);
 }
 
 #[test]
@@ -3460,27 +3540,11 @@ fn imported_partial_global_inference_is_independent_of_file_order() {
     let main_source = "import 'origin.dart' as origin; final items = [origin.later]; \
          dynamic readItems() => items; dynamic readNull() => origin.empty; \
          final cycle = [origin.other];";
-    let falcon_dart_parser::ParseResult {
-        tree: main_tree,
-        errors,
-    } = parse(main_source);
-    let main_parsed = Arc::new(crate::ParsedFile {
-        source: main_source.into(),
-        tree: main_tree,
-    });
+    let main_parsed = parsed(main_source);
     let main = main_parsed.program();
-    assert!(errors.is_empty(), "{errors:?}");
     let origin_source = "import 'main.dart' as root; final later = 1; var empty = null; \
          final other = [root.cycle];";
-    let falcon_dart_parser::ParseResult {
-        tree: origin_tree,
-        errors,
-    } = parse(origin_source);
-    let origin_parsed = Arc::new(crate::ParsedFile {
-        source: origin_source.into(),
-        tree: origin_tree,
-    });
-    assert!(errors.is_empty(), "{errors:?}");
+    let origin_parsed = parsed(origin_source);
     let sources = [
         IdentitySource {
             path: &main_path,
@@ -4009,6 +4073,10 @@ fn collection_literal_element_inference() {
             &[Some("String"), Some("int")],
         ),
     ];
+    assert_collection_literal_cases(cases);
+}
+
+fn assert_collection_literal_cases(cases: &[(&str, &str, &[Option<&str>])]) {
     let mut source = String::from("class A {} class B {}");
     for (index, (expression, _, _)) in cases.iter().enumerate() {
         use std::fmt::Write;

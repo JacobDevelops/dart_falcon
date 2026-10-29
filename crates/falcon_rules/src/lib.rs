@@ -73,42 +73,9 @@ pub fn load_or_default(start_dir: &Path) -> Result<LoadedConfig, ConfigError> {
 ///
 /// Returns an error for unknown rules, unsupported sections, or invalid options.
 pub fn canonicalize_loaded_config(mut loaded: LoadedConfig) -> Result<LoadedConfig, ConfigError> {
-    validate_rule_names(
-        &loaded.config.linter.rules,
-        &["linter", "rules"].map(|key| ConfigPathSegment::Key(key.to_owned())),
-        Section::Linter,
-    )?;
-    validate_rule_names(
-        &loaded.config.cross_file.rules,
-        &["cross-file", "rules"].map(|key| ConfigPathSegment::Key(key.to_owned())),
-        Section::CrossFile,
-    )?;
-    for (index, entry) in loaded.config.overrides.iter().enumerate() {
-        if let Some(linter) = &entry.linter {
-            validate_rule_names(
-                &linter.rules,
-                &[
-                    ConfigPathSegment::Key("overrides".to_owned()),
-                    ConfigPathSegment::Index(index),
-                    ConfigPathSegment::Key("linter".to_owned()),
-                    ConfigPathSegment::Key("rules".to_owned()),
-                ],
-                Section::Linter,
-            )?;
-        }
-        if let Some(cross_file) = &entry.cross_file {
-            validate_rule_names(
-                &cross_file.rules,
-                &[
-                    ConfigPathSegment::Key("overrides".to_owned()),
-                    ConfigPathSegment::Index(index),
-                    ConfigPathSegment::Key("cross-file".to_owned()),
-                    ConfigPathSegment::Key("rules".to_owned()),
-                ],
-                Section::CrossFile,
-            )?;
-        }
-    }
+    visit_config_rules(&mut loaded.config, |rules, path, section| {
+        validate_rule_names(rules, path, section)
+    })?;
     loaded
         .warnings
         .extend(validate_config_options(&mut loaded.config)?);
@@ -288,115 +255,132 @@ pub fn validate_rule_options(
     lint::options::validate_rule(name, options, path)
 }
 
-fn validate_config_options(config: &mut FalconConfig) -> Result<Vec<String>, ConfigError> {
-    let mut warnings = Vec::new();
-    let mut validate = |rules: &mut Rules, path: &[ConfigPathSegment]| {
-        for (group, entries) in &mut rules.groups {
-            // Match canonicalization's winner policy before validating raw spellings.
-            // Distinct spellings cannot tie: canonical status or alias position breaks ties.
-            let shadowed: Vec<_> = entries
-                .iter()
-                .filter(|(name, configuration)| {
-                    let canonical = meta::canonical_rule_name(name);
-                    let priority =
-                        meta::rule_priority(name, meta::rule_level_rank(configuration.level()));
-                    std::iter::once(canonical)
-                        .chain(
-                            meta::RULE_ALIASES.iter().filter_map(|(alias, target)| {
-                                (*target == canonical).then_some(*alias)
-                            }),
-                        )
-                        .any(|candidate| {
-                            entries.get(candidate).is_some_and(|other| {
-                                meta::rule_priority(candidate, meta::rule_level_rank(other.level()))
-                                    > priority
-                            })
+fn validate_config_rule_options(
+    rules: &mut Rules,
+    path: &[ConfigPathSegment],
+    warnings: &mut Vec<String>,
+) -> Result<(), ConfigError> {
+    for (group, entries) in &mut rules.groups {
+        // Match canonicalization's winner policy before validating raw spellings.
+        // Distinct spellings cannot tie: canonical status or alias position breaks ties.
+        let shadowed: Vec<_> = entries
+            .iter()
+            .filter(|(name, configuration)| {
+                let canonical = meta::canonical_rule_name(name);
+                let priority =
+                    meta::rule_priority(name, meta::rule_level_rank(configuration.level()));
+                std::iter::once(canonical)
+                    .chain(
+                        meta::RULE_ALIASES
+                            .iter()
+                            .filter_map(|(alias, target)| (*target == canonical).then_some(*alias)),
+                    )
+                    .any(|candidate| {
+                        entries.get(candidate).is_some_and(|other| {
+                            meta::rule_priority(candidate, meta::rule_level_rank(other.level()))
+                                > priority
                         })
-                })
-                .map(|(name, _)| name.clone())
-                .collect();
-            for (name, configuration) in entries {
-                if shadowed.contains(name) {
-                    continue;
-                }
-                if let falcon_config::RuleConfiguration::WithOptions { options, .. } = configuration
-                    && !options.value().is_null()
-                {
-                    let mut option_path = Vec::with_capacity(path.len() + 3);
-                    option_path.extend_from_slice(path);
-                    option_path.extend(
-                        [group.as_str(), name.as_str(), "options"]
-                            .map(|key| ConfigPathSegment::Key(key.to_owned())),
-                    );
-                    let (option_warnings, renames) = canonicalize_option_keys_with_paths(
-                        options.value_mut(),
-                        name,
-                        &format_config_path(&option_path),
-                    );
-                    warnings.extend(option_warnings);
-                    if let Err(mut error) =
-                        lint::options::validate_rule(name, options, &option_path)
-                    {
-                        let canonical_path = format_config_path(&error.1);
-                        let relative = &error.1[option_path.len()..];
-                        let mut original_path = option_path;
-                        original_path.reserve(relative.len());
-                        for (index, segment) in relative.iter().enumerate() {
-                            let original = renames
-                                .iter()
-                                .find(|(path, _)| path.as_slice() == &relative[..=index])
-                                .map_or_else(
-                                    || segment.clone(),
-                                    |(_, key)| ConfigPathSegment::Key(key.clone()),
-                                );
-                            original_path.push(original);
-                        }
-                        error.0 = error.0.replacen(
-                            &canonical_path,
-                            &format_config_path(&original_path),
-                            1,
-                        );
-                        error.1 = original_path;
-                        return Err(error);
+                    })
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        for (name, configuration) in entries {
+            if shadowed.contains(name) {
+                continue;
+            }
+            if let falcon_config::RuleConfiguration::WithOptions { options, .. } = configuration
+                && !options.value().is_null()
+            {
+                let mut option_path = Vec::with_capacity(path.len() + 3);
+                option_path.extend_from_slice(path);
+                option_path.extend(
+                    [group.as_str(), name.as_str(), "options"]
+                        .map(|key| ConfigPathSegment::Key(key.to_owned())),
+                );
+                let (option_warnings, renames) = canonicalize_option_keys_with_paths(
+                    options.value_mut(),
+                    name,
+                    &format_config_path(&option_path),
+                );
+                warnings.extend(option_warnings);
+                if let Err(mut error) = lint::options::validate_rule(name, options, &option_path) {
+                    let canonical_path = format_config_path(&error.1);
+                    let relative = &error.1[option_path.len()..];
+                    let mut original_path = option_path;
+                    original_path.reserve(relative.len());
+                    for (index, segment) in relative.iter().enumerate() {
+                        let original = renames
+                            .iter()
+                            .find(|(path, _)| path.as_slice() == &relative[..=index])
+                            .map_or_else(
+                                || segment.clone(),
+                                |(_, key)| ConfigPathSegment::Key(key.clone()),
+                            );
+                        original_path.push(original);
                     }
+                    error.0 =
+                        error
+                            .0
+                            .replacen(&canonical_path, &format_config_path(&original_path), 1);
+                    error.1 = original_path;
+                    return Err(error);
                 }
             }
         }
-        Ok(())
-    };
-    validate(
+    }
+    Ok(())
+}
+
+fn validate_config_options(config: &mut FalconConfig) -> Result<Vec<String>, ConfigError> {
+    let mut warnings = Vec::new();
+    visit_config_rules(config, |rules, path, _| {
+        validate_config_rule_options(rules, path, &mut warnings)
+    })?;
+    Ok(warnings)
+}
+
+fn visit_config_rules(
+    config: &mut FalconConfig,
+    mut visit: impl FnMut(&mut Rules, &[ConfigPathSegment], Section) -> Result<(), ConfigError>,
+) -> Result<(), ConfigError> {
+    visit(
         &mut config.linter.rules,
         &["linter", "rules"].map(|key| ConfigPathSegment::Key(key.to_owned())),
+        Section::Linter,
     )?;
-    validate(
+    visit(
         &mut config.cross_file.rules,
         &["cross-file", "rules"].map(|key| ConfigPathSegment::Key(key.to_owned())),
+        Section::CrossFile,
     )?;
     for (index, entry) in config.overrides.iter_mut().enumerate() {
-        if let Some(section) = &mut entry.linter {
-            validate(
-                &mut section.rules,
-                &[
-                    ConfigPathSegment::Key("overrides".to_owned()),
-                    ConfigPathSegment::Index(index),
-                    ConfigPathSegment::Key("linter".to_owned()),
-                    ConfigPathSegment::Key("rules".to_owned()),
-                ],
-            )?;
-        }
-        if let Some(section) = &mut entry.cross_file {
-            validate(
-                &mut section.rules,
-                &[
-                    ConfigPathSegment::Key("overrides".to_owned()),
-                    ConfigPathSegment::Index(index),
-                    ConfigPathSegment::Key("cross-file".to_owned()),
-                    ConfigPathSegment::Key("rules".to_owned()),
-                ],
-            )?;
+        for (name, rules, section) in [
+            (
+                "linter",
+                entry.linter.as_mut().map(|section| &mut section.rules),
+                Section::Linter,
+            ),
+            (
+                "cross-file",
+                entry.cross_file.as_mut().map(|section| &mut section.rules),
+                Section::CrossFile,
+            ),
+        ] {
+            if let Some(rules) = rules {
+                visit(
+                    rules,
+                    &[
+                        ConfigPathSegment::Key("overrides".to_owned()),
+                        ConfigPathSegment::Index(index),
+                        ConfigPathSegment::Key(name.to_owned()),
+                        ConfigPathSegment::Key("rules".to_owned()),
+                    ],
+                    section,
+                )?;
+            }
         }
     }
-    Ok(warnings)
+    Ok(())
 }
 
 /// Whether a registered rule needs semantic resolution; unknown names return false.

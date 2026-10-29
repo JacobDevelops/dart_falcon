@@ -58,186 +58,8 @@ impl Recorder {
             }
             // Match the most specific hook, not just a node id: a DartType
             // callback cannot conceal a missing NamedType callback, for example.
-            let hook = match node.kind() {
-                NodeKind::Program => "Program",
-                NodeKind::LibraryDirective => "LibraryDirective",
-                NodeKind::PartOfDirective => "PartOfDirective",
-                NodeKind::PartDirective => "PartDirective",
-                NodeKind::ImportDirective => "ImportDirective",
-                NodeKind::ExportDirective => "ExportDirective",
-                NodeKind::ConfigurableUri => "ConfigurableUri",
-                NodeKind::Combinator => "ImportCombinator",
-                NodeKind::ClassDecl => "ClassDecl",
-                NodeKind::PrimaryConstructor => "PrimaryConstructor",
-                NodeKind::PrimaryConstructorBody => "PrimaryConstructorBody",
-                NodeKind::ClassTypeAliasDecl => "ClassTypeAliasDecl",
-                NodeKind::FieldDecl => "FieldDecl",
-                NodeKind::VarDeclarator => "VarDeclarator",
-                NodeKind::ConstructorDecl => "ConstructorDecl",
-                NodeKind::RedirectedConstructor => "RedirectedConstructor",
-                NodeKind::SuperCallInitializer
-                | NodeKind::ThisCallInitializer
-                | NodeKind::FieldInitializer
-                | NodeKind::AssertInitializer => "ConstructorInitializer",
-                NodeKind::MethodDecl => "MethodDecl",
-                NodeKind::GetterDecl => "GetterDecl",
-                NodeKind::SetterDecl => "SetterDecl",
-                NodeKind::OperatorDecl => "OperatorDecl",
-                NodeKind::MixinDecl => "MixinDecl",
-                NodeKind::MixinClassDecl => "MixinClassDecl",
-                NodeKind::EnumDecl => "EnumDecl",
-                NodeKind::EnumVariant => "EnumVariant",
-                NodeKind::ExtensionDecl => "ExtensionDecl",
-                NodeKind::ExtensionTypeDecl => "ExtensionTypeDecl",
-                NodeKind::FunctionDecl => "FunctionDecl",
-                NodeKind::TopLevelVarDecl => "TopLevelVarDecl",
-                NodeKind::TypeAliasDecl => "TypeAliasDecl",
-                NodeKind::FormalParamList => "FormalParamList",
-                NodeKind::FormalParam(_) => "FormalParam",
-                NodeKind::ArrowBody | NodeKind::NativeBody => "FunctionBody",
-                NodeKind::Annotation => "Annotation",
-                NodeKind::NamedType => "NamedType",
-                NodeKind::FunctionType => "FunctionType",
-                NodeKind::FunctionTypeParam(_) => "FunctionTypeParam",
-                NodeKind::RecordType => "RecordType",
-                NodeKind::NamedRecordField => "NamedRecordField",
-                NodeKind::TypeParam => "TypeParam",
-                NodeKind::VoidType | NodeKind::DynamicType => "DartType",
-                NodeKind::Block => "Block",
-                NodeKind::IfStmt => "IfStmt",
-                NodeKind::CaseCondition => "IfCondition",
-                NodeKind::ForStmt => "ForStmt",
-                NodeKind::ForHeader => "ForHeader",
-                NodeKind::ForInInit | NodeKind::PatternForInInit | NodeKind::ForExprsInit => {
-                    "ForInit"
-                }
-                NodeKind::WhileStmt => "WhileStmt",
-                NodeKind::DoWhileStmt => "DoWhileStmt",
-                NodeKind::SwitchStmt => "SwitchStmt",
-                NodeKind::SwitchCase => "SwitchCase",
-                NodeKind::CasePatternLabel | NodeKind::CaseExprLabel | NodeKind::DefaultLabel => {
-                    "SwitchCaseKind"
-                }
-                NodeKind::TryCatchStmt => "TryCatchStmt",
-                NodeKind::CatchClause => "CatchClause",
-                NodeKind::ReturnStmt => "ReturnStmt",
-                NodeKind::ThrowStmt => "ThrowStmt",
-                NodeKind::RethrowStmt | NodeKind::EmptyStmt => "Stmt",
-                NodeKind::BreakStmt => "BreakStmt",
-                NodeKind::ContinueStmt => "ContinueStmt",
-                NodeKind::LocalVarDecl => "LocalVarDecl",
-                NodeKind::PatternDeclaration => "PatternDeclaration",
-                NodeKind::PatternAssignStmt => "PatternAssignStmt",
-                NodeKind::LabeledStmt => "LabeledStmt",
-                NodeKind::LocalFuncDecl => "LocalFuncDecl",
-                NodeKind::AssertStmt => "AssertStmt",
-                NodeKind::YieldStmt => "YieldStmt",
-                NodeKind::ExprStmt => "ExprStmt",
-                NodeKind::ErrorNode => "ErrorNode",
-                NodeKind::Identifier => "Identifier",
-                NodeKind::StringLitNode | NodeKind::AdjacentStrings => "StringLitNode",
-                NodeKind::StringInterpolation => "StringInterpolation",
-                NodeKind::CascadeSection => "CascadeSection",
-                NodeKind::CascadeField
-                | NodeKind::CascadeIndex
-                | NodeKind::CascadeNullAssert
-                | NodeKind::CascadeCall
-                | NodeKind::CascadeInvoke
-                | NodeKind::CascadeAssign
-                | NodeKind::CascadeIndexAssign => "CascadeOp",
-                NodeKind::NullAwareElement
-                | NodeKind::SpreadElement
-                | NodeKind::IfElement
-                | NodeKind::ForElement => "CollectionElement",
-                NodeKind::MapEntry => "MapEntry",
-                NodeKind::MapSpreadElement | NodeKind::MapIfElement | NodeKind::MapForElement => {
-                    "MapElement"
-                }
-                NodeKind::RecordField => "RecordField",
-                NodeKind::ArgList => "ArgList",
-                NodeKind::NamedArg => "NamedArg",
-                NodeKind::SwitchExprArm => "SwitchExprArm",
-                NodeKind::LiteralPattern => "LiteralPattern",
-                NodeKind::ConstPattern => "ConstPattern",
-                NodeKind::ListPattern => "ListPattern",
-                NodeKind::RecordPattern => "RecordPattern",
-                NodeKind::MapPattern => "MapPattern",
-                NodeKind::ObjectPattern => "ObjectPattern",
-                NodeKind::RestPattern => "ListPatternElement",
-                NodeKind::RecordPatternField => "RecordPatternField",
-                NodeKind::MapPatternEntry => "MapPatternEntry",
-                NodeKind::ObjectPatternField => "ObjectPatternField",
-                NodeKind::WildcardPattern
-                | NodeKind::VariablePattern
-                | NodeKind::LogicalAndPattern
-                | NodeKind::LogicalOrPattern
-                | NodeKind::RelationalPattern
-                | NodeKind::CastPattern
-                | NodeKind::NullCheckPattern
-                | NodeKind::NullAssertPattern
-                | NodeKind::ParenPattern
-                | NodeKind::ErrorPattern => {
-                    if default_chains {
-                        // Default pattern chains promise their observable
-                        // children, not a callback for each intermediate link.
-                        continue;
-                    }
-                    "Pattern"
-                }
-                NodeKind::IntLitExpr
-                | NodeKind::DoubleLitExpr
-                | NodeKind::BoolLitExpr
-                | NodeKind::NullLitExpr
-                | NodeKind::ParenExpr
-                | NodeKind::ThisExpr
-                | NodeKind::SuperExpr
-                | NodeKind::UnaryExpr
-                | NodeKind::PostfixIncDecExpr
-                | NodeKind::BinaryExpr
-                | NodeKind::AssignExpr
-                | NodeKind::ConditionalExpr
-                | NodeKind::IsExpr
-                | NodeKind::AsExpr
-                | NodeKind::FieldExpr
-                | NodeKind::IndexExpr
-                | NodeKind::CallExpr
-                | NodeKind::CascadeExpr
-                | NodeKind::ListExpr
-                | NodeKind::MapExpr
-                | NodeKind::SetExpr
-                | NodeKind::RecordExpr
-                | NodeKind::FuncExpr
-                | NodeKind::NewExpr
-                | NodeKind::DotShorthandExpr
-                | NodeKind::AwaitExpr
-                | NodeKind::ThrowExpr
-                | NodeKind::SwitchExpr
-                | NodeKind::NullAssertExpr
-                | NodeKind::SymbolLitExpr
-                | NodeKind::GenericInstantiationExpr
-                | NodeKind::ErrorExpr => {
-                    if default_chains {
-                        // The unmodified default expression hook has no leaf
-                        // callback for literal values or chain links themselves.
-                        continue;
-                    }
-                    "Expr"
-                }
-                // Transparent source grouping nodes have no independent hook.
-                NodeKind::ExtendsClause
-                | NodeKind::WithClause
-                | NodeKind::ImplementsClause
-                | NodeKind::OnClause
-                | NodeKind::SetterParameter
-                | NodeKind::LegacyTypedef
-                | NodeKind::TypeArgs
-                | NodeKind::ForCondition
-                | NodeKind::ForUpdates
-                | NodeKind::AwaitFor
-                | NodeKind::ExprCondition
-                | NodeKind::ExprGuard
-                | NodeKind::ConstPatternExpr
-                | NodeKind::Error => continue,
+            let Some(hook) = node_hook(node.kind(), default_chains) else {
+                continue;
             };
             // Adjacent strings expose one logical literal to visitors; the
             // segment nodes are spelling, not additional expression visits.
@@ -264,6 +86,265 @@ impl Recorder {
             );
         }
     }
+}
+
+fn node_hook(kind: NodeKind, default_chains: bool) -> Option<&'static str> {
+    use NodeKind::*;
+
+    match kind {
+        Program | LibraryDirective | PartOfDirective => declaration_hook(kind, default_chains),
+        PartDirective | ImportDirective | ExportDirective => declaration_hook(kind, default_chains),
+        ConfigurableUri | Combinator | ClassDecl => declaration_hook(kind, default_chains),
+        PrimaryConstructor | PrimaryConstructorBody => declaration_hook(kind, default_chains),
+        ClassTypeAliasDecl | FieldDecl | VarDeclarator => declaration_hook(kind, default_chains),
+        ConstructorDecl | RedirectedConstructor => declaration_hook(kind, default_chains),
+        SuperCallInitializer | ThisCallInitializer => declaration_hook(kind, default_chains),
+        FieldInitializer | AssertInitializer | MethodDecl => declaration_hook(kind, default_chains),
+        GetterDecl | SetterDecl | OperatorDecl => declaration_hook(kind, default_chains),
+        MixinDecl | MixinClassDecl | EnumDecl => declaration_hook(kind, default_chains),
+        EnumVariant | ExtensionDecl | ExtensionTypeDecl => declaration_hook(kind, default_chains),
+        FunctionDecl | TopLevelVarDecl | TypeAliasDecl => declaration_hook(kind, default_chains),
+        FormalParamList | FormalParam(_) | ArrowBody => declaration_hook(kind, default_chains),
+        NativeBody | Annotation | NamedType => declaration_hook(kind, default_chains),
+        FunctionType | FunctionTypeParam(_) | RecordType => declaration_hook(kind, default_chains),
+        NamedRecordField | TypeParam | VoidType => declaration_hook(kind, default_chains),
+        DynamicType => declaration_hook(kind, default_chains),
+        Block | IfStmt | CaseCondition | ForStmt => statement_hook(kind, default_chains),
+        ForHeader | ForInInit | PatternForInInit => statement_hook(kind, default_chains),
+        ForExprsInit | WhileStmt | DoWhileStmt | SwitchStmt => statement_hook(kind, default_chains),
+        SwitchCase | CasePatternLabel | CaseExprLabel => statement_hook(kind, default_chains),
+        DefaultLabel | TryCatchStmt | CatchClause => statement_hook(kind, default_chains),
+        ReturnStmt | ThrowStmt | RethrowStmt | EmptyStmt => statement_hook(kind, default_chains),
+        BreakStmt | ContinueStmt | LocalVarDecl => statement_hook(kind, default_chains),
+        PatternDeclaration | PatternAssignStmt => statement_hook(kind, default_chains),
+        LabeledStmt | LocalFuncDecl | AssertStmt => statement_hook(kind, default_chains),
+        YieldStmt | ExprStmt | ErrorNode | Identifier => statement_hook(kind, default_chains),
+        StringLitNode | AdjacentStrings => statement_hook(kind, default_chains),
+        StringInterpolation | CascadeSection | CascadeField => statement_hook(kind, default_chains),
+        CascadeIndex | CascadeNullAssert | CascadeCall => statement_hook(kind, default_chains),
+        CascadeInvoke | CascadeAssign | CascadeIndexAssign => statement_hook(kind, default_chains),
+        NullAwareElement | SpreadElement | IfElement => statement_hook(kind, default_chains),
+        ForElement | MapEntry | MapSpreadElement => statement_hook(kind, default_chains),
+        MapIfElement | MapForElement | RecordField => statement_hook(kind, default_chains),
+        ArgList | NamedArg | SwitchExprArm | LiteralPattern => statement_hook(kind, default_chains),
+        ConstPattern | ListPattern | RecordPattern => statement_hook(kind, default_chains),
+        MapPattern | ObjectPattern | RestPattern => statement_hook(kind, default_chains),
+        RecordPatternField | MapPatternEntry => statement_hook(kind, default_chains),
+        ObjectPatternField => statement_hook(kind, default_chains),
+        WildcardPattern | VariablePattern => expression_hook(kind, default_chains),
+        LogicalAndPattern | LogicalOrPattern => expression_hook(kind, default_chains),
+        RelationalPattern | CastPattern | NullCheckPattern => expression_hook(kind, default_chains),
+        NullAssertPattern | ParenPattern | ErrorPattern => expression_hook(kind, default_chains),
+        IntLitExpr | DoubleLitExpr | BoolLitExpr => expression_hook(kind, default_chains),
+        NullLitExpr | ParenExpr | ThisExpr | SuperExpr => expression_hook(kind, default_chains),
+        UnaryExpr | PostfixIncDecExpr | BinaryExpr => expression_hook(kind, default_chains),
+        AssignExpr | ConditionalExpr | IsExpr | AsExpr => expression_hook(kind, default_chains),
+        FieldExpr | IndexExpr | CallExpr | CascadeExpr => expression_hook(kind, default_chains),
+        ListExpr | MapExpr | SetExpr | RecordExpr => expression_hook(kind, default_chains),
+        FuncExpr | NewExpr | DotShorthandExpr | AwaitExpr => expression_hook(kind, default_chains),
+        ThrowExpr | SwitchExpr | NullAssertExpr => expression_hook(kind, default_chains),
+        SymbolLitExpr | GenericInstantiationExpr => expression_hook(kind, default_chains),
+        ErrorExpr | ExtendsClause | WithClause => expression_hook(kind, default_chains),
+        ImplementsClause | OnClause | SetterParameter => expression_hook(kind, default_chains),
+        LegacyTypedef | TypeArgs | ForCondition => expression_hook(kind, default_chains),
+        ForUpdates | AwaitFor | ExprCondition | ExprGuard => expression_hook(kind, default_chains),
+        ConstPatternExpr | Error => expression_hook(kind, default_chains),
+    }
+}
+
+fn declaration_hook(kind: NodeKind, _default_chains: bool) -> Option<&'static str> {
+    Some(match kind {
+        NodeKind::Program => "Program",
+        NodeKind::LibraryDirective => "LibraryDirective",
+        NodeKind::PartOfDirective => "PartOfDirective",
+        NodeKind::PartDirective => "PartDirective",
+        NodeKind::ImportDirective => "ImportDirective",
+        NodeKind::ExportDirective => "ExportDirective",
+        NodeKind::ConfigurableUri => "ConfigurableUri",
+        NodeKind::Combinator => "ImportCombinator",
+        NodeKind::ClassDecl => "ClassDecl",
+        NodeKind::PrimaryConstructor => "PrimaryConstructor",
+        NodeKind::PrimaryConstructorBody => "PrimaryConstructorBody",
+        NodeKind::ClassTypeAliasDecl => "ClassTypeAliasDecl",
+        NodeKind::FieldDecl => "FieldDecl",
+        NodeKind::VarDeclarator => "VarDeclarator",
+        NodeKind::ConstructorDecl => "ConstructorDecl",
+        NodeKind::RedirectedConstructor => "RedirectedConstructor",
+        NodeKind::SuperCallInitializer
+        | NodeKind::ThisCallInitializer
+        | NodeKind::FieldInitializer
+        | NodeKind::AssertInitializer => "ConstructorInitializer",
+        NodeKind::MethodDecl => "MethodDecl",
+        NodeKind::GetterDecl => "GetterDecl",
+        NodeKind::SetterDecl => "SetterDecl",
+        NodeKind::OperatorDecl => "OperatorDecl",
+        NodeKind::MixinDecl => "MixinDecl",
+        NodeKind::MixinClassDecl => "MixinClassDecl",
+        NodeKind::EnumDecl => "EnumDecl",
+        NodeKind::EnumVariant => "EnumVariant",
+        NodeKind::ExtensionDecl => "ExtensionDecl",
+        NodeKind::ExtensionTypeDecl => "ExtensionTypeDecl",
+        NodeKind::FunctionDecl => "FunctionDecl",
+        NodeKind::TopLevelVarDecl => "TopLevelVarDecl",
+        NodeKind::TypeAliasDecl => "TypeAliasDecl",
+        NodeKind::FormalParamList => "FormalParamList",
+        NodeKind::FormalParam(_) => "FormalParam",
+        NodeKind::ArrowBody | NodeKind::NativeBody => "FunctionBody",
+        NodeKind::Annotation => "Annotation",
+        NodeKind::NamedType => "NamedType",
+        NodeKind::FunctionType => "FunctionType",
+        NodeKind::FunctionTypeParam(_) => "FunctionTypeParam",
+        NodeKind::RecordType => "RecordType",
+        NodeKind::NamedRecordField => "NamedRecordField",
+        NodeKind::TypeParam => "TypeParam",
+        NodeKind::VoidType | NodeKind::DynamicType => "DartType",
+        _ => unreachable!("node_hook dispatches only declaration kinds here"),
+    })
+}
+
+fn statement_hook(kind: NodeKind, _default_chains: bool) -> Option<&'static str> {
+    Some(match kind {
+        NodeKind::Block => "Block",
+        NodeKind::IfStmt => "IfStmt",
+        NodeKind::CaseCondition => "IfCondition",
+        NodeKind::ForStmt => "ForStmt",
+        NodeKind::ForHeader => "ForHeader",
+        NodeKind::ForInInit | NodeKind::PatternForInInit | NodeKind::ForExprsInit => "ForInit",
+        NodeKind::WhileStmt => "WhileStmt",
+        NodeKind::DoWhileStmt => "DoWhileStmt",
+        NodeKind::SwitchStmt => "SwitchStmt",
+        NodeKind::SwitchCase => "SwitchCase",
+        NodeKind::CasePatternLabel | NodeKind::CaseExprLabel | NodeKind::DefaultLabel => {
+            "SwitchCaseKind"
+        }
+        NodeKind::TryCatchStmt => "TryCatchStmt",
+        NodeKind::CatchClause => "CatchClause",
+        NodeKind::ReturnStmt => "ReturnStmt",
+        NodeKind::ThrowStmt => "ThrowStmt",
+        NodeKind::RethrowStmt | NodeKind::EmptyStmt => "Stmt",
+        NodeKind::BreakStmt => "BreakStmt",
+        NodeKind::ContinueStmt => "ContinueStmt",
+        NodeKind::LocalVarDecl => "LocalVarDecl",
+        NodeKind::PatternDeclaration => "PatternDeclaration",
+        NodeKind::PatternAssignStmt => "PatternAssignStmt",
+        NodeKind::LabeledStmt => "LabeledStmt",
+        NodeKind::LocalFuncDecl => "LocalFuncDecl",
+        NodeKind::AssertStmt => "AssertStmt",
+        NodeKind::YieldStmt => "YieldStmt",
+        NodeKind::ExprStmt => "ExprStmt",
+        NodeKind::ErrorNode => "ErrorNode",
+        NodeKind::Identifier => "Identifier",
+        NodeKind::StringLitNode | NodeKind::AdjacentStrings => "StringLitNode",
+        NodeKind::StringInterpolation => "StringInterpolation",
+        NodeKind::CascadeSection => "CascadeSection",
+        NodeKind::CascadeField
+        | NodeKind::CascadeIndex
+        | NodeKind::CascadeNullAssert
+        | NodeKind::CascadeCall
+        | NodeKind::CascadeInvoke
+        | NodeKind::CascadeAssign
+        | NodeKind::CascadeIndexAssign => "CascadeOp",
+        NodeKind::NullAwareElement
+        | NodeKind::SpreadElement
+        | NodeKind::IfElement
+        | NodeKind::ForElement => "CollectionElement",
+        NodeKind::MapEntry => "MapEntry",
+        NodeKind::MapSpreadElement | NodeKind::MapIfElement | NodeKind::MapForElement => {
+            "MapElement"
+        }
+        NodeKind::RecordField => "RecordField",
+        NodeKind::ArgList => "ArgList",
+        NodeKind::NamedArg => "NamedArg",
+        NodeKind::SwitchExprArm => "SwitchExprArm",
+        NodeKind::LiteralPattern => "LiteralPattern",
+        NodeKind::ConstPattern => "ConstPattern",
+        NodeKind::ListPattern => "ListPattern",
+        NodeKind::RecordPattern => "RecordPattern",
+        NodeKind::MapPattern => "MapPattern",
+        NodeKind::ObjectPattern => "ObjectPattern",
+        NodeKind::RestPattern => "ListPatternElement",
+        NodeKind::RecordPatternField => "RecordPatternField",
+        NodeKind::MapPatternEntry => "MapPatternEntry",
+        NodeKind::ObjectPatternField => "ObjectPatternField",
+        _ => unreachable!("node_hook dispatches only statement kinds here"),
+    })
+}
+
+fn expression_hook(kind: NodeKind, default_chains: bool) -> Option<&'static str> {
+    Some(match kind {
+        NodeKind::WildcardPattern
+        | NodeKind::VariablePattern
+        | NodeKind::LogicalAndPattern
+        | NodeKind::LogicalOrPattern
+        | NodeKind::RelationalPattern
+        | NodeKind::CastPattern
+        | NodeKind::NullCheckPattern
+        | NodeKind::NullAssertPattern
+        | NodeKind::ParenPattern
+        | NodeKind::ErrorPattern => {
+            if default_chains {
+                // Default pattern chains promise their observable
+                // children, not a callback for each intermediate link.
+                return None;
+            }
+            "Pattern"
+        }
+        NodeKind::IntLitExpr
+        | NodeKind::DoubleLitExpr
+        | NodeKind::BoolLitExpr
+        | NodeKind::NullLitExpr
+        | NodeKind::ParenExpr
+        | NodeKind::ThisExpr
+        | NodeKind::SuperExpr
+        | NodeKind::UnaryExpr
+        | NodeKind::PostfixIncDecExpr
+        | NodeKind::BinaryExpr
+        | NodeKind::AssignExpr
+        | NodeKind::ConditionalExpr
+        | NodeKind::IsExpr
+        | NodeKind::AsExpr
+        | NodeKind::FieldExpr
+        | NodeKind::IndexExpr
+        | NodeKind::CallExpr
+        | NodeKind::CascadeExpr
+        | NodeKind::ListExpr
+        | NodeKind::MapExpr
+        | NodeKind::SetExpr
+        | NodeKind::RecordExpr
+        | NodeKind::FuncExpr
+        | NodeKind::NewExpr
+        | NodeKind::DotShorthandExpr
+        | NodeKind::AwaitExpr
+        | NodeKind::ThrowExpr
+        | NodeKind::SwitchExpr
+        | NodeKind::NullAssertExpr
+        | NodeKind::SymbolLitExpr
+        | NodeKind::GenericInstantiationExpr
+        | NodeKind::ErrorExpr => {
+            if default_chains {
+                // The unmodified default expression hook has no leaf
+                // callback for literal values or chain links themselves.
+                return None;
+            }
+            "Expr"
+        }
+        // Transparent source grouping nodes have no independent hook.
+        NodeKind::ExtendsClause
+        | NodeKind::WithClause
+        | NodeKind::ImplementsClause
+        | NodeKind::OnClause
+        | NodeKind::SetterParameter
+        | NodeKind::LegacyTypedef
+        | NodeKind::TypeArgs
+        | NodeKind::ForCondition
+        | NodeKind::ForUpdates
+        | NodeKind::AwaitFor
+        | NodeKind::ExprCondition
+        | NodeKind::ExprGuard
+        | NodeKind::ConstPatternExpr
+        | NodeKind::Error => return None,
+        _ => unreachable!("declaration and statement hooks are handled before expression hooks"),
+    })
 }
 
 macro_rules! recording_visitor {

@@ -422,22 +422,6 @@ fn substitution_source_keys_preserve_scalar_context_and_alias_origins() {
             extension_type: false,
         },
     };
-    let mut other_identity = interface.clone();
-    let ResolvedType {
-        kind: ResolvedTypeKind::Interface { identity, .. },
-    } = &mut other_identity
-    else {
-        unreachable!()
-    };
-    *identity = DeclarationIdentity::sdk("dart:core", "Set");
-    let mut extension = interface.clone();
-    let ResolvedType {
-        kind: ResolvedTypeKind::Interface { extension_type, .. },
-    } = &mut extension
-    else {
-        unreachable!()
-    };
-    *extension_type = true;
     let record = ResolvedType {
         kind: ResolvedTypeKind::Record {
             occurrence: Default::default(),
@@ -445,12 +429,6 @@ fn substitution_source_keys_preserve_scalar_context_and_alias_origins() {
             named: Arc::clone(&named),
             nullable: false,
         },
-    };
-    let provenance = |offset| {
-        FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
-            identity: DeclarationIdentity::OBJECT,
-            origin: Some((None, offset)),
-        })))
     };
     let function = ResolvedType {
         kind: ResolvedTypeKind::Function {
@@ -463,41 +441,6 @@ fn substitution_source_keys_preserve_scalar_context_and_alias_origins() {
             nullable: false,
         },
     };
-    let mut optional = function.clone();
-    let ResolvedType {
-        kind: ResolvedTypeKind::Function {
-            optional_positional,
-            ..
-        },
-    } = &mut optional
-    else {
-        unreachable!()
-    };
-    *optional_positional = 1;
-    let mut unaliased = function.clone();
-    let ResolvedType {
-        kind: ResolvedTypeKind::Function { alias, .. },
-    } = &mut unaliased
-    else {
-        unreachable!()
-    };
-    *alias = FunctionTypeAlias::default();
-    let mut other_origin = function.clone();
-    let ResolvedType {
-        kind: ResolvedTypeKind::Function { alias, .. },
-    } = &mut other_origin
-    else {
-        unreachable!()
-    };
-    *alias = provenance(2);
-    let mut contextual_interface = interface.clone();
-    let ResolvedType {
-        kind: ResolvedTypeKind::Interface { occurrence, .. },
-    } = &mut contextual_interface
-    else {
-        unreachable!()
-    };
-    *occurrence = provenance(3);
     let mut contextual_record = record.clone();
     let ResolvedType {
         kind: ResolvedTypeKind::Record { occurrence, .. },
@@ -506,14 +449,9 @@ fn substitution_source_keys_preserve_scalar_context_and_alias_origins() {
         unreachable!()
     };
     *occurrence = provenance(3);
-    let mut contextual_function = unaliased.clone();
-    let ResolvedType {
-        kind: ResolvedTypeKind::Function { alias, .. },
-    } = &mut contextual_function
-    else {
-        unreachable!()
-    };
-    *alias = alias.projected_from(&provenance(3));
+    let [other_identity, extension, contextual_interface] = interface_context_variants(&interface);
+    let [optional, unaliased, other_origin, contextual_function] =
+        function_context_variants(&function);
     let cases = vec![
         interface.clone(),
         interface.with_nullable(true),
@@ -554,15 +492,97 @@ fn substitution_source_keys_preserve_scalar_context_and_alias_origins() {
     for (actual, expected) in positional.iter().zip(&expected) {
         assert!(SubstitutionKey(actual) == SubstitutionKey(expected));
     }
+    assert_parameter_substitution_not_memoized(&model, &parameter, &substitutions);
+}
+
+fn assert_parameter_substitution_not_memoized(
+    model: &SemanticModel<'_>,
+    parameter: &ResolvedType,
+    substitutions: &FxHashMap<TypeParameterId, ResolvedType>,
+) {
     let mut memo = SubstitutionMemo::default();
     assert!(matches!(
         model
-            .substitute_memoized(&parameter, &substitutions, &mut memo)
+            .substitute_memoized(parameter, substitutions, &mut memo)
             .kind,
         ResolvedTypeKind::Void
     ));
     assert!(memo.hashes.is_empty());
     assert!(memo.structural.is_empty());
+}
+
+pub(super) fn provenance(offset: usize) -> FunctionTypeAlias {
+    FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
+        identity: DeclarationIdentity::OBJECT,
+        origin: Some((None, offset)),
+    })))
+}
+
+fn interface_context_variants(interface: &ResolvedType) -> [ResolvedType; 3] {
+    let mut other_identity = interface.clone();
+    let ResolvedType {
+        kind: ResolvedTypeKind::Interface { identity, .. },
+    } = &mut other_identity
+    else {
+        unreachable!()
+    };
+    *identity = DeclarationIdentity::sdk("dart:core", "Set");
+    let mut extension = interface.clone();
+    let ResolvedType {
+        kind: ResolvedTypeKind::Interface { extension_type, .. },
+    } = &mut extension
+    else {
+        unreachable!()
+    };
+    *extension_type = true;
+    let mut contextual_interface = interface.clone();
+    let ResolvedType {
+        kind: ResolvedTypeKind::Interface { occurrence, .. },
+    } = &mut contextual_interface
+    else {
+        unreachable!()
+    };
+    *occurrence = provenance(3);
+    [other_identity, extension, contextual_interface]
+}
+
+fn function_context_variants(function: &ResolvedType) -> [ResolvedType; 4] {
+    let mut optional = function.clone();
+    let ResolvedType {
+        kind: ResolvedTypeKind::Function {
+            optional_positional,
+            ..
+        },
+    } = &mut optional
+    else {
+        unreachable!()
+    };
+    *optional_positional = 1;
+    let mut unaliased = function.clone();
+    let ResolvedType {
+        kind: ResolvedTypeKind::Function { alias, .. },
+    } = &mut unaliased
+    else {
+        unreachable!()
+    };
+    *alias = FunctionTypeAlias::default();
+    let mut other_origin = function.clone();
+    let ResolvedType {
+        kind: ResolvedTypeKind::Function { alias, .. },
+    } = &mut other_origin
+    else {
+        unreachable!()
+    };
+    *alias = provenance(2);
+    let mut contextual_function = unaliased.clone();
+    let ResolvedType {
+        kind: ResolvedTypeKind::Function { alias, .. },
+    } = &mut contextual_function
+    else {
+        unreachable!()
+    };
+    *alias = alias.projected_from(&provenance(3));
+    [optional, unaliased, other_origin, contextual_function]
 }
 
 #[test]

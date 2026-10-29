@@ -272,14 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn widened_container_dispatch_runs_each_rule() {
-        use std::path::Path;
-
-        use crate::lint::test_support::TestIndexes;
-        use falcon_config::FalconConfig;
-
-        use crate::meta::{RULE_METADATA, RuleKind};
-
+    fn widened_container_dispatch_runs_callable_rules() {
         let cases: &[(&str, &[&str], &str)] = &[
             (
                 "avoid-nested-if",
@@ -317,11 +310,6 @@ mod tests {
                 "bool f(int value) => 5 == value;",
             ),
             (
-                "boolean-prefixes",
-                &["ExtensionType"],
-                "bool get active => true;",
-            ),
-            (
                 "newline-before-return",
                 &["Enum", "Extension", "ExtensionType"],
                 "int f() {\n final result = 1;\n return result;\n}",
@@ -347,6 +335,38 @@ mod tests {
                 "int f() { final result = compute(); return result; }",
             ),
             (
+                "avoid-returning-widgets",
+                &["Enum", "Extension", "ExtensionType"],
+                "Widget makeWidget() => Container();",
+            ),
+            (
+                "no-object-declaration",
+                &["ExtensionType"],
+                "Object f() => 0;",
+            ),
+            (
+                "avoid-dynamic",
+                &["ExtensionType"],
+                "void f(dynamic value) {}",
+            ),
+            (
+                "use-spacer-as-expanded-child",
+                &["Enum", "Extension", "ExtensionType"],
+                "Object f() => Expanded(child: SizedBox());",
+            ),
+        ];
+        assert_container_dispatch(cases);
+    }
+
+    #[test]
+    fn widened_container_dispatch_runs_member_structure_rules() {
+        let cases: &[(&str, &[&str], &str)] = &[
+            (
+                "boolean-prefixes",
+                &["ExtensionType"],
+                "bool get active => true;",
+            ),
+            (
                 "unnecessary-getters-setters",
                 &["Extension"],
                 "static int _value = 0; static int get value => _value; static set value(int v) => _value = v;",
@@ -355,11 +375,6 @@ mod tests {
                 "avoid-global-state",
                 &["Enum", "Extension", "ExtensionType"],
                 "static var shared = 0;",
-            ),
-            (
-                "avoid-returning-widgets",
-                &["Enum", "Extension", "ExtensionType"],
-                "Widget makeWidget() => Container();",
             ),
             (
                 "hash-and-equals",
@@ -379,11 +394,6 @@ mod tests {
                 "void f() {} static const value = 1;",
             ),
             (
-                "no-object-declaration",
-                &["ExtensionType"],
-                "Object f() => 0;",
-            ),
-            (
                 "prefer-correct-identifier-length",
                 &["ExtensionType"],
                 "int get x => 0;",
@@ -393,17 +403,17 @@ mod tests {
                 &["Extension"],
                 "static int _value = 1;",
             ),
-            (
-                "avoid-dynamic",
-                &["ExtensionType"],
-                "void f(dynamic value) {}",
-            ),
-            (
-                "use-spacer-as-expanded-child",
-                &["Enum", "Extension", "ExtensionType"],
-                "Object f() => Expanded(child: SizedBox());",
-            ),
         ];
+        assert_container_dispatch(cases);
+    }
+
+    fn assert_container_dispatch(cases: &[(&'static str, &[&str], &str)]) {
+        use std::path::Path;
+
+        use crate::lint::test_support::TestIndexes;
+        use falcon_config::FalconConfig;
+
+        use crate::meta::{RULE_METADATA, RuleKind};
         for &(name, kinds, member_source) in cases {
             let meta = RULE_METADATA.iter().find(|meta| meta.name == name).unwrap();
             let RuleKind::File { make, .. } = meta.kind else {

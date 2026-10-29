@@ -74,7 +74,10 @@ struct Collector<'a> {
 
 impl<'a> Collector<'a> {
     fn report(&mut self, span: Span) {
-        self.diagnostics.push(self.ctx.diagnostic("Avoid invoking methods or accessing properties on a `dynamic` target.", span));
+        self.diagnostics.push(self.ctx.diagnostic(
+            "Avoid invoking methods or accessing properties on a `dynamic` target.",
+            span,
+        ));
     }
 
     /// Reports `target` when it is provably `dynamic`; explicit casts are allowed.
@@ -103,13 +106,55 @@ impl<'a> Collector<'a> {
         // Receiver paths share the current flow with their surrounding operations.
         for receiver in receivers.into_iter().rev() {
             dynamic = dynamic || matches!(state.infer(receiver).view(), ResolvedTypeView::Dynamic);
-            self.dynamic_receivers.insert(receiver.syntax().id(), dynamic);
+            self.dynamic_receivers
+                .insert(receiver.syntax().id(), dynamic);
         }
         dynamic
     }
 
     fn is_function_typed(&self, expr: Expr<'a>, state: &SemanticState<'a>) -> bool {
         state.infer(expr).interface("dart:core", "Function")
+    }
+
+    fn check_call(&mut self, call: CallExpr<'a>, state: &SemanticState<'a>) {
+        let callee = call.callee();
+        match callee {
+            Expr::Field(field) => {
+                let object = field.object();
+                let name = field.field();
+                let span = field.span();
+                self.callees.insert((span.start, span.end));
+                if !is_universal_call(name.name(), call.args())
+                    && !matches!(object.unparenthesized(), Expr::As(_))
+                    && !self.report_if_dynamic(object, state)
+                    && (self.is_dynamic(callee, state)
+                        || self.is_function_typed(callee, state)
+                        || (name.name() == "call" && self.is_function_typed(object, state)))
+                {
+                    self.report(
+                        if name.name() == "call" && self.is_function_typed(object, state) {
+                            name.span()
+                        } else {
+                            callee.span()
+                        },
+                    );
+                }
+            }
+            other => {
+                if !matches!(other.unparenthesized(), Expr::As(_))
+                    && (self.is_dynamic(other, state)
+                        || self.is_function_typed(other, state)
+                        || matches!(
+                            other.unparenthesized(),
+                            Expr::Field(field)
+                                if field.field().name() == "call"
+                                    && self.is_function_typed(field.object(), state)
+                        ))
+                {
+                    self.report(callee.span());
+                }
+            }
+        }
     }
 }
 
@@ -143,7 +188,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 .resolved_field(receiver, call.name().name(), &state.model)
                 .is_some_and(|(ty, owner)| {
                     let ty = state.model.substitute(&ty, &owner);
-                    matches!(ty.view(), ResolvedTypeView::Dynamic) || ty.interface("dart:core", "Function")
+                    matches!(ty.view(), ResolvedTypeView::Dynamic)
+                        || ty.interface("dart:core", "Function")
                 })
         {
             // Calling a field/getter is a function-expression invocation, not
@@ -192,17 +238,25 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     .signatures
                     .resolved_member(receiver, "[]", &state.model)
                     .is_some_and(|(signature, owner)| {
-                        matches!(state.model.substitute(&signature.return_type, &owner).view(),
+                        matches!(
+                            state
+                                .model
+                                .substitute(&signature.return_type, &owner)
+                                .view(),
                             ResolvedTypeView::Dynamic
                         )
                     })
         } else if let Expr::Ident(name) = assignment.target {
-            (matches!(receiver.view(), ResolvedTypeView::Dynamic) && !ALLOWED_MEMBERS.contains(&name.name()))
+            (matches!(receiver.view(), ResolvedTypeView::Dynamic)
+                && !ALLOWED_MEMBERS.contains(&name.name()))
                 || state
                     .signatures
                     .resolved_field(receiver, name.name(), &state.model)
                     .is_some_and(|(ty, owner)| {
-                        matches!(state.model.substitute(&ty, &owner).view(), ResolvedTypeView::Dynamic)
+                        matches!(
+                            state.model.substitute(&ty, &owner).view(),
+                            ResolvedTypeView::Dynamic
+                        )
                     })
         } else {
             false
@@ -252,46 +306,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     self.report_if_dynamic(field.object(), state);
                 }
             }
-            Expr::Call(call) => {
-                let callee = call.callee();
-                match callee {
-                    Expr::Field(field) => {
-                        let object = field.object();
-                        let name = field.field();
-                        let span = field.span();
-                        self.callees.insert((span.start, span.end));
-                        if !is_universal_call(name.name(), call.args())
-                            && !matches!(object.unparenthesized(), Expr::As(_))
-                            && !self.report_if_dynamic(object, state)
-                            && (self.is_dynamic(callee, state)
-                                || self.is_function_typed(callee, state)
-                                || (name.name() == "call" && self.is_function_typed(object, state)))
-                        {
-                            self.report(
-                                if name.name() == "call" && self.is_function_typed(object, state) {
-                                    name.span()
-                                } else {
-                                    callee.span()
-                                },
-                            );
-                        }
-                    }
-                    other => {
-                        if !matches!(other.unparenthesized(), Expr::As(_))
-                            && (self.is_dynamic(other, state)
-                                || self.is_function_typed(other, state)
-                                || matches!(
-                                    other.unparenthesized(),
-                                    Expr::Field(field)
-                                        if field.field().name() == "call"
-                                            && self.is_function_typed(field.object(), state)
-                                ))
-                        {
-                            self.report(callee.span());
-                        }
-                    }
-                }
-            }
+            Expr::Call(call) => self.check_call(call, state),
             Expr::Cascade(cascade) => {
                 let object = cascade.object();
                 let dynamic_section =
@@ -366,9 +381,9 @@ fn is_user_definable(op: BinaryOp) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use falcon_analyze::RuleAnalysis;
     use super::*;
-    use falcon_analyze::{ParsedFile};
+    use falcon_analyze::ParsedFile;
+    use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::{path::Path, sync::Arc};
@@ -481,7 +496,10 @@ void use(dynamic value) {
             tree,
         });
         let program = parsed.program();
-        let indexes = crate::lint::test_support::TestIndexes::new(&[(path, &parsed), (expect_path, &expect_parsed)]);
+        let indexes = crate::lint::test_support::TestIndexes::new(&[
+            (path, &parsed),
+            (expect_path, &expect_parsed),
+        ]);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&indexes.identities)
@@ -647,6 +665,11 @@ void groupedCallWitness(Function fn, dynamic d, SpanCallable o) {
             .iter()
             .map(|diagnostic| (diagnostic.span.start, diagnostic.span.end))
             .collect();
+        let expected = grouped_callable_expected_spans(source);
+        assert_eq!(actual, expected, "{diagnostics:?}");
+    }
+
+    fn grouped_callable_expected_spans(source: &str) -> Vec<(usize, usize)> {
         let line_starts: Vec<_> = std::iter::once(0)
             .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
             .collect();
@@ -688,7 +711,7 @@ void groupedCallWitness(Function fn, dynamic d, SpanCallable o) {
         })
         .collect();
         expected.sort_unstable();
-        assert_eq!(actual, expected, "{diagnostics:?}");
+        expected
     }
 
     #[test]

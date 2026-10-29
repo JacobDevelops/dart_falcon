@@ -184,204 +184,217 @@ impl<'a> SemanticState<'a> {
         expression: Expr<'a>,
         write: bool,
     ) -> Option<ReferencedDeclaration<'a>> {
-        use crate::{MemberSelector, MemberSelectorKind as Kind};
-
         let mut node = expression.unparenthesized();
         while let Expr::GenericInstantiation(instantiation) = node {
             node = instantiation.target().unparenthesized();
         }
-        let kind = if write { Kind::Write } else { Kind::Read };
-        let target = |owner, selector| Some(ReferencedDeclaration { owner, selector });
-        let static_selector = |owner: &DeclarationIdentity, name: &'a str| {
-            self.signatures
-                .declared_member_facts(owner, name)
-                .iter()
-                .find_map(|fact| {
-                    if !fact.is_static {
-                        return None;
-                    }
-                    let selector_kind = match fact.kind {
-                        crate::MemberKind::Field { writable, .. } if !write || writable => {
-                            Kind::Field
-                        }
-                        crate::MemberKind::Setter if write => Kind::Write,
-                        crate::MemberKind::Getter | crate::MemberKind::Method if !write => {
-                            Kind::Read
-                        }
-                        _ => return None,
-                    };
-                    Some(MemberSelector::new(selector_kind, true, name))
-                })
-                .or_else(|| {
-                    self.model
-                        .identities()
-                        .static_member_selector(owner, name, write)
-                })
-        };
         match node {
-            Expr::Ident(name) => {
-                if self.environment.is_bound(name.name())
-                    && !self.environment.is_bound_in_root_scope(name.name())
-                {
-                    return None;
-                }
-                if self
-                    .unnamed_extension_members
-                    .as_ref()
-                    .is_some_and(|members| {
-                        members.clone().any(|member| match member {
-                            ClassMember::Field(field) => field
-                                .declarators()
-                                .any(|declarator| declarator.name().name() == name.name()),
-                            ClassMember::Method(method) => method.name().name() == name.name(),
-                            ClassMember::Getter(getter) => getter.name().name() == name.name(),
-                            ClassMember::Setter(setter) => setter.name().name() == name.name(),
-                            _ => false,
-                        })
-                    })
-                {
-                    // Unnamed extensions have no addressable declaration identity,
-                    // but their own members still shadow the on-type and library.
-                    return None;
-                }
-                if let Some(owner) = &self.constant_owner {
-                    let facts = self.signatures.declared_member_facts(owner, name.name());
-                    if write
-                        && !facts.is_empty()
-                        && facts
-                            .iter()
-                            .all(|fact| matches!(fact.kind, MemberKind::Getter))
-                    {
-                        return None;
-                    }
-                    if let Some(fact) = facts.first() {
-                        if fact.is_static {
-                            let selector = static_selector(owner, name.name())?;
-                            return target(owner.clone(), selector);
-                        }
-                        // Extension bodies bind `this` to their on-type, not
-                        // to the extension declaration supplying the member.
-                        if !matches!(&self.enclosing_type,
-                            Some(ResolvedType { kind: ResolvedTypeKind::Interface { identity, .. } }) if identity == owner)
-                        {
-                            return target(
-                                owner.clone(),
-                                MemberSelector::new(kind, false, name.name()),
-                            );
-                        }
-                    }
-                }
-                if matches!((&self.constant_owner, &self.enclosing_type),
-                    (Some(owner), Some(ResolvedType { kind: ResolvedTypeKind::Interface { identity, .. } })) if owner == identity)
-                    && self.enclosing_type_declares(name.name())
-                    && let Some(receiver) = &self.enclosing_type
-                {
-                    let owner = self.referenced_member_owner(receiver, name.name(), write)?;
-                    return target(owner, MemberSelector::new(kind, false, name.name()));
-                }
-                let value = self.model.resolve_value(name.name());
-                if let Some(owner) = value
-                    .clone()
-                    .or_else(|| self.model.resolve_name(name.name()))
-                    .or_else(|| self.model.resolve_extension(name.name()))
-                {
-                    return target(
-                        owner,
-                        MemberSelector::new(
-                            if write && value.is_some() {
-                                Kind::Write
-                            } else {
-                                Kind::Declaration
-                            },
-                            false,
-                            "",
-                        ),
-                    );
-                }
-                let receiver = self.enclosing_type.as_ref()?;
-                let owner = self.referenced_member_owner(receiver, name.name(), write)?;
-                target(owner, MemberSelector::new(kind, false, name.name()))
-            }
-            Expr::Field(access) => {
-                let name = access.field().name();
-                let mut object = access.object().unparenthesized();
-                while let Expr::GenericInstantiation(instantiation) = object {
-                    object = instantiation.target().unparenthesized();
-                }
-                // Type-qualified constructor tear-offs precede ordinary static lookup.
-                let qualified = match object {
-                    Expr::Ident(identifier) if !self.environment.is_bound(identifier.name()) => {
-                        Some(QualifiedName::from(identifier.name()))
-                    }
-                    Expr::Field(field) => match field.object().unparenthesized() {
-                        Expr::Ident(prefix) if !self.environment.is_bound(prefix.name()) => {
-                            Some(QualifiedName::prefixed(prefix.name(), field.field().name()))
-                        }
-                        _ => None,
-                    },
-                    _ => None,
-                };
-                if let Some(owner) = qualified.and_then(|name| self.model.resolve_name(name)) {
-                    let owner = self.model.unaliased(owner);
-                    if self.signatures.constructor(&owner, name).is_some() {
-                        return target(owner, MemberSelector::new(Kind::Constructor, false, name));
-                    }
-                }
-                if matches!(object, Expr::Super(_)) {
-                    let owner = self.signatures.resolved_super_member_owner(
-                        self.enclosing_type.as_ref()?,
-                        name,
-                        write,
-                        &self.model,
-                    )?;
-                    return target(owner, MemberSelector::new(kind, false, name));
-                }
-                if let Some(owner) = self.named_extension(object)
-                    && let Some(selector) = static_selector(&owner, name)
-                {
-                    return target(owner, selector);
-                }
-                if let Expr::Call(call) = object
-                    && let Some(owner) = self.named_extension(call.callee())
-                {
-                    return target(owner, MemberSelector::new(kind, false, name));
-                }
-                if let Expr::Ident(prefix) = object
-                    && !self.environment.is_bound(prefix.name())
-                {
-                    let qualified = QualifiedName::prefixed(prefix.name(), name);
-                    let value = self.model.resolve_value(qualified);
-                    if let Some(owner) = value
-                        .clone()
-                        .or_else(|| self.model.resolve_name(qualified))
-                        .or_else(|| self.model.resolve_extension(qualified))
-                    {
-                        return target(
-                            owner,
-                            MemberSelector::new(
-                                if write && value.is_some() {
-                                    Kind::Write
-                                } else {
-                                    Kind::Declaration
-                                },
-                                false,
-                                "",
-                            ),
-                        );
-                    }
-                    if let Some(owner) = self.model.resolve_name(prefix.name()) {
-                        let owner = self.model.unaliased(owner);
-                        let selector = static_selector(&owner, name)?;
-                        return target(owner, selector);
-                    }
-                }
-                let receiver =
-                    self.infer_access_receiver(access.object(), name, access.is_null_safe());
-                let owner = self.referenced_member_owner(&receiver, name, write)?;
-                target(owner, MemberSelector::new(kind, false, name))
-            }
+            Expr::Ident(name) => self.referenced_identifier(name, write),
+            Expr::Field(access) => self.referenced_field(access, write),
             _ => None,
         }
+    }
+
+    fn static_reference_selector(
+        &self,
+        owner: &DeclarationIdentity,
+        name: &'a str,
+        write: bool,
+    ) -> Option<crate::MemberSelector<'a>> {
+        use crate::{MemberSelector, MemberSelectorKind as Kind};
+        self.signatures
+            .declared_member_facts(owner, name)
+            .iter()
+            .find_map(|fact| {
+                if !fact.is_static {
+                    return None;
+                }
+                let selector_kind = match fact.kind {
+                    crate::MemberKind::Field { writable, .. } if !write || writable => Kind::Field,
+                    crate::MemberKind::Setter if write => Kind::Write,
+                    crate::MemberKind::Getter | crate::MemberKind::Method if !write => Kind::Read,
+                    _ => return None,
+                };
+                Some(MemberSelector::new(selector_kind, true, name))
+            })
+            .or_else(|| {
+                self.model
+                    .identities()
+                    .static_member_selector(owner, name, write)
+            })
+    }
+
+    fn referenced_identifier(
+        &self,
+        name: Identifier<'a>,
+        write: bool,
+    ) -> Option<ReferencedDeclaration<'a>> {
+        use crate::{MemberSelector, MemberSelectorKind as Kind};
+        let kind = if write { Kind::Write } else { Kind::Read };
+        let target = |owner, selector| Some(ReferencedDeclaration { owner, selector });
+        if self.environment.is_bound(name.name())
+            && !self.environment.is_bound_in_root_scope(name.name())
+        {
+            return None;
+        }
+        if self
+            .unnamed_extension_members
+            .as_ref()
+            .is_some_and(|members| {
+                members.clone().any(|member| match member {
+                    ClassMember::Field(field) => field
+                        .declarators()
+                        .any(|declarator| declarator.name().name() == name.name()),
+                    ClassMember::Method(method) => method.name().name() == name.name(),
+                    ClassMember::Getter(getter) => getter.name().name() == name.name(),
+                    ClassMember::Setter(setter) => setter.name().name() == name.name(),
+                    _ => false,
+                })
+            })
+        {
+            // Unnamed extensions have no addressable declaration identity,
+            // but their own members still shadow the on-type and library.
+            return None;
+        }
+        if let Some(owner) = &self.constant_owner {
+            let facts = self.signatures.declared_member_facts(owner, name.name());
+            if write
+                && !facts.is_empty()
+                && facts
+                    .iter()
+                    .all(|fact| matches!(fact.kind, MemberKind::Getter))
+            {
+                return None;
+            }
+            if let Some(fact) = facts.first() {
+                if fact.is_static {
+                    let selector = self.static_reference_selector(owner, name.name(), write)?;
+                    return target(owner.clone(), selector);
+                }
+                // Extension bodies bind `this` to their on-type, not
+                // to the extension declaration supplying the member.
+                if !matches!(&self.enclosing_type,
+                    Some(ResolvedType { kind: ResolvedTypeKind::Interface { identity, .. } }) if identity == owner)
+                {
+                    return target(owner.clone(), MemberSelector::new(kind, false, name.name()));
+                }
+            }
+        }
+        if matches!((&self.constant_owner, &self.enclosing_type),
+            (Some(owner), Some(ResolvedType { kind: ResolvedTypeKind::Interface { identity, .. } })) if owner == identity)
+            && self.enclosing_type_declares(name.name())
+            && let Some(receiver) = &self.enclosing_type
+        {
+            let owner = self.referenced_member_owner(receiver, name.name(), write)?;
+            return target(owner, MemberSelector::new(kind, false, name.name()));
+        }
+        let value = self.model.resolve_value(name.name());
+        if let Some(owner) = value
+            .clone()
+            .or_else(|| self.model.resolve_name(name.name()))
+            .or_else(|| self.model.resolve_extension(name.name()))
+        {
+            return target(
+                owner,
+                MemberSelector::new(
+                    if write && value.is_some() {
+                        Kind::Write
+                    } else {
+                        Kind::Declaration
+                    },
+                    false,
+                    "",
+                ),
+            );
+        }
+        let receiver = self.enclosing_type.as_ref()?;
+        let owner = self.referenced_member_owner(receiver, name.name(), write)?;
+        target(owner, MemberSelector::new(kind, false, name.name()))
+    }
+
+    fn referenced_field(
+        &self,
+        access: FieldExpr<'a>,
+        write: bool,
+    ) -> Option<ReferencedDeclaration<'a>> {
+        use crate::{MemberSelector, MemberSelectorKind as Kind};
+        let kind = if write { Kind::Write } else { Kind::Read };
+        let target = |owner, selector| Some(ReferencedDeclaration { owner, selector });
+        let name = access.field().name();
+        let mut object = access.object().unparenthesized();
+        while let Expr::GenericInstantiation(instantiation) = object {
+            object = instantiation.target().unparenthesized();
+        }
+        // Type-qualified constructor tear-offs precede ordinary static lookup.
+        let qualified = match object {
+            Expr::Ident(identifier) if !self.environment.is_bound(identifier.name()) => {
+                Some(QualifiedName::from(identifier.name()))
+            }
+            Expr::Field(field) => match field.object().unparenthesized() {
+                Expr::Ident(prefix) if !self.environment.is_bound(prefix.name()) => {
+                    Some(QualifiedName::prefixed(prefix.name(), field.field().name()))
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(owner) = qualified.and_then(|name| self.model.resolve_name(name)) {
+            let owner = self.model.unaliased(owner);
+            if self.signatures.constructor(&owner, name).is_some() {
+                return target(owner, MemberSelector::new(Kind::Constructor, false, name));
+            }
+        }
+        if matches!(object, Expr::Super(_)) {
+            let owner = self.signatures.resolved_super_member_owner(
+                self.enclosing_type.as_ref()?,
+                name,
+                write,
+                &self.model,
+            )?;
+            return target(owner, MemberSelector::new(kind, false, name));
+        }
+        if let Some(owner) = self.named_extension(object)
+            && let Some(selector) = self.static_reference_selector(&owner, name, write)
+        {
+            return target(owner, selector);
+        }
+        if let Expr::Call(call) = object
+            && let Some(owner) = self.named_extension(call.callee())
+        {
+            return target(owner, MemberSelector::new(kind, false, name));
+        }
+        if let Expr::Ident(prefix) = object
+            && !self.environment.is_bound(prefix.name())
+        {
+            let qualified = QualifiedName::prefixed(prefix.name(), name);
+            let value = self.model.resolve_value(qualified);
+            if let Some(owner) = value
+                .clone()
+                .or_else(|| self.model.resolve_name(qualified))
+                .or_else(|| self.model.resolve_extension(qualified))
+            {
+                return target(
+                    owner,
+                    MemberSelector::new(
+                        if write && value.is_some() {
+                            Kind::Write
+                        } else {
+                            Kind::Declaration
+                        },
+                        false,
+                        "",
+                    ),
+                );
+            }
+            if let Some(owner) = self.model.resolve_name(prefix.name()) {
+                let owner = self.model.unaliased(owner);
+                let selector = self.static_reference_selector(&owner, name, write)?;
+                return target(owner, selector);
+            }
+        }
+        let receiver = self.infer_access_receiver(access.object(), name, access.is_null_safe());
+        let owner = self.referenced_member_owner(&receiver, name, write)?;
+        target(owner, MemberSelector::new(kind, false, name))
     }
 
     /// Resolve an instance or implicit-extension member, including cascade members.
@@ -1461,6 +1474,20 @@ enum CallableParams<'a> {
     Setter(SetterDecl<'a>),
 }
 
+enum BinaryChainPending<'a> {
+    Left {
+        binary: BinaryExpr<'a>,
+        result_needed: bool,
+    },
+    Right {
+        binary: BinaryExpr<'a>,
+        left: ResolvedType,
+        before: Option<TypeEnvironment>,
+        left_effects: bool,
+        result_needed: bool,
+    },
+}
+
 impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
     fn visit_selector_chain(&mut self, root: Expr<'a>) {
         let mut spine = Vec::new();
@@ -1519,87 +1546,17 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
     }
 
     fn visit_binary_chain(&mut self, root: BinaryExpr<'a>) {
-        enum Pending<'a> {
-            Left {
-                binary: BinaryExpr<'a>,
-                result_needed: bool,
-            },
-            Right {
-                binary: BinaryExpr<'a>,
-                left: ResolvedType,
-                before: Option<TypeEnvironment>,
-                left_effects: bool,
-                result_needed: bool,
-            },
-        }
-
-        let finish = |walker: &mut Self, pending, right: Option<ResolvedType>, right_effects| {
-            let Pending::Right {
-                binary,
-                left,
-                before,
-                left_effects,
-                result_needed,
-            } = pending
-            else {
-                unreachable!("binary right operand was not visited");
-            };
-            let evaluated = result_needed.then(|| match binary.op() {
-                BinaryOp::NullCoalesce => crate::resolve::null_coalesce_result(
-                    &left,
-                    &right.expect("evaluated right operand"),
-                    &walker.state.signatures,
-                    &walker.state.model,
-                ),
-                BinaryOp::EqEq
-                | BinaryOp::NotEq
-                | BinaryOp::Lt
-                | BinaryOp::Gt
-                | BinaryOp::LtEq
-                | BinaryOp::GtEq
-                | BinaryOp::And
-                | BinaryOp::Or => walker.state.model.core_type("bool", false),
-                op => crate::resolve::binary_result(
-                    op,
-                    &left,
-                    &right.expect("evaluated right operand"),
-                    &walker.state.signatures,
-                    &walker.state.model,
-                ),
-            });
-            walker.state.expected.pop();
-            if let Some(before) = before {
-                walker.state.environment = before.join(&walker.state.environment);
-            }
-            FlowContext {
-                model: &walker.state.model,
-                signatures: &walker.state.signatures,
-                type_parameters: &walker.state.type_parameters,
-                field_promotions: walker.state.private_field_promotion,
-            }
-            .finish_expression(
-                &mut walker.state.environment,
-                Expr::Binary(binary),
-                None,
-            );
-            (
-                evaluated,
-                left_effects
-                    || right_effects
-                    || matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq),
-            )
-        };
         let root_needed = std::mem::take(&mut self.chain_result_needed);
         let mut pending = Vec::new();
         let mut effects = false;
         let mut evaluated = None;
         walk_expr_chain(self, Expr::Binary(root), |walker, expression| {
             // Finish completed parents before preparing the next sibling's context.
-            while matches!(pending.last(), Some(Pending::Right { .. })) {
+            while matches!(pending.last(), Some(BinaryChainPending::Right { .. })) {
                 (evaluated, effects) =
-                    finish(walker, pending.pop().unwrap(), evaluated.take(), effects);
+                    walker.finish_binary_chain(pending.pop().unwrap(), evaluated.take(), effects);
             }
-            if let Some(Pending::Left {
+            if let Some(BinaryChainPending::Left {
                 binary,
                 result_needed,
             }) = pending.last()
@@ -1610,91 +1567,17 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                 pending.pop();
                 // Dart evaluates the receiver before the RHS can write a local.
                 let left = evaluated.take().unwrap_or(ResolvedType::UNKNOWN);
-                walker.state.expected.pop();
-                let before = binary
-                    .op()
-                    .operator_name()
-                    .is_none()
-                    .then(|| walker.state.environment.clone());
-                let expected = match binary.op() {
-                    BinaryOp::And | BinaryOp::Or => {
-                        // Only effectful prefixes need their promotions and invalidating writes replayed.
-                        if effects {
-                            walker.assume_condition(binary.left(), binary.op() == BinaryOp::And);
-                        }
-                        ResolvedType::UNKNOWN
-                    }
-                    BinaryOp::NullCoalesce => walker
-                        .state
-                        .expected()
-                        .filter(|ty| {
-                            !matches!(
-                                ty,
-                                ResolvedType {
-                                    kind: ResolvedTypeKind::Unknown | ResolvedTypeKind::Dynamic
-                                }
-                            )
-                        })
-                        .cloned()
-                        .unwrap_or_else(|| left.clone()),
-                    _ => walker
-                        .state
-                        .signatures
-                        .resolved_member(
-                            &left,
-                            binary.op().operator_name().expect("operator chain"),
-                            &walker.state.model,
-                        )
-                        .and_then(|(signature, owner)| {
-                            signature
-                                .positional
-                                .first()
-                                .map(|ty| walker.state.model.substitute(ty, &owner))
-                        })
-                        .unwrap_or(ResolvedType::UNKNOWN),
-                };
-                walker.state.expected.push(Some(expected));
-                pending.push(Pending::Right {
+                pending.push(walker.prepare_binary_chain_right(
                     binary,
                     left,
-                    before,
-                    left_effects: effects,
+                    effects,
                     result_needed,
-                });
+                ));
             }
-            let (result_needed, context) = match pending.last() {
-                Some(Pending::Left { binary, .. }) => {
-                    (!matches!(binary.op(), BinaryOp::And | BinaryOp::Or), None)
-                }
-                Some(Pending::Right {
-                    binary,
-                    result_needed,
-                    left,
-                    ..
-                }) => (
-                    *result_needed
-                        && !matches!(
-                            binary.op(),
-                            BinaryOp::And
-                                | BinaryOp::Or
-                                | BinaryOp::EqEq
-                                | BinaryOp::NotEq
-                                | BinaryOp::Lt
-                                | BinaryOp::Gt
-                                | BinaryOp::LtEq
-                                | BinaryOp::GtEq
-                        ),
-                    if binary.op() == BinaryOp::NullCoalesce {
-                        Some(left.non_null()).filter(|ty| *ty != ResolvedType::UNKNOWN)
-                    } else {
-                        walker.state.expected().cloned()
-                    },
-                ),
-                None => (root_needed, None),
-            };
+            let (result_needed, context) = walker.binary_chain_context(pending.last(), root_needed);
             if let Expr::Binary(binary) = expression {
                 walker.visitor.visit_expr(expression, &walker.state);
-                pending.push(Pending::Left {
+                pending.push(BinaryChainPending::Left {
                     binary,
                     result_needed,
                 });
@@ -1707,52 +1590,218 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                 );
                 true
             } else {
-                let parenthesized_chain = matches!(expression, Expr::Paren(_))
-                    && matches!(expression.unparenthesized(), Expr::Binary(_));
-                // Optional RHS typing depends on its outer context, unlike operator-chain results.
-                let contextual_optional = context.as_ref().is_some_and(|ty| {
-                    !matches!(
-                        ty.kind,
-                        ResolvedTypeKind::Unknown | ResolvedTypeKind::Dynamic
-                    )
-                }) && matches!(expression.unparenthesized(), Expr::Binary(binary)
-                        if binary.op() == BinaryOp::NullCoalesce);
-                evaluated =
-                    (result_needed && (!parenthesized_chain || contextual_optional)).then(|| {
-                        if let Some(context) = context.as_ref().filter(|ty| {
-                            !matches!(
-                                ty.kind,
-                                ResolvedTypeKind::Unknown | ResolvedTypeKind::Dynamic
-                            )
-                        }) {
-                            walker.state.infer_with_context(expression, Some(context))
-                        } else {
-                            walker.state.infer(expression)
-                        }
-                    });
-                if parenthesized_chain {
-                    walker.chain_result = None;
-                    walker.chain_result_needed = result_needed && !contextual_optional;
-                }
-                walker.visit_expr(expression);
-                if parenthesized_chain && !contextual_optional {
-                    evaluated = walker.chain_result.take();
-                }
-                effects = !matches!(
-                    expression,
-                    Expr::Ident(_)
-                        | Expr::IntLit(_)
-                        | Expr::DoubleLit(_)
-                        | Expr::BoolLit(_)
-                        | Expr::NullLit(_)
-                );
+                (evaluated, effects) =
+                    walker.visit_binary_chain_operand(expression, result_needed, context);
                 false
             }
         });
         while let Some(parent) = pending.pop() {
-            (evaluated, effects) = finish(self, parent, evaluated.take(), effects);
+            (evaluated, effects) = self.finish_binary_chain(parent, evaluated.take(), effects);
         }
         self.chain_result = evaluated;
+    }
+
+    fn prepare_binary_chain_right(
+        &mut self,
+        binary: BinaryExpr<'a>,
+        left: ResolvedType,
+        effects: bool,
+        result_needed: bool,
+    ) -> BinaryChainPending<'a> {
+        self.state.expected.pop();
+        let before = binary
+            .op()
+            .operator_name()
+            .is_none()
+            .then(|| self.state.environment.clone());
+        let expected = match binary.op() {
+            BinaryOp::And | BinaryOp::Or => {
+                // Only effectful prefixes need their promotions and invalidating writes replayed.
+                if effects {
+                    self.assume_condition(binary.left(), binary.op() == BinaryOp::And);
+                }
+                ResolvedType::UNKNOWN
+            }
+            BinaryOp::NullCoalesce => self
+                .state
+                .expected()
+                .filter(|ty| {
+                    !matches!(
+                        ty,
+                        ResolvedType {
+                            kind: ResolvedTypeKind::Unknown | ResolvedTypeKind::Dynamic
+                        }
+                    )
+                })
+                .cloned()
+                .unwrap_or_else(|| left.clone()),
+            _ => self
+                .state
+                .signatures
+                .resolved_member(
+                    &left,
+                    binary.op().operator_name().expect("operator chain"),
+                    &self.state.model,
+                )
+                .and_then(|(signature, owner)| {
+                    signature
+                        .positional
+                        .first()
+                        .map(|ty| self.state.model.substitute(ty, &owner))
+                })
+                .unwrap_or(ResolvedType::UNKNOWN),
+        };
+        self.state.expected.push(Some(expected));
+        BinaryChainPending::Right {
+            binary,
+            left,
+            before,
+            left_effects: effects,
+            result_needed,
+        }
+    }
+
+    fn binary_chain_context(
+        &self,
+        pending: Option<&BinaryChainPending<'a>>,
+        root_needed: bool,
+    ) -> (bool, Option<ResolvedType>) {
+        match pending {
+            Some(BinaryChainPending::Left { binary, .. }) => {
+                (!matches!(binary.op(), BinaryOp::And | BinaryOp::Or), None)
+            }
+            Some(BinaryChainPending::Right {
+                binary,
+                result_needed,
+                left,
+                ..
+            }) => (
+                *result_needed
+                    && !matches!(
+                        binary.op(),
+                        BinaryOp::And
+                            | BinaryOp::Or
+                            | BinaryOp::EqEq
+                            | BinaryOp::NotEq
+                            | BinaryOp::Lt
+                            | BinaryOp::Gt
+                            | BinaryOp::LtEq
+                            | BinaryOp::GtEq
+                    ),
+                if binary.op() == BinaryOp::NullCoalesce {
+                    Some(left.non_null()).filter(|ty| *ty != ResolvedType::UNKNOWN)
+                } else {
+                    self.state.expected().cloned()
+                },
+            ),
+            None => (root_needed, None),
+        }
+    }
+
+    fn visit_binary_chain_operand(
+        &mut self,
+        expression: Expr<'a>,
+        result_needed: bool,
+        context: Option<ResolvedType>,
+    ) -> (Option<ResolvedType>, bool) {
+        let parenthesized_chain = matches!(expression, Expr::Paren(_))
+            && matches!(expression.unparenthesized(), Expr::Binary(_));
+        // Optional RHS typing depends on its outer context, unlike operator-chain results.
+        let contextual_optional = context.as_ref().is_some_and(|ty| {
+            !matches!(
+                ty.kind,
+                ResolvedTypeKind::Unknown | ResolvedTypeKind::Dynamic
+            )
+        }) && matches!(expression.unparenthesized(), Expr::Binary(binary)
+                if binary.op() == BinaryOp::NullCoalesce);
+        let mut evaluated =
+            (result_needed && (!parenthesized_chain || contextual_optional)).then(|| {
+                if let Some(context) = context.as_ref().filter(|ty| {
+                    !matches!(
+                        ty.kind,
+                        ResolvedTypeKind::Unknown | ResolvedTypeKind::Dynamic
+                    )
+                }) {
+                    self.state.infer_with_context(expression, Some(context))
+                } else {
+                    self.state.infer(expression)
+                }
+            });
+        if parenthesized_chain {
+            self.chain_result = None;
+            self.chain_result_needed = result_needed && !contextual_optional;
+        }
+        self.visit_expr(expression);
+        if parenthesized_chain && !contextual_optional {
+            evaluated = self.chain_result.take();
+        }
+        let effects = !matches!(
+            expression,
+            Expr::Ident(_)
+                | Expr::IntLit(_)
+                | Expr::DoubleLit(_)
+                | Expr::BoolLit(_)
+                | Expr::NullLit(_)
+        );
+        (evaluated, effects)
+    }
+
+    fn finish_binary_chain(
+        &mut self,
+        pending: BinaryChainPending<'a>,
+        right: Option<ResolvedType>,
+        right_effects: bool,
+    ) -> (Option<ResolvedType>, bool) {
+        let BinaryChainPending::Right {
+            binary,
+            left,
+            before,
+            left_effects,
+            result_needed,
+        } = pending
+        else {
+            unreachable!("binary right operand was not visited");
+        };
+        let evaluated = result_needed.then(|| match binary.op() {
+            BinaryOp::NullCoalesce => crate::resolve::null_coalesce_result(
+                &left,
+                &right.expect("evaluated right operand"),
+                &self.state.signatures,
+                &self.state.model,
+            ),
+            BinaryOp::EqEq
+            | BinaryOp::NotEq
+            | BinaryOp::Lt
+            | BinaryOp::Gt
+            | BinaryOp::LtEq
+            | BinaryOp::GtEq
+            | BinaryOp::And
+            | BinaryOp::Or => self.state.model.core_type("bool", false),
+            op => crate::resolve::binary_result(
+                op,
+                &left,
+                &right.expect("evaluated right operand"),
+                &self.state.signatures,
+                &self.state.model,
+            ),
+        });
+        self.state.expected.pop();
+        if let Some(before) = before {
+            self.state.environment = before.join(&self.state.environment);
+        }
+        FlowContext {
+            model: &self.state.model,
+            signatures: &self.state.signatures,
+            type_parameters: &self.state.type_parameters,
+            field_promotions: self.state.private_field_promotion,
+        }
+        .finish_expression(&mut self.state.environment, Expr::Binary(binary), None);
+        (
+            evaluated,
+            left_effects
+                || right_effects
+                || matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq),
+        )
     }
 
     fn visit_conditional_chain(&mut self, root: ConditionalExpr<'a>) {
@@ -2136,6 +2185,133 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         self.visit_function_context(callable, contextual, false);
     }
 
+    fn callable_context_substitutions(
+        &self,
+        contextual_parameters: Option<&AstChildren<'a, TypeParam<'a>>>,
+    ) -> Option<FxHashMap<TypeParameterId, ResolvedType>> {
+        let Some(contextual_parameters) = contextual_parameters else {
+            return Some(FxHashMap::default());
+        };
+        if contextual_parameters.is_empty() {
+            return Some(FxHashMap::default());
+        }
+        let expected = self.state.expected()?;
+        if !matches!(
+            expected,
+            ResolvedType {
+                kind: ResolvedTypeKind::Function { .. }
+            }
+        ) {
+            return None;
+        }
+        let mut by_owner = HashMap::new();
+        collect_type_parameter_ids(expected, &mut by_owner);
+        let parameters = by_owner.values().find(|parameters| {
+            contextual_parameters
+                .clone()
+                .enumerate()
+                .all(|(ordinal, declared)| {
+                    parameters.iter().any(|parameter| {
+                        parameter.ordinal == ordinal
+                            && parameter.name.as_ref() == declared.name().name()
+                    })
+                })
+        })?;
+        Some(
+            parameters
+                .iter()
+                .filter_map(|parameter| {
+                    contextual_parameters
+                        .clone()
+                        .nth(parameter.ordinal)
+                        .and_then(|declared| {
+                            self.state.type_parameters.lookup(declared.name().name())
+                        })
+                        .map(|resolved| (parameter.clone(), resolved))
+                })
+                .collect(),
+        )
+    }
+
+    fn callable_return_type(
+        &self,
+        return_type: Option<DartType<'a>>,
+        contextual: bool,
+        substitutions: Option<&FxHashMap<TypeParameterId, ResolvedType>>,
+        async_marker: AsyncMarker,
+    ) -> ResolvedType {
+        let resolved_return = return_type
+            .map(|ty| {
+                self.state
+                    .model
+                    .resolve_type_in(ty, &self.state.type_parameters)
+            })
+            .or_else(|| {
+                contextual.then(|| {
+                    self.contextual_closure_type(substitutions, None)
+                        .unwrap_or_else(|| self.uncontextual_type())
+                })
+            })
+            .unwrap_or(ResolvedType::DYNAMIC);
+        match resolved_return {
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity,
+                        arguments,
+                        occurrence,
+                        ..
+                    },
+            } if async_marker == AsyncMarker::Async && identity.is_sdk("dart:async", "Future") => {
+                ResolvedType {
+                    kind: ResolvedTypeKind::Interface {
+                        occurrence,
+                        identity: crate::DeclarationIdentity::sdk("dart:async", "FutureOr"),
+                        arguments,
+                        nullable: false,
+                        extension_type: false,
+                    },
+                }
+            }
+            resolved_return => resolved_return,
+        }
+    }
+
+    fn bind_callable_params(
+        &mut self,
+        params: Option<CallableParams<'a>>,
+        contextual: bool,
+        substitutions: Option<&FxHashMap<TypeParameterId, ResolvedType>>,
+    ) {
+        match params {
+            Some(CallableParams::List(params)) => {
+                self.bind_params(params, None, contextual, substitutions);
+                self.visit_param_constants(params);
+            }
+            Some(CallableParams::Setter(setter)) => {
+                let mut ty = setter.param_type().map_or(ResolvedType::DYNAMIC, |ty| {
+                    self.state
+                        .model
+                        .resolve_type_in(ty, &self.state.type_parameters)
+                });
+                if setter.param_type().is_none() && contextual {
+                    ty = self
+                        .contextual_closure_type(
+                            substitutions,
+                            Some((setter.param().name(), ParamKind::Positional, 0)),
+                        )
+                        .unwrap_or_else(|| self.uncontextual_type());
+                }
+                self.state.environment.declare_at(
+                    setter.param().name().to_owned(),
+                    ty,
+                    setter.param().span(),
+                );
+            }
+            None => {}
+        }
+    }
+
     fn visit_function_context(
         &mut self,
         callable: Callable<'a>,
@@ -2183,116 +2359,17 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         let saved_returns = (!contextual).then(|| std::mem::take(&mut self.state.return_type));
         // Match the context's generic owner once for both parameters and return.
         let contextual_substitutions = contextual
-            .then(|| {
-                let Some(contextual_parameters) = contextual_parameters.as_ref() else {
-                    return Some(FxHashMap::default());
-                };
-                if contextual_parameters.is_empty() {
-                    return Some(FxHashMap::default());
-                }
-                let expected = self.state.expected()?;
-                if !matches!(
-                    expected,
-                    ResolvedType {
-                        kind: ResolvedTypeKind::Function { .. }
-                    }
-                ) {
-                    return None;
-                }
-                let mut by_owner = HashMap::new();
-                collect_type_parameter_ids(expected, &mut by_owner);
-                let parameters = by_owner.values().find(|parameters| {
-                    contextual_parameters
-                        .clone()
-                        .enumerate()
-                        .all(|(ordinal, declared)| {
-                            parameters.iter().any(|parameter| {
-                                parameter.ordinal == ordinal
-                                    && parameter.name.as_ref() == declared.name().name()
-                            })
-                        })
-                })?;
-                Some(
-                    parameters
-                        .iter()
-                        .filter_map(|parameter| {
-                            contextual_parameters
-                                .clone()
-                                .nth(parameter.ordinal)
-                                .and_then(|declared| {
-                                    self.state.type_parameters.lookup(declared.name().name())
-                                })
-                                .map(|resolved| (parameter.clone(), resolved))
-                        })
-                        .collect(),
-                )
-            })
+            .then(|| self.callable_context_substitutions(contextual_parameters.as_ref()))
             .flatten();
-        let resolved_return = return_type
-            .map(|ty| {
-                self.state
-                    .model
-                    .resolve_type_in(ty, &self.state.type_parameters)
-            })
-            .or_else(|| {
-                contextual.then(|| {
-                    self.contextual_closure_type(contextual_substitutions.as_ref(), None)
-                        .unwrap_or_else(|| self.uncontextual_type())
-                })
-            })
-            .unwrap_or(ResolvedType::DYNAMIC);
-        let resolved_return = match resolved_return {
-            ResolvedType {
-                kind:
-                    ResolvedTypeKind::Interface {
-                        identity,
-                        arguments,
-                        occurrence,
-                        ..
-                    },
-            } if async_marker == AsyncMarker::Async && identity.is_sdk("dart:async", "Future") => {
-                ResolvedType {
-                    kind: ResolvedTypeKind::Interface {
-                        occurrence,
-                        identity: crate::DeclarationIdentity::sdk("dart:async", "FutureOr"),
-                        arguments,
-                        nullable: false,
-                        extension_type: false,
-                    },
-                }
-            }
-            resolved_return => resolved_return,
-        };
+        let resolved_return = self.callable_return_type(
+            return_type,
+            contextual,
+            contextual_substitutions.as_ref(),
+            async_marker,
+        );
         self.state.return_type.push(resolved_return);
         self.with_scope(|walker| {
-            match params {
-                Some(CallableParams::List(params)) => {
-                    walker.bind_params(params, None, contextual, contextual_substitutions.as_ref());
-                    walker.visit_param_constants(params);
-                }
-                Some(CallableParams::Setter(setter)) => {
-                    let mut ty = setter.param_type().map_or(ResolvedType::DYNAMIC, |ty| {
-                        walker
-                            .state
-                            .model
-                            .resolve_type_in(ty, &walker.state.type_parameters)
-                    });
-                    if setter.param_type().is_none() && contextual {
-                        ty = walker
-                            .contextual_closure_type(
-                                contextual_substitutions.as_ref(),
-                                Some((setter.param().name(), ParamKind::Positional, 0)),
-                            )
-                            .unwrap_or_else(|| walker.uncontextual_type());
-                    }
-                    walker.state.environment.declare_at(
-                        setter.param().name().to_owned(),
-                        ty,
-                        setter.param().span(),
-                    );
-                }
-                None => {}
-            }
+            walker.bind_callable_params(params, contextual, contextual_substitutions.as_ref());
             if let Some(body) = body {
                 // The closure's own context only shapes its parameters and
                 // return type; its body statements have no context.
@@ -2703,78 +2780,119 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         }
     }
 
+    fn visit_matched_variable_pattern(&mut self, node: VariablePattern<'a>, matched: ResolvedType) {
+        let name = node.name();
+        let ty = node
+            .type_()
+            .map(|ty| {
+                self.state
+                    .model
+                    .resolve_type_in(ty, &self.state.type_parameters)
+            })
+            .unwrap_or(matched);
+        if self.assigning_pattern {
+            FlowContext {
+                model: &self.state.model,
+                signatures: &self.state.signatures,
+                type_parameters: &self.state.type_parameters,
+                field_promotions: self.state.private_field_promotion,
+            }
+            .assign_variable(&mut self.state.environment, name.name(), &ty);
+        } else {
+            self.state
+                .environment
+                .declare_at(name.name().to_owned(), ty, name.span());
+        }
+    }
+
+    fn visit_matched_list_pattern(&mut self, list: ListPattern<'a>, matched: &ResolvedType) {
+        let element = list
+            .type_arg()
+            .map(|ty| {
+                self.state
+                    .model
+                    .resolve_type_in(ty, &self.state.type_parameters)
+            })
+            .or_else(|| {
+                self.state
+                    .signatures
+                    .instantiated_supertype(matched, "dart:core", "List", &self.state.model)
+                    .and_then(|ty| ty.type_argument(0))
+            })
+            .unwrap_or(ResolvedType::UNKNOWN);
+        for child in list.elements() {
+            match child {
+                ListPatternElement::Pattern(child) => {
+                    self.visit_matched_pattern(child, element.clone());
+                }
+                ListPatternElement::Rest(rest) => {
+                    if let Some(child) = rest.pattern() {
+                        self.visit_matched_pattern(child, matched.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    fn visit_matched_object_pattern(&mut self, object: ObjectPattern<'a>, matched: &ResolvedType) {
+        let object_type = FlowContext {
+            model: &self.state.model,
+            signatures: &self.state.signatures,
+            type_parameters: &self.state.type_parameters,
+            field_promotions: self.state.private_field_promotion,
+        }
+        .object_pattern_type(object.type_(), matched);
+        for field in object.fields() {
+            let field_type = self
+                .state
+                .signatures
+                .resolved_field(&object_type, field.name().name(), &self.state.model)
+                .or_else(|| {
+                    self.state.signatures.resolved_extension_getter(
+                        &object_type,
+                        field.name().name(),
+                        &self.state.model,
+                    )
+                })
+                .map(|(ty, substitutions)| self.state.model.substitute(&ty, &substitutions))
+                .unwrap_or(ResolvedType::UNKNOWN);
+            if let Some(child) = field.pattern() {
+                self.visit_matched_pattern(child, field_type);
+            } else if self.assigning_pattern {
+                FlowContext {
+                    model: &self.state.model,
+                    signatures: &self.state.signatures,
+                    type_parameters: &self.state.type_parameters,
+                    field_promotions: self.state.private_field_promotion,
+                }
+                .assign_variable(
+                    &mut self.state.environment,
+                    field.name().name(),
+                    &field_type,
+                );
+            } else {
+                self.state.environment.declare_at(
+                    field.name().name().to_owned(),
+                    field_type,
+                    field.name().span(),
+                );
+            }
+        }
+    }
+
     fn visit_matched_pattern(&mut self, pattern: Pattern<'a>, matched: ResolvedType) {
         self.state.matched.push(matched.clone());
         self.visitor
             .visit_pattern(pattern, Some(&matched), &self.state);
         match pattern {
-            Pattern::Variable(node) => {
-                let name = node.name();
-                let ty = node
-                    .type_()
-                    .map(|ty| {
-                        self.state
-                            .model
-                            .resolve_type_in(ty, &self.state.type_parameters)
-                    })
-                    .unwrap_or(matched);
-                if self.assigning_pattern {
-                    FlowContext {
-                        model: &self.state.model,
-                        signatures: &self.state.signatures,
-                        type_parameters: &self.state.type_parameters,
-                        field_promotions: self.state.private_field_promotion,
-                    }
-                    .assign_variable(
-                        &mut self.state.environment,
-                        name.name(),
-                        &ty,
-                    );
-                } else {
-                    self.state
-                        .environment
-                        .declare_at(name.name().to_owned(), ty, name.span());
-                }
-            }
+            Pattern::Variable(node) => self.visit_matched_variable_pattern(node, matched),
             Pattern::Wildcard(_) | Pattern::Literal(_) | Pattern::Error(_) => {}
             Pattern::Const(constant) => {
                 if let ConstPatternValue::Expr(expression) = constant.value() {
                     self.visit_expr(expression);
                 }
             }
-            Pattern::List(list) => {
-                let element = list
-                    .type_arg()
-                    .map(|ty| {
-                        self.state
-                            .model
-                            .resolve_type_in(ty, &self.state.type_parameters)
-                    })
-                    .or_else(|| {
-                        self.state
-                            .signatures
-                            .instantiated_supertype(
-                                &matched,
-                                "dart:core",
-                                "List",
-                                &self.state.model,
-                            )
-                            .and_then(|ty| ty.type_argument(0))
-                    })
-                    .unwrap_or(ResolvedType::UNKNOWN);
-                for child in list.elements() {
-                    match child {
-                        ListPatternElement::Pattern(child) => {
-                            self.visit_matched_pattern(child, element.clone());
-                        }
-                        ListPatternElement::Rest(rest) => {
-                            if let Some(child) = rest.pattern() {
-                                self.visit_matched_pattern(child, matched.clone());
-                            }
-                        }
-                    }
-                }
-            }
+            Pattern::List(list) => self.visit_matched_list_pattern(list, &matched),
             Pattern::Record(record) => {
                 let mut positional_index = 0;
                 for field in record.fields() {
@@ -2803,51 +2921,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                     self.visit_matched_pattern(entry.pattern(), value_type.clone());
                 }
             }
-            Pattern::Object(object) => {
-                let object_type = FlowContext {
-                    model: &self.state.model,
-                    signatures: &self.state.signatures,
-                    type_parameters: &self.state.type_parameters,
-                    field_promotions: self.state.private_field_promotion,
-                }
-                .object_pattern_type(object.type_(), &matched);
-                for field in object.fields() {
-                    let field_type = self
-                        .state
-                        .signatures
-                        .resolved_field(&object_type, field.name().name(), &self.state.model)
-                        .or_else(|| {
-                            self.state.signatures.resolved_extension_getter(
-                                &object_type,
-                                field.name().name(),
-                                &self.state.model,
-                            )
-                        })
-                        .map(|(ty, substitutions)| self.state.model.substitute(&ty, &substitutions))
-                        .unwrap_or(ResolvedType::UNKNOWN);
-                    if let Some(child) = field.pattern() {
-                        self.visit_matched_pattern(child, field_type);
-                    } else if self.assigning_pattern {
-                        FlowContext {
-                            model: &self.state.model,
-                            signatures: &self.state.signatures,
-                            type_parameters: &self.state.type_parameters,
-                            field_promotions: self.state.private_field_promotion,
-                        }
-                        .assign_variable(
-                            &mut self.state.environment,
-                            field.name().name(),
-                            &field_type,
-                        );
-                    } else {
-                        self.state.environment.declare_at(
-                            field.name().name().to_owned(),
-                            field_type,
-                            field.name().span(),
-                        );
-                    }
-                }
-            }
+            Pattern::Object(object) => self.visit_matched_object_pattern(object, &matched),
             Pattern::LogicalAnd(node) => {
                 self.visit_matched_pattern(node.left(), matched.clone());
                 self.visit_matched_pattern(node.right(), matched.clone());
@@ -3191,6 +3265,475 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
     }
 }
 
+impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
+    fn visit_if_statement(&mut self, statement: IfStmt<'a>) {
+        if let IfCondition::Expr(condition) = statement.condition() {
+            self.visit_expr(condition);
+            self.visit_branches(
+                condition,
+                |walker| walker.visit_stmt(statement.then_branch()),
+                |walker| {
+                    if let Some(branch) = statement.else_branch() {
+                        walker.visit_stmt(branch);
+                    }
+                },
+                self.statement_exits(statement.then_branch()),
+                statement
+                    .else_branch()
+                    .is_some_and(|branch| self.statement_exits(branch)),
+            );
+        } else {
+            self.visit_if_condition(
+                statement.condition(),
+                |walker| walker.visit_stmt(statement.then_branch()),
+                |walker| {
+                    if let Some(branch) = statement.else_branch() {
+                        walker.visit_stmt(branch);
+                    }
+                },
+                self.statement_exits(statement.then_branch()),
+                statement
+                    .else_branch()
+                    .is_some_and(|branch| self.statement_exits(branch)),
+            );
+        }
+    }
+
+    fn visit_for_statement(&mut self, statement: ForStmt<'a>) {
+        self.with_scope(|walker| {
+            if let Some(init) = statement.header().init() {
+                walker.visit_for_init(init, statement.is_await());
+            }
+            let body = statement.body();
+            walker.with_break_target(None, true, Stmt::For(statement), |walker| {
+                let (_, exit) =
+                    walker.enter_loop(statement.span().start, statement.header().condition());
+                walker.assign_for_in(statement.header().init(), statement.is_await());
+                walker.visit_stmt(body);
+                for update in statement.header().updates() {
+                    walker.visit_expr(update);
+                }
+                walker.state.environment = exit;
+            });
+        });
+    }
+
+    fn visit_switch_statement(&mut self, statement: SwitchStmt<'a>) {
+        self.visit_expr(statement.subject());
+        let matched = self.state.infer(statement.subject());
+        // A `continue label;` may re-enter any labeled case.
+        if statement.cases().any(|case| case.labels().next().is_some()) {
+            self.enter_region(statement.span().start);
+        }
+        let exhaustive = statement.cases().any(|case| {
+            case.cases()
+                .any(|kind| matches!(kind, SwitchCaseKind::Default(_)))
+        }) || FlowContext {
+            model: &self.state.model,
+            signatures: &self.state.signatures,
+            type_parameters: &self.state.type_parameters,
+            field_promotions: self.state.private_field_promotion,
+        }
+        .switch_is_exhaustive(statement, &matched);
+        let before = self.state.environment.clone();
+        let depth = before.depth();
+        let mut ends = Vec::with_capacity(statement.cases().len() + 1);
+        self.break_targets.push(BreakTarget {
+            label: None,
+            unlabeled: true,
+            states: Vec::new(),
+        });
+        // An empty case's matches reach the next case's body.
+        let mut matched_empty: Option<TypeEnvironment> = None;
+        let mut unmatched = before.clone();
+        for (index, case) in statement.cases().enumerate() {
+            self.state.environment.clone_from(&unmatched);
+            let falls_through = case.body().is_empty() && index + 1 < statement.cases().len();
+            self.with_scope(|walker| {
+                // Later heads start from the preceding head's failure.
+                unmatched.clone_from(&walker.state.environment);
+                let mut matches = matched_empty.take();
+                for kind in case.cases() {
+                    walker.state.environment.clone_from(&unmatched);
+                    match kind {
+                        SwitchCaseKind::Pattern(label) => {
+                            unmatched = walker.visit_pattern_condition(
+                                statement.subject(),
+                                label.pattern(),
+                                label.guard(),
+                                matched.clone(),
+                            );
+                        }
+                        SwitchCaseKind::Expr(label) => walker.visit_expr(label.expr()),
+                        SwitchCaseKind::Default(_) => {}
+                    }
+                    matches = Some(match matches {
+                        Some(previous) => walker.state.environment.join(&previous),
+                        None => walker.state.environment.clone(),
+                    });
+                }
+                if let Some(matches) = matches {
+                    walker.state.environment = matches;
+                }
+                if falls_through {
+                    matched_empty = Some(walker.state.environment.clone());
+                    return;
+                }
+                for statement in case.body() {
+                    walker.visit_stmt(statement);
+                }
+            });
+            unmatched.pop_scope();
+            if !falls_through && !self.block_exits(case.body()) {
+                ends.push(std::mem::take(&mut self.state.environment));
+            }
+        }
+        ends.extend(self.break_targets.pop().expect("switch target").states);
+        // No case matching reaches the end unless the switch is
+        // exhaustive; with no completing path the end is unreachable.
+        if !exhaustive {
+            ends.push(unmatched);
+        }
+        FlowContext::join_paths(
+            &mut self.state.environment,
+            ends.into_iter().map(|end| (Cow::Owned(end), true)),
+            depth,
+            false,
+        );
+    }
+
+    fn visit_try_statement(&mut self, statement: TryCatchStmt<'a>) {
+        let before = self.state.environment.clone();
+        self.with_scope(|walker| walker.visit_block(statement.body()));
+        let mut ends = Vec::with_capacity(statement.catches().len() + 1);
+        let completes = !self.block_exits(statement.body().stmts());
+        ends.push((
+            Cow::Owned(std::mem::take(&mut self.state.environment)),
+            completes,
+        ));
+        // `finally` may also start anywhere in the `try` or its catches.
+        let before_finally = statement.finally().map(|_| before.clone());
+        // A catch may start anywhere in the `try` body: only promotions
+        // that hold before it and survive its writes remain.
+        self.state.environment = before;
+        self.enter_region(statement.span().start);
+        let caught = self.state.environment.clone();
+        for catch in statement.catches() {
+            self.state.environment = caught.clone();
+            self.with_scope(|walker| {
+                if let Some(name) = catch.exception_var() {
+                    let ty = catch.exception_type().map_or_else(
+                        || walker.state.model.core_type("Object", false),
+                        |ty| {
+                            walker
+                                .state
+                                .model
+                                .resolve_type_in(ty, &walker.state.type_parameters)
+                        },
+                    );
+                    walker
+                        .state
+                        .environment
+                        .declare_at(name.name().to_owned(), ty, name.span());
+                }
+                if let Some(name) = catch.stack_trace_var() {
+                    let ty = walker.state.model.core_type("StackTrace", false);
+                    walker
+                        .state
+                        .environment
+                        .declare_at(name.name().to_owned(), ty, name.span());
+                }
+                walker.visit_block(catch.body());
+            });
+            let completes = !self.block_exits(catch.body().stmts());
+            ends.push((
+                Cow::Owned(std::mem::take(&mut self.state.environment)),
+                completes,
+            ));
+        }
+        self.state.environment = caught;
+        let depth = self.state.environment.depth();
+        FlowContext::join_paths(&mut self.state.environment, ends, depth, false);
+        if let (Some(finally), Some(before)) = (statement.finally(), before_finally) {
+            // `finally` runs after the body and catches complete, or
+            // after any of their writes when they leave early.
+            let completed = std::mem::replace(&mut self.state.environment, before);
+            self.enter_region(statement.span().start);
+            for catch in statement.catches() {
+                self.enter_region(catch.body().span().start);
+            }
+            let entry = completed.join(&self.state.environment);
+            self.state.environment = entry.clone();
+            self.with_scope(|walker| walker.visit_block(finally));
+            let end = std::mem::replace(&mut self.state.environment, completed);
+            self.state.environment.attach_finally(&entry, &end);
+        }
+    }
+
+    fn visit_local_function_statement(&mut self, function: LocalFuncDecl<'a>) {
+        self.visit_declaration_annotations(function.annotations());
+        self.state
+            .type_parameters
+            .push(function.type_params(), &self.state.model);
+        let mut inferred_return = ResolvedType::UNKNOWN;
+        if function.return_type().is_none() && function.async_marker() == AsyncMarker::Sync {
+            self.with_scope(|walker| {
+                walker.bind_params(function.params(), None, false, None);
+                if let FunctionBody::Arrow(body) = function.body() {
+                    inferred_return = walker.state.infer(body.expr());
+                }
+            });
+        }
+        let ty = ResolvedType {
+            kind: ResolvedTypeKind::Function {
+                shape: Some(crate::resolve::FunctionTypeShape::new(
+                    function
+                        .params()
+                        .named()
+                        .filter(|param| matches!(param.kind(), ParamKind::Named { required: true }))
+                        .map(|param| param.name().name().to_owned())
+                        .collect(),
+                    function
+                        .type_params()
+                        .filter_map(|param| self.state.type_parameters.lookup(param.name().name()))
+                        .collect(),
+                )),
+                optional_positional: function
+                    .params()
+                    .positional()
+                    .filter(|param| param.kind() == ParamKind::OptionalPositional)
+                    .count(),
+                alias: Default::default(),
+                return_type: std::sync::Arc::new(
+                    function
+                        .return_type()
+                        .map(|ty| {
+                            self.state
+                                .model
+                                .resolve_type_in(ty, &self.state.type_parameters)
+                        })
+                        .unwrap_or(inferred_return),
+                ),
+                positional: function
+                    .params()
+                    .positional()
+                    .map(|param| {
+                        self.state
+                            .model
+                            .resolve_formal_parameter_in(param, &self.state.type_parameters)
+                    })
+                    .collect(),
+                named: function
+                    .params()
+                    .named()
+                    .map(|param| {
+                        (
+                            param.name().name().to_owned(),
+                            self.state
+                                .model
+                                .resolve_formal_parameter_in(param, &self.state.type_parameters),
+                        )
+                    })
+                    .collect(),
+                nullable: false,
+            },
+        };
+        self.state.environment.declare_local_function_at(
+            function.name().name().to_owned(),
+            ty,
+            function.name().span(),
+        );
+        self.state.type_parameters.pop();
+        self.visit_function(
+            Callable {
+                nested: Some(function.span().start),
+                type_parameters: function.type_params(),
+                params: Some(CallableParams::List(function.params())),
+                return_type: function.return_type(),
+                body: Some(function.body()),
+                async_marker: function.async_marker(),
+            },
+            false,
+        );
+    }
+
+    fn visit_yield_statement(&mut self, statement: YieldStmt<'a>) {
+        // `yield e` in a `Stream<T>`/`Iterable<T>` generator has
+        // context `T`.
+        let element = self.state.return_type.last().and_then(|ty| {
+            (!statement.is_star()
+                && (ty.interface("dart:async", "Stream") || ty.interface("dart:core", "Iterable")))
+            .then(|| ty.type_argument(0))
+            .flatten()
+        });
+        match element {
+            Some(element) => {
+                self.with_expected(element, |walker| walker.visit_expr(statement.value()));
+            }
+            None => self.visit_expr(statement.value()),
+        }
+    }
+
+    fn enclosing_declaration_type(
+        &self,
+        node: TopLevelDecl<'a>,
+        enclosing_name: Option<&str>,
+        type_parameters: AstChildren<'a, TypeParam<'a>>,
+    ) -> ResolvedType {
+        let walker = self;
+        // Instantiate the enclosing type with its own type parameters, so
+        // member and constructor lookups have something to substitute.
+        let arguments: Vec<ResolvedType> = type_parameters
+            .map(|param| {
+                walker
+                    .state
+                    .type_parameters
+                    .lookup(param.name().name())
+                    .unwrap_or(ResolvedType::UNKNOWN)
+            })
+            .collect();
+        // `this` in an extension is its `on` type.
+        match node {
+            TopLevelDecl::Extension(extension) => walker
+                .state
+                .model
+                .resolve_type_in(extension.on_type(), &walker.state.type_parameters),
+            _ => enclosing_name
+                .and_then(|name| walker.state.model.resolve_name(name))
+                .map(|identity| ResolvedType {
+                    kind: ResolvedTypeKind::Interface {
+                        occurrence: Default::default(),
+                        identity,
+                        arguments: arguments.into(),
+                        nullable: false,
+                        extension_type: false,
+                    },
+                })
+                .unwrap_or(ResolvedType::UNKNOWN),
+        }
+    }
+
+    fn prepare_declaration_members(
+        &mut self,
+        effective_members: EffectiveMembers<'a>,
+        members: AstChildren<'a, ClassMember<'a>>,
+    ) {
+        let walker = self;
+        walker.declare_fields(effective_members.clone());
+        walker.state.environment.declare_receiver(
+            walker
+                .state
+                .enclosing_type
+                .clone()
+                .unwrap_or(ResolvedType::UNKNOWN),
+        );
+        for constructor in effective_members
+            .constructors()
+            .filter(|ctor| ctor.is_primary)
+        {
+            walker.with_primary_environment(|walker| {
+                walker
+                    .visitor
+                    .visit_constructor_ref(constructor, &walker.state);
+            });
+        }
+        if let Some(primary) = effective_members.primary
+            && members.clone().any(|member| {
+                matches!(
+                    member,
+                    ClassMember::PrimaryConstructorBody(body) if body.body().is_some()
+                )
+            })
+        {
+            walker.with_scope(|walker| {
+                for param in primary.params().params() {
+                    if effective_members.representation
+                        || param.is_var()
+                        || param.is_final()
+                        || param.initializing().is_some()
+                    {
+                        continue;
+                    }
+                    let ty = walker
+                        .state
+                        .model
+                        .resolve_formal_parameter_in(param, &walker.state.type_parameters);
+                    walker.state.environment.declare_at(
+                        param.name().name().to_owned(),
+                        ty,
+                        param.name().span(),
+                    );
+                }
+                walker.primary_body_environment = Some(walker.state.environment.clone());
+            });
+        }
+    }
+
+    fn visit_scoped_top_level_declaration(
+        &mut self,
+        node: TopLevelDecl<'a>,
+        enclosing_name: Option<&str>,
+        superclass: Option<DartType<'a>>,
+        effective_members: Option<EffectiveMembers<'a>>,
+        type_parameters: AstChildren<'a, TypeParam<'a>>,
+        members: AstChildren<'a, ClassMember<'a>>,
+    ) {
+        let walker = self;
+        let previous_unnamed_members = std::mem::replace(
+            &mut walker.state.unnamed_extension_members,
+            match node {
+                TopLevelDecl::Extension(extension) if extension.name().is_none() => {
+                    Some(extension.members())
+                }
+                _ => None,
+            },
+        );
+        let previous_constant_owner = std::mem::replace(
+            &mut walker.state.constant_owner,
+            match node {
+                TopLevelDecl::Extension(extension) => extension
+                    .name()
+                    .and_then(|name| walker.state.model.resolve_extension(name.name())),
+                _ => enclosing_name.and_then(|name| walker.state.model.resolve_name(name)),
+            },
+        );
+        walker
+            .state
+            .type_parameters
+            .push(type_parameters.clone(), &walker.state.model);
+        let enclosing = walker.enclosing_declaration_type(node, enclosing_name, type_parameters);
+        let previous_enclosing = walker.state.enclosing_type.replace(enclosing);
+        let previous_superclass = std::mem::replace(
+            &mut walker.state.superclass,
+            superclass.map(|superclass| {
+                walker
+                    .state
+                    .model
+                    .resolve_type_in(superclass, &walker.state.type_parameters)
+            }),
+        );
+        let effective_members =
+            effective_members.unwrap_or_else(|| EffectiveMembers::declared(members.clone()));
+        let previous_primary = walker.primary_environment.take();
+        let previous_primary_body = walker.primary_body_environment.take();
+        walker.prepare_declaration_members(effective_members, members);
+        if matches!(node, TopLevelDecl::Enum(_)) {
+            walker.with_expected(ResolvedType::UNKNOWN, |walker| {
+                walk_top_level_decl(walker, node)
+            });
+        } else {
+            walk_top_level_decl(walker, node);
+        }
+        walker.primary_environment = previous_primary;
+        walker.primary_body_environment = previous_primary_body;
+        walker.state.superclass = previous_superclass;
+        walker.state.type_parameters.pop();
+        walker.state.enclosing_type = previous_enclosing;
+        walker.state.constant_owner = previous_constant_owner;
+        walker.state.unnamed_extension_members = previous_unnamed_members;
+    }
+}
+
 impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, 'a, V> {
     fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
         let enclosing_name = match node {
@@ -3241,134 +3784,14 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
         };
         if let Some((type_parameters, members)) = scoped {
             self.with_fresh_environment(|walker| {
-                let previous_unnamed_members = std::mem::replace(
-                    &mut walker.state.unnamed_extension_members,
-                    match node {
-                        TopLevelDecl::Extension(extension) if extension.name().is_none() => {
-                            Some(extension.members())
-                        }
-                        _ => None,
-                    },
+                walker.visit_scoped_top_level_declaration(
+                    node,
+                    enclosing_name,
+                    superclass,
+                    effective_members,
+                    type_parameters,
+                    members,
                 );
-                let previous_constant_owner = std::mem::replace(
-                    &mut walker.state.constant_owner,
-                    match node {
-                        TopLevelDecl::Extension(extension) => extension
-                            .name()
-                            .and_then(|name| walker.state.model.resolve_extension(name.name())),
-                        _ => enclosing_name.and_then(|name| walker.state.model.resolve_name(name)),
-                    },
-                );
-                walker
-                    .state
-                    .type_parameters
-                    .push(type_parameters.clone(), &walker.state.model);
-                // Instantiate the enclosing type with its own type parameters, so
-                // member and constructor lookups have something to substitute.
-                let arguments: Vec<ResolvedType> = type_parameters
-                    .map(|param| {
-                        walker
-                            .state
-                            .type_parameters
-                            .lookup(param.name().name())
-                            .unwrap_or(ResolvedType::UNKNOWN)
-                    })
-                    .collect();
-                // `this` in an extension is its `on` type.
-                let enclosing = match node {
-                    TopLevelDecl::Extension(extension) => walker
-                        .state
-                        .model
-                        .resolve_type_in(extension.on_type(), &walker.state.type_parameters),
-                    _ => enclosing_name
-                        .and_then(|name| walker.state.model.resolve_name(name))
-                        .map(|identity| ResolvedType {
-                            kind: ResolvedTypeKind::Interface {
-                                occurrence: Default::default(),
-                                identity,
-                                arguments: arguments.into(),
-                                nullable: false,
-                                extension_type: false,
-                            },
-                        })
-                        .unwrap_or(ResolvedType::UNKNOWN),
-                };
-                let previous_enclosing = walker.state.enclosing_type.replace(enclosing);
-                let previous_superclass = std::mem::replace(
-                    &mut walker.state.superclass,
-                    superclass.map(|superclass| {
-                        walker
-                            .state
-                            .model
-                            .resolve_type_in(superclass, &walker.state.type_parameters)
-                    }),
-                );
-                let effective_members = effective_members
-                    .unwrap_or_else(|| EffectiveMembers::declared(members.clone()));
-                let previous_primary = walker.primary_environment.take();
-                let previous_primary_body = walker.primary_body_environment.take();
-                walker.declare_fields(effective_members.clone());
-                walker.state.environment.declare_receiver(
-                    walker
-                        .state
-                        .enclosing_type
-                        .clone()
-                        .unwrap_or(ResolvedType::UNKNOWN),
-                );
-                for constructor in effective_members
-                    .constructors()
-                    .filter(|ctor| ctor.is_primary)
-                {
-                    walker.with_primary_environment(|walker| {
-                        walker
-                            .visitor
-                            .visit_constructor_ref(constructor, &walker.state);
-                    });
-                }
-                if let Some(primary) = effective_members.primary
-                    && members.clone().any(|member| {
-                        matches!(
-                            member,
-                            ClassMember::PrimaryConstructorBody(body) if body.body().is_some()
-                        )
-                    })
-                {
-                    walker.with_scope(|walker| {
-                        for param in primary.params().params() {
-                            if effective_members.representation
-                                || param.is_var()
-                                || param.is_final()
-                                || param.initializing().is_some()
-                            {
-                                continue;
-                            }
-                            let ty = walker
-                                .state
-                                .model
-                                .resolve_formal_parameter_in(param, &walker.state.type_parameters);
-                            walker.state.environment.declare_at(
-                                param.name().name().to_owned(),
-                                ty,
-                                param.name().span(),
-                            );
-                        }
-                        walker.primary_body_environment = Some(walker.state.environment.clone());
-                    });
-                }
-                if matches!(node, TopLevelDecl::Enum(_)) {
-                    walker.with_expected(ResolvedType::UNKNOWN, |walker| {
-                        walk_top_level_decl(walker, node)
-                    });
-                } else {
-                    walk_top_level_decl(walker, node);
-                }
-                walker.primary_environment = previous_primary;
-                walker.primary_body_environment = previous_primary_body;
-                walker.state.superclass = previous_superclass;
-                walker.state.type_parameters.pop();
-                walker.state.enclosing_type = previous_enclosing;
-                walker.state.constant_owner = previous_constant_owner;
-                walker.state.unnamed_extension_members = previous_unnamed_members;
             });
         } else if matches!(node, TopLevelDecl::Function(_)) {
             self.with_fresh_environment(|walker| walk_top_level_decl(walker, node));
@@ -3675,54 +4098,8 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                 self.visit_matched_pattern(assignment.pattern(), matched);
                 self.assigning_pattern = previous;
             }
-            Stmt::If(statement) => {
-                if let IfCondition::Expr(condition) = statement.condition() {
-                    self.visit_expr(condition);
-                    self.visit_branches(
-                        condition,
-                        |walker| walker.visit_stmt(statement.then_branch()),
-                        |walker| {
-                            if let Some(branch) = statement.else_branch() {
-                                walker.visit_stmt(branch);
-                            }
-                        },
-                        self.statement_exits(statement.then_branch()),
-                        statement
-                            .else_branch()
-                            .is_some_and(|branch| self.statement_exits(branch)),
-                    );
-                } else {
-                    self.visit_if_condition(
-                        statement.condition(),
-                        |walker| walker.visit_stmt(statement.then_branch()),
-                        |walker| {
-                            if let Some(branch) = statement.else_branch() {
-                                walker.visit_stmt(branch);
-                            }
-                        },
-                        self.statement_exits(statement.then_branch()),
-                        statement
-                            .else_branch()
-                            .is_some_and(|branch| self.statement_exits(branch)),
-                    );
-                }
-            }
-            Stmt::For(statement) => self.with_scope(|walker| {
-                if let Some(init) = statement.header().init() {
-                    walker.visit_for_init(init, statement.is_await());
-                }
-                let body = statement.body();
-                walker.with_break_target(None, true, node, |walker| {
-                    let (_, exit) =
-                        walker.enter_loop(statement.span().start, statement.header().condition());
-                    walker.assign_for_in(statement.header().init(), statement.is_await());
-                    walker.visit_stmt(body);
-                    for update in statement.header().updates() {
-                        walker.visit_expr(update);
-                    }
-                    walker.state.environment = exit;
-                });
-            }),
+            Stmt::If(statement) => self.visit_if_statement(statement),
+            Stmt::For(statement) => self.visit_for_statement(statement),
             Stmt::While(statement) => self.with_break_target(None, true, node, |walker| {
                 let (_, exit) =
                     walker.enter_loop(statement.span().start, Some(statement.condition()));
@@ -3741,159 +4118,8 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                     walker.assume_condition(statement.condition(), false);
                 })
             }),
-            Stmt::Switch(statement) => {
-                self.visit_expr(statement.subject());
-                let matched = self.state.infer(statement.subject());
-                // A `continue label;` may re-enter any labeled case.
-                if statement.cases().any(|case| case.labels().next().is_some()) {
-                    self.enter_region(statement.span().start);
-                }
-                let exhaustive = statement.cases().any(|case| {
-                    case.cases()
-                        .any(|kind| matches!(kind, SwitchCaseKind::Default(_)))
-                }) || FlowContext {
-                    model: &self.state.model,
-                    signatures: &self.state.signatures,
-                    type_parameters: &self.state.type_parameters,
-                    field_promotions: self.state.private_field_promotion,
-                }
-                .switch_is_exhaustive(statement, &matched);
-                let before = self.state.environment.clone();
-                let depth = before.depth();
-                let mut ends = Vec::with_capacity(statement.cases().len() + 1);
-                self.break_targets.push(BreakTarget {
-                    label: None,
-                    unlabeled: true,
-                    states: Vec::new(),
-                });
-                // An empty case's matches reach the next case's body.
-                let mut matched_empty: Option<TypeEnvironment> = None;
-                let mut unmatched = before.clone();
-                for (index, case) in statement.cases().enumerate() {
-                    self.state.environment.clone_from(&unmatched);
-                    let falls_through =
-                        case.body().is_empty() && index + 1 < statement.cases().len();
-                    self.with_scope(|walker| {
-                        // Later heads start from the preceding head's failure.
-                        unmatched.clone_from(&walker.state.environment);
-                        let mut matches = matched_empty.take();
-                        for kind in case.cases() {
-                            walker.state.environment.clone_from(&unmatched);
-                            match kind {
-                                SwitchCaseKind::Pattern(label) => {
-                                    unmatched = walker.visit_pattern_condition(
-                                        statement.subject(),
-                                        label.pattern(),
-                                        label.guard(),
-                                        matched.clone(),
-                                    );
-                                }
-                                SwitchCaseKind::Expr(label) => walker.visit_expr(label.expr()),
-                                SwitchCaseKind::Default(_) => {}
-                            }
-                            matches = Some(match matches {
-                                Some(previous) => walker.state.environment.join(&previous),
-                                None => walker.state.environment.clone(),
-                            });
-                        }
-                        if let Some(matches) = matches {
-                            walker.state.environment = matches;
-                        }
-                        if falls_through {
-                            matched_empty = Some(walker.state.environment.clone());
-                            return;
-                        }
-                        for statement in case.body() {
-                            walker.visit_stmt(statement);
-                        }
-                    });
-                    unmatched.pop_scope();
-                    if !falls_through && !self.block_exits(case.body()) {
-                        ends.push(std::mem::take(&mut self.state.environment));
-                    }
-                }
-                ends.extend(self.break_targets.pop().expect("switch target").states);
-                // No case matching reaches the end unless the switch is
-                // exhaustive; with no completing path the end is unreachable.
-                if !exhaustive {
-                    ends.push(unmatched);
-                }
-                FlowContext::join_paths(
-                    &mut self.state.environment,
-                    ends.into_iter().map(|end| (Cow::Owned(end), true)),
-                    depth,
-                    false,
-                );
-            }
-            Stmt::TryCatch(statement) => {
-                let before = self.state.environment.clone();
-                self.with_scope(|walker| walker.visit_block(statement.body()));
-                let mut ends = Vec::with_capacity(statement.catches().len() + 1);
-                let completes = !self.block_exits(statement.body().stmts());
-                ends.push((
-                    Cow::Owned(std::mem::take(&mut self.state.environment)),
-                    completes,
-                ));
-                // `finally` may also start anywhere in the `try` or its catches.
-                let before_finally = statement.finally().map(|_| before.clone());
-                // A catch may start anywhere in the `try` body: only promotions
-                // that hold before it and survive its writes remain.
-                self.state.environment = before;
-                self.enter_region(statement.span().start);
-                let caught = self.state.environment.clone();
-                for catch in statement.catches() {
-                    self.state.environment = caught.clone();
-                    self.with_scope(|walker| {
-                        if let Some(name) = catch.exception_var() {
-                            let ty = catch.exception_type().map_or_else(
-                                || walker.state.model.core_type("Object", false),
-                                |ty| {
-                                    walker
-                                        .state
-                                        .model
-                                        .resolve_type_in(ty, &walker.state.type_parameters)
-                                },
-                            );
-                            walker.state.environment.declare_at(
-                                name.name().to_owned(),
-                                ty,
-                                name.span(),
-                            );
-                        }
-                        if let Some(name) = catch.stack_trace_var() {
-                            let ty = walker.state.model.core_type("StackTrace", false);
-                            walker.state.environment.declare_at(
-                                name.name().to_owned(),
-                                ty,
-                                name.span(),
-                            );
-                        }
-                        walker.visit_block(catch.body());
-                    });
-                    let completes = !self.block_exits(catch.body().stmts());
-                    ends.push((
-                        Cow::Owned(std::mem::take(&mut self.state.environment)),
-                        completes,
-                    ));
-                }
-                self.state.environment = caught;
-                let depth = self.state.environment.depth();
-                FlowContext::join_paths(&mut self.state.environment, ends, depth, false);
-                if let (Some(finally), Some(before)) = (statement.finally(), before_finally) {
-                    // `finally` runs after the body and catches complete, or
-                    // after any of their writes when they leave early.
-                    let completed = std::mem::replace(&mut self.state.environment, before);
-                    self.enter_region(statement.span().start);
-                    for catch in statement.catches() {
-                        self.enter_region(catch.body().span().start);
-                    }
-                    let entry = completed.join(&self.state.environment);
-                    self.state.environment = entry.clone();
-                    self.with_scope(|walker| walker.visit_block(finally));
-                    let end = std::mem::replace(&mut self.state.environment, completed);
-                    self.state.environment.attach_finally(&entry, &end);
-                }
-            }
+            Stmt::Switch(statement) => self.visit_switch_statement(statement),
+            Stmt::TryCatch(statement) => self.visit_try_statement(statement),
             Stmt::Return(statement) => {
                 if let Some(value) = statement.value() {
                     let expected = self
@@ -3912,121 +4138,14 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                 statement.stmt(),
                 |walker| walker.visit_stmt(statement.stmt()),
             ),
-            Stmt::LocalFunc(function) => {
-                self.visit_declaration_annotations(function.annotations());
-                self.state
-                    .type_parameters
-                    .push(function.type_params(), &self.state.model);
-                let mut inferred_return = ResolvedType::UNKNOWN;
-                if function.return_type().is_none() && function.async_marker() == AsyncMarker::Sync
-                {
-                    self.with_scope(|walker| {
-                        walker.bind_params(function.params(), None, false, None);
-                        if let FunctionBody::Arrow(body) = function.body() {
-                            inferred_return = walker.state.infer(body.expr());
-                        }
-                    });
-                }
-                let ty = ResolvedType {
-                    kind: ResolvedTypeKind::Function {
-                        shape: Some(crate::resolve::FunctionTypeShape::new(
-                            function
-                                .params()
-                                .named()
-                                .filter(|param| {
-                                    matches!(param.kind(), ParamKind::Named { required: true })
-                                })
-                                .map(|param| param.name().name().to_owned())
-                                .collect(),
-                            function
-                                .type_params()
-                                .filter_map(|param| {
-                                    self.state.type_parameters.lookup(param.name().name())
-                                })
-                                .collect(),
-                        )),
-                        optional_positional: function
-                            .params()
-                            .positional()
-                            .filter(|param| param.kind() == ParamKind::OptionalPositional)
-                            .count(),
-                        alias: Default::default(),
-                        return_type: std::sync::Arc::new(
-                            function
-                                .return_type()
-                                .map(|ty| {
-                                    self.state
-                                        .model
-                                        .resolve_type_in(ty, &self.state.type_parameters)
-                                })
-                                .unwrap_or(inferred_return),
-                        ),
-                        positional: function
-                            .params()
-                            .positional()
-                            .map(|param| {
-                                self.state
-                                    .model
-                                    .resolve_formal_parameter_in(param, &self.state.type_parameters)
-                            })
-                            .collect(),
-                        named: function
-                            .params()
-                            .named()
-                            .map(|param| {
-                                (
-                                    param.name().name().to_owned(),
-                                    self.state.model.resolve_formal_parameter_in(
-                                        param,
-                                        &self.state.type_parameters,
-                                    ),
-                                )
-                            })
-                            .collect(),
-                        nullable: false,
-                    },
-                };
-                self.state.environment.declare_local_function_at(
-                    function.name().name().to_owned(),
-                    ty,
-                    function.name().span(),
-                );
-                self.state.type_parameters.pop();
-                self.visit_function(
-                    Callable {
-                        nested: Some(function.span().start),
-                        type_parameters: function.type_params(),
-                        params: Some(CallableParams::List(function.params())),
-                        return_type: function.return_type(),
-                        body: Some(function.body()),
-                        async_marker: function.async_marker(),
-                    },
-                    false,
-                );
-            }
+            Stmt::LocalFunc(function) => self.visit_local_function_statement(function),
             Stmt::Assert(statement) => {
                 self.visit_expr(statement.condition());
                 if let Some(message) = statement.message() {
                     self.visit_expr(message);
                 }
             }
-            Stmt::Yield(statement) => {
-                // `yield e` in a `Stream<T>`/`Iterable<T>` generator has
-                // context `T`.
-                let element = self.state.return_type.last().and_then(|ty| {
-                    (!statement.is_star()
-                        && (ty.interface("dart:async", "Stream")
-                            || ty.interface("dart:core", "Iterable")))
-                    .then(|| ty.type_argument(0))
-                    .flatten()
-                });
-                match element {
-                    Some(element) => {
-                        self.with_expected(element, |walker| walker.visit_expr(statement.value()));
-                    }
-                    None => self.visit_expr(statement.value()),
-                }
-            }
+            Stmt::Yield(statement) => self.visit_yield_statement(statement),
             Stmt::Expr(statement) => self.visit_expr(statement.expr()),
             Stmt::Break(statement) => self.record_break(statement.label()),
             Stmt::Continue(_) | Stmt::Rethrow(_) | Stmt::Empty(_) | Stmt::Error(_) => {}
@@ -4064,133 +4183,9 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
         }
         match node {
             Expr::Paren(n) => self.visit_expr(n.expr()),
-            Expr::Call(n) => {
-                let callee = n.callee();
-                let type_args = n.type_args();
-                let args = n.args();
-                // A dot shorthand takes its context from the complete
-                // selector chain, not from the final method's return type.
-                let expected = self
-                    .state
-                    .expected()
-                    .filter(|expected| {
-                        !matches!(
-                            expected,
-                            ResolvedType {
-                                kind: ResolvedTypeKind::Unknown
-                            }
-                        ) && crate::expression_has_dot_shorthand_base(callee)
-                    })
-                    .cloned();
-                self.with_context(expected, |walker| walker.visit_expr(callee));
-                match self.state.call_parameter_types(
-                    callee,
-                    type_args,
-                    args,
-                    self.state.expected(),
-                ) {
-                    Some((positional, named)) => {
-                        self.visit_call_arguments(args, &positional, &named)
-                    }
-                    None => {
-                        let callee_type = self.state.infer(callee);
-                        let untyped_member = match callee {
-                            Expr::Field(field) => {
-                                let receiver = self.state.infer_receiver(field.object());
-                                matches!(
-                                    receiver,
-                                    ResolvedType {
-                                        kind: ResolvedTypeKind::Dynamic
-                                    }
-                                ) || (field.field().name() == "call"
-                                    && receiver.interface("dart:core", "Function"))
-                            }
-                            _ => false,
-                        };
-                        let expected = if matches!(
-                            callee_type,
-                            ResolvedType {
-                                kind: ResolvedTypeKind::Dynamic
-                            }
-                        ) || callee_type.interface("dart:core", "Function")
-                            || untyped_member
-                        {
-                            ResolvedType::DYNAMIC
-                        } else {
-                            ResolvedType::UNKNOWN
-                        };
-                        for argument in args.positional() {
-                            self.with_expected(expected.clone(), |walker| {
-                                walker.visit_expr(argument)
-                            });
-                        }
-                        for argument in args.named() {
-                            self.with_expected(expected.clone(), |walker| {
-                                walker.visit_expr(argument.value())
-                            });
-                        }
-                    }
-                }
-            }
-            Expr::New(n) => {
-                let dart_type = n.dart_type();
-                let constructor_name = n.constructor_name();
-                let args = n.args();
-                let constructor =
-                    crate::resolve_new_constructor(dart_type, constructor_name, &self.state.model);
-                let resolved = self.state.infer_with_context(node, self.state.expected());
-                let parameters = self.state.constructor_parameter_types(
-                    &resolved,
-                    constructor.as_ref().map_or("new", |(_, name)| *name),
-                );
-                match parameters {
-                    Some((positional, named)) => {
-                        self.visit_call_arguments(args, &positional, &named)
-                    }
-                    None => self.visit_call_arguments(args, &[], &HashMap::new()),
-                }
-            }
-            Expr::FuncExpr(n) => {
-                let callable = Callable {
-                    nested: Some(n.span().start),
-                    type_parameters: n.type_params(),
-                    params: Some(CallableParams::List(n.params())),
-                    return_type: None,
-                    body: Some(n.body()),
-                    async_marker: n.async_marker(),
-                };
-                let inferred = self.state.infer_with_context(node, self.state.expected());
-                if let ResolvedType {
-                    kind:
-                        ResolvedTypeKind::Function {
-                            return_type,
-                            positional,
-                            named,
-                            nullable,
-                            alias,
-                            optional_positional,
-                            shape,
-                        },
-                } = inferred
-                {
-                    self.with_expected(
-                        ResolvedType {
-                            kind: ResolvedTypeKind::Function {
-                                shape,
-                                optional_positional,
-                                return_type,
-                                positional,
-                                named,
-                                nullable,
-                                alias,
-                            },
-                        },
-                        |walker| walker.visit_function(callable, true),
-                    );
-                } else {
-                    self.visit_function(callable, true);
-                }
-            }
+            Expr::Call(n) => self.visit_call_expression(n),
+            Expr::New(n) => self.visit_new_expression(n),
+            Expr::FuncExpr(n) => self.visit_function_expression(n),
             Expr::Conditional(_) => unreachable!("conditional chain handled above"),
             Expr::Assign(n) if matches!(n.op(), AssignOp::NullCoalesceEq) => {
                 let target = n.target();
@@ -4201,233 +4196,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                 self.with_expected(expected, |walker| walker.visit_expr(value));
                 self.state.environment = before.join(&self.state.environment);
             }
-            Expr::Cascade(n) => {
-                let object = n.object();
-                let sections = n.sections();
-                let is_null_aware = n.is_null_aware();
-                self.visit_expr(object);
-                let receiver = self.state.infer_with_context(object, self.state.expected());
-                let receiver = if is_null_aware {
-                    receiver.non_null()
-                } else {
-                    receiver
-                };
-                for section in sections {
-                    let mut current = receiver.clone();
-                    for operation in section.ops() {
-                        if match operation {
-                            CascadeOp::Field(n) => n.is_null_aware(),
-                            CascadeOp::Index(n) => n.is_null_aware(),
-                            _ => false,
-                        } {
-                            current = current.non_null();
-                        }
-                        self.visitor.visit_cascade_operation(
-                            operation,
-                            &current,
-                            section.span(),
-                            &self.state,
-                        );
-                        match operation {
-                            CascadeOp::NullAssert(_) => current = current.non_null(),
-                            CascadeOp::Field(n) => {
-                                let name = n.name();
-                                current = self
-                                    .state
-                                    .signatures
-                                    .instantiated_member_read(
-                                        &current,
-                                        name.name(),
-                                        &self.state.model,
-                                    )
-                                    .unwrap_or_else(|| {
-                                        if current == ResolvedType::DYNAMIC {
-                                            ResolvedType::DYNAMIC
-                                        } else {
-                                            ResolvedType::UNKNOWN
-                                        }
-                                    });
-                            }
-                            CascadeOp::Call(n) => {
-                                let name = n.name();
-                                let type_args = n.type_args();
-                                let args = n.args();
-                                if let Some((signature, owner)) = self
-                                    .state
-                                    .signatures
-                                    .resolved_member(&current, name.name(), &self.state.model)
-                                {
-                                    let substitutions = self.state.signature_substitutions(
-                                        signature, &owner, type_args, args, None,
-                                    );
-                                    let (positional, named) = self
-                                        .state
-                                        .substituted_parameters(signature, &substitutions);
-                                    let returned = self
-                                        .state
-                                        .model
-                                        .substitute(&signature.return_type, &substitutions);
-                                    self.visit_call_arguments(args, &positional, &named);
-                                    current = returned;
-                                } else {
-                                    for argument in args.positional() {
-                                        self.with_expected(ResolvedType::UNKNOWN, |walker| {
-                                            walker.visit_expr(argument)
-                                        });
-                                    }
-                                    for argument in args.named() {
-                                        self.with_expected(ResolvedType::UNKNOWN, |walker| {
-                                            walker.visit_expr(argument.value())
-                                        });
-                                    }
-                                    current = self
-                                        .state
-                                        .signatures
-                                        .instantiated_member_read(
-                                            &current,
-                                            name.name(),
-                                            &self.state.model,
-                                        )
-                                        .as_ref()
-                                        .map(SemanticState::callable_return_type)
-                                        .unwrap_or_else(|| {
-                                            if current == ResolvedType::DYNAMIC {
-                                                ResolvedType::DYNAMIC
-                                            } else {
-                                                ResolvedType::UNKNOWN
-                                            }
-                                        });
-                                }
-                                self.state.environment.demote_captured();
-                            }
-                            CascadeOp::Invoke(n) => {
-                                let type_args = n.type_args();
-                                let args = n.args();
-                                if let Some((signature, owner)) = self
-                                    .state
-                                    .signatures
-                                    .resolved_member(&current, "call", &self.state.model)
-                                {
-                                    let substitutions = self.state.signature_substitutions(
-                                        signature, &owner, type_args, args, None,
-                                    );
-                                    let (positional, named) = self
-                                        .state
-                                        .substituted_parameters(signature, &substitutions);
-                                    let returned = self
-                                        .state
-                                        .model
-                                        .substitute(&signature.return_type, &substitutions);
-                                    self.visit_call_arguments(args, &positional, &named);
-                                    current = returned;
-                                } else {
-                                    let returned = current.function_return_type();
-                                    if let ResolvedType {
-                                        kind:
-                                            ResolvedTypeKind::Function {
-                                                positional, named, ..
-                                            },
-                                    } = current
-                                    {
-                                        self.visit_call_arguments(
-                                            args,
-                                            &positional,
-                                            &named.iter().cloned().collect(),
-                                        );
-                                        current = returned.unwrap_or(ResolvedType::UNKNOWN);
-                                    } else {
-                                        self.visit_call_arguments(args, &[], &HashMap::new());
-                                        current = SemanticState::callable_return_type(&current);
-                                    }
-                                }
-                                self.state.environment.demote_captured();
-                            }
-                            CascadeOp::Index(n) => {
-                                let index = n.index();
-                                if let Some((signature, owner)) = self
-                                    .state
-                                    .signatures
-                                    .resolved_member(&current, "[]", &self.state.model)
-                                {
-                                    let expected = signature
-                                        .positional
-                                        .first()
-                                        .map(|ty| self.state.model.substitute(ty, &owner))
-                                        .unwrap_or(ResolvedType::UNKNOWN);
-                                    let returned =
-                                        self.state.model.substitute(&signature.return_type, &owner);
-                                    self.with_expected(expected, |walker| walker.visit_expr(index));
-                                    current = returned;
-                                } else {
-                                    self.with_expected(ResolvedType::UNKNOWN, |walker| {
-                                        walker.visit_expr(index)
-                                    });
-                                    if current != ResolvedType::DYNAMIC {
-                                        current = ResolvedType::UNKNOWN;
-                                    }
-                                }
-                            }
-                            CascadeOp::Assign(_) | CascadeOp::IndexAssign(_) => {
-                                let (target, operator, value) = match operation {
-                                    CascadeOp::Assign(n) => (n.target(), n.op(), n.value()),
-                                    CascadeOp::IndexAssign(n) => (n.target(), n.op(), n.value()),
-                                    _ => unreachable!(),
-                                };
-                                let indexed = matches!(operation, CascadeOp::IndexAssign(_));
-                                self.visitor.visit_cascade_assignment(
-                                    CascadeAssignment {
-                                        target,
-                                        value,
-                                        operator,
-                                        indexed,
-                                    },
-                                    &current,
-                                    section.span(),
-                                    &self.state,
-                                );
-                                let (index_context, value_context) = if indexed {
-                                    self.state
-                                        .signatures
-                                        .resolved_member(&current, "[]=", &self.state.model)
-                                        .map(|(signature, owner)| {
-                                            let resolve = |position| {
-                                                signature
-                                                    .positional
-                                                    .get(position)
-                                                    .map(|ty| {
-                                                        self.state.model.substitute(ty, &owner)
-                                                    })
-                                                    .unwrap_or(ResolvedType::UNKNOWN)
-                                            };
-                                            (resolve(0), resolve(1))
-                                        })
-                                        .unwrap_or((ResolvedType::UNKNOWN, ResolvedType::UNKNOWN))
-                                } else if let Expr::Ident(identifier) = target {
-                                    let expected = self
-                                        .state
-                                        .signatures
-                                        .resolved_writable_field(
-                                            &current,
-                                            identifier.name(),
-                                            &self.state.model,
-                                        )
-                                        .map(|(ty, owner)| self.state.model.substitute(&ty, &owner))
-                                        .unwrap_or(ResolvedType::UNKNOWN);
-                                    (ResolvedType::UNKNOWN, expected)
-                                } else {
-                                    (ResolvedType::UNKNOWN, ResolvedType::UNKNOWN)
-                                };
-                                self.with_expected(index_context, |walker| {
-                                    walker.visit_expr(target)
-                                });
-                                self.with_expected(value_context, |walker| {
-                                    walker.visit_expr(value)
-                                });
-                            }
-                        }
-                    }
-                }
-            }
+            Expr::Cascade(n) => self.visit_cascade_expression(n),
             Expr::Assign(n) if matches!(n.op(), AssignOp::Eq) => {
                 let target = n.target();
                 let value = n.value();
@@ -4447,98 +4216,242 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                     self.visit_element_with_context(element, &context, &None);
                 }
             }
-            Expr::Map(n) => {
-                let type_args = n.type_args();
-                let elements = n.elements();
-                let component_type = |ordinal| {
-                    type_args
-                        .clone()
-                        .nth(ordinal)
-                        .map(|ty| {
-                            self.state
-                                .model
-                                .resolve_type_in(ty, &self.state.type_parameters)
-                        })
-                        .or_else(|| {
-                            self.state.expected().map(|expected| {
-                                if expected.interface("dart:core", "Map") {
-                                    expected
-                                        .type_argument(ordinal)
-                                        .unwrap_or(ResolvedType::UNKNOWN)
-                                } else {
-                                    ResolvedType::UNKNOWN
-                                }
-                            })
-                        })
-                };
-                let key_type = component_type(0);
-                let value_type = component_type(1);
-                for element in elements {
-                    self.visit_element_with_context(element, &key_type, &value_type);
-                }
-            }
+            Expr::Map(n) => self.visit_map_expression(n),
             // A record literal's fields take the context record's field types.
-            Expr::Record(n) => {
-                let fields = n.fields();
-                if let Some(
-                    expected @ ResolvedType {
-                        kind: ResolvedTypeKind::Record { .. },
-                    },
-                ) = self.state.expected().cloned()
-                {
-                    let mut positional_index = 0;
-                    for field in fields {
-                        let expected = match field.name() {
-                            Some(name) => expected.record_field(name.name()),
-                            None => {
-                                let ty = expected.record_positional(positional_index);
-                                positional_index += 1;
-                                ty
-                            }
-                        };
-                        self.with_expected(expected.unwrap_or(ResolvedType::UNKNOWN), |walker| {
-                            walker.visit_expr(field.value())
-                        });
-                    }
-                } else {
-                    self.with_expected(ResolvedType::UNKNOWN, |walker| walk_expr(walker, node));
-                }
-            }
-            Expr::Switch(n) => {
-                let subject = n.subject();
-                let arms = n.arms();
-                self.visit_expr(subject);
-                let matched = self.state.infer(subject);
-                let before = self.state.environment.clone();
-                let depth = before.depth();
-                let mut ends = Vec::with_capacity(arms.len());
-                let mut unmatched = before.clone();
-                for arm in arms {
-                    self.state.environment.clone_from(&unmatched);
-                    let mut completes = true;
-                    self.with_scope(|walker| {
-                        unmatched = walker.visit_pattern_condition(
-                            subject,
-                            arm.pattern(),
-                            arm.guard(),
-                            matched.clone(),
-                        );
-                        walker.visit_expr(arm.body());
-                        completes = walker.state.infer(arm.body()) != ResolvedType::NEVER;
-                    });
-                    unmatched.pop_scope();
-                    ends.push((
-                        Cow::Owned(std::mem::take(&mut self.state.environment)),
-                        completes,
-                    ));
-                }
-                // A switch expression is exhaustive; with no completing arm,
-                // control never reaches its end.
-                self.state.environment = before;
-                FlowContext::join_paths(&mut self.state.environment, ends, depth, false);
-            }
+            Expr::Record(n) => self.visit_record_expression(n),
+            Expr::Switch(n) => self.visit_switch_expression(n),
             _ => self.with_expected(ResolvedType::UNKNOWN, |walker| walk_expr(walker, node)),
         }
+        self.finish_visited_expression(node);
+        self.state.inside_cascade = enclosing_cascade;
+    }
+
+    fn visit_pattern(&mut self, node: Pattern<'a>) {
+        self.visitor
+            .visit_pattern(node, self.state.matched.last(), &self.state);
+        walk_pattern(self, node);
+    }
+}
+
+impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
+    fn visit_call_expression(&mut self, n: CallExpr<'a>) {
+        let callee = n.callee();
+        let type_args = n.type_args();
+        let args = n.args();
+        // A dot shorthand takes its context from the complete
+        // selector chain, not from the final method's return type.
+        let expected = self
+            .state
+            .expected()
+            .filter(|expected| {
+                !matches!(
+                    expected,
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Unknown
+                    }
+                ) && crate::expression_has_dot_shorthand_base(callee)
+            })
+            .cloned();
+        self.with_context(expected, |walker| walker.visit_expr(callee));
+        match self
+            .state
+            .call_parameter_types(callee, type_args, args, self.state.expected())
+        {
+            Some((positional, named)) => self.visit_call_arguments(args, &positional, &named),
+            None => {
+                let callee_type = self.state.infer(callee);
+                let untyped_member = match callee {
+                    Expr::Field(field) => {
+                        let receiver = self.state.infer_receiver(field.object());
+                        matches!(
+                            receiver,
+                            ResolvedType {
+                                kind: ResolvedTypeKind::Dynamic
+                            }
+                        ) || (field.field().name() == "call"
+                            && receiver.interface("dart:core", "Function"))
+                    }
+                    _ => false,
+                };
+                let expected = if matches!(
+                    callee_type,
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Dynamic
+                    }
+                ) || callee_type.interface("dart:core", "Function")
+                    || untyped_member
+                {
+                    ResolvedType::DYNAMIC
+                } else {
+                    ResolvedType::UNKNOWN
+                };
+                for argument in args.positional() {
+                    self.with_expected(expected.clone(), |walker| walker.visit_expr(argument));
+                }
+                for argument in args.named() {
+                    self.with_expected(expected.clone(), |walker| {
+                        walker.visit_expr(argument.value())
+                    });
+                }
+            }
+        }
+    }
+
+    fn visit_new_expression(&mut self, n: NewExpr<'a>) {
+        let node = Expr::New(n);
+        let dart_type = n.dart_type();
+        let constructor_name = n.constructor_name();
+        let args = n.args();
+        let constructor =
+            crate::resolve_new_constructor(dart_type, constructor_name, &self.state.model);
+        let resolved = self.state.infer_with_context(node, self.state.expected());
+        let parameters = self.state.constructor_parameter_types(
+            &resolved,
+            constructor.as_ref().map_or("new", |(_, name)| *name),
+        );
+        match parameters {
+            Some((positional, named)) => self.visit_call_arguments(args, &positional, &named),
+            None => self.visit_call_arguments(args, &[], &HashMap::new()),
+        }
+    }
+
+    fn visit_function_expression(&mut self, n: FuncExpr<'a>) {
+        let node = Expr::FuncExpr(n);
+        let callable = Callable {
+            nested: Some(n.span().start),
+            type_parameters: n.type_params(),
+            params: Some(CallableParams::List(n.params())),
+            return_type: None,
+            body: Some(n.body()),
+            async_marker: n.async_marker(),
+        };
+        let inferred = self.state.infer_with_context(node, self.state.expected());
+        if let ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    return_type,
+                    positional,
+                    named,
+                    nullable,
+                    alias,
+                    optional_positional,
+                    shape,
+                },
+        } = inferred
+        {
+            self.with_expected(
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function {
+                        shape,
+                        optional_positional,
+                        return_type,
+                        positional,
+                        named,
+                        nullable,
+                        alias,
+                    },
+                },
+                |walker| walker.visit_function(callable, true),
+            );
+        } else {
+            self.visit_function(callable, true);
+        }
+    }
+
+    fn visit_map_expression(&mut self, n: MapExpr<'a>) {
+        let type_args = n.type_args();
+        let elements = n.elements();
+        let component_type = |ordinal| {
+            type_args
+                .clone()
+                .nth(ordinal)
+                .map(|ty| {
+                    self.state
+                        .model
+                        .resolve_type_in(ty, &self.state.type_parameters)
+                })
+                .or_else(|| {
+                    self.state.expected().map(|expected| {
+                        if expected.interface("dart:core", "Map") {
+                            expected
+                                .type_argument(ordinal)
+                                .unwrap_or(ResolvedType::UNKNOWN)
+                        } else {
+                            ResolvedType::UNKNOWN
+                        }
+                    })
+                })
+        };
+        let key_type = component_type(0);
+        let value_type = component_type(1);
+        for element in elements {
+            self.visit_element_with_context(element, &key_type, &value_type);
+        }
+    }
+
+    fn visit_record_expression(&mut self, n: RecordExpr<'a>) {
+        let node = Expr::Record(n);
+        let fields = n.fields();
+        if let Some(
+            expected @ ResolvedType {
+                kind: ResolvedTypeKind::Record { .. },
+            },
+        ) = self.state.expected().cloned()
+        {
+            let mut positional_index = 0;
+            for field in fields {
+                let expected = match field.name() {
+                    Some(name) => expected.record_field(name.name()),
+                    None => {
+                        let ty = expected.record_positional(positional_index);
+                        positional_index += 1;
+                        ty
+                    }
+                };
+                self.with_expected(expected.unwrap_or(ResolvedType::UNKNOWN), |walker| {
+                    walker.visit_expr(field.value())
+                });
+            }
+        } else {
+            self.with_expected(ResolvedType::UNKNOWN, |walker| walk_expr(walker, node));
+        }
+    }
+
+    fn visit_switch_expression(&mut self, n: SwitchExpr<'a>) {
+        let subject = n.subject();
+        let arms = n.arms();
+        self.visit_expr(subject);
+        let matched = self.state.infer(subject);
+        let before = self.state.environment.clone();
+        let depth = before.depth();
+        let mut ends = Vec::with_capacity(arms.len());
+        let mut unmatched = before.clone();
+        for arm in arms {
+            self.state.environment.clone_from(&unmatched);
+            let mut completes = true;
+            self.with_scope(|walker| {
+                unmatched = walker.visit_pattern_condition(
+                    subject,
+                    arm.pattern(),
+                    arm.guard(),
+                    matched.clone(),
+                );
+                walker.visit_expr(arm.body());
+                completes = walker.state.infer(arm.body()) != ResolvedType::NEVER;
+            });
+            unmatched.pop_scope();
+            ends.push((
+                Cow::Owned(std::mem::take(&mut self.state.environment)),
+                completes,
+            ));
+        }
+        // A switch expression is exhaustive; with no completing arm,
+        // control never reaches its end.
+        self.state.environment = before;
+        FlowContext::join_paths(&mut self.state.environment, ends, depth, false);
+    }
+
+    fn finish_visited_expression(&mut self, node: Expr<'a>) {
         let assigned = match node {
             Expr::Assign(n) if matches!(n.target(), Expr::Ident(_)) => {
                 let target = n.target();
@@ -4568,13 +4481,239 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
             field_promotions: self.state.private_field_promotion,
         }
         .finish_expression(&mut self.state.environment, node, assigned);
-        self.state.inside_cascade = enclosing_cascade;
     }
 
-    fn visit_pattern(&mut self, node: Pattern<'a>) {
+    fn visit_cascade_call(
+        &mut self,
+        n: CascadeCall<'a>,
+        mut current: ResolvedType,
+    ) -> ResolvedType {
+        let name = n.name();
+        let type_args = n.type_args();
+        let args = n.args();
+        if let Some((signature, owner)) =
+            self.state
+                .signatures
+                .resolved_member(&current, name.name(), &self.state.model)
+        {
+            let substitutions = self
+                .state
+                .signature_substitutions(signature, &owner, type_args, args, None);
+            let (positional, named) = self.state.substituted_parameters(signature, &substitutions);
+            let returned = self
+                .state
+                .model
+                .substitute(&signature.return_type, &substitutions);
+            self.visit_call_arguments(args, &positional, &named);
+            current = returned;
+        } else {
+            for argument in args.positional() {
+                self.with_expected(ResolvedType::UNKNOWN, |walker| walker.visit_expr(argument));
+            }
+            for argument in args.named() {
+                self.with_expected(ResolvedType::UNKNOWN, |walker| {
+                    walker.visit_expr(argument.value())
+                });
+            }
+            current = self
+                .state
+                .signatures
+                .instantiated_member_read(&current, name.name(), &self.state.model)
+                .as_ref()
+                .map(SemanticState::callable_return_type)
+                .unwrap_or_else(|| {
+                    if current == ResolvedType::DYNAMIC {
+                        ResolvedType::DYNAMIC
+                    } else {
+                        ResolvedType::UNKNOWN
+                    }
+                });
+        }
+        self.state.environment.demote_captured();
+        current
+    }
+
+    fn visit_cascade_invoke(
+        &mut self,
+        n: CascadeInvoke<'a>,
+        mut current: ResolvedType,
+    ) -> ResolvedType {
+        let type_args = n.type_args();
+        let args = n.args();
+        if let Some((signature, owner)) =
+            self.state
+                .signatures
+                .resolved_member(&current, "call", &self.state.model)
+        {
+            let substitutions = self
+                .state
+                .signature_substitutions(signature, &owner, type_args, args, None);
+            let (positional, named) = self.state.substituted_parameters(signature, &substitutions);
+            let returned = self
+                .state
+                .model
+                .substitute(&signature.return_type, &substitutions);
+            self.visit_call_arguments(args, &positional, &named);
+            current = returned;
+        } else {
+            let returned = current.function_return_type();
+            if let ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        positional, named, ..
+                    },
+            } = current
+            {
+                self.visit_call_arguments(args, &positional, &named.iter().cloned().collect());
+                current = returned.unwrap_or(ResolvedType::UNKNOWN);
+            } else {
+                self.visit_call_arguments(args, &[], &HashMap::new());
+                current = SemanticState::callable_return_type(&current);
+            }
+        }
+        self.state.environment.demote_captured();
+        current
+    }
+
+    fn visit_cascade_index(
+        &mut self,
+        n: CascadeIndex<'a>,
+        mut current: ResolvedType,
+    ) -> ResolvedType {
+        let index = n.index();
+        if let Some((signature, owner)) =
+            self.state
+                .signatures
+                .resolved_member(&current, "[]", &self.state.model)
+        {
+            let expected = signature
+                .positional
+                .first()
+                .map(|ty| self.state.model.substitute(ty, &owner))
+                .unwrap_or(ResolvedType::UNKNOWN);
+            let returned = self.state.model.substitute(&signature.return_type, &owner);
+            self.with_expected(expected, |walker| walker.visit_expr(index));
+            current = returned;
+        } else {
+            self.with_expected(ResolvedType::UNKNOWN, |walker| walker.visit_expr(index));
+            if current != ResolvedType::DYNAMIC {
+                current = ResolvedType::UNKNOWN;
+            }
+        }
+        current
+    }
+
+    fn visit_cascade_assignment_operation(
+        &mut self,
+        operation: CascadeOp<'a>,
+        current: &ResolvedType,
+        section: Span,
+    ) {
+        let (target, operator, value) = match operation {
+            CascadeOp::Assign(n) => (n.target(), n.op(), n.value()),
+            CascadeOp::IndexAssign(n) => (n.target(), n.op(), n.value()),
+            _ => unreachable!(),
+        };
+        let indexed = matches!(operation, CascadeOp::IndexAssign(_));
+        self.visitor.visit_cascade_assignment(
+            CascadeAssignment {
+                target,
+                value,
+                operator,
+                indexed,
+            },
+            current,
+            section,
+            &self.state,
+        );
+        let (index_context, value_context) = if indexed {
+            self.state
+                .signatures
+                .resolved_member(current, "[]=", &self.state.model)
+                .map(|(signature, owner)| {
+                    let resolve = |position| {
+                        signature
+                            .positional
+                            .get(position)
+                            .map(|ty| self.state.model.substitute(ty, &owner))
+                            .unwrap_or(ResolvedType::UNKNOWN)
+                    };
+                    (resolve(0), resolve(1))
+                })
+                .unwrap_or((ResolvedType::UNKNOWN, ResolvedType::UNKNOWN))
+        } else if let Expr::Ident(identifier) = target {
+            let expected = self
+                .state
+                .signatures
+                .resolved_writable_field(current, identifier.name(), &self.state.model)
+                .map(|(ty, owner)| self.state.model.substitute(&ty, &owner))
+                .unwrap_or(ResolvedType::UNKNOWN);
+            (ResolvedType::UNKNOWN, expected)
+        } else {
+            (ResolvedType::UNKNOWN, ResolvedType::UNKNOWN)
+        };
+        self.with_expected(index_context, |walker| walker.visit_expr(target));
+        self.with_expected(value_context, |walker| walker.visit_expr(value));
+    }
+
+    fn walk_cascade_operation(
+        &mut self,
+        operation: CascadeOp<'a>,
+        mut current: ResolvedType,
+        section: Span,
+    ) -> ResolvedType {
+        if match operation {
+            CascadeOp::Field(n) => n.is_null_aware(),
+            CascadeOp::Index(n) => n.is_null_aware(),
+            _ => false,
+        } {
+            current = current.non_null();
+        }
         self.visitor
-            .visit_pattern(node, self.state.matched.last(), &self.state);
-        walk_pattern(self, node);
+            .visit_cascade_operation(operation, &current, section, &self.state);
+        match operation {
+            CascadeOp::NullAssert(_) => current = current.non_null(),
+            CascadeOp::Field(n) => {
+                let name = n.name();
+                current = self
+                    .state
+                    .signatures
+                    .instantiated_member_read(&current, name.name(), &self.state.model)
+                    .unwrap_or_else(|| {
+                        if current == ResolvedType::DYNAMIC {
+                            ResolvedType::DYNAMIC
+                        } else {
+                            ResolvedType::UNKNOWN
+                        }
+                    });
+            }
+            CascadeOp::Call(n) => current = self.visit_cascade_call(n, current),
+            CascadeOp::Invoke(n) => current = self.visit_cascade_invoke(n, current),
+            CascadeOp::Index(n) => current = self.visit_cascade_index(n, current),
+            CascadeOp::Assign(_) | CascadeOp::IndexAssign(_) => {
+                self.visit_cascade_assignment_operation(operation, &current, section);
+            }
+        }
+        current
+    }
+
+    fn visit_cascade_expression(&mut self, n: CascadeExpr<'a>) {
+        let object = n.object();
+        let sections = n.sections();
+        let is_null_aware = n.is_null_aware();
+        self.visit_expr(object);
+        let receiver = self.state.infer_with_context(object, self.state.expected());
+        let receiver = if is_null_aware {
+            receiver.non_null()
+        } else {
+            receiver
+        };
+        for section in sections {
+            let mut current = receiver.clone();
+            for operation in section.ops() {
+                current = self.walk_cascade_operation(operation, current, section.span());
+            }
+        }
     }
 }
 

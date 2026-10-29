@@ -50,8 +50,8 @@ use std::collections::{HashMap, HashSet};
 use falcon_analyze::{AnalyzeContext, QualifiedName, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{
-    Visitor, walk_annotation, walk_class_member, walk_dart_type, walk_expr, walk_expr_chain, walk_pattern,
-    walk_stmt, walk_top_level_decl,
+    Visitor, walk_annotation, walk_class_member, walk_dart_type, walk_expr, walk_expr_chain,
+    walk_pattern, walk_stmt, walk_top_level_decl,
 };
 use falcon_syntax::cst::*;
 
@@ -144,19 +144,7 @@ impl<'a> Reachability<'a> {
             walker.doc_references();
         }
 
-        let mut reached = vec![false; tables.decls.len()];
-        let mut pending = tables.roots.clone();
-        for &root in &pending {
-            reached[root] = true;
-        }
-        while let Some(declaration) = pending.pop() {
-            for &dependency in &deps[declaration] {
-                if !reached[dependency] {
-                    reached[dependency] = true;
-                    pending.push(dependency);
-                }
-            }
-        }
+        let reached = reachable_declarations(&deps, &tables.roots);
 
         let mut diagnostics: Vec<Diagnostic> = tables
             .decls
@@ -172,15 +160,35 @@ impl<'a> Reachability<'a> {
                             .is_none_or(|container| reached[tables.containers[container].decl]))
             })
             .map(|(_, decl)| {
-                ctx.diagnostic(format!(
-                    "Unreachable member `{}` in an executable library.",
-                    decl.label
-                ), decl.name_span)
+                ctx.diagnostic(
+                    format!(
+                        "Unreachable member `{}` in an executable library.",
+                        decl.label
+                    ),
+                    decl.name_span,
+                )
             })
             .collect();
         diagnostics.sort_by_key(|diagnostic| diagnostic.span.start);
         diagnostics
     }
+}
+
+fn reachable_declarations(deps: &[Vec<DeclId>], roots: &[DeclId]) -> Vec<bool> {
+    let mut reached = vec![false; deps.len()];
+    let mut pending = roots.to_vec();
+    for &root in &pending {
+        reached[root] = true;
+    }
+    while let Some(declaration) = pending.pop() {
+        for &dependency in &deps[declaration] {
+            if !reached[dependency] {
+                reached[dependency] = true;
+                pending.push(dependency);
+            }
+        }
+    }
+    reached
 }
 
 /// One compilation unit of the analyzed library. Unit 0 is the file under
@@ -244,6 +252,7 @@ fn top_level_name(declaration: TopLevelDecl<'_>) -> Option<Identifier<'_>> {
 
 type DeclId = usize;
 type ContainerId = usize;
+type MemberEntry<'a> = (usize, &'a str, String, Span, Span);
 
 /// A declaration that reachability is computed for.
 struct Decl {
@@ -461,32 +470,7 @@ impl<'a> Tables<'a> {
         let exempt = annotations.clone().any(is_visible_for_testing);
 
         if let TopLevelDecl::Variable(variable) = declaration {
-            for declarator in variable.declarators() {
-                let id = self.add_decl(
-                    unit,
-                    declarator.span().start,
-                    Decl {
-                        label: declarator.name().name().to_string(),
-                        unit,
-                        name_span: declarator.name().span(),
-                        container: None,
-                        scope: None,
-                        reportable: is_public(declarator.name().name()) && !exempt,
-                        doc_start,
-                        end: declarator.span().end,
-                        field: false,
-                    },
-                );
-                self.top
-                    .entry(declarator.name().name())
-                    .or_default()
-                    .push(id);
-                self.conflicting |= !self.defined.insert(declarator.name().name());
-                if let Some(initializer) = declarator.initializer() {
-                    self.initializers
-                        .insert(declarator.name().name(), initializer);
-                }
-            }
+            self.add_top_level_variables(unit, variable, doc_start, exempt);
             return;
         }
 
@@ -544,6 +528,52 @@ impl<'a> Tables<'a> {
             self.conflicting |= !self.defined.insert(name.name());
         }
 
+        self.add_top_level_container(unit, declaration, id, name, span);
+    }
+
+    fn add_top_level_variables(
+        &mut self,
+        unit: usize,
+        variable: TopLevelVarDecl<'a>,
+        doc_start: usize,
+        exempt: bool,
+    ) {
+        for declarator in variable.declarators() {
+            let id = self.add_decl(
+                unit,
+                declarator.span().start,
+                Decl {
+                    label: declarator.name().name().to_string(),
+                    unit,
+                    name_span: declarator.name().span(),
+                    container: None,
+                    scope: None,
+                    reportable: is_public(declarator.name().name()) && !exempt,
+                    doc_start,
+                    end: declarator.span().end,
+                    field: false,
+                },
+            );
+            self.top
+                .entry(declarator.name().name())
+                .or_default()
+                .push(id);
+            self.conflicting |= !self.defined.insert(declarator.name().name());
+            if let Some(initializer) = declarator.initializer() {
+                self.initializers
+                    .insert(declarator.name().name(), initializer);
+            }
+        }
+    }
+
+    fn add_top_level_container(
+        &mut self,
+        unit: usize,
+        declaration: TopLevelDecl<'a>,
+        id: DeclId,
+        name: Identifier<'a>,
+        span: Span,
+    ) {
         let public = is_public(name.name());
         let (kind, superclass, supertypes, members): (_, _, Vec<DartType<'a>>, _) =
             match declaration {
@@ -615,6 +645,14 @@ impl<'a> Tables<'a> {
         );
         self.container_named.entry(name.name()).or_insert(container);
         self.decls[id].scope = Some(container);
+        self.add_container_lexical_names(container, declaration);
+    }
+
+    fn add_container_lexical_names(
+        &mut self,
+        container: ContainerId,
+        declaration: TopLevelDecl<'a>,
+    ) {
         let lexical = &mut self.containers[container];
         match declaration {
             TopLevelDecl::Enum(x) => {
@@ -686,7 +724,6 @@ impl<'a> Tables<'a> {
         let Container {
             public,
             unit,
-            kind,
             ref members_source,
             decl,
             ..
@@ -714,59 +751,11 @@ impl<'a> Tables<'a> {
             );
             let visible_for_testing = annotations.clone().any(is_visible_for_testing);
             let preview = annotations.clone().any(|a| self.is_preview(a));
-            let mut entries: Vec<(usize, &'a str, String, Span, Span)> = Vec::new();
-            match member {
-                ClassMember::Constructor(constructor) => {
-                    let key = constructor_key(constructor);
-                    if kind == ContainerKind::Enum || !is_public(key) {
-                        continue;
-                    }
-                    let name_span = constructor
-                        .constructor_name()
-                        .map_or(constructor.name().span(), |name| name.span());
-                    let label = format!("{owner}.{key}");
-                    entries.push((span.start, key, label, name_span, span));
-                }
-                ClassMember::Field(field) => {
-                    for declarator in field.declarators() {
-                        let name = declarator.name().name();
-                        if is_public(name)
-                            && (is_static || !self.may_override(container, name, semantic))
-                        {
-                            entries.push((
-                                declarator.span().start,
-                                name,
-                                name.to_string(),
-                                declarator.name().span(),
-                                Span::new(span.start, declarator.span().end),
-                            ));
-                        }
-                    }
-                }
-                ClassMember::Operator(operator) => {
-                    let key = operator.lookup_name();
-                    if !self.may_override(container, key, semantic) {
-                        let name_span = operator_token_span(operator);
-                        entries.push((span.start, key, operator.op().to_string(), name_span, span));
-                    }
-                }
-                ClassMember::Method(_) | ClassMember::Getter(_) | ClassMember::Setter(_) => {
-                    let name = match member {
-                        ClassMember::Method(x) => x.name(),
-                        ClassMember::Getter(x) => x.name(),
-                        ClassMember::Setter(x) => x.name(),
-                        _ => unreachable!(),
-                    };
-                    let key = name.name();
-                    if is_public(key)
-                        && !is_test_method(key)
-                        && (is_static || !self.may_override(container, key, semantic))
-                    {
-                        entries.push((span.start, key, key.to_string(), name.span(), span));
-                    }
-                }
-                ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => {}
-            }
+            let Some(entries) =
+                self.member_entries(container, member, &owner, is_static, span, semantic)
+            else {
+                continue;
+            };
             // Widget previews apply to constructors and static methods.
             let preview_exempt = preview
                 && match member {
@@ -805,6 +794,74 @@ impl<'a> Tables<'a> {
                 }
             }
         }
+    }
+
+    fn member_entries(
+        &self,
+        container: ContainerId,
+        member: ClassMember<'a>,
+        owner: &str,
+        is_static: bool,
+        span: Span,
+        semantic: Option<(
+            &falcon_analyze::SemanticModel<'_>,
+            &falcon_analyze::SignatureIndex,
+        )>,
+    ) -> Option<Vec<MemberEntry<'a>>> {
+        let mut entries = Vec::new();
+        match member {
+            ClassMember::Constructor(constructor) => {
+                let key = constructor_key(constructor);
+                if self.containers[container].kind == ContainerKind::Enum || !is_public(key) {
+                    return None;
+                }
+                let name_span = constructor
+                    .constructor_name()
+                    .map_or(constructor.name().span(), |name| name.span());
+                let label = format!("{owner}.{key}");
+                entries.push((span.start, key, label, name_span, span));
+            }
+            ClassMember::Field(field) => {
+                for declarator in field.declarators() {
+                    let name = declarator.name().name();
+                    if is_public(name)
+                        && (is_static || !self.may_override(container, name, semantic))
+                    {
+                        entries.push((
+                            declarator.span().start,
+                            name,
+                            name.to_string(),
+                            declarator.name().span(),
+                            Span::new(span.start, declarator.span().end),
+                        ));
+                    }
+                }
+            }
+            ClassMember::Operator(operator) => {
+                let key = operator.lookup_name();
+                if !self.may_override(container, key, semantic) {
+                    let name_span = operator_token_span(operator);
+                    entries.push((span.start, key, operator.op().to_string(), name_span, span));
+                }
+            }
+            ClassMember::Method(_) | ClassMember::Getter(_) | ClassMember::Setter(_) => {
+                let name = match member {
+                    ClassMember::Method(x) => x.name(),
+                    ClassMember::Getter(x) => x.name(),
+                    ClassMember::Setter(x) => x.name(),
+                    _ => unreachable!(),
+                };
+                let key = name.name();
+                if is_public(key)
+                    && !is_test_method(key)
+                    && (is_static || !self.may_override(container, key, semantic))
+                {
+                    entries.push((span.start, key, key.to_string(), name.span(), span));
+                }
+            }
+            ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => {}
+        }
+        Some(entries)
     }
 
     /// Whether an instance member named `name` of `container` may override a
@@ -1144,10 +1201,14 @@ struct ExpressionTypes<'a>(
 impl<'a> SemanticRuleVisitor<'a> for ExpressionTypes<'a> {
     fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         if let Expr::Field(field) = node
-            && let Some(reference) = state.referenced_declaration(node, false)
+            && let Some(reference) = state
+                .referenced_declaration(node, false)
                 .or_else(|| state.referenced_declaration(node, true))
         {
-            self.1.insert((field.object().span(), field.field().name()), reference.owner);
+            self.1.insert(
+                (field.object().span(), field.field().name()),
+                reference.owner,
+            );
         }
         let receiver = match node {
             Expr::Field(field) => field.object(),
@@ -1182,10 +1243,7 @@ struct RefWalker<'t, 'a> {
     type_parameters: Vec<Span>,
     external_depth: usize,
     constant_pattern_depth: usize,
-    semantic: Option<(
-        &'t SemanticState<'a>,
-        &'t ExpressionTypes<'a>,
-    )>,
+    semantic: Option<(&'t SemanticState<'a>, &'t ExpressionTypes<'a>)>,
 }
 
 impl<'t, 'a> RefWalker<'t, 'a> {
@@ -1473,7 +1531,10 @@ impl<'t, 'a> RefWalker<'t, 'a> {
         {
             return true;
         }
-        if let Some(owner) = types.1.get(&(receiver.span(), name)).cloned()
+        if let Some(owner) = types
+            .1
+            .get(&(receiver.span(), name))
+            .cloned()
             .or_else(|| state.referenced_member_owner(ty, name, false))
             .or_else(|| state.referenced_member_owner(ty, name, true))
         {
@@ -1680,7 +1741,9 @@ impl<'t, 'a> RefWalker<'t, 'a> {
             self.container = tables.decls[innermost].scope;
             let mut names = parsed.names.iter().map(|name| name.text);
             match (names.next(), names.next(), names.next()) {
-                (Some(name), None, _) if parsed.new_keyword => self.constructor_reference(name, "new"),
+                (Some(name), None, _) if parsed.new_keyword => {
+                    self.constructor_reference(name, "new")
+                }
                 (Some(name), None, _) => self.reference(name),
                 (Some(type_name), Some(member), None) => {
                     self.reference(type_name);
@@ -1698,8 +1761,43 @@ impl<'t, 'a> RefWalker<'t, 'a> {
         }
         self.container = None;
     }
-}
 
+    fn cascade_references(&mut self, cascade: CascadeExpr<'a>) {
+        let object = cascade.object();
+        for operation in cascade.sections().flat_map(|section| section.ops()) {
+            match operation {
+                CascadeOp::NullAssert(_) => {}
+                CascadeOp::Field(field) => self.instance_member(object, field.name().name()),
+                CascadeOp::Call(call) => {
+                    self.visit_type_arguments(call.type_args());
+                    self.instance_member(object, call.name().name());
+                }
+                // Like ordinary function-expression invocations, an implicit
+                // `call` names no element, so it references no member.
+                CascadeOp::Invoke(invoke) => self.visit_type_arguments(invoke.type_args()),
+                CascadeOp::Index(_) => self.mark_any_member("[]"),
+                CascadeOp::Assign(assign) => {
+                    // A named cascade assignment writes the receiver member.
+                    if let Expr::Ident(name) = assign.target().unparenthesized() {
+                        self.instance_member(object, name.name());
+                    }
+                    if let Some(operator) = assign.op().operator_name() {
+                        self.mark_any_member(operator);
+                    }
+                }
+                CascadeOp::IndexAssign(assign) => {
+                    self.instance_member(object, "[]=");
+                    if assign.op() != AssignOp::Eq {
+                        self.instance_member(object, "[]");
+                    }
+                    if let Some(operator) = assign.op().operator_name() {
+                        self.mark_any_member(operator);
+                    }
+                }
+            }
+        }
+    }
+}
 
 fn relational_operator(op: RelationalPatternOp) -> Option<&'static str> {
     match op {
@@ -1889,7 +1987,11 @@ impl<'a> Visitor<'a> for RefWalker<'_, 'a> {
                     }
                 }
                 Expr::Binary(binary) => {
-                    if let Some(operator) = binary.op().operator_name().filter(|_| !matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq)) {
+                    if let Some(operator) = binary
+                        .op()
+                        .operator_name()
+                        .filter(|_| !matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq))
+                    {
                         this.instance_member(binary.left(), operator);
                     }
                 }
@@ -1921,47 +2023,13 @@ impl<'a> Visitor<'a> for RefWalker<'_, 'a> {
                     }
                 }
                 Expr::Index(index) => this.instance_member(index.object(), "[]"),
-                Expr::Cascade(cascade) => {
-                    let object = cascade.object();
-                    for operation in cascade.sections().flat_map(|section| section.ops()) {
-                        match operation {
-                            CascadeOp::NullAssert(_) => {}
-                            CascadeOp::Field(field) => {
-                                this.instance_member(object, field.name().name())
-                            }
-                            CascadeOp::Call(call) => {
-                                this.visit_type_arguments(call.type_args());
-                                this.instance_member(object, call.name().name());
-                            }
-                            // Like ordinary function-expression invocations, an implicit
-                            // `call` names no element, so it references no member.
-                            CascadeOp::Invoke(invoke) => this.visit_type_arguments(invoke.type_args()),
-                            CascadeOp::Index(_) => this.mark_any_member("[]"),
-                            CascadeOp::Assign(assign) => {
-                                // A named cascade assignment writes the receiver member.
-                                if let Expr::Ident(name) = assign.target().unparenthesized() {
-                                    this.instance_member(object, name.name());
-                                }
-                                if let Some(operator) = assign.op().operator_name() {
-                                    this.mark_any_member(operator);
-                                }
-                            }
-                            CascadeOp::IndexAssign(assign) => {
-                                this.instance_member(object, "[]=");
-                                if assign.op() != AssignOp::Eq {
-                                    this.instance_member(object, "[]");
-                                }
-                                if let Some(operator) = assign.op().operator_name() {
-                                    this.mark_any_member(operator);
-                                }
-                            }
-                        }
-                    }
-                }
+                Expr::Cascade(cascade) => this.cascade_references(cascade),
                 Expr::List(list) => this.visit_type_arguments(list.type_arg()),
                 Expr::Set(set) => this.visit_type_arguments(set.type_arg()),
                 Expr::Map(map) => this.visit_type_arguments(map.type_args()),
-                Expr::GenericInstantiation(generic) => this.visit_type_arguments(generic.type_args()),
+                Expr::GenericInstantiation(generic) => {
+                    this.visit_type_arguments(generic.type_args())
+                }
                 _ => {}
             }
             true
@@ -2039,7 +2107,8 @@ mod tests {
         let program = parsed.program();
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(std::path::Path::new("main.dart"), &config, &parsed);
-        UnreachableFromMain.analyze(UnreachableFromMain::NAME, program, &ctx)
+        UnreachableFromMain
+            .analyze(UnreachableFromMain::NAME, program, &ctx)
             .into_iter()
             .map(|diagnostic| source[diagnostic.span.start..diagnostic.span.end].to_string())
             .collect()
@@ -2047,7 +2116,8 @@ mod tests {
 
     #[test]
     fn doc_comment_references_parse_names_members_and_constructors() {
-        let source = "/// See [A], [B.c], [new D] and [text].\nvoid f() {}\n/** [E] */\nvoid g() {}\n";
+        let source =
+            "/// See [A], [B.c], [new D] and [text].\nvoid f() {}\n/** [E] */\nvoid g() {}\n";
         let markdown_link = "/// [text](url)\n";
         let markdown_parsed = parse(markdown_link);
         assert!(
@@ -2227,7 +2297,8 @@ mod tests {
             "part of 'main.dart';\nvoid run() {\n\
              final receiver = _C();\nreceiver.used();\n}\n",
         );
-        let identities = crate::lint::test_support::identities(&[(path, &parsed), (part_path, &part)]);
+        let identities =
+            crate::lint::test_support::identities(&[(path, &parsed), (part_path, &part)]);
         let grouping = group_libraries(&[
             (path.to_path_buf(), parsed.program()),
             (part_path.to_path_buf(), part.program()),

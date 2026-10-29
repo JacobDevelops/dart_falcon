@@ -34,9 +34,8 @@ use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RuleP
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::cst::*;
 
-
-use falcon_analyze::{BodyOwner, FunctionBodies};
 use falcon_analyze::locally_bound_identifiers;
+use falcon_analyze::{BodyOwner, FunctionBodies};
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
 use crate::lint::semantic_type_operations::is_nullable_or_dynamic_or_void;
@@ -140,10 +139,13 @@ enum ValueContext {
 
 impl<'a> Collector<'a> {
     fn report(&mut self, span: &Span) {
-        self.diags.push(self.ctx.diagnostic("Remove the unnecessary null check (`!`).", DiagSpan {
-            start: span.end - 1,
-            end: span.end,
-        }));
+        self.diags.push(self.ctx.diagnostic(
+            "Remove the unnecessary null check (`!`).",
+            DiagSpan {
+                start: span.end - 1,
+                end: span.end,
+            },
+        ));
     }
 
     fn contextual_arguments(&mut self, args: ArgList<'a>) {
@@ -270,6 +272,38 @@ impl<'a> Collector<'a> {
             _ => None,
         }
     }
+
+    fn fix_call_arguments(
+        &mut self,
+        call: CallExpr<'a>,
+        node: Expr<'a>,
+        state: &SemanticState<'a>,
+    ) {
+        let callee = call.callee();
+        let type_args = call.type_args();
+        let args = call.args();
+        if !is_future_value(node, state) && !is_completer_complete(callee, state) {
+            // A call's result context must not widen the argument type
+            // (notably dart:math min/max in nullable assignments).
+            if let Some(mut signature) = state.call_signature(callee, type_args, args, None) {
+                for (argument, expected) in args.positional().zip(signature.positional) {
+                    if is_null_assert(argument) {
+                        self.fixed
+                            .insert(key(&argument.unparenthesized().span()), expected);
+                    }
+                }
+                for argument in args.named() {
+                    if is_null_assert(argument.value())
+                        && let Some(expected) = signature.named.remove(argument.name().name())
+                    {
+                        self.fixed
+                            .insert(key(&argument.value().unparenthesized().span()), expected);
+                    }
+                }
+            }
+            self.contextual_arguments(args);
+        }
+    }
 }
 
 impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
@@ -366,34 +400,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         .named()
                         .any(|argument| is_null_assert(argument.value())) =>
             {
-                let callee = call.callee();
-                let type_args = call.type_args();
-                let args = call.args();
-                if !is_future_value(node, state) && !is_completer_complete(callee, state) {
-                    // A call's result context must not widen the argument type
-                    // (notably dart:math min/max in nullable assignments).
-                    if let Some(mut signature) = state.call_signature(callee, type_args, args, None)
-                    {
-                        for (argument, expected) in args.positional().zip(signature.positional) {
-                            if is_null_assert(argument) {
-                                self.fixed
-                                    .insert(key(&argument.unparenthesized().span()), expected);
-                            }
-                        }
-                        for argument in args.named() {
-                            if is_null_assert(argument.value())
-                                && let Some(expected) =
-                                    signature.named.remove(argument.name().name())
-                            {
-                                self.fixed.insert(
-                                    key(&argument.value().unparenthesized().span()),
-                                    expected,
-                                );
-                            }
-                        }
-                    }
-                    self.contextual_arguments(args);
-                }
+                self.fix_call_arguments(call, node, state);
             }
             Expr::New(expression) => {
                 if !is_future_value(node, state) {
@@ -438,9 +445,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         _state: &SemanticState<'a>,
     ) {
         if let Pattern::NullAssert(assertion) = node
-            && self.pattern_assignments.iter().any(|assignment| {
-                assignment.contains(assertion.span())
-            })
+            && self
+                .pattern_assignments
+                .iter()
+                .any(|assignment| assignment.contains(assertion.span()))
             && matched.is_some_and(is_nullable_or_dynamic_or_void)
         {
             self.report(&assertion.span());

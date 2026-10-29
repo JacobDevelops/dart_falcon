@@ -259,127 +259,7 @@ fn instantiate_bound_type_memoized<'a>(
             };
             result.non_null()
         }
-        _ => {
-            let mut result = ty.clone();
-            // Read original nodes rather than copy-on-write destinations: memo
-            // keys must remain valid for this entire traversal.
-            match (ty, &mut result) {
-                (
-                    ResolvedType {
-                        kind:
-                            ResolvedTypeKind::Interface {
-                                arguments: source, ..
-                            },
-                    },
-                    ResolvedType {
-                        kind: ResolvedTypeKind::Interface { arguments, .. },
-                    },
-                ) => {
-                    *arguments = source
-                        .iter()
-                        .map(|argument| {
-                            instantiate_bound_type_memoized(
-                                argument, bounds, visiting, covariant, memo,
-                            )
-                        })
-                        .collect();
-                }
-                (
-                    ResolvedType {
-                        kind:
-                            ResolvedTypeKind::Function {
-                                return_type: source_return,
-                                positional: source_positional,
-                                named: source_named,
-                                shape: source_shape,
-                                ..
-                            },
-                    },
-                    ResolvedType {
-                        kind:
-                            ResolvedTypeKind::Function {
-                                return_type,
-                                positional,
-                                named,
-                                shape,
-                                ..
-                            },
-                    },
-                ) => {
-                    *shape = source_shape.as_ref().map(|shape| {
-                        shape.map_bounds(|bound| {
-                            instantiate_bound_type_memoized(
-                                bound, bounds, visiting, covariant, memo,
-                            )
-                        })
-                    });
-                    *return_type = Arc::new(instantiate_bound_type_memoized(
-                        source_return,
-                        bounds,
-                        visiting,
-                        covariant,
-                        memo,
-                    ));
-                    *positional = source_positional
-                        .iter()
-                        .map(|parameter| {
-                            instantiate_bound_type_memoized(
-                                parameter, bounds, visiting, !covariant, memo,
-                            )
-                        })
-                        .collect();
-                    *named = source_named
-                        .iter()
-                        .map(|(name, parameter)| {
-                            (
-                                name.clone(),
-                                instantiate_bound_type_memoized(
-                                    parameter, bounds, visiting, !covariant, memo,
-                                ),
-                            )
-                        })
-                        .collect();
-                }
-                (
-                    ResolvedType {
-                        kind:
-                            ResolvedTypeKind::Record {
-                                positional: source_positional,
-                                named: source_named,
-                                ..
-                            },
-                    },
-                    ResolvedType {
-                        kind:
-                            ResolvedTypeKind::Record {
-                                positional, named, ..
-                            },
-                    },
-                ) => {
-                    *positional = source_positional
-                        .iter()
-                        .map(|field| {
-                            instantiate_bound_type_memoized(
-                                field, bounds, visiting, covariant, memo,
-                            )
-                        })
-                        .collect();
-                    *named = source_named
-                        .iter()
-                        .map(|(name, field)| {
-                            (
-                                name.clone(),
-                                instantiate_bound_type_memoized(
-                                    field, bounds, visiting, covariant, memo,
-                                ),
-                            )
-                        })
-                        .collect();
-                }
-                _ => {}
-            }
-            result
-        }
+        _ => instantiate_bound_children(ty, bounds, visiting, covariant, memo),
     };
     if matches!(
         ty,
@@ -398,6 +278,141 @@ fn instantiate_bound_type_memoized<'a>(
         memo.insert(key, result.clone());
     }
     result
+}
+
+fn instantiate_bound_children<'a>(
+    ty: &'a ResolvedType,
+    bounds: &FxHashMap<TypeParameterId, ResolvedType>,
+    visiting: &mut HashSet<TypeParameterId>,
+    covariant: bool,
+    memo: &mut FxHashMap<(BorrowedIdentity<'a, ResolvedType>, bool), ResolvedType>,
+) -> ResolvedType {
+    let mut result = ty.clone();
+    // Read original nodes rather than copy-on-write destinations: memo
+    // keys must remain valid for this entire traversal.
+    match (ty, &mut result) {
+        (
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        arguments: source, ..
+                    },
+            },
+            ResolvedType {
+                kind: ResolvedTypeKind::Interface { arguments, .. },
+            },
+        ) => {
+            *arguments = source
+                .iter()
+                .map(|argument| {
+                    instantiate_bound_type_memoized(argument, bounds, visiting, covariant, memo)
+                })
+                .collect();
+        }
+        (
+            ResolvedType {
+                kind: ResolvedTypeKind::Function { .. },
+            },
+            _,
+        ) => {
+            instantiate_function_bound_children(ty, &mut result, bounds, visiting, covariant, memo);
+        }
+        (
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Record {
+                        positional: source_positional,
+                        named: source_named,
+                        ..
+                    },
+            },
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Record {
+                        positional, named, ..
+                    },
+            },
+        ) => {
+            *positional = source_positional
+                .iter()
+                .map(|field| {
+                    instantiate_bound_type_memoized(field, bounds, visiting, covariant, memo)
+                })
+                .collect();
+            *named = source_named
+                .iter()
+                .map(|(name, field)| {
+                    (
+                        name.clone(),
+                        instantiate_bound_type_memoized(field, bounds, visiting, covariant, memo),
+                    )
+                })
+                .collect();
+        }
+        _ => {}
+    }
+    result
+}
+
+fn instantiate_function_bound_children<'a>(
+    ty: &'a ResolvedType,
+    result: &mut ResolvedType,
+    bounds: &FxHashMap<TypeParameterId, ResolvedType>,
+    visiting: &mut HashSet<TypeParameterId>,
+    covariant: bool,
+    memo: &mut FxHashMap<(BorrowedIdentity<'a, ResolvedType>, bool), ResolvedType>,
+) {
+    if let (
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    return_type: source_return,
+                    positional: source_positional,
+                    named: source_named,
+                    shape: source_shape,
+                    ..
+                },
+        },
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    return_type,
+                    positional,
+                    named,
+                    shape,
+                    ..
+                },
+        },
+    ) = (ty, result)
+    {
+        *shape = source_shape.as_ref().map(|shape| {
+            shape.map_bounds(|bound| {
+                instantiate_bound_type_memoized(bound, bounds, visiting, covariant, memo)
+            })
+        });
+        *return_type = Arc::new(instantiate_bound_type_memoized(
+            source_return,
+            bounds,
+            visiting,
+            covariant,
+            memo,
+        ));
+        *positional = source_positional
+            .iter()
+            .map(|parameter| {
+                instantiate_bound_type_memoized(parameter, bounds, visiting, !covariant, memo)
+            })
+            .collect();
+        *named = source_named
+            .iter()
+            .map(|(name, parameter)| {
+                (
+                    name.clone(),
+                    instantiate_bound_type_memoized(parameter, bounds, visiting, !covariant, memo),
+                )
+            })
+            .collect();
+    }
 }
 
 fn bound_reaches_visiting(

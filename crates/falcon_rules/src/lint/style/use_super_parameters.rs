@@ -90,7 +90,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 let convertible =
                     positional || constructor.named.iter().any(|span| !referenced(*span));
                 convertible.then(|| {
-                    ctx.diagnostic("Use `super` parameters instead of forwarding parameters to `super`.", constructor.anchor)
+                    ctx.diagnostic(
+                        "Use `super` parameters instead of forwarding parameters to `super`.",
+                        constructor.anchor,
+                    )
                 })
             })
             .collect()
@@ -149,46 +152,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             positional: Vec::with_capacity(ctor.params.params().len()),
             named: Vec::with_capacity(args.named().len()),
         };
-        // Every positional super argument must be a distinct positional formal,
-        // in declaration order. Other constructor parameters may precede it.
-        if !args.positional().is_empty()
-            && args.positional().all(|arg| matches!(arg, Expr::Ident(_)))
-        {
-            let mut parameters_by_name = HashMap::with_capacity(ctor.params.params().len());
-            for (index, parameter) in ctor.params.params().enumerate() {
-                parameters_by_name
-                    .entry(parameter.name().name())
-                    .or_insert((index, parameter));
-            }
-            let mut parameters = ctor.params.params();
-            let mut seen = HashSet::with_capacity(args.positional().len());
-            let mut previous = 0;
-            for argument in args.positional() {
-                let Expr::Ident(identifier) = argument else {
-                    unreachable!()
-                };
-                let Some(&(index, parameter)) = parameters_by_name.get(identifier.name()) else {
-                    conversion.positional.push(PositionalCheck::Invalid);
-                    break;
-                };
-                if matches!(parameter.kind(), ParamKind::Named { .. }) || !seen.insert(index) {
-                    conversion.positional.push(PositionalCheck::Invalid);
-                    break;
-                }
-                if index < previous {
-                    conversion.positional.push(PositionalCheck::Blocked);
-                    break;
-                }
-                for parameter in parameters.by_ref().take(index + 1 - previous) {
-                    conversion.positional.push(match parameter.initializing() {
-                        Some(InitializingFormal::Super) => PositionalCheck::Invalid,
-                        Some(InitializingFormal::This) => PositionalCheck::Blocked,
-                        None => PositionalCheck::Reference(parameter.name().span()),
-                    });
-                }
-                previous = index + 1;
-            }
-        }
+        collect_positional_checks(&ctor, args, &mut conversion.positional);
         for parameter in ctor.params.named() {
             if parameter.initializing() == Some(InitializingFormal::This)
                 || (ctor.is_primary && (parameter.is_final() || parameter.is_var()))
@@ -206,10 +170,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             let this_type = state.environment.declared_type(parameter.name().name());
             if matches!(super_type.view(), ResolvedTypeView::Dynamic)
                 || matches!(this_type.view(), ResolvedTypeView::Dynamic)
-                || state
-                    .signatures
-                    .relation(&super_type, TypeRelation::SubtypeOf(&this_type), &state.model)
-                    == Truth::Yes
+                || state.signatures.relation(
+                    &super_type,
+                    TypeRelation::SubtypeOf(&this_type),
+                    &state.model,
+                ) == Truth::Yes
             {
                 conversion.named.push(parameter.name().span());
             }
@@ -230,5 +195,50 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             }
         }
         self.constructors.push(conversion);
+    }
+}
+
+fn collect_positional_checks(
+    ctor: &ConstructorRef<'_>,
+    args: ArgList<'_>,
+    checks: &mut Vec<PositionalCheck>,
+) {
+    // Every positional super argument must be a distinct positional formal,
+    // in declaration order. Other constructor parameters may precede it.
+    if !args.positional().is_empty() && args.positional().all(|arg| matches!(arg, Expr::Ident(_))) {
+        let mut parameters_by_name = HashMap::with_capacity(ctor.params.params().len());
+        for (index, parameter) in ctor.params.params().enumerate() {
+            parameters_by_name
+                .entry(parameter.name().name())
+                .or_insert((index, parameter));
+        }
+        let mut parameters = ctor.params.params();
+        let mut seen = HashSet::with_capacity(args.positional().len());
+        let mut previous = 0;
+        for argument in args.positional() {
+            let Expr::Ident(identifier) = argument else {
+                unreachable!()
+            };
+            let Some(&(index, parameter)) = parameters_by_name.get(identifier.name()) else {
+                checks.push(PositionalCheck::Invalid);
+                break;
+            };
+            if matches!(parameter.kind(), ParamKind::Named { .. }) || !seen.insert(index) {
+                checks.push(PositionalCheck::Invalid);
+                break;
+            }
+            if index < previous {
+                checks.push(PositionalCheck::Blocked);
+                break;
+            }
+            for parameter in parameters.by_ref().take(index + 1 - previous) {
+                checks.push(match parameter.initializing() {
+                    Some(InitializingFormal::Super) => PositionalCheck::Invalid,
+                    Some(InitializingFormal::This) => PositionalCheck::Blocked,
+                    None => PositionalCheck::Reference(parameter.name().span()),
+                });
+            }
+            previous = index + 1;
+        }
     }
 }

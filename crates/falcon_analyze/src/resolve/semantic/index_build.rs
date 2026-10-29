@@ -331,466 +331,677 @@ impl SignatureIndex {
             if !model.owns_top_level_declaration(declaration) {
                 continue;
             }
-            let kind = match declaration {
-                TopLevelDecl::Class(class) => Some((
-                    class.name(),
-                    TypeKind::Class,
-                    class.extends().is_none(),
-                    class.modifiers().restriction,
-                )),
-                TopLevelDecl::ClassTypeAlias(alias) => Some((
-                    alias.name(),
-                    TypeKind::Class,
-                    false,
-                    alias.modifiers().restriction,
-                )),
-                TopLevelDecl::MixinClass(class) => Some((
-                    class.name(),
-                    TypeKind::MixinClass,
-                    class.extends().is_none(),
-                    class.is_base().then_some(ClassRestriction::Base),
-                )),
-                TopLevelDecl::Mixin(mixin) => Some((
-                    mixin.name(),
-                    TypeKind::Mixin,
-                    mixin.on_clause().is_empty(),
-                    mixin.is_base().then_some(ClassRestriction::Base),
-                )),
-                TopLevelDecl::Enum(enumeration) => Some((
-                    enumeration.name(),
-                    TypeKind::Enum,
-                    !model.identities.has_sdk_sources(),
-                    None,
-                )),
-                TopLevelDecl::ExtensionType(extension) => {
-                    Some((extension.name(), TypeKind::ExtensionType, false, None))
-                }
-                _ => None,
-            };
-            if let Some((name, kind, inherited_object, restriction)) = kind
-                && let Some(identity) = model.resolve_name(name.name())
-            {
-                let facts = self.type_facts.entry(identity).or_default();
-                facts.inherited_object = Some(inherited_object);
-                facts.restriction = restriction;
-                facts.kind = Some(kind);
-            }
+            self.add_type_kind(declaration, model);
             match declaration {
                 TopLevelDecl::ClassTypeAlias(alias) => {
-                    self.add_declaration_facts(
-                        alias.name().name(),
-                        alias.annotations(),
-                        alias.type_params(),
-                        EffectiveMembers::declared(AstChildren::empty()),
-                        (None, alias.modifiers().is_abstract),
-                        model,
-                    );
-                    self.add_type(
-                        alias.name().name(),
-                        alias.type_params(),
-                        declaration,
-                        EffectiveMembers::declared(AstChildren::empty()),
-                        model,
-                    );
+                    self.add_class_alias_declaration(alias, model);
                 }
-                // Alias parameters are the inference variables of alias
-                // constructor calls and tear-offs (`alias_template`).
                 TopLevelDecl::TypeAlias(alias) => {
-                    let mut parameters = TypeParameterScope::default();
-                    parameters.push(alias.type_params(), model);
-                    record_bound_declarations(
-                        &mut self.bound_declared,
-                        &parameters,
-                        alias.type_params(),
-                    );
-                    self.add_declaration_facts(
-                        alias.name().name(),
-                        alias.annotations(),
-                        alias.type_params(),
-                        EffectiveMembers::declared(AstChildren::empty()),
-                        (None, false),
-                        model,
-                    );
+                    self.add_type_alias_declaration(alias, model);
                 }
                 TopLevelDecl::Function(function)
                     if matches!(function.kind(), FunctionKind::Function(_)) =>
                 {
-                    let mut parameters = TypeParameterScope::default();
-                    parameters.push(function.type_params(), model);
-                    record_bound_declarations(
-                        &mut self.bound_declared,
-                        &parameters,
-                        function.type_params(),
-                    );
-                    if let Some(identity) = model.resolve_value(function.name().name()) {
-                        let annotations = resolve_annotations(function.annotations(), model);
-                        if !annotations.is_empty() {
-                            self.function_annotations
-                                .insert(identity.clone(), annotations);
-                        }
-                        self.functions.insert(
-                            identity,
-                            signature(
-                                &parameters,
-                                &[],
-                                function.type_params(),
-                                function.params(),
-                                function.return_type(),
-                                SignatureContext::Function,
-                                model,
-                            ),
-                        );
-                    }
+                    self.add_function_declaration(function, model);
                 }
                 TopLevelDecl::Function(function)
                     if matches!(function.kind(), FunctionKind::Getter) =>
                 {
-                    if let Some(identity) = model.resolve_value(function.name().name()) {
-                        self.value_getters.insert(identity.clone());
-                        self.value_types.insert(
-                            identity,
-                            function
-                                .return_type()
-                                .map(|ty| model.resolve_type(ty))
-                                .unwrap_or(ResolvedType::DYNAMIC),
-                        );
-                    }
+                    self.add_getter_declaration(function, model);
                 }
                 TopLevelDecl::Variable(variable) => {
-                    for declarator in variable.declarators() {
-                        if !model.owns_declaration(declarator.name().name()) {
-                            continue;
-                        }
-                        let Some(identity) = model.resolve_value(declarator.name().name()) else {
-                            continue;
-                        };
-                        self.value_types.insert(
-                            identity.clone(),
-                            variable
-                                .var_type()
-                                .map(|ty| model.resolve_type(ty))
-                                .unwrap_or_else(|| {
-                                    if declarator.initializer().is_none() {
-                                        ResolvedType::DYNAMIC
-                                    } else {
-                                        ResolvedType::UNKNOWN
-                                    }
-                                }),
-                        );
-                        if variable.keyword() == VarKeyword::Const
-                            && let Some(initializer) = declarator.initializer()
-                        {
-                            if let Some(constant_type) = constructed_identity(initializer, model) {
-                                self.constant_types.insert(identity.clone(), constant_type);
-                            }
-                            self.constants
-                                .insert(identity, model.node_ref(initializer.syntax()));
-                        }
-                    }
+                    self.add_variable_declaration(variable, model);
                 }
                 TopLevelDecl::Class(class) => {
-                    let members = class.element_members();
-                    self.add_type(
-                        class.name().name(),
-                        class.type_params(),
-                        declaration,
-                        members.clone(),
-                        model,
-                    );
-                    self.add_declaration_facts(
-                        class.name().name(),
-                        class.annotations(),
-                        class.type_params(),
-                        members.clone(),
-                        (None, class.modifiers().is_abstract),
-                        model,
-                    );
+                    self.add_class_declaration(class, model);
                 }
                 TopLevelDecl::MixinClass(class) => {
-                    let members = class.element_members();
-                    self.add_type(
-                        class.name().name(),
-                        class.type_params(),
-                        declaration,
-                        members.clone(),
-                        model,
-                    );
-                    self.add_declaration_facts(
-                        class.name().name(),
-                        class.annotations(),
-                        class.type_params(),
-                        members.clone(),
-                        (None, class.is_abstract()),
-                        model,
-                    );
+                    self.add_mixin_class_declaration(class, model);
                 }
                 TopLevelDecl::Extension(extension) => {
-                    if let Some(name) = extension.name() {
-                        self.add_type(
-                            name.name(),
-                            extension.type_params(),
-                            declaration,
-                            EffectiveMembers::declared(extension.members()),
-                            model,
-                        );
-                    }
-                    let mut parameters = TypeParameterScope::default();
-                    parameters.push(extension.type_params(), model);
-                    let owner_parameters = parameter_ids(&parameters, extension.type_params());
-                    let methods = extension
-                        .members()
-                        .filter_map(|member| match member {
-                            ClassMember::Method(method) if !method.is_static() => {
-                                parameters.push(method.type_params(), model);
-                                record_bound_declarations(
-                                    &mut self.bound_declared,
-                                    &parameters,
-                                    method.type_params(),
-                                );
-                                let resolved = signature(
-                                    &parameters,
-                                    &owner_parameters,
-                                    method.type_params(),
-                                    Some(method.params()),
-                                    method.return_type(),
-                                    SignatureContext::Function,
-                                    model,
-                                );
-                                parameters.pop();
-                                Some((method.name().name().to_owned(), resolved))
-                            }
-                            ClassMember::Operator(operator) => Some((
-                                operator.lookup_name().to_owned(),
-                                signature(
-                                    &parameters,
-                                    &owner_parameters,
-                                    AstChildren::<TypeParam<'_>>::empty(),
-                                    Some(operator.params()),
-                                    operator.return_type(),
-                                    SignatureContext::Function,
-                                    model,
-                                ),
-                            )),
-                            _ => None,
-                        })
-                        .collect();
-                    let getters = extension
-                        .members()
-                        .filter_map(|member| match member {
-                            ClassMember::Getter(getter) if !getter.is_static() => Some((
-                                getter.name().name().to_owned(),
-                                getter.return_type().map_or(ResolvedType::DYNAMIC, |ty| {
-                                    model.resolve_type_in(ty, &parameters)
-                                }),
-                            )),
-                            _ => None,
-                        })
-                        .collect();
-                    self.extensions.push(ExtensionFacts {
-                        declaring_library: model.library,
-                        name: extension.name().map(|name| name.name().to_owned()),
-                        identity: extension
-                            .name()
-                            .and_then(|name| model.resolve_extension(name.name())),
-                        on_type: model.resolve_type_in(extension.on_type(), &parameters),
-                        parameters: owner_parameters,
-                        parameter_bounds: extension
-                            .type_params()
-                            .filter_map(|parameter| {
-                                let ResolvedType {
-                                    kind: ResolvedTypeKind::TypeParameter { id, bound, .. },
-                                } = parameters.lookup(parameter.name().name())?
-                                else {
-                                    return None;
-                                };
-                                Some((
-                                    id,
-                                    if parameter.bound().is_some() {
-                                        bound.as_ref().clone()
-                                    } else {
-                                        ResolvedType::DYNAMIC
-                                    },
-                                ))
-                            })
-                            .collect(),
-                        methods,
-                        annotations: extension
-                            .members()
-                            .filter_map(|member| {
-                                let (name, annotations) = match member {
-                                    ClassMember::Method(method) => {
-                                        (method.name().name(), method.annotations())
-                                    }
-                                    ClassMember::Getter(getter) => {
-                                        (getter.name().name(), getter.annotations())
-                                    }
-                                    ClassMember::Operator(operator) => {
-                                        (operator.lookup_name(), operator.annotations())
-                                    }
-                                    _ => return None,
-                                };
-                                let annotations = resolve_annotations(annotations, model);
-                                (!annotations.is_empty()).then(|| (name.to_owned(), annotations))
-                            })
-                            .collect(),
-                        getters,
-                        members: extension
-                            .members()
-                            .filter_map(|member| match member {
-                                ClassMember::Method(method) => {
-                                    Some(method.name().name().to_owned())
-                                }
-                                _ => None,
-                            })
-                            .collect(),
-                        instance_members: extension
-                            .members()
-                            .filter_map(|member| match member {
-                                ClassMember::Method(method) if !method.is_static() => {
-                                    Some(method.name().name().to_owned())
-                                }
-                                ClassMember::Getter(getter) if !getter.is_static() => {
-                                    Some(getter.name().name().to_owned())
-                                }
-                                ClassMember::Setter(setter) if !setter.is_static() => {
-                                    Some(format!("{}=", setter.name().name()))
-                                }
-                                ClassMember::Operator(operator) => {
-                                    Some(operator.lookup_name().to_owned())
-                                }
-                                _ => None,
-                            })
-                            .collect(),
-                    });
+                    self.add_extension_declaration(extension, model);
                 }
                 TopLevelDecl::ExtensionType(extension) => {
-                    let members = extension.element_members();
-                    self.add_type(
-                        extension.name().name(),
-                        extension.type_params(),
-                        declaration,
-                        members.clone(),
-                        model,
-                    );
-                    self.add_declaration_facts(
-                        extension.name().name(),
-                        extension.annotations(),
-                        extension.type_params(),
-                        members.clone(),
-                        (
-                            extension
-                                .representation()
-                                .and_then(|param| param.param_type()),
-                            false,
-                        ),
-                        model,
-                    );
+                    self.add_extension_type_declaration(extension, model);
                 }
                 TopLevelDecl::Mixin(mixin) => {
-                    self.add_type(
-                        mixin.name().name(),
-                        mixin.type_params(),
-                        declaration,
-                        EffectiveMembers::declared(mixin.members()),
-                        model,
-                    );
-                    // Mixins are never instantiated: abstract for every consumer.
-                    self.add_declaration_facts(
-                        mixin.name().name(),
-                        mixin.annotations(),
-                        mixin.type_params(),
-                        EffectiveMembers::declared(mixin.members()),
-                        (None, true),
-                        model,
-                    );
+                    self.add_mixin_declaration(mixin, model);
                 }
                 TopLevelDecl::Enum(enumeration) => {
-                    let members = enumeration.element_members();
-                    self.add_type(
-                        enumeration.name().name(),
-                        enumeration.type_params(),
-                        declaration,
-                        members.clone(),
-                        model,
-                    );
-                    self.add_declaration_facts(
-                        enumeration.name().name(),
-                        enumeration.annotations(),
-                        enumeration.type_params(),
-                        members.clone(),
-                        (None, false),
-                        model,
-                    );
-                    // Every enum implicitly extends `Enum`; only meaningful
-                    // when `dart:core` sources describe it.
-                    if model.identities.has_sdk_sources()
-                        && let Some(identity) = model.resolve_name(enumeration.name().name())
-                    {
-                        let enum_type = model.core_type("Enum", false);
-                        if let Some((_, supertypes)) = self
-                            .type_facts
-                            .get_mut(&identity)
-                            .and_then(|facts| facts.supertypes.as_mut())
-                        {
-                            // Inherited interfaces start with Enum, then apply
-                            // mixins in source order and finally interfaces.
-                            supertypes.insert(0, enum_type.clone());
-                        }
-                        if let Some(supertypes) = self
-                            .type_facts
-                            .get_mut(&identity)
-                            .and_then(|facts| facts.member_supertypes.as_mut())
-                        {
-                            // Concrete lookup searches mixins in reverse order
-                            // before the superclass.
-                            let object = supertypes.len().saturating_sub(1);
-                            supertypes.insert(object, enum_type);
-                        }
-                    }
-                    if let Some(identity) = model.resolve_name(enumeration.name().name()) {
-                        // The language synthesizes a static const list, including
-                        // the enum's instantiation to bounds for generic enums.
-                        let enum_type = self.with_raw_arguments(&ResolvedType::interface_identity(
-                            identity.clone(),
-                        ));
-                        let values_type = ResolvedType::from_kind(ResolvedTypeKind::Interface {
-                            occurrence: Default::default(),
-                            identity: DeclarationIdentity::sdk("dart:core", "List"),
-                            arguments: vec![enum_type].into(),
-                            nullable: false,
-                            extension_type: false,
-                        });
-                        let entry = self
-                            .member_entries
-                            .entry(identity.clone())
-                            .or_default()
-                            .entry("values".to_string())
-                            .or_default();
-                        entry.field = Some((Vec::new(), values_type));
-                        entry.facts.push(MemberFacts {
-                            declaring_type: identity.clone(),
-                            kind: MemberKind::Field {
-                                writable: false,
-                                covariant: false,
-                            },
-                            is_static: true,
-                            is_abstract: false,
-                            positional_parameter_names: Vec::new(),
-                            parameter_contracts: Some(empty_parameter_contracts()),
-                            annotations: Vec::new(),
-                        });
-                        self.type_facts.entry(identity).or_default().enum_values = Some(
-                            enumeration
-                                .variants()
-                                .map(|variant| variant.name().name().to_owned())
-                                .collect(),
-                        );
-                    }
+                    self.add_enum_declaration(enumeration, model);
                 }
                 _ => {}
             }
         }
         self.add_immutability(program, model);
+    }
+
+    fn add_type_kind(&mut self, declaration: TopLevelDecl<'_>, model: &SemanticModel<'_>) {
+        let kind = match declaration {
+            TopLevelDecl::Class(class) => Some((
+                class.name(),
+                TypeKind::Class,
+                class.extends().is_none(),
+                class.modifiers().restriction,
+            )),
+            TopLevelDecl::ClassTypeAlias(alias) => Some((
+                alias.name(),
+                TypeKind::Class,
+                false,
+                alias.modifiers().restriction,
+            )),
+            TopLevelDecl::MixinClass(class) => Some((
+                class.name(),
+                TypeKind::MixinClass,
+                class.extends().is_none(),
+                class.is_base().then_some(ClassRestriction::Base),
+            )),
+            TopLevelDecl::Mixin(mixin) => Some((
+                mixin.name(),
+                TypeKind::Mixin,
+                mixin.on_clause().is_empty(),
+                mixin.is_base().then_some(ClassRestriction::Base),
+            )),
+            TopLevelDecl::Enum(enumeration) => Some((
+                enumeration.name(),
+                TypeKind::Enum,
+                !model.identities.has_sdk_sources(),
+                None,
+            )),
+            TopLevelDecl::ExtensionType(extension) => {
+                Some((extension.name(), TypeKind::ExtensionType, false, None))
+            }
+            _ => None,
+        };
+        if let Some((name, kind, inherited_object, restriction)) = kind
+            && let Some(identity) = model.resolve_name(name.name())
+        {
+            let facts = self.type_facts.entry(identity).or_default();
+            facts.inherited_object = Some(inherited_object);
+            facts.restriction = restriction;
+            facts.kind = Some(kind);
+        }
+    }
+
+    fn add_class_alias_declaration(
+        &mut self,
+        alias: falcon_syntax::cst::ClassTypeAliasDecl<'_>,
+        model: &SemanticModel<'_>,
+    ) {
+        self.add_declaration_facts(
+            alias.name().name(),
+            alias.annotations(),
+            alias.type_params(),
+            EffectiveMembers::declared(AstChildren::empty()),
+            (None, alias.modifiers().is_abstract),
+            model,
+        );
+        self.add_type(
+            alias.name().name(),
+            alias.type_params(),
+            TopLevelDecl::ClassTypeAlias(alias),
+            EffectiveMembers::declared(AstChildren::empty()),
+            model,
+        );
+    }
+
+    // Alias parameters drive constructor-call and tear-off inference (`alias_template`).
+    fn add_type_alias_declaration(
+        &mut self,
+        alias: falcon_syntax::cst::TypeAliasDecl<'_>,
+        model: &SemanticModel<'_>,
+    ) {
+        let mut parameters = TypeParameterScope::default();
+        parameters.push(alias.type_params(), model);
+        record_bound_declarations(&mut self.bound_declared, &parameters, alias.type_params());
+        self.add_declaration_facts(
+            alias.name().name(),
+            alias.annotations(),
+            alias.type_params(),
+            EffectiveMembers::declared(AstChildren::empty()),
+            (None, false),
+            model,
+        );
+    }
+
+    fn add_function_declaration(
+        &mut self,
+        function: falcon_syntax::cst::FunctionDecl<'_>,
+        model: &SemanticModel<'_>,
+    ) {
+        let mut parameters = TypeParameterScope::default();
+        parameters.push(function.type_params(), model);
+        record_bound_declarations(
+            &mut self.bound_declared,
+            &parameters,
+            function.type_params(),
+        );
+        if let Some(identity) = model.resolve_value(function.name().name()) {
+            let annotations = resolve_annotations(function.annotations(), model);
+            if !annotations.is_empty() {
+                self.function_annotations
+                    .insert(identity.clone(), annotations);
+            }
+            self.functions.insert(
+                identity,
+                signature(
+                    &parameters,
+                    &[],
+                    function.type_params(),
+                    function.params(),
+                    function.return_type(),
+                    SignatureContext::Function,
+                    model,
+                ),
+            );
+        }
+    }
+
+    fn add_getter_declaration(
+        &mut self,
+        function: falcon_syntax::cst::FunctionDecl<'_>,
+        model: &SemanticModel<'_>,
+    ) {
+        if let Some(identity) = model.resolve_value(function.name().name()) {
+            self.value_getters.insert(identity.clone());
+            self.value_types.insert(
+                identity,
+                function
+                    .return_type()
+                    .map(|ty| model.resolve_type(ty))
+                    .unwrap_or(ResolvedType::DYNAMIC),
+            );
+        }
+    }
+
+    fn add_variable_declaration(
+        &mut self,
+        variable: falcon_syntax::cst::TopLevelVarDecl<'_>,
+        model: &SemanticModel<'_>,
+    ) {
+        for declarator in variable.declarators() {
+            if !model.owns_declaration(declarator.name().name()) {
+                continue;
+            }
+            let Some(identity) = model.resolve_value(declarator.name().name()) else {
+                continue;
+            };
+            self.value_types.insert(
+                identity.clone(),
+                variable
+                    .var_type()
+                    .map(|ty| model.resolve_type(ty))
+                    .unwrap_or_else(|| {
+                        if declarator.initializer().is_none() {
+                            ResolvedType::DYNAMIC
+                        } else {
+                            ResolvedType::UNKNOWN
+                        }
+                    }),
+            );
+            if variable.keyword() == VarKeyword::Const
+                && let Some(initializer) = declarator.initializer()
+            {
+                if let Some(constant_type) = constructed_identity(initializer, model) {
+                    self.constant_types.insert(identity.clone(), constant_type);
+                }
+                self.constants
+                    .insert(identity, model.node_ref(initializer.syntax()));
+            }
+        }
+    }
+
+    fn add_class_declaration(
+        &mut self,
+        class: falcon_syntax::cst::ClassDecl<'_>,
+        model: &SemanticModel<'_>,
+    ) {
+        let members = class.element_members();
+        self.add_type(
+            class.name().name(),
+            class.type_params(),
+            TopLevelDecl::Class(class),
+            members.clone(),
+            model,
+        );
+        self.add_declaration_facts(
+            class.name().name(),
+            class.annotations(),
+            class.type_params(),
+            members.clone(),
+            (None, class.modifiers().is_abstract),
+            model,
+        );
+    }
+
+    fn add_mixin_class_declaration(
+        &mut self,
+        class: falcon_syntax::cst::MixinClassDecl<'_>,
+        model: &SemanticModel<'_>,
+    ) {
+        let members = class.element_members();
+        self.add_type(
+            class.name().name(),
+            class.type_params(),
+            TopLevelDecl::MixinClass(class),
+            members.clone(),
+            model,
+        );
+        self.add_declaration_facts(
+            class.name().name(),
+            class.annotations(),
+            class.type_params(),
+            members.clone(),
+            (None, class.is_abstract()),
+            model,
+        );
+    }
+
+    fn add_extension_declaration(
+        &mut self,
+        extension: falcon_syntax::cst::ExtensionDecl<'_>,
+        model: &SemanticModel<'_>,
+    ) {
+        if let Some(name) = extension.name() {
+            self.add_type(
+                name.name(),
+                extension.type_params(),
+                TopLevelDecl::Extension(extension),
+                EffectiveMembers::declared(extension.members()),
+                model,
+            );
+        }
+        let mut parameters = TypeParameterScope::default();
+        parameters.push(extension.type_params(), model);
+        let owner_parameters = parameter_ids(&parameters, extension.type_params());
+        let methods = self.extension_methods(extension, &mut parameters, &owner_parameters, model);
+        let getters = extension
+            .members()
+            .filter_map(|member| match member {
+                ClassMember::Getter(getter) if !getter.is_static() => Some((
+                    getter.name().name().to_owned(),
+                    getter.return_type().map_or(ResolvedType::DYNAMIC, |ty| {
+                        model.resolve_type_in(ty, &parameters)
+                    }),
+                )),
+                _ => None,
+            })
+            .collect();
+        self.extensions.push(ExtensionFacts {
+            declaring_library: model.library,
+            name: extension.name().map(|name| name.name().to_owned()),
+            identity: extension
+                .name()
+                .and_then(|name| model.resolve_extension(name.name())),
+            on_type: model.resolve_type_in(extension.on_type(), &parameters),
+            parameters: owner_parameters,
+            parameter_bounds: extension
+                .type_params()
+                .filter_map(|parameter| {
+                    let ResolvedType {
+                        kind: ResolvedTypeKind::TypeParameter { id, bound, .. },
+                    } = parameters.lookup(parameter.name().name())?
+                    else {
+                        return None;
+                    };
+                    Some((
+                        id,
+                        if parameter.bound().is_some() {
+                            bound.as_ref().clone()
+                        } else {
+                            ResolvedType::DYNAMIC
+                        },
+                    ))
+                })
+                .collect(),
+            methods,
+            annotations: extension_annotations(extension, model),
+            getters,
+            members: extension
+                .members()
+                .filter_map(|member| match member {
+                    ClassMember::Method(method) => Some(method.name().name().to_owned()),
+                    _ => None,
+                })
+                .collect(),
+            instance_members: extension
+                .members()
+                .filter_map(|member| match member {
+                    ClassMember::Method(method) if !method.is_static() => {
+                        Some(method.name().name().to_owned())
+                    }
+                    ClassMember::Getter(getter) if !getter.is_static() => {
+                        Some(getter.name().name().to_owned())
+                    }
+                    ClassMember::Setter(setter) if !setter.is_static() => {
+                        Some(format!("{}=", setter.name().name()))
+                    }
+                    ClassMember::Operator(operator) => Some(operator.lookup_name().to_owned()),
+                    _ => None,
+                })
+                .collect(),
+        });
+    }
+
+    fn add_extension_type_declaration(
+        &mut self,
+        extension: falcon_syntax::cst::ExtensionTypeDecl<'_>,
+        model: &SemanticModel<'_>,
+    ) {
+        let members = extension.element_members();
+        self.add_type(
+            extension.name().name(),
+            extension.type_params(),
+            TopLevelDecl::ExtensionType(extension),
+            members.clone(),
+            model,
+        );
+        self.add_declaration_facts(
+            extension.name().name(),
+            extension.annotations(),
+            extension.type_params(),
+            members.clone(),
+            (
+                extension
+                    .representation()
+                    .and_then(|param| param.param_type()),
+                false,
+            ),
+            model,
+        );
+    }
+
+    fn add_mixin_declaration(
+        &mut self,
+        mixin: falcon_syntax::cst::MixinDecl<'_>,
+        model: &SemanticModel<'_>,
+    ) {
+        self.add_type(
+            mixin.name().name(),
+            mixin.type_params(),
+            TopLevelDecl::Mixin(mixin),
+            EffectiveMembers::declared(mixin.members()),
+            model,
+        );
+        // Mixins are never instantiated: abstract for every consumer.
+        self.add_declaration_facts(
+            mixin.name().name(),
+            mixin.annotations(),
+            mixin.type_params(),
+            EffectiveMembers::declared(mixin.members()),
+            (None, true),
+            model,
+        );
+    }
+
+    fn add_enum_declaration(
+        &mut self,
+        enumeration: falcon_syntax::cst::EnumDecl<'_>,
+        model: &SemanticModel<'_>,
+    ) {
+        let members = enumeration.element_members();
+        self.add_type(
+            enumeration.name().name(),
+            enumeration.type_params(),
+            TopLevelDecl::Enum(enumeration),
+            members.clone(),
+            model,
+        );
+        self.add_declaration_facts(
+            enumeration.name().name(),
+            enumeration.annotations(),
+            enumeration.type_params(),
+            members.clone(),
+            (None, false),
+            model,
+        );
+        // Every enum implicitly extends `Enum`; only meaningful
+        // when `dart:core` sources describe it.
+        if model.identities.has_sdk_sources()
+            && let Some(identity) = model.resolve_name(enumeration.name().name())
+        {
+            let enum_type = model.core_type("Enum", false);
+            if let Some((_, supertypes)) = self
+                .type_facts
+                .get_mut(&identity)
+                .and_then(|facts| facts.supertypes.as_mut())
+            {
+                // Inherited interfaces start with Enum, then apply
+                // mixins in source order and finally interfaces.
+                supertypes.insert(0, enum_type.clone());
+            }
+            if let Some(supertypes) = self
+                .type_facts
+                .get_mut(&identity)
+                .and_then(|facts| facts.member_supertypes.as_mut())
+            {
+                // Concrete lookup searches mixins in reverse order
+                // before the superclass.
+                let object = supertypes.len().saturating_sub(1);
+                supertypes.insert(object, enum_type);
+            }
+        }
+        if let Some(identity) = model.resolve_name(enumeration.name().name()) {
+            // The language synthesizes a static const list, including
+            // the enum's instantiation to bounds for generic enums.
+            let enum_type =
+                self.with_raw_arguments(&ResolvedType::interface_identity(identity.clone()));
+            let values_type = ResolvedType::from_kind(ResolvedTypeKind::Interface {
+                occurrence: Default::default(),
+                identity: DeclarationIdentity::sdk("dart:core", "List"),
+                arguments: vec![enum_type].into(),
+                nullable: false,
+                extension_type: false,
+            });
+            let entry = self
+                .member_entries
+                .entry(identity.clone())
+                .or_default()
+                .entry("values".to_string())
+                .or_default();
+            entry.field = Some((Vec::new(), values_type));
+            entry.facts.push(MemberFacts {
+                declaring_type: identity.clone(),
+                kind: MemberKind::Field {
+                    writable: false,
+                    covariant: false,
+                },
+                is_static: true,
+                is_abstract: false,
+                positional_parameter_names: Vec::new(),
+                parameter_contracts: Some(empty_parameter_contracts()),
+                annotations: Vec::new(),
+            });
+            self.type_facts.entry(identity).or_default().enum_values = Some(
+                enumeration
+                    .variants()
+                    .map(|variant| variant.name().name().to_owned())
+                    .collect(),
+            );
+        }
+    }
+
+    fn extension_methods(
+        &mut self,
+        extension: falcon_syntax::cst::ExtensionDecl<'_>,
+        parameters: &mut TypeParameterScope,
+        owner_parameters: &[TypeParameterId],
+        model: &SemanticModel<'_>,
+    ) -> FxHashMap<String, ResolvedSignature> {
+        extension
+            .members()
+            .filter_map(|member| match member {
+                ClassMember::Method(method) if !method.is_static() => {
+                    parameters.push(method.type_params(), model);
+                    record_bound_declarations(
+                        &mut self.bound_declared,
+                        parameters,
+                        method.type_params(),
+                    );
+                    let resolved = signature(
+                        parameters,
+                        owner_parameters,
+                        method.type_params(),
+                        Some(method.params()),
+                        method.return_type(),
+                        SignatureContext::Function,
+                        model,
+                    );
+                    parameters.pop();
+                    Some((method.name().name().to_owned(), resolved))
+                }
+                ClassMember::Operator(operator) => Some((
+                    operator.lookup_name().to_owned(),
+                    signature(
+                        parameters,
+                        owner_parameters,
+                        AstChildren::<TypeParam<'_>>::empty(),
+                        Some(operator.params()),
+                        operator.return_type(),
+                        SignatureContext::Function,
+                        model,
+                    ),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn apply_constructor_parameter_updates(
+        &mut self,
+        identity: &DeclarationIdentity,
+        constructor_name: &str,
+        params: FormalParamList<'_>,
+        updates: Vec<(
+            FormalParam<'_>,
+            Option<ResolvedType>,
+            Option<ParameterDefault>,
+        )>,
+    ) {
+        let mut defaults_changed = false;
+        for (parameter, ty, default) in updates {
+            if let Some(ty) = ty {
+                self.update_constructor_parameter_type(
+                    identity,
+                    constructor_name,
+                    params,
+                    parameter,
+                    ty,
+                );
+            }
+            if let Some(default) = default
+                && let Some(signature) = self
+                    .type_facts
+                    .get_mut(identity)
+                    .and_then(|facts| facts.constructors.get_mut(constructor_name))
+                && !signature.defaults.contains_key(parameter.name().name())
+            {
+                signature
+                    .defaults
+                    .insert(parameter.name().name().to_owned(), default);
+                defaults_changed = true;
+            }
+        }
+        if defaults_changed {
+            index_fixpoint::record_inference_write(|| {
+                index_fixpoint::InferenceInput::Constructor(
+                    identity.clone(),
+                    constructor_name.to_owned(),
+                )
+            });
+            index_fixpoint::record_inference_write(|| {
+                index_fixpoint::InferenceInput::Constructors(identity.clone())
+            });
+        }
+    }
+
+    fn mixins_have_no_fields(&self, identity: &DeclarationIdentity) -> bool {
+        self.type_facts.get(identity).is_some_and(|facts| {
+            facts.mixin_applications.iter().all(|mixin| {
+                let ResolvedType {
+                    kind: ResolvedTypeKind::Interface { identity, .. },
+                } = mixin
+                else {
+                    return false;
+                };
+                self.type_kind(identity).is_some()
+                    && self.member_entries.get(identity).is_some_and(|entries| {
+                        entries.values().all(|entry| {
+                            entry.facts.iter().all(|fact| {
+                                fact.is_static || !matches!(fact.kind, MemberKind::Field { .. })
+                            })
+                        })
+                    })
+            })
+        })
+    }
+
+    fn publish_alias_constructors(
+        &mut self,
+        identity: &DeclarationIdentity,
+        forwarded: Vec<(ConstructorFacts, ResolvedSignature)>,
+    ) -> bool {
+        let mut changed = false;
+        for (facts, signature) in forwarded {
+            let name = facts.name.clone();
+            let mut entry_changed = false;
+            let constructors = &mut self
+                .type_facts
+                .entry(identity.clone())
+                .or_default()
+                .constructors;
+            if let Some(existing) = constructors.get_mut(&name) {
+                for (current, candidate) in existing.positional.iter_mut().zip(signature.positional)
+                {
+                    entry_changed |= refine_inferred_type(current, candidate);
+                }
+                for (name, candidate) in signature.named {
+                    if let Some(current) = existing.named.get_mut(&name) {
+                        entry_changed |= refine_inferred_type(current, candidate);
+                    }
+                }
+                for (name, default) in signature.defaults {
+                    if let std::collections::hash_map::Entry::Vacant(entry) =
+                        existing.defaults.entry(name)
+                    {
+                        entry.insert(default);
+                        entry_changed = true;
+                    }
+                }
+            } else {
+                constructors.insert(name.clone(), signature);
+                entry_changed = true;
+            }
+            if let Some(declaration) = self
+                .type_facts
+                .get_mut(identity)
+                .and_then(|facts| facts.declaration.as_mut())
+            {
+                if let Some(existing) = declaration
+                    .constructors
+                    .iter_mut()
+                    .find(|existing| existing.name == facts.name)
+                {
+                    for (current, candidate) in existing.parameters.iter_mut().zip(facts.parameters)
+                    {
+                        entry_changed |= refine_inferred_type(&mut current.ty, candidate.ty);
+                    }
+                } else {
+                    declaration.constructors.push(facts);
+                    entry_changed = true;
+                }
+            }
+            if entry_changed {
+                index_fixpoint::record_inference_write(|| {
+                    index_fixpoint::InferenceInput::Constructor(identity.clone(), name)
+                });
+                index_fixpoint::record_inference_write(|| {
+                    index_fixpoint::InferenceInput::Constructors(identity.clone())
+                });
+                changed = true;
+            }
+        }
+        changed
     }
 
     fn add_immutability(&mut self, program: Program<'_>, model: &SemanticModel<'_>) {
@@ -1033,41 +1244,7 @@ impl SignatureIndex {
         if index_fixpoint::inference_deferred() {
             return;
         }
-        let mut defaults_changed = false;
-        for (parameter, ty, default) in updates {
-            if let Some(ty) = ty {
-                self.update_constructor_parameter_type(
-                    identity,
-                    constructor_name,
-                    *params,
-                    parameter,
-                    ty,
-                );
-            }
-            if let Some(default) = default
-                && let Some(signature) = self
-                    .type_facts
-                    .get_mut(identity)
-                    .and_then(|facts| facts.constructors.get_mut(constructor_name))
-                && !signature.defaults.contains_key(parameter.name().name())
-            {
-                signature
-                    .defaults
-                    .insert(parameter.name().name().to_owned(), default);
-                defaults_changed = true;
-            }
-        }
-        if defaults_changed {
-            index_fixpoint::record_inference_write(|| {
-                index_fixpoint::InferenceInput::Constructor(
-                    identity.clone(),
-                    constructor_name.to_owned(),
-                )
-            });
-            index_fixpoint::record_inference_write(|| {
-                index_fixpoint::InferenceInput::Constructors(identity.clone())
-            });
-        }
+        self.apply_constructor_parameter_updates(identity, constructor_name, *params, updates);
     }
 
     /// Materialize mixin-application constructors in the alias's parameter
@@ -1104,24 +1281,7 @@ impl SignatureIndex {
         let Some(owner_parameters) = self.type_parameters(&identity) else {
             return false;
         };
-        let mixins_have_no_fields = self.type_facts.get(&identity).is_some_and(|facts| {
-            facts.mixin_applications.iter().all(|mixin| {
-                let ResolvedType {
-                    kind: ResolvedTypeKind::Interface { identity, .. },
-                } = mixin
-                else {
-                    return false;
-                };
-                self.type_kind(identity).is_some()
-                    && self.member_entries.get(identity).is_some_and(|entries| {
-                        entries.values().all(|entry| {
-                            entry.facts.iter().all(|fact| {
-                                fact.is_static || !matches!(fact.kind, MemberKind::Field { .. })
-                            })
-                        })
-                    })
-            })
-        });
+        let mixins_have_no_fields = self.mixins_have_no_fields(&identity);
         let owner_parameters = owner_parameters.to_vec();
         let mut forwarded = Vec::with_capacity(source_facts.constructors.len());
         for facts in &source_facts.constructors {
@@ -1186,67 +1346,7 @@ impl SignatureIndex {
         if index_fixpoint::inference_deferred() {
             return false;
         }
-        let mut changed = false;
-        for (facts, signature) in forwarded {
-            let name = facts.name.clone();
-            let mut entry_changed = false;
-            let constructors = &mut self
-                .type_facts
-                .entry(identity.clone())
-                .or_default()
-                .constructors;
-            if let Some(existing) = constructors.get_mut(&name) {
-                for (current, candidate) in existing.positional.iter_mut().zip(signature.positional)
-                {
-                    entry_changed |= refine_inferred_type(current, candidate);
-                }
-                for (name, candidate) in signature.named {
-                    if let Some(current) = existing.named.get_mut(&name) {
-                        entry_changed |= refine_inferred_type(current, candidate);
-                    }
-                }
-                for (name, default) in signature.defaults {
-                    if let std::collections::hash_map::Entry::Vacant(entry) =
-                        existing.defaults.entry(name)
-                    {
-                        entry.insert(default);
-                        entry_changed = true;
-                    }
-                }
-            } else {
-                constructors.insert(name.clone(), signature);
-                entry_changed = true;
-            }
-            if let Some(declaration) = self
-                .type_facts
-                .get_mut(&identity)
-                .and_then(|facts| facts.declaration.as_mut())
-            {
-                if let Some(existing) = declaration
-                    .constructors
-                    .iter_mut()
-                    .find(|existing| existing.name == facts.name)
-                {
-                    for (current, candidate) in existing.parameters.iter_mut().zip(facts.parameters)
-                    {
-                        entry_changed |= refine_inferred_type(&mut current.ty, candidate.ty);
-                    }
-                } else {
-                    declaration.constructors.push(facts);
-                    entry_changed = true;
-                }
-            }
-            if entry_changed {
-                index_fixpoint::record_inference_write(|| {
-                    index_fixpoint::InferenceInput::Constructor(identity.clone(), name)
-                });
-                index_fixpoint::record_inference_write(|| {
-                    index_fixpoint::InferenceInput::Constructors(identity.clone())
-                });
-                changed = true;
-            }
-        }
-        changed
+        self.publish_alias_constructors(&identity, forwarded)
     }
 
     /// Resolve the default of the super-constructor parameter before publishing.
@@ -1518,39 +1618,7 @@ impl SignatureIndex {
                     .collect(),
             })
             .collect();
-        let static_consts = members
-            .declared
-            .clone()
-            .filter_map(|member| match member {
-                ClassMember::Field(field)
-                    if field.is_static() && field.keyword() == VarKeyword::Const =>
-                {
-                    Some(field)
-                }
-                _ => None,
-            })
-            .flat_map(|field| {
-                let field_scope = scope.clone();
-                let declared_ty = field
-                    .field_type()
-                    .map(|ty| model.resolve_type_in(ty, &scope));
-                let is_deprecated = field
-                    .annotations()
-                    .any(|annotation| model.is_deprecation(annotation));
-                field.declarators().filter_map(move |declarator| {
-                    declarator
-                        .initializer()
-                        .map(|initializer| StaticConstFacts {
-                            name: declarator.name().name().to_owned(),
-                            ty: declared_ty.clone().unwrap_or_else(|| {
-                                infer_const_initializer_type(initializer, model, &field_scope)
-                            }),
-                            initializer: model.node_ref(initializer.syntax()),
-                            is_deprecated,
-                        })
-                })
-            })
-            .collect();
+        let static_consts = declaration_static_consts(&members, &scope, model);
         self.type_facts.entry(identity).or_default().declaration = Some(DeclarationFacts {
             annotations,
             library_target,
@@ -1648,6 +1716,39 @@ impl SignatureIndex {
                 instantiate_parameter_bound(id, &bounds, &mut HashSet::new(), model),
             );
         }
+        let field_types = Self::type_field_types(&members, &scope, model);
+        self.add_type_supertypes(
+            declaration,
+            &identity,
+            is_extension,
+            &owner_parameters,
+            &scope,
+            model,
+        );
+        let infer_override =
+            !is_extension && !matches!(declaration, TopLevelDecl::ExtensionType(_));
+        let entries = self.member_entries.entry(identity.clone()).or_default();
+        TypeMemberRegistration {
+            identity,
+            is_extension,
+            infer_override,
+            scope,
+            owner_parameters,
+            field_types,
+            model,
+            entries,
+            bound_declared: &mut self.bound_declared,
+            type_facts: &mut self.type_facts,
+            blocked_field_promotions: &mut self.blocked_field_promotions,
+        }
+        .register(members);
+    }
+
+    fn type_field_types(
+        members: &EffectiveMembers<'_>,
+        scope: &TypeParameterScope,
+        model: &SemanticModel<'_>,
+    ) -> HashMap<String, ResolvedType> {
         let mut field_types = members
             .declared
             .clone()
@@ -1658,7 +1759,7 @@ impl SignatureIndex {
             .flat_map(|field| {
                 let field_type = field
                     .field_type()
-                    .map(|ty| model.resolve_type_in(ty, &scope))
+                    .map(|ty| model.resolve_type_in(ty, scope))
                     .unwrap_or(ResolvedType::UNKNOWN);
                 field.declarators().map(move |declarator| {
                     (declarator.name().name().to_string(), field_type.clone())
@@ -1670,10 +1771,22 @@ impl SignatureIndex {
                 parameter.name().name().to_string(),
                 parameter
                     .param_type()
-                    .map(|ty| model.resolve_type_in(ty, &scope))
+                    .map(|ty| model.resolve_type_in(ty, scope))
                     .unwrap_or(ResolvedType::UNKNOWN),
             );
         }
+        field_types
+    }
+
+    fn add_type_supertypes(
+        &mut self,
+        declaration: TopLevelDecl<'_>,
+        identity: &DeclarationIdentity,
+        is_extension: bool,
+        owner_parameters: &[TypeParameterId],
+        scope: &TypeParameterScope,
+        model: &SemanticModel<'_>,
+    ) {
         let (superclass, mixins, constraints, interfaces) = match declaration {
             TopLevelDecl::Class(node) => {
                 (node.extends(), node.with_clause(), None, node.implements())
@@ -1699,10 +1812,10 @@ impl SignatureIndex {
             }
             _ => (None, AstChildren::empty(), None, AstChildren::empty()),
         };
-        let superclass = superclass.map(|ty| model.resolve_type_in(ty, &scope));
-        let mixins: Vec<_> = mixins.map(|ty| model.resolve_type_in(ty, &scope)).collect();
+        let superclass = superclass.map(|ty| model.resolve_type_in(ty, scope));
+        let mixins: Vec<_> = mixins.map(|ty| model.resolve_type_in(ty, scope)).collect();
         let constraints: Option<Vec<_>> =
-            constraints.map(|types| types.map(|ty| model.resolve_type_in(ty, &scope)).collect());
+            constraints.map(|types| types.map(|ty| model.resolve_type_in(ty, scope)).collect());
         // Resolve each declared edge once, retaining source order for subtype
         // traversal and reverse mixin order for concrete member lookup.
         let mut resolved_supertypes: Vec<_> = superclass
@@ -1710,7 +1823,7 @@ impl SignatureIndex {
             .chain(&mixins)
             .chain(constraints.iter().flatten())
             .cloned()
-            .chain(interfaces.map(|ty| model.resolve_type_in(ty, &scope)))
+            .chain(interfaces.map(|ty| model.resolve_type_in(ty, scope)))
             .collect();
         let mut resolved_member_supertypes: Vec<_> = mixins
             .iter()
@@ -1731,15 +1844,15 @@ impl SignatureIndex {
         // Extension types retain only their declared superinterfaces: their
         // representation may admit null, so an implicit Object edge is unsound.
         let inherits_object = !is_extension
-            && identity != DeclarationIdentity::OBJECT
-            && self.type_kind(&identity) != Some(TypeKind::ExtensionType);
+            && *identity != DeclarationIdentity::OBJECT
+            && self.type_kind(identity) != Some(TypeKind::ExtensionType);
         if inherits_object {
             resolved_supertypes.push(model.core_type("Object", false));
         }
         self.type_facts
             .entry(identity.clone())
             .or_default()
-            .supertypes = Some((owner_parameters.clone(), resolved_supertypes));
+            .supertypes = Some((owner_parameters.to_vec(), resolved_supertypes));
         if inherits_object {
             resolved_member_supertypes.push(model.core_type("Object", false));
         }
@@ -1747,216 +1860,258 @@ impl SignatureIndex {
             .entry(identity.clone())
             .or_default()
             .member_supertypes = Some(resolved_member_supertypes);
-        let infer_override =
-            !is_extension && !matches!(declaration, TopLevelDecl::ExtensionType(_));
-        let entries = self.member_entries.entry(identity.clone()).or_default();
+    }
+}
+
+struct TypeMemberRegistration<'a, 's> {
+    identity: DeclarationIdentity,
+    is_extension: bool,
+    infer_override: bool,
+    scope: TypeParameterScope,
+    owner_parameters: Vec<TypeParameterId>,
+    field_types: HashMap<String, ResolvedType>,
+    model: &'s SemanticModel<'a>,
+    entries: &'s mut FxHashMap<String, MemberEntry>,
+    bound_declared: &'s mut SignatureMap<TypeParameterId, bool>,
+    type_facts: &'s mut SignatureMap<DeclarationIdentity, TypeFacts>,
+    blocked_field_promotions: &'s mut SignatureMap<LibraryId, FxHashSet<String>>,
+}
+
+impl TypeMemberRegistration<'_, '_> {
+    fn register(mut self, members: EffectiveMembers<'_>) {
         for member in members.declared.clone() {
             match member {
-                ClassMember::Method(method) => {
-                    let entry = entries.entry(method.name().name().to_string()).or_default();
-                    scope.push(method.type_params(), model);
-                    record_bound_declarations(
-                        &mut self.bound_declared,
-                        &scope,
-                        method.type_params(),
-                    );
-                    entry.override_shape = Some(inherited::OverrideShape::new(
-                        method.params(),
-                        method.type_params(),
-                        &scope,
-                    ));
-                    entry.is_instance_method |= !method.is_static();
-                    let mut facts = MemberFacts {
-                        declaring_type: identity.clone(),
-                        kind: MemberKind::Method,
-                        is_static: method.is_static(),
-                        // An `external` method has no body but is concrete.
-                        is_abstract: method.is_abstract() && !method.is_external(),
-                        positional_parameter_names: Vec::new(),
-                        annotations: resolve_annotations(method.annotations(), model),
-                        parameter_contracts: None,
-                    };
-                    entry.signature = Some(signature(
-                        &scope,
-                        &owner_parameters,
-                        method.type_params(),
-                        Some(method.params()),
-                        method.return_type(),
-                        SignatureContext::Member(&mut facts, infer_override),
-                        model,
-                    ));
-                    entry.facts.push(facts);
-                    scope.pop();
-                }
-                ClassMember::Constructor(constructor) => {
-                    self.type_facts
-                        .entry(identity.clone())
-                        .or_default()
-                        .constructors
-                        .insert(
-                            constructor
-                                .constructor_name()
-                                .map(|name| name.name().to_string())
-                                .unwrap_or_else(|| "new".to_string()),
-                            signature(
-                                &scope,
-                                &owner_parameters,
-                                AstChildren::empty(),
-                                Some(constructor.params()),
-                                None,
-                                SignatureContext::Constructor(&field_types),
-                                model,
-                            ),
-                        );
-                }
-                ClassMember::Field(field) => {
-                    let field_type = field
-                        .field_type()
-                        .map(|ty| model.resolve_type_in(ty, &scope))
-                        .unwrap_or(ResolvedType::UNKNOWN);
-                    for declarator in field.declarators() {
-                        let kind = MemberKind::field(field, declarator);
-                        let entry = entries
-                            .entry(declarator.name().name().to_string())
-                            .or_default();
-                        entry.promotable_field = declarator.name().name().starts_with('_')
-                            && !field.is_static()
-                            && !field.is_abstract()
-                            && !field.is_external()
-                            && matches!(field.keyword(), VarKeyword::Final | VarKeyword::Const);
-                        entry.facts.push(MemberFacts {
-                            declaring_type: identity.clone(),
-                            kind,
-                            is_static: field.is_static(),
-                            is_abstract: field.is_abstract(),
-                            positional_parameter_names: Vec::new(),
-                            parameter_contracts: Some(if kind.has_setter() {
-                                setter_parameter_contracts(
-                                    "value",
-                                    matches!(
-                                        kind,
-                                        MemberKind::Field {
-                                            covariant: true,
-                                            ..
-                                        }
-                                    ),
-                                )
-                            } else {
-                                empty_parameter_contracts()
-                            }),
-                            annotations: resolve_annotations(field.annotations(), model),
-                        });
-                        entry.field = Some((owner_parameters.clone(), field_type.clone()));
-                        if !field.is_static() {
-                            entry.read = Some(field_type.clone());
-                            if kind.has_setter() {
-                                entry.write = Some(field_type.clone());
-                            }
-                        }
-                    }
-                }
-                ClassMember::Getter(getter) => {
-                    let entry = entries.entry(getter.name().name().to_string()).or_default();
-                    entry.facts.push(MemberFacts {
-                        declaring_type: identity.clone(),
-                        kind: MemberKind::Getter,
-                        is_static: getter.is_static(),
-                        is_abstract: getter.is_abstract(),
-                        positional_parameter_names: Vec::new(),
-                        parameter_contracts: Some(empty_parameter_contracts()),
-                        annotations: resolve_annotations(getter.annotations(), model),
-                    });
-                    let return_type = getter
-                        .return_type()
-                        .map(|ty| model.resolve_type_in(ty, &scope))
-                        .unwrap_or(if infer_override && !getter.is_static() {
-                            ResolvedType::UNKNOWN
-                        } else {
-                            ResolvedType::DYNAMIC
-                        });
-                    entry.field = Some((owner_parameters.clone(), return_type.clone()));
-                    entry.implicit_getter = getter.return_type().is_none();
-                    if !getter.is_static() {
-                        entry.read = Some(return_type);
-                    }
-                }
-                ClassMember::Setter(setter) => {
-                    let entry = entries.entry(setter.name().name().to_string()).or_default();
-                    entry.facts.push(MemberFacts {
-                        declaring_type: identity.clone(),
-                        kind: MemberKind::Setter,
-                        is_static: setter.is_static(),
-                        is_abstract: setter.is_abstract(),
-                        positional_parameter_names: vec![setter.param().name().to_string()],
-                        parameter_contracts: Some(setter_parameter_contracts(
-                            setter.param().name(),
-                            setter.is_covariant(),
-                        )),
-                        annotations: resolve_annotations(setter.annotations(), model),
-                    });
-                    let parameter_type = setter
-                        .param_type()
-                        .map(|ty| model.resolve_type_in(ty, &scope))
-                        .unwrap_or(if setter.is_static() || !infer_override {
-                            ResolvedType::DYNAMIC
-                        } else {
-                            ResolvedType::UNKNOWN
-                        });
-                    entry.field.get_or_insert_with(|| {
-                        let read_type = if setter.param_type().is_none() {
-                            ResolvedType::DYNAMIC
-                        } else {
-                            parameter_type.clone()
-                        };
-                        (owner_parameters.clone(), read_type)
-                    });
-                    if !setter.is_static() {
-                        entry.write = Some(parameter_type);
-                    }
-                }
-                ClassMember::Operator(operator) => {
-                    let entry = entries
-                        .entry(operator.lookup_name().to_owned())
-                        .or_default();
-                    entry.is_instance_method = true;
-                    entry.override_shape = Some(inherited::OverrideShape::new(
-                        operator.params(),
-                        AstChildren::empty(),
-                        &scope,
-                    ));
-                    let mut facts = MemberFacts {
-                        declaring_type: identity.clone(),
-                        kind: MemberKind::Operator,
-                        is_static: false,
-                        is_abstract: operator.body().is_none() && !operator.is_external(),
-                        positional_parameter_names: Vec::new(),
-                        annotations: resolve_annotations(operator.annotations(), model),
-                        parameter_contracts: None,
-                    };
-                    entry.signature = Some(signature(
-                        &scope,
-                        &owner_parameters,
-                        AstChildren::empty(),
-                        Some(operator.params()),
-                        operator.return_type(),
-                        SignatureContext::Member(&mut facts, infer_override),
-                        model,
-                    ));
-                    entry.facts.push(facts);
-                }
+                ClassMember::Method(method) => self.add_method(method),
+                ClassMember::Constructor(constructor) => self.add_constructor(constructor),
+                ClassMember::Field(field) => self.add_field(field),
+                ClassMember::Getter(getter) => self.add_getter(getter),
+                ClassMember::Setter(setter) => self.add_setter(setter),
+                ClassMember::Operator(operator) => self.add_operator(operator),
                 // Indexed through the constructor it completes (`element_members`).
                 ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => {}
             }
         }
+        self.add_declaring_fields(&members);
+        self.add_primary_constructor(&members);
+        self.record_blocked_promotions();
+    }
+
+    fn add_method(&mut self, method: falcon_syntax::cst::MethodDecl<'_>) {
+        let entry = self
+            .entries
+            .entry(method.name().name().to_string())
+            .or_default();
+        self.scope.push(method.type_params(), self.model);
+        record_bound_declarations(self.bound_declared, &self.scope, method.type_params());
+        entry.override_shape = Some(inherited::OverrideShape::new(
+            method.params(),
+            method.type_params(),
+            &self.scope,
+        ));
+        entry.is_instance_method |= !method.is_static();
+        let mut facts = MemberFacts {
+            declaring_type: self.identity.clone(),
+            kind: MemberKind::Method,
+            is_static: method.is_static(),
+            // An `external` method has no body but is concrete.
+            is_abstract: method.is_abstract() && !method.is_external(),
+            positional_parameter_names: Vec::new(),
+            annotations: resolve_annotations(method.annotations(), self.model),
+            parameter_contracts: None,
+        };
+        entry.signature = Some(signature(
+            &self.scope,
+            &self.owner_parameters,
+            method.type_params(),
+            Some(method.params()),
+            method.return_type(),
+            SignatureContext::Member(&mut facts, self.infer_override),
+            self.model,
+        ));
+        entry.facts.push(facts);
+        self.scope.pop();
+    }
+
+    fn add_constructor(&mut self, constructor: falcon_syntax::cst::ConstructorDecl<'_>) {
+        self.type_facts
+            .entry(self.identity.clone())
+            .or_default()
+            .constructors
+            .insert(
+                constructor
+                    .constructor_name()
+                    .map(|name| name.name().to_string())
+                    .unwrap_or_else(|| "new".to_string()),
+                signature(
+                    &self.scope,
+                    &self.owner_parameters,
+                    AstChildren::empty(),
+                    Some(constructor.params()),
+                    None,
+                    SignatureContext::Constructor(&self.field_types),
+                    self.model,
+                ),
+            );
+    }
+
+    fn add_field(&mut self, field: falcon_syntax::cst::FieldDecl<'_>) {
+        let field_type = field
+            .field_type()
+            .map(|ty| self.model.resolve_type_in(ty, &self.scope))
+            .unwrap_or(ResolvedType::UNKNOWN);
+        for declarator in field.declarators() {
+            let kind = MemberKind::field(field, declarator);
+            let entry = self
+                .entries
+                .entry(declarator.name().name().to_string())
+                .or_default();
+            entry.promotable_field = declarator.name().name().starts_with('_')
+                && !field.is_static()
+                && !field.is_abstract()
+                && !field.is_external()
+                && matches!(field.keyword(), VarKeyword::Final | VarKeyword::Const);
+            entry.facts.push(MemberFacts {
+                declaring_type: self.identity.clone(),
+                kind,
+                is_static: field.is_static(),
+                is_abstract: field.is_abstract(),
+                positional_parameter_names: Vec::new(),
+                parameter_contracts: Some(if kind.has_setter() {
+                    setter_parameter_contracts(
+                        "value",
+                        matches!(
+                            kind,
+                            MemberKind::Field {
+                                covariant: true,
+                                ..
+                            }
+                        ),
+                    )
+                } else {
+                    empty_parameter_contracts()
+                }),
+                annotations: resolve_annotations(field.annotations(), self.model),
+            });
+            entry.field = Some((self.owner_parameters.clone(), field_type.clone()));
+            if !field.is_static() {
+                entry.read = Some(field_type.clone());
+                if kind.has_setter() {
+                    entry.write = Some(field_type.clone());
+                }
+            }
+        }
+    }
+
+    fn add_getter(&mut self, getter: falcon_syntax::cst::GetterDecl<'_>) {
+        let entry = self
+            .entries
+            .entry(getter.name().name().to_string())
+            .or_default();
+        entry.facts.push(MemberFacts {
+            declaring_type: self.identity.clone(),
+            kind: MemberKind::Getter,
+            is_static: getter.is_static(),
+            is_abstract: getter.is_abstract(),
+            positional_parameter_names: Vec::new(),
+            parameter_contracts: Some(empty_parameter_contracts()),
+            annotations: resolve_annotations(getter.annotations(), self.model),
+        });
+        let return_type = getter
+            .return_type()
+            .map(|ty| self.model.resolve_type_in(ty, &self.scope))
+            .unwrap_or(if self.infer_override && !getter.is_static() {
+                ResolvedType::UNKNOWN
+            } else {
+                ResolvedType::DYNAMIC
+            });
+        entry.field = Some((self.owner_parameters.clone(), return_type.clone()));
+        entry.implicit_getter = getter.return_type().is_none();
+        if !getter.is_static() {
+            entry.read = Some(return_type);
+        }
+    }
+
+    fn add_setter(&mut self, setter: falcon_syntax::cst::SetterDecl<'_>) {
+        let entry = self
+            .entries
+            .entry(setter.name().name().to_string())
+            .or_default();
+        entry.facts.push(MemberFacts {
+            declaring_type: self.identity.clone(),
+            kind: MemberKind::Setter,
+            is_static: setter.is_static(),
+            is_abstract: setter.is_abstract(),
+            positional_parameter_names: vec![setter.param().name().to_string()],
+            parameter_contracts: Some(setter_parameter_contracts(
+                setter.param().name(),
+                setter.is_covariant(),
+            )),
+            annotations: resolve_annotations(setter.annotations(), self.model),
+        });
+        let parameter_type = setter
+            .param_type()
+            .map(|ty| self.model.resolve_type_in(ty, &self.scope))
+            .unwrap_or(if setter.is_static() || !self.infer_override {
+                ResolvedType::DYNAMIC
+            } else {
+                ResolvedType::UNKNOWN
+            });
+        entry.field.get_or_insert_with(|| {
+            let read_type = if setter.param_type().is_none() {
+                ResolvedType::DYNAMIC
+            } else {
+                parameter_type.clone()
+            };
+            (self.owner_parameters.clone(), read_type)
+        });
+        if !setter.is_static() {
+            entry.write = Some(parameter_type);
+        }
+    }
+
+    fn add_operator(&mut self, operator: falcon_syntax::cst::OperatorDecl<'_>) {
+        let entry = self
+            .entries
+            .entry(operator.lookup_name().to_owned())
+            .or_default();
+        entry.is_instance_method = true;
+        entry.override_shape = Some(inherited::OverrideShape::new(
+            operator.params(),
+            AstChildren::empty(),
+            &self.scope,
+        ));
+        let mut facts = MemberFacts {
+            declaring_type: self.identity.clone(),
+            kind: MemberKind::Operator,
+            is_static: false,
+            is_abstract: operator.body().is_none() && !operator.is_external(),
+            positional_parameter_names: Vec::new(),
+            annotations: resolve_annotations(operator.annotations(), self.model),
+            parameter_contracts: None,
+        };
+        entry.signature = Some(signature(
+            &self.scope,
+            &self.owner_parameters,
+            AstChildren::empty(),
+            Some(operator.params()),
+            operator.return_type(),
+            SignatureContext::Member(&mut facts, self.infer_override),
+            self.model,
+        ));
+        entry.facts.push(facts);
+    }
+
+    fn add_declaring_fields(&mut self, members: &EffectiveMembers<'_>) {
         for parameter in members.declaring_params() {
             let is_final = members.representation || parameter.is_final();
-            let field_type = field_types[parameter.name().name()].clone();
-            let entry = entries
+            let field_type = self.field_types[parameter.name().name()].clone();
+            let entry = self
+                .entries
                 .entry(parameter.name().name().to_string())
                 .or_default();
             entry.promotable_field = parameter.name().name().starts_with('_') && is_final;
             entry.facts.push(MemberFacts {
-                declaring_type: identity.clone(),
+                declaring_type: self.identity.clone(),
                 kind: MemberKind::Field {
                     writable: !is_final,
                     covariant: parameter.is_covariant(),
@@ -1969,23 +2124,26 @@ impl SignatureIndex {
                 } else {
                     setter_parameter_contracts("value", parameter.is_covariant())
                 }),
-                annotations: resolve_annotations(parameter.annotations(), model),
+                annotations: resolve_annotations(parameter.annotations(), self.model),
             });
-            entry.field = Some((owner_parameters.clone(), field_type.clone()));
+            entry.field = Some((self.owner_parameters.clone(), field_type.clone()));
             entry.read = Some(field_type.clone());
             if !is_final {
                 entry.write = Some(field_type);
             }
         }
+    }
+
+    fn add_primary_constructor(&mut self, members: &EffectiveMembers<'_>) {
         if let Some(primary) = members.primary {
             let mut primary_signature = signature(
-                &scope,
-                &owner_parameters,
+                &self.scope,
+                &self.owner_parameters,
                 AstChildren::empty(),
                 Some(primary.params()),
                 None,
-                SignatureContext::Constructor(&field_types),
-                model,
+                SignatureContext::Constructor(&self.field_types),
+                self.model,
             );
             for parameter in primary.params().named().filter(|parameter| {
                 (parameter.is_final() || parameter.is_var() || members.representation)
@@ -2036,7 +2194,7 @@ impl SignatureIndex {
                 ));
             }
             self.type_facts
-                .entry(identity.clone())
+                .entry(self.identity.clone())
                 .or_default()
                 .constructors
                 .insert(
@@ -2046,10 +2204,13 @@ impl SignatureIndex {
                     primary_signature,
                 );
         }
-        if let DeclarationIdentity::Library { library, .. } = identity
-            && !is_extension
+    }
+
+    fn record_blocked_promotions(self) {
+        if let DeclarationIdentity::Library { library, .. } = self.identity
+            && !self.is_extension
         {
-            for (name, entry) in entries {
+            for (name, entry) in self.entries {
                 if name.starts_with('_')
                     && !entry.promotable_field
                     && entry.facts.iter().any(|facts| {
@@ -2193,6 +2354,98 @@ pub(super) enum SignatureContext<'a> {
     Member(&'a mut MemberFacts, bool),
 }
 
+fn extension_annotations(
+    extension: falcon_syntax::cst::ExtensionDecl<'_>,
+    model: &SemanticModel<'_>,
+) -> FxHashMap<String, Vec<DeclarationIdentity>> {
+    extension
+        .members()
+        .filter_map(|member| {
+            let (name, annotations) = match member {
+                ClassMember::Method(method) => (method.name().name(), method.annotations()),
+                ClassMember::Getter(getter) => (getter.name().name(), getter.annotations()),
+                ClassMember::Operator(operator) => (operator.lookup_name(), operator.annotations()),
+                _ => return None,
+            };
+            let annotations = resolve_annotations(annotations, model);
+            (!annotations.is_empty()).then(|| (name.to_owned(), annotations))
+        })
+        .collect()
+}
+
+fn declaration_static_consts(
+    members: &EffectiveMembers<'_>,
+    scope: &TypeParameterScope,
+    model: &SemanticModel<'_>,
+) -> Vec<StaticConstFacts> {
+    members
+        .declared
+        .clone()
+        .filter_map(|member| match member {
+            ClassMember::Field(field)
+                if field.is_static() && field.keyword() == VarKeyword::Const =>
+            {
+                Some(field)
+            }
+            _ => None,
+        })
+        .flat_map(|field| {
+            let field_scope = scope.clone();
+            let declared_ty = field
+                .field_type()
+                .map(|ty| model.resolve_type_in(ty, scope));
+            let is_deprecated = field
+                .annotations()
+                .any(|annotation| model.is_deprecation(annotation));
+            field.declarators().filter_map(move |declarator| {
+                declarator
+                    .initializer()
+                    .map(|initializer| StaticConstFacts {
+                        name: declarator.name().name().to_owned(),
+                        ty: declared_ty.clone().unwrap_or_else(|| {
+                            infer_const_initializer_type(initializer, model, &field_scope)
+                        }),
+                        initializer: model.node_ref(initializer.syntax()),
+                        is_deprecated,
+                    })
+            })
+        })
+        .collect()
+}
+
+fn parameter_requires_default(param: FormalParam<'_>, optional: bool) -> bool {
+    !optional
+        || param.annotations().any(|annotation| {
+            annotation
+                .name()
+                .last()
+                .is_some_and(|name| name.name() == "required")
+        })
+}
+
+fn signature_parameter_type(
+    param: FormalParam<'_>,
+    initializing: Option<InitializingFormal>,
+    name: &str,
+    field_types: Option<&HashMap<String, ResolvedType>>,
+    infer_override: bool,
+    scope: &TypeParameterScope,
+    model: &SemanticModel<'_>,
+) -> ResolvedType {
+    if param.param_type().is_some() || param.function_params().is_some() {
+        model.resolve_formal_parameter_in(param, scope)
+    } else if initializing == Some(InitializingFormal::This) {
+        field_types
+            .and_then(|fields| fields.get(name))
+            .cloned()
+            .unwrap_or(ResolvedType::UNKNOWN)
+    } else if initializing == Some(InitializingFormal::Super) || infer_override {
+        ResolvedType::UNKNOWN
+    } else {
+        ResolvedType::DYNAMIC
+    }
+}
+
 /// Resolves a callable, collecting declaration facts only when requested.
 pub(super) fn signature<'a>(
     scope: &TypeParameterScope,
@@ -2209,20 +2462,6 @@ pub(super) fn signature<'a>(
         SignatureContext::Member(facts, infer_override) => (None, Some(facts), infer_override),
     };
     let infer_override = infer_override && facts.as_ref().is_some_and(|facts| !facts.is_static);
-    let parameter_type = |param: FormalParam<'_>, initializing, name: &str| {
-        if param.param_type().is_some() || param.function_params().is_some() {
-            model.resolve_formal_parameter_in(param, scope)
-        } else if initializing == Some(InitializingFormal::This) {
-            field_types
-                .and_then(|fields| fields.get(name))
-                .cloned()
-                .unwrap_or(ResolvedType::UNKNOWN)
-        } else if initializing == Some(InitializingFormal::Super) || infer_override {
-            ResolvedType::UNKNOWN
-        } else {
-            ResolvedType::DYNAMIC
-        }
-    };
     let mut result = ResolvedSignature::returning(ResolvedType::DYNAMIC);
     result.owner_parameters = owner_parameters.to_vec();
     result.call_parameters = parameter_ids(scope, call_parameters.clone());
@@ -2250,7 +2489,15 @@ pub(super) fn signature<'a>(
             ParamKind::OptionalPositional | ParamKind::Named { required: false }
         );
         let has_default = default_value.is_some() || optional;
-        let ty = parameter_type(param, initializing, name);
+        let ty = signature_parameter_type(
+            param,
+            initializing,
+            name,
+            field_types,
+            infer_override,
+            scope,
+            model,
+        );
         if let ParamKind::Named { required } = kind {
             if required {
                 required_named.push(name.to_string());
@@ -2269,15 +2516,7 @@ pub(super) fn signature<'a>(
                 result.positional_parameter_names.push(String::new());
             }
         }
-        if has_default
-            && (!optional
-                || param.annotations().any(|annotation| {
-                    annotation
-                        .name()
-                        .last()
-                        .is_some_and(|name| name.name() == "required")
-                }))
-        {
+        if has_default && parameter_requires_default(param, optional) {
             result.non_optional_defaults.insert(name.to_string());
         }
         // Super formals without a declared default inherit theirs once the super

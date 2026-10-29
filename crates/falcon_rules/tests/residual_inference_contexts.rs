@@ -98,9 +98,10 @@ void use(Callable value, dynamic dynamicValue) {
     );
 }
 
+type ExpectedSpan<'a> = (usize, usize, &'a str);
+
 #[test]
 fn historical_callable_contexts_preserve_exact_omission_spans() {
-    type ExpectedSpan<'a> = (usize, usize, &'a str);
     let cases: &[(&str, &[ExpectedSpan<'_>])] = &[
         (
             r#"class C { void call() {} int x = 0; }
@@ -180,6 +181,10 @@ void f(C c, C c2, C? n, bool b, Gen g) {
             ],
         ),
     ];
+    assert_callable_omission_spans(cases);
+}
+
+fn assert_callable_omission_spans(cases: &[(&str, &[ExpectedSpan<'_>])]) {
     let rules = all_rules();
     let rule = &rules
         .iter()

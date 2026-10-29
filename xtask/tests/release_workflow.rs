@@ -232,64 +232,83 @@ rcodesign() {{
             .env("APPLE_TEAM_ID", "team")
             .output()
             .unwrap();
+        assert_notarisation_result(
+            temp.path(),
+            &output,
+            statuses,
+            published,
+            expected,
+            (name, existing, submitted),
+        );
+    }
+}
+
+fn assert_notarisation_result(
+    root: &std::path::Path,
+    output: &std::process::Output,
+    statuses: &str,
+    published: bool,
+    expected: &str,
+    submission: (&str, &str, &str),
+) {
+    let (name, existing, submitted) = submission;
+    assert_eq!(
+        output.status.success(),
+        matches!(expected, "Accepted" | "In Progress"),
+        "{statuses}: {output:?}"
+    );
+    if statuses == "Different Commit" {
+        assert!(String::from_utf8_lossy(&output.stderr).contains("rerun the original ref"));
+        assert!(!root.join("calls").exists());
+        return;
+    }
+    assert_eq!(root.join("tar-calls").exists(), published);
+    let calls = fs::read_to_string(root.join("calls")).unwrap();
+    assert_eq!(
+        calls.lines().any(|line| line.starts_with("notary-submit ")),
+        statuses.is_empty(),
+        "{calls}"
+    );
+    assert_eq!(
+        calls.lines().any(|line| line.starts_with("sign ")),
+        statuses.is_empty(),
+        "{calls}"
+    );
+    assert!(
+        calls.lines().any(|line| line.starts_with("verify ")),
+        "{calls}"
+    );
+    assert_eq!(root.join("zip-calls").exists(), statuses.is_empty());
+    if !statuses.is_empty() {
         assert_eq!(
-            output.status.success(),
-            matches!(expected, "Accepted" | "In Progress"),
-            "{statuses}: {output:?}"
+            fs::read_to_string(root.join("stage/falcon")).unwrap(),
+            "signed binary\n"
         );
-        if statuses == "Different Commit" {
-            assert!(String::from_utf8_lossy(&output.stderr).contains("rerun the original ref"));
-            assert!(!temp.path().join("calls").exists());
-            continue;
+    }
+    let summary = fs::read_to_string(root.join("summary")).unwrap();
+    let id = if statuses.is_empty() {
+        submitted
+    } else {
+        existing
+    };
+    assert!(summary.contains(name), "{summary}");
+    assert!(summary.contains(id), "{summary}");
+    if output.status.success() {
+        let outputs = fs::read_to_string(root.join("output")).unwrap();
+        for field in [
+            format!("id={id}"),
+            format!("name={name}"),
+            format!("status={expected}"),
+        ] {
+            assert!(outputs.lines().any(|line| line == field), "{outputs}");
         }
-        assert_eq!(temp.path().join("tar-calls").exists(), published);
-        let calls = fs::read_to_string(temp.path().join("calls")).unwrap();
-        assert_eq!(
-            calls.lines().any(|line| line.starts_with("notary-submit ")),
-            statuses.is_empty(),
-            "{calls}"
-        );
-        assert_eq!(
-            calls.lines().any(|line| line.starts_with("sign ")),
-            statuses.is_empty(),
-            "{calls}"
-        );
-        assert!(
-            calls.lines().any(|line| line.starts_with("verify ")),
-            "{calls}"
-        );
-        assert_eq!(temp.path().join("zip-calls").exists(), statuses.is_empty());
-        if !statuses.is_empty() {
-            assert_eq!(
-                fs::read_to_string(temp.path().join("stage/falcon")).unwrap(),
-                "signed binary\n"
-            );
-        }
-        let summary = fs::read_to_string(temp.path().join("summary")).unwrap();
-        let id = if statuses.is_empty() {
-            submitted
-        } else {
-            existing
-        };
-        assert!(summary.contains(name), "{summary}");
-        assert!(summary.contains(id), "{summary}");
-        if output.status.success() {
-            let outputs = fs::read_to_string(temp.path().join("output")).unwrap();
-            for field in [
-                format!("id={id}"),
-                format!("name={name}"),
-                format!("status={expected}"),
-            ] {
-                assert!(outputs.lines().any(|line| line == field), "{outputs}");
-            }
-        }
-        let gh_calls = fs::read_to_string(temp.path().join("gh-calls")).unwrap();
-        assert!(!gh_calls.contains("draft=false"), "{gh_calls}");
-        assert!(!gh_calls.contains("publish.yml"), "{gh_calls}");
-        if statuses.is_empty() {
-            assert!(gh_calls.contains("--draft --target head"), "{gh_calls}");
-            assert!(gh_calls.contains(".signed"), "{gh_calls}");
-        }
+    }
+    let gh_calls = fs::read_to_string(root.join("gh-calls")).unwrap();
+    assert!(!gh_calls.contains("draft=false"), "{gh_calls}");
+    assert!(!gh_calls.contains("publish.yml"), "{gh_calls}");
+    if statuses.is_empty() {
+        assert!(gh_calls.contains("--draft --target head"), "{gh_calls}");
+        assert!(gh_calls.contains(".signed"), "{gh_calls}");
     }
 }
 
@@ -644,32 +663,7 @@ rcodesign() {{
                 assert!(outputs.lines().any(|line| line == field), "{outputs}");
             }
         }
-        let dispatched = temp.path().join("dispatch");
-        assert_eq!(dispatched.exists(), !dispatch.is_empty(), "{output:?}");
-        if !dispatch.is_empty() {
-            let calls = fs::read_to_string(dispatched).unwrap();
-            assert_eq!(calls.lines().count(), 1, "{calls}");
-            assert!(
-                calls.contains(&format!("workflow run {dispatch} --ref main")),
-                "{calls}"
-            );
-            if dispatch == "release.yml" {
-                assert!(
-                    calls.contains(&format!("-f commit={commit} -f tag=v1.2.3")),
-                    "{calls}"
-                );
-            } else {
-                for field in [
-                    format!("-f release-ref={commit}"),
-                    "-f release-tag=v1.2.3".to_owned(),
-                    format!("-f submission-id={id}"),
-                    "-f submission-name=submission.zip".to_owned(),
-                    format!("-f attempt={}", attempt.parse::<u8>().unwrap() + 1),
-                ] {
-                    assert!(calls.contains(&field), "{calls}");
-                }
-            }
-        }
+        assert_polling_dispatch(temp.path(), &output, dispatch, commit, id, attempt);
         if matches!(status, "Invalid" | "Rejected") {
             assert!(String::from_utf8_lossy(&output.stdout).contains("Apple rejection details"));
             let calls = fs::read_to_string(temp.path().join("calls")).unwrap();
@@ -680,6 +674,42 @@ rcodesign() {{
         }
         if status == "In Progress" && attempt == "6" {
             assert!(String::from_utf8_lossy(&output.stderr).contains("manually rerun"));
+        }
+    }
+}
+
+fn assert_polling_dispatch(
+    root: &std::path::Path,
+    output: &std::process::Output,
+    dispatch: &str,
+    commit: &str,
+    id: &str,
+    attempt: &str,
+) {
+    let dispatched = root.join("dispatch");
+    assert_eq!(dispatched.exists(), !dispatch.is_empty(), "{output:?}");
+    if !dispatch.is_empty() {
+        let calls = fs::read_to_string(dispatched).unwrap();
+        assert_eq!(calls.lines().count(), 1, "{calls}");
+        assert!(
+            calls.contains(&format!("workflow run {dispatch} --ref main")),
+            "{calls}"
+        );
+        if dispatch == "release.yml" {
+            assert!(
+                calls.contains(&format!("-f commit={commit} -f tag=v1.2.3")),
+                "{calls}"
+            );
+        } else {
+            for field in [
+                format!("-f release-ref={commit}"),
+                "-f release-tag=v1.2.3".to_owned(),
+                format!("-f submission-id={id}"),
+                "-f submission-name=submission.zip".to_owned(),
+                format!("-f attempt={}", attempt.parse::<u8>().unwrap() + 1),
+            ] {
+                assert!(calls.contains(&field), "{calls}");
+            }
         }
     }
 }

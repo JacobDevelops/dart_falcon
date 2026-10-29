@@ -27,14 +27,16 @@
 //!
 //! Adopted from the official `void_checks` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth};
+use falcon_analyze::{
+    AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
 use crate::lint::expressions::is_parenthesized;
-use falcon_analyze::{BodyOwner, FunctionBodies};
 #[cfg(test)]
 use falcon_analyze::visit_program;
+use falcon_analyze::{BodyOwner, FunctionBodies};
 use falcon_analyze::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
 
 #[derive(Default)]
@@ -81,9 +83,12 @@ impl<'a> Collector<'a> {
     /// function's return type; for a function literal that is its inferred
     /// return type, not the context it was inferred against.
     fn return_type(&self, statement: Span, state: &SemanticState<'_>) -> Option<ResolvedType> {
-        match self.functions.iter().rev().find(|(enclosing, _)| {
-            enclosing.contains(statement)
-        }) {
+        match self
+            .functions
+            .iter()
+            .rev()
+            .find(|(enclosing, _)| enclosing.contains(statement))
+        {
             Some((_, Some(return_type))) => Some(return_type.clone()),
             _ if self
                 .bodies
@@ -108,7 +113,10 @@ impl<'a> Collector<'a> {
     ) {
         if !matches!(expected.view(), ResolvedTypeView::Void)
             && !(expected.interface("dart:async", "FutureOr")
-                && matches!(expected.arguments().first().map(ResolvedType::view), Some(ResolvedTypeView::Void)))
+                && matches!(
+                    expected.arguments().first().map(ResolvedType::view),
+                    Some(ResolvedTypeView::Void)
+                ))
             && !(matches!(expected.view(), ResolvedTypeView::Function { .. })
                 && matches!(value, Expr::FuncExpr(function)
                     if matches!(function.body(), FunctionBody::Block(_))))
@@ -131,7 +139,10 @@ impl<'a> Collector<'a> {
             return_statement,
         ) == Truth::No
         {
-            self.diagnostics.push(self.ctx.diagnostic("This value is not valid for a generic type instantiated with void.", reported_span));
+            self.diagnostics.push(self.ctx.diagnostic(
+                "This value is not valid for a generic type instantiated with void.",
+                reported_span,
+            ));
         }
     }
 
@@ -427,14 +438,18 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         state: &SemanticState<'a>,
     ) {
         if let Pattern::Variable(variable) = node
-            && self.pattern_assignments.iter().any(|assignment| {
-                assignment.contains(node.span())
-            })
+            && self
+                .pattern_assignments
+                .iter()
+                .any(|assignment| assignment.contains(node.span()))
             && let Some(actual) = matched
         {
             let expected = state.environment.declared_type(variable.name().name());
             if acceptable(&expected, actual, false, false) == Truth::No {
-                self.diagnostics.push(self.ctx.diagnostic("This value is not valid for a generic type instantiated with void.", node.span()));
+                self.diagnostics.push(self.ctx.diagnostic(
+                    "This value is not valid for a generic type instantiated with void.",
+                    node.span(),
+                ));
             }
         }
     }
@@ -453,7 +468,10 @@ fn acceptable(
         return acceptable_for_void(actual);
     }
     if expected.interface("dart:async", "FutureOr")
-        && matches!(expected.arguments().first().map(ResolvedType::view), Some(ResolvedTypeView::Void))
+        && matches!(
+            expected.arguments().first().map(ResolvedType::view),
+            Some(ResolvedTypeView::Void)
+        )
     {
         return acceptable_for_future_or_void(actual);
     }
@@ -500,8 +518,8 @@ fn acceptable_for_future_or_void(actual: &ResolvedType) -> Truth {
 
 #[cfg(test)]
 mod tests {
-    use falcon_analyze::RuleAnalysis;
     use super::*;
+    use falcon_analyze::RuleAnalysis;
     use falcon_analyze::{IdentityIndex, IdentitySource, ParsedFile, SignatureIndex};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
@@ -599,26 +617,7 @@ void use() {
         };
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
-        crate::lint::test_support::write_sdk(root, &[
-            ("core", "library dart.core; class Object {} abstract class num {} \
-             abstract class int extends num {} abstract class Null {} \
-             abstract class Function {} abstract class Type {}"),
-            ("async", "library dart.async; abstract class FutureOr<T> {} \
-             class Future<T> { Future(FutureOr<T> Function() computation); \
-             Future.value([FutureOr<T>? value]); }"),
-        ]);
-        std::fs::create_dir_all(root.join("app/.dart_tool")).unwrap();
-        std::fs::create_dir_all(root.join("app/lib")).unwrap();
-        std::fs::write(
-            root.join("app/.dart_tool/package_config.json"),
-            serde_json::json!({
-                "configVersion": 2,
-                "flutterRoot": format!("file://{}", root.join("flutter").display()),
-                "packages": [{"name": "app", "rootUri": "../", "packageUri": "lib/"}]
-            })
-            .to_string(),
-        )
-        .unwrap();
+        write_future_constructor_project(root);
         let path = root.join("app/lib/main.dart");
         let source = r"
 import 'dart:async';
@@ -708,6 +707,38 @@ void use() {
             })
             .collect();
         assert_eq!(actual, expected, "{diagnostics:?}");
+    }
+
+    fn write_future_constructor_project(root: &Path) {
+        crate::lint::test_support::write_sdk(
+            root,
+            &[
+                (
+                    "core",
+                    "library dart.core; class Object {} abstract class num {} \
+             abstract class int extends num {} abstract class Null {} \
+             abstract class Function {} abstract class Type {}",
+                ),
+                (
+                    "async",
+                    "library dart.async; abstract class FutureOr<T> {} \
+             class Future<T> { Future(FutureOr<T> Function() computation); \
+             Future.value([FutureOr<T>? value]); }",
+                ),
+            ],
+        );
+        std::fs::create_dir_all(root.join("app/.dart_tool")).unwrap();
+        std::fs::create_dir_all(root.join("app/lib")).unwrap();
+        std::fs::write(
+            root.join("app/.dart_tool/package_config.json"),
+            serde_json::json!({
+                "configVersion": 2,
+                "flutterRoot": format!("file://{}", root.join("flutter").display()),
+                "packages": [{"name": "app", "rootUri": "../", "packageUri": "lib/"}]
+            })
+            .to_string(),
+        )
+        .unwrap();
     }
 
     #[test]

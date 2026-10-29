@@ -148,29 +148,7 @@ fn analyze_indexed(
 ) -> (Vec<Diagnostic>, SemanticIndexes) {
     // Partition files into libraries, then build the type index (each type
     // inheriting its library's unresolved-part flag) and per-file library units.
-    let externals = workspace
-        .environment
-        .map(|environment| {
-            let span = info_span!("load_external_libraries");
-            let _enter = span.enter();
-            let project_paths: HashSet<PathBuf> = parsed
-                .iter()
-                .map(|p| canonical_or_lexical(p.path))
-                .collect();
-            let roots: Vec<(&Path, Program<'_>, &str)> = parsed
-                .iter()
-                .map(|p| (p.path, p.parsed.program(), p.parsed.source.as_ref()))
-                .collect();
-            let libraries =
-                ExternalLibraries::load(environment, &roots, |path| project_paths.contains(path));
-            info!(libraries = libraries.libraries().len(), "external libraries loaded");
-            for library in libraries.libraries() {
-                for file in library.files.iter().filter(|file| file.has_parse_errors) {
-                    info!(file = %file.path.display(), "external file has parse errors; its library stays unresolved");
-                }
-            }
-            (libraries, environment, project_paths)
-        });
+    let externals = load_indexed_externals(parsed, workspace);
     // Opening a dependency part promotes the defining library into the project
     // view. Index its unopened companions without linting them as requested files.
     let mut companion_sources: Vec<(PathBuf, Box<str>)> = externals
@@ -266,6 +244,35 @@ fn analyze_indexed(
             signatures,
         },
     )
+}
+
+fn load_indexed_externals<'a>(
+    parsed: &[Parsed<'_>],
+    workspace: Workspace<'a>,
+) -> Option<(ExternalLibraries, &'a AnalysisEnvironment, HashSet<PathBuf>)> {
+    workspace
+        .environment
+        .map(|environment| {
+            let span = info_span!("load_external_libraries");
+            let _enter = span.enter();
+            let project_paths: HashSet<PathBuf> = parsed
+                .iter()
+                .map(|p| canonical_or_lexical(p.path))
+                .collect();
+            let roots: Vec<(&Path, Program<'_>, &str)> = parsed
+                .iter()
+                .map(|p| (p.path, p.parsed.program(), p.parsed.source.as_ref()))
+                .collect();
+            let libraries =
+                ExternalLibraries::load(environment, &roots, |path| project_paths.contains(path));
+            info!(libraries = libraries.libraries().len(), "external libraries loaded");
+            for library in libraries.libraries() {
+                for file in library.files.iter().filter(|file| file.has_parse_errors) {
+                    info!(file = %file.path.display(), "external file has parse errors; its library stays unresolved");
+                }
+            }
+            (libraries, environment, project_paths)
+        })
 }
 
 /// What a resolving run knows about the analyzed project beyond its files.

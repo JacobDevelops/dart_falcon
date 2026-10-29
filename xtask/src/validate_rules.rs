@@ -167,20 +167,7 @@ fn validate_project_dir(
     threshold: f64,
     split_projects: bool,
 ) -> (usize, usize, Vec<String>) {
-    let fixture_files = recursive_files(project_dir);
-    let mut expectations: Vec<(String, Expectation)> = Vec::new();
-    for file in &fixture_files {
-        let source = match fs::read_to_string(file) {
-            Ok(source) => source,
-            Err(_) => continue,
-        };
-        let key = file.to_string_lossy().into_owned();
-        for exp in parse_expectations(&source) {
-            if exp.rule == rule_name {
-                expectations.push((key.clone(), exp));
-            }
-        }
-    }
+    let expectations = project_expectations(project_dir, rule_name);
 
     let mut failures = Vec::new();
     if expectations.is_empty() && split_projects {
@@ -274,6 +261,24 @@ fn validate_project_dir(
         ));
     }
     (expected, matched, failures)
+}
+
+fn project_expectations(project_dir: &Path, rule_name: &str) -> Vec<(String, Expectation)> {
+    let fixture_files = recursive_files(project_dir);
+    let mut expectations: Vec<(String, Expectation)> = Vec::new();
+    for file in &fixture_files {
+        let source = match fs::read_to_string(file) {
+            Ok(source) => source,
+            Err(_) => continue,
+        };
+        let key = file.to_string_lossy().into_owned();
+        for exp in parse_expectations(&source) {
+            if exp.rule == rule_name {
+                expectations.push((key.clone(), exp));
+            }
+        }
+    }
+    expectations
 }
 
 pub(crate) fn run(options: Options) -> Result<(), String> {
@@ -428,7 +433,35 @@ fn validate_rule_dir(
             return outcome;
         }
     };
-    for dart_file in &dart_files {
+    validate_ordinary_fixtures(
+        &dart_files,
+        &rule_name,
+        falcon,
+        threshold,
+        rule_config.as_deref(),
+        &mut outcome,
+    );
+    validate_project_fixtures(
+        rule_dir,
+        &rule_name,
+        falcon,
+        threshold,
+        rule_config.as_deref(),
+        resolver_dependent,
+        &mut outcome,
+    );
+    outcome
+}
+
+fn validate_ordinary_fixtures(
+    dart_files: &[PathBuf],
+    rule_name: &str,
+    falcon: &FalconRunner,
+    threshold: f64,
+    rule_config: Option<&Path>,
+    outcome: &mut RuleOutcome,
+) {
+    for dart_file in dart_files {
         let source = match fs::read_to_string(dart_file) {
             Ok(s) => s,
             Err(e) => {
@@ -443,8 +476,8 @@ fn validate_rule_dir(
             &source,
             falcon,
             threshold,
-            Some(&rule_name),
-            rule_config.as_deref(),
+            Some(rule_name),
+            rule_config,
         ) {
             Ok(result) => result,
             Err(error) => {
@@ -478,16 +511,26 @@ fn validate_rule_dir(
                 )
             }));
     }
+}
 
+fn validate_project_fixtures(
+    rule_dir: &Path,
+    rule_name: &str,
+    falcon: &FalconRunner,
+    threshold: f64,
+    rule_config: Option<&Path>,
+    resolver_dependent: bool,
+    outcome: &mut RuleOutcome,
+) {
     // Cross-file rules keep their fixtures in a `cross-file/` subdirectory,
     // run as one invocation over the whole directory.
     let cross_file_dir = rule_dir.join("cross-file");
     if cross_file_dir.is_dir() {
         let (expected, matched, failures) = validate_project_dir(
             &cross_file_dir,
-            &rule_name,
+            rule_name,
             falcon,
-            rule_config.as_deref(),
+            rule_config,
             threshold,
             true,
         );
@@ -500,9 +543,9 @@ fn validate_rule_dir(
     if resolver_dependent && project_dir.is_dir() {
         let (expected, matched, failures) = validate_project_dir(
             &project_dir,
-            &rule_name,
+            rule_name,
             falcon,
-            rule_config.as_deref(),
+            rule_config,
             threshold,
             false,
         );
@@ -511,7 +554,6 @@ fn validate_rule_dir(
         outcome.matched += matched;
         outcome.failures.extend(failures);
     }
-    outcome
 }
 
 #[cfg(test)]

@@ -426,6 +426,21 @@ enum ConstantState {
     Evaluated(CachedConstant),
 }
 
+type ConstructorArguments = (
+    Vec<Option<ConstantValue>>,
+    Vec<(String, Option<ConstantValue>)>,
+);
+
+struct ConstructorState {
+    type_args: Vec<ResolvedType>,
+    substitutions: FxHashMap<TypeParameterId, ResolvedType>,
+    environment: HashMap<String, Option<ConstantValue>>,
+    parameter_types: HashMap<String, ResolvedType>,
+    fields: Vec<(String, Option<ConstantValue>)>,
+    super_positional: Vec<Option<ConstantValue>>,
+    super_named: Vec<(String, Option<ConstantValue>)>,
+    superclass: Option<ResolvedType>,
+}
 struct ConstEvaluator<'a, 'model> {
     owner: Option<&'a DeclarationIdentity>,
     fields: &'a HashMap<&'a str, Expr<'a>>,
@@ -608,6 +623,38 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                     .collect();
                 self.invoke(identity, constructor, type_args, args)
             }
+            Expr::List(_) | Expr::Set(_) | Expr::Map(_) | Expr::Record(_) => {
+                self.evaluate_collection(expression, expected)
+            }
+            Expr::NullAssert(assertion) => {
+                let value = self.evaluate(assertion.operand())?;
+                (value != ConstantValue::Null).then_some(value)
+            }
+            Expr::Is(_) | Expr::As(_) | Expr::DotShorthand(_) => {
+                self.evaluate_type_operation(expression, expected)
+            }
+            Expr::This(_)
+            | Expr::Super(_)
+            | Expr::PostfixIncDec(_)
+            | Expr::Assign(_)
+            | Expr::Index(_)
+            | Expr::Cascade(_)
+            | Expr::FuncExpr(_)
+            | Expr::Await(_)
+            | Expr::Throw(_)
+            | Expr::Switch(_)
+            | Expr::SymbolLit(_)
+            | Expr::GenericInstantiation(_)
+            | Expr::Error(_) => None,
+        }
+    }
+
+    fn evaluate_collection(
+        &mut self,
+        expression: Expr<'_>,
+        expected: Option<&ResolvedType>,
+    ) -> Option<ConstantValue> {
+        match expression {
             Expr::List(list) => {
                 let elements = list.elements();
                 let arguments = self.collection_arguments(expression, expected)?;
@@ -650,10 +697,16 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 values[positional..].sort();
                 Some(ConstantValue::Record(values))
             }
-            Expr::NullAssert(assertion) => {
-                let value = self.evaluate(assertion.operand())?;
-                (value != ConstantValue::Null).then_some(value)
-            }
+            _ => None,
+        }
+    }
+
+    fn evaluate_type_operation(
+        &mut self,
+        expression: Expr<'_>,
+        expected: Option<&ResolvedType>,
+    ) -> Option<ConstantValue> {
+        match expression {
             Expr::Is(test) => {
                 let expr = test.expr();
                 let dart_type = test.dart_type();
@@ -683,19 +736,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                     .is_enum_value(identity, name.name())
                     .then(|| ConstantValue::EnumValue(identity.clone(), name.name().to_owned()))
             }
-            Expr::This(_)
-            | Expr::Super(_)
-            | Expr::PostfixIncDec(_)
-            | Expr::Assign(_)
-            | Expr::Index(_)
-            | Expr::Cascade(_)
-            | Expr::FuncExpr(_)
-            | Expr::Await(_)
-            | Expr::Throw(_)
-            | Expr::Switch(_)
-            | Expr::SymbolLit(_)
-            | Expr::GenericInstantiation(_)
-            | Expr::Error(_) => None,
+            _ => None,
         }
     }
 
@@ -1019,19 +1060,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         let Some(identity) =
             QualifiedName::from_segments(names).and_then(|name| self.model.resolve_value(name))
         else {
-            // A type literal names a declared type rather than a value.
-            let ty = self.model.resolve_type_name(names)?;
-            if self.stable_evaluation
-                && let ResolvedType {
-                    kind: ResolvedTypeKind::Interface { identity, .. },
-                } = &ty
-                && self.model.configurable_constant_path(identity)
-            {
-                return None;
-            }
-            return constant_type(&self.signatures.instantiate_to_bounds(&ty))
-                .map(ConstantValue::Type)
-                .map(Arc::new);
+            return self.resolve_type_literal(names);
         };
         if self.stable_evaluation && self.model.configurable_constant_path(&identity) {
             return None;
@@ -1044,6 +1073,21 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             )));
         }
         self.initializer(ConstantKey::TopLevel(identity))
+    }
+
+    fn resolve_type_literal(&self, names: &[&str]) -> Option<Arc<ConstantValue>> {
+        let ty = self.model.resolve_type_name(names)?;
+        if self.stable_evaluation
+            && let ResolvedType {
+                kind: ResolvedTypeKind::Interface { identity, .. },
+            } = &ty
+            && self.model.configurable_constant_path(identity)
+        {
+            return None;
+        }
+        constant_type(&self.signatures.instantiate_to_bounds(&ty))
+            .map(ConstantValue::Type)
+            .map(Arc::new)
     }
 
     /// The value of `owner`'s enum value or static constant `name`; `None`
@@ -1577,16 +1621,12 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         )
     }
 
-    #[allow(clippy::type_complexity)]
     fn arguments(
         &mut self,
         args: ArgList<'_>,
         signature: Option<&ResolvedSignature>,
         substitutions: Option<&FxHashMap<TypeParameterId, ResolvedType>>,
-    ) -> (
-        Vec<Option<ConstantValue>>,
-        Vec<(String, Option<ConstantValue>)>,
-    ) {
+    ) -> ConstructorArguments {
         let positional = args
             .positional()
             .enumerate()
@@ -1679,7 +1719,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         positional: Vec<Option<ConstantValue>>,
         named: Vec<(String, Option<ConstantValue>)>,
     ) -> Option<ConstantValue> {
-        let mut substitutions = self
+        let substitutions = self
             .signatures
             .type_parameters(identity)
             .unwrap_or(&[])
@@ -1692,11 +1732,108 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             .signatures
             .superclass(identity)
             .map(|ty| self.model.substitute(ty, &substitutions));
-        let mut environment = HashMap::with_capacity(body.params.len());
-        let mut parameter_types = HashMap::with_capacity(body.params.len());
-        let mut fields = Vec::new();
-        let mut super_positional = Vec::new();
-        let mut super_named = Vec::new();
+        let mut state = ConstructorState {
+            type_args,
+            substitutions,
+            superclass,
+            environment: HashMap::with_capacity(body.params.len()),
+            parameter_types: HashMap::with_capacity(body.params.len()),
+            fields: Vec::new(),
+            super_positional: Vec::new(),
+            super_named: Vec::new(),
+        };
+        self.bind_constructor_parameters(body, signature, &mut state, &positional, &named);
+        if body.redirect.is_some() {
+            return self.redirect_constructor(
+                identity,
+                constructor,
+                signature,
+                body,
+                &mut state,
+                (positional, named),
+            );
+        }
+        self.initialize_constructor_fields(identity, body, &mut state);
+        let mut super_constructor = "new";
+        for initializer in &body.initializers {
+            match initializer.cast::<ConstructorInitializer<'_>>() {
+                ConstructorInitializer::FieldInit(initializer) => {
+                    let field = initializer.field();
+                    let value = initializer.value();
+                    let signatures = self.signatures;
+                    let expected = signatures
+                        .field(identity, field.name())
+                        .map(|(_, ty)| self.model.substitute(ty, &state.substitutions));
+                    let value = self.evaluate_with_context(value, expected.as_ref());
+                    state.fields.push((field.name().to_owned(), value));
+                }
+                ConstructorInitializer::Assert(initializer) => {
+                    if self.evaluate(initializer.condition()) == Some(ConstantValue::Bool(false)) {
+                        self.failed = true;
+                    }
+                }
+                ConstructorInitializer::ThisCall(initializer) => {
+                    let target = initializer.call_name().map_or("new", |name| name.name());
+                    let args = initializer.args();
+                    let signatures = self.signatures;
+                    let mut signature = signatures.constructor(identity, target).cloned();
+                    if let Some(signature) = &mut signature {
+                        for ty in signature
+                            .positional
+                            .iter_mut()
+                            .chain(signature.named.values_mut())
+                        {
+                            *ty = self.model.substitute(ty, &state.substitutions);
+                        }
+                    }
+                    let (positional, named) = self.arguments(args, signature.as_ref(), None);
+                    return self.construct(
+                        identity.clone(),
+                        target,
+                        state.type_args,
+                        positional,
+                        named,
+                    );
+                }
+                ConstructorInitializer::SuperCall(initializer) => {
+                    super_constructor = initializer.call_name().map_or("new", |name| name.name());
+                    let args = initializer.args();
+                    let signatures = self.signatures;
+                    let signature = state
+                        .superclass
+                        .as_ref()
+                        .and_then(|ty| signatures.resolved_constructor(ty, super_constructor));
+                    let (positional, named) = match signature {
+                        Some((signature, substitutions)) => {
+                            self.arguments(args, Some(signature), Some(&substitutions))
+                        }
+                        None => self.arguments(args, None, None),
+                    };
+                    state.super_positional.extend(positional);
+                    state.super_named.extend(named);
+                }
+            }
+        }
+        self.finish_constructor(identity, constructor, body, state, super_constructor)
+    }
+
+    fn bind_constructor_parameters(
+        &mut self,
+        body: &ConstConstructorBody,
+        signature: &ResolvedSignature,
+        state: &mut ConstructorState,
+        positional: &[Option<ConstantValue>],
+        named: &[(String, Option<ConstantValue>)],
+    ) {
+        let ConstructorState {
+            substitutions,
+            environment,
+            parameter_types,
+            fields,
+            super_positional,
+            super_named,
+            ..
+        } = state;
         let mut remaining = positional.iter();
         let mut positional_types = signature.positional.iter();
         for param in &body.params {
@@ -1705,7 +1842,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 ParamKind::Positional | ParamKind::OptionalPositional => positional_types.next(),
                 ParamKind::Named { .. } => signature.named.get(param.name().name()),
             }
-            .map(|ty| self.model.substitute(ty, &substitutions));
+            .map(|ty| self.model.substitute(ty, substitutions));
             if let Some(ty) = &ty {
                 parameter_types.insert(param.name().name().to_owned(), ty.clone());
             }
@@ -1756,127 +1893,167 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             }
             environment.insert(param.name().name().to_owned(), value);
         }
-        if let Some(redirect) = &body.redirect {
-            let redirect: RedirectedConstructor<'_> = redirect.cast();
-            let (target, target_constructor, _) =
-                self.new_target(redirect.type_(), redirect.constructor_name())?;
-            // Conservative expression inference may miss the source type even
-            // though its evaluated arguments determine it (for example NaN
-            // without SDK source). Recover that source contract before
-            // substituting the redirect, not from the target's parameters.
-            let mut type_args = type_args;
-            if type_args.iter().any(|ty| constant_type(ty).is_none())
-                && self
-                    .signatures
-                    .constructor(&target, &target_constructor)
-                    .is_some_and(|target| !target.owner_parameters.is_empty())
-            {
-                let (_, inferred) =
-                    self.runtime_type(identity, constructor, body, &type_args, &environment)?;
-                type_args = inferred.iter().map(resolved_constant_type).collect();
-                substitutions.extend(
-                    signature
-                        .owner_parameters
-                        .iter()
-                        .cloned()
-                        .zip(type_args.iter().cloned()),
-                );
-            }
-            let mut scope = TypeParameterScope::default();
-            scope.push_bindings(
+    }
+
+    fn redirect_constructor(
+        &mut self,
+        identity: &DeclarationIdentity,
+        constructor: &str,
+        signature: &ResolvedSignature,
+        body: &ConstConstructorBody,
+        state: &mut ConstructorState,
+        arguments: ConstructorArguments,
+    ) -> Option<ConstantValue> {
+        let redirect: RedirectedConstructor<'_> = body.redirect.as_ref()?.cast();
+        let (target, target_constructor, _) =
+            self.new_target(redirect.type_(), redirect.constructor_name())?;
+        let mut type_args = std::mem::take(&mut state.type_args);
+        if type_args.iter().any(|ty| constant_type(ty).is_none())
+            && self
+                .signatures
+                .constructor(&target, &target_constructor)
+                .is_some_and(|target| !target.owner_parameters.is_empty())
+        {
+            let (_, inferred) =
+                self.runtime_type(identity, constructor, body, &type_args, &state.environment)?;
+            type_args = inferred.iter().map(resolved_constant_type).collect();
+            state.substitutions.extend(
                 signature
                     .owner_parameters
                     .iter()
-                    .zip(&type_args)
-                    .map(|(parameter, ty)| (parameter.name.clone(), ty.clone())),
-            );
-            let DartType::Named(named_type) = redirect.type_() else {
-                return None;
-            };
-            let mut target_arguments: Vec<_> = named_type
-                .type_args()
-                .map(|ty| self.model.resolve_type_in(ty, &scope))
-                .collect();
-            if target_arguments.is_empty()
-                && let Some(target_signature) =
-                    self.signatures.constructor(&target, &target_constructor)
-                && !target_signature.owner_parameters.is_empty()
-            {
-                let mut inference = target_signature.clone();
-                inference.call_parameters = inference.owner_parameters.clone();
-                inference.return_type = self.signatures.as_instance_of(
-                    &self.signatures.self_instantiation(
-                        target.clone(),
-                        &inference.owner_parameters,
-                        &self.model,
-                    ),
-                    identity,
-                    &self.model,
-                )?;
-                let expected = self.model.substitute(
-                    &self.signatures.self_instantiation(
-                        identity.clone(),
-                        &signature.owner_parameters,
-                        &self.model,
-                    ),
-                    &substitutions,
-                );
-                let context = crate::InferenceContext {
-                    model: &self.model,
-                    signatures: self.signatures,
-                    type_parameters: &scope,
-                    lookup: &|_| None,
-                    argument_fallback: None,
-                };
-                let inferred = TypeEnvironment::new().infer_signature_substitutions(
-                    &inference,
-                    None,
-                    AstChildren::empty(),
-                    &context,
-                    Some(&expected),
-                    &FxHashMap::default(),
-                );
-                let defaults = std::cell::OnceCell::new();
-                target_arguments = inference
-                    .owner_parameters
-                    .iter()
-                    .enumerate()
-                    .map(|(index, parameter)| {
-                        inferred
-                            .get(parameter)
-                            .filter(|ty| constant_type(ty).is_some())
-                            .cloned()
-                            .or_else(|| {
-                                defaults
-                                    .get_or_init(|| {
-                                        self.signatures.instantiate_to_bounds(
-                                            &self.model.resolve_type_in(redirect.type_(), &scope),
-                                        )
-                                    })
-                                    .type_argument(index)
-                            })
-                    })
-                    .collect::<Option<Vec<_>>>()?;
-            }
-            return self.construct(
-                target,
-                &target_constructor,
-                target_arguments,
-                positional,
-                named,
+                    .cloned()
+                    .zip(type_args.iter().cloned()),
             );
         }
+        let target_arguments = self.redirect_type_arguments(
+            identity,
+            signature,
+            redirect,
+            &type_args,
+            &state.substitutions,
+            (&target, &target_constructor),
+        )?;
+        self.construct(
+            target,
+            &target_constructor,
+            target_arguments,
+            arguments.0,
+            arguments.1,
+        )
+    }
+
+    fn redirect_type_arguments(
+        &self,
+        identity: &DeclarationIdentity,
+        signature: &ResolvedSignature,
+        redirect: RedirectedConstructor<'_>,
+        type_args: &[ResolvedType],
+        substitutions: &FxHashMap<TypeParameterId, ResolvedType>,
+        target: (&DeclarationIdentity, &str),
+    ) -> Option<Vec<ResolvedType>> {
+        let (target, target_constructor) = target;
+        let mut scope = TypeParameterScope::default();
+        scope.push_bindings(
+            signature
+                .owner_parameters
+                .iter()
+                .zip(type_args)
+                .map(|(parameter, ty)| (parameter.name.clone(), ty.clone())),
+        );
+        let DartType::Named(named_type) = redirect.type_() else {
+            return None;
+        };
+        let mut target_arguments: Vec<_> = named_type
+            .type_args()
+            .map(|ty| self.model.resolve_type_in(ty, &scope))
+            .collect();
+        if target_arguments.is_empty()
+            && let Some(target_signature) = self.signatures.constructor(target, target_constructor)
+            && !target_signature.owner_parameters.is_empty()
+        {
+            let mut inference = target_signature.clone();
+            inference.call_parameters = inference.owner_parameters.clone();
+            inference.return_type = self.signatures.as_instance_of(
+                &self.signatures.self_instantiation(
+                    target.clone(),
+                    &inference.owner_parameters,
+                    &self.model,
+                ),
+                identity,
+                &self.model,
+            )?;
+            let expected = self.model.substitute(
+                &self.signatures.self_instantiation(
+                    identity.clone(),
+                    &signature.owner_parameters,
+                    &self.model,
+                ),
+                substitutions,
+            );
+            let context = crate::InferenceContext {
+                model: &self.model,
+                signatures: self.signatures,
+                type_parameters: &scope,
+                lookup: &|_| None,
+                argument_fallback: None,
+            };
+            let inferred = TypeEnvironment::new().infer_signature_substitutions(
+                &inference,
+                None,
+                AstChildren::empty(),
+                &context,
+                Some(&expected),
+                &FxHashMap::default(),
+            );
+            let defaults = std::cell::OnceCell::new();
+            target_arguments = inference
+                .owner_parameters
+                .iter()
+                .enumerate()
+                .map(|(index, parameter)| {
+                    inferred
+                        .get(parameter)
+                        .filter(|ty| constant_type(ty).is_some())
+                        .cloned()
+                        .or_else(|| {
+                            defaults
+                                .get_or_init(|| {
+                                    self.signatures.instantiate_to_bounds(
+                                        &self.model.resolve_type_in(redirect.type_(), &scope),
+                                    )
+                                })
+                                .type_argument(index)
+                        })
+                })
+                .collect::<Option<Vec<_>>>()?;
+        }
+        Some(target_arguments)
+    }
+
+    fn initialize_constructor_fields(
+        &mut self,
+        identity: &DeclarationIdentity,
+        body: &ConstConstructorBody,
+        state: &mut ConstructorState,
+    ) {
+        let ConstructorState {
+            environment,
+            parameter_types,
+            fields,
+            substitutions,
+            ..
+        } = state;
         if body.is_primary
             && let Some(scope) = self.parameters.last_mut()
         {
-            std::mem::swap(scope, &mut environment);
-            std::mem::swap(&mut self.parameter_types, &mut parameter_types);
+            std::mem::swap(scope, environment);
+            std::mem::swap(&mut self.parameter_types, parameter_types);
         }
         let signatures = self.signatures;
         for (name, initializer) in signatures.const_field_initializers(identity) {
             let expected = signatures
                 .field(identity, name)
-                .map(|(_, ty)| self.model.substitute(ty, &substitutions));
+                .map(|(_, ty)| self.model.substitute(ty, substitutions));
             fields.push((
                 name.to_owned(),
                 self.evaluate_with_context(initializer, expected.as_ref()),
@@ -1885,62 +2062,27 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         if !body.is_primary
             && let Some(scope) = self.parameters.last_mut()
         {
-            std::mem::swap(scope, &mut environment);
-            std::mem::swap(&mut self.parameter_types, &mut parameter_types);
+            std::mem::swap(scope, environment);
+            std::mem::swap(&mut self.parameter_types, parameter_types);
         }
-        let mut super_constructor = "new";
-        for initializer in &body.initializers {
-            match initializer.cast::<ConstructorInitializer<'_>>() {
-                ConstructorInitializer::FieldInit(initializer) => {
-                    let field = initializer.field();
-                    let value = initializer.value();
-                    let signatures = self.signatures;
-                    let expected = signatures
-                        .field(identity, field.name())
-                        .map(|(_, ty)| self.model.substitute(ty, &substitutions));
-                    let value = self.evaluate_with_context(value, expected.as_ref());
-                    fields.push((field.name().to_owned(), value));
-                }
-                ConstructorInitializer::Assert(initializer) => {
-                    if self.evaluate(initializer.condition()) == Some(ConstantValue::Bool(false)) {
-                        self.failed = true;
-                    }
-                }
-                ConstructorInitializer::ThisCall(initializer) => {
-                    let target = initializer.call_name().map_or("new", |name| name.name());
-                    let args = initializer.args();
-                    let signatures = self.signatures;
-                    let mut signature = signatures.constructor(identity, target).cloned();
-                    if let Some(signature) = &mut signature {
-                        for ty in signature
-                            .positional
-                            .iter_mut()
-                            .chain(signature.named.values_mut())
-                        {
-                            *ty = self.model.substitute(ty, &substitutions);
-                        }
-                    }
-                    let (positional, named) = self.arguments(args, signature.as_ref(), None);
-                    return self.construct(identity.clone(), target, type_args, positional, named);
-                }
-                ConstructorInitializer::SuperCall(initializer) => {
-                    super_constructor = initializer.call_name().map_or("new", |name| name.name());
-                    let args = initializer.args();
-                    let signatures = self.signatures;
-                    let signature = superclass
-                        .as_ref()
-                        .and_then(|ty| signatures.resolved_constructor(ty, super_constructor));
-                    let (positional, named) = match signature {
-                        Some((signature, substitutions)) => {
-                            self.arguments(args, Some(signature), Some(&substitutions))
-                        }
-                        None => self.arguments(args, None, None),
-                    };
-                    super_positional.extend(positional);
-                    super_named.extend(named);
-                }
-            }
-        }
+    }
+
+    fn finish_constructor(
+        &mut self,
+        identity: &DeclarationIdentity,
+        constructor: &str,
+        body: &ConstConstructorBody,
+        state: ConstructorState,
+        super_constructor: &str,
+    ) -> Option<ConstantValue> {
+        let ConstructorState {
+            type_args,
+            fields,
+            superclass,
+            super_positional,
+            super_named,
+            ..
+        } = state;
         let environment = self
             .parameters
             .last_mut()
@@ -2830,8 +2972,7 @@ mod tests {
         });
     }
 
-    fn with_constants(test: impl FnOnce(Program<'_>, &SemanticModel<'_>, &SignatureIndex)) {
-        let source = r#"
+    const CONSTANT_SOURCE: &str = r#"
 import 'dart:async';
 class ConstBox<T> {
   final T value;
@@ -3012,7 +3153,9 @@ const nullableCast = null as int?;
 const nonNullableCast = null as int;
 const futureOrCast = null as FutureOr<int?>;
 "#;
-        with_source(source, test);
+
+    fn with_constants(test: impl FnOnce(Program<'_>, &SemanticModel<'_>, &SignatureIndex)) {
+        with_source(CONSTANT_SOURCE, test);
     }
 
     fn with_source(
@@ -3850,10 +3993,18 @@ const futureOrCast = null as FutureOr<int?>;
             evaluate_named(programs[1], &model, &signatures, "otherMode"),
             Some(mode)
         );
+        assert_imported_field_constants(programs[0], &model, &signatures);
+    }
+
+    fn assert_imported_field_constants(
+        program: Program<'_>,
+        model: &SemanticModel<'_>,
+        signatures: &SignatureIndex,
+    ) {
         let owner = model
             .resolve_name(QualifiedName::prefixed("origin", "Foo"))
             .unwrap();
-        let class = programs[0]
+        let class = program
             .declarations()
             .find_map(|declaration| {
                 let TopLevelDecl::Class(class) = declaration else {
@@ -3881,7 +4032,7 @@ const futureOrCast = null as FutureOr<int?>;
                     ConstantContext {
                         owner: Some(&owner),
                         fields: Some(&fields),
-                        ..ConstantContext::new(&model, &signatures)
+                        ..ConstantContext::new(model, signatures)
                     }
                 ),
                 Some(ConstantValue::Number(Number::Int(2)))
@@ -3893,7 +4044,7 @@ const futureOrCast = null as FutureOr<int?>;
                 ConstantContext {
                     owner: Some(&owner),
                     fields: Some(&fields),
-                    ..ConstantContext::new(&model, &signatures)
+                    ..ConstantContext::new(model, signatures)
                 }
             ),
             Some(ConstantValue::Instance(..))

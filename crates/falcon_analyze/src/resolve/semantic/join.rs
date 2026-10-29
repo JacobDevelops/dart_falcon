@@ -149,152 +149,235 @@ fn inference_join_impl(
         return left.clone();
     }
     if left == right {
-        if let (
-            ResolvedType {
-                kind:
-                    ResolvedTypeKind::Record {
-                        occurrence: left_occurrence,
-                        positional: left_positional,
-                        named: left_named,
-                        nullable,
-                    },
-            },
-            ResolvedType {
-                kind:
-                    ResolvedTypeKind::Record {
-                        occurrence: right_occurrence,
-                        positional: right_positional,
-                        named: right_named,
-                        ..
-                    },
-            },
-        ) = (left, right)
-        {
-            if Arc::ptr_eq(left_positional, right_positional)
-                && Arc::ptr_eq(left_named, right_named)
-                && left_occurrence.same_origin(right_occurrence)
-            {
-                return right.clone();
+        return match (&left.kind, &right.kind) {
+            (ResolvedTypeKind::Record { .. }, ResolvedTypeKind::Record { .. }) => {
+                join_equal_records(left, right, signatures, model, memo)
             }
-            return ResolvedType {
-                kind: ResolvedTypeKind::Record {
-                    occurrence: Default::default(),
-                    positional: left_positional
-                        .iter()
-                        .zip(right_positional.iter())
-                        .map(|(left, right)| {
+            (ResolvedTypeKind::Function { .. }, ResolvedTypeKind::Function { .. }) => {
+                join_equal_functions(left, right, signatures, model, memo)
+            }
+            // Equal interfaces retain the right operand's argument provenance.
+            _ => right.clone(),
+        };
+    }
+    if let Some(joined) = join_special_types(left, right) {
+        return joined;
+    }
+    let nullable = left.nullable() || right.nullable();
+    let (left_base, right_base) = (left.with_nullable(false), right.with_nullable(false));
+    if left_base == right_base {
+        return inference_join_memoized(&left_base, &right_base, signatures, model, memo)
+            .with_nullable(nullable);
+    }
+    if matches!(
+        (&left.kind, &right.kind),
+        (
+            ResolvedTypeKind::Function { .. },
+            ResolvedTypeKind::Function { .. }
+        )
+    ) {
+        return join_functions(left, right, signatures, model, memo);
+    }
+    if matches!(
+        (&left.kind, &right.kind),
+        (
+            ResolvedTypeKind::Interface { .. },
+            ResolvedTypeKind::Interface { .. }
+        )
+    ) {
+        return join_interfaces(
+            left,
+            right,
+            signatures,
+            model,
+            memo,
+            &left_base,
+            &right_base,
+        );
+    }
+    if signatures.relation(
+        &right_base,
+        crate::TypeRelation::SubtypeOf(&left_base),
+        model,
+    ) == Truth::Yes
+    {
+        return left.with_nullable(nullable);
+    }
+    if signatures.relation(
+        &left_base,
+        crate::TypeRelation::SubtypeOf(&right_base),
+        model,
+    ) == Truth::Yes
+    {
+        return right.with_nullable(nullable);
+    }
+    ResolvedType::UNKNOWN
+}
+
+fn join_equal_records(
+    left: &ResolvedType,
+    right: &ResolvedType,
+    signatures: &SignatureIndex,
+    model: &SemanticModel<'_>,
+    memo: &mut InferenceJoinMemo,
+) -> ResolvedType {
+    if let (
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Record {
+                    occurrence: left_occurrence,
+                    positional: left_positional,
+                    named: left_named,
+                    nullable,
+                },
+        },
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Record {
+                    occurrence: right_occurrence,
+                    positional: right_positional,
+                    named: right_named,
+                    ..
+                },
+        },
+    ) = (left, right)
+    {
+        if Arc::ptr_eq(left_positional, right_positional)
+            && Arc::ptr_eq(left_named, right_named)
+            && left_occurrence.same_origin(right_occurrence)
+        {
+            return right.clone();
+        }
+        return ResolvedType {
+            kind: ResolvedTypeKind::Record {
+                occurrence: Default::default(),
+                positional: left_positional
+                    .iter()
+                    .zip(right_positional.iter())
+                    .map(|(left, right)| {
+                        inference_join_memoized(
+                            &memo.project(left, left_occurrence),
+                            &memo.project(right, right_occurrence),
+                            signatures,
+                            model,
+                            memo,
+                        )
+                    })
+                    .collect(),
+                named: left_named
+                    .iter()
+                    .zip(right_named.iter())
+                    .map(|((name, left), (_, right))| {
+                        (
+                            name.clone(),
                             inference_join_memoized(
                                 &memo.project(left, left_occurrence),
                                 &memo.project(right, right_occurrence),
                                 signatures,
                                 model,
                                 memo,
-                            )
-                        })
-                        .collect(),
-                    named: left_named
-                        .iter()
-                        .zip(right_named.iter())
-                        .map(|((name, left), (_, right))| {
-                            (
-                                name.clone(),
-                                inference_join_memoized(
-                                    &memo.project(left, left_occurrence),
-                                    &memo.project(right, right_occurrence),
-                                    signatures,
-                                    model,
-                                    memo,
-                                ),
-                            )
-                        })
-                        .collect(),
-                    nullable: *nullable,
+                            ),
+                        )
+                    })
+                    .collect(),
+                nullable: *nullable,
+            },
+        };
+    }
+    right.clone()
+}
+
+fn join_equal_functions(
+    left: &ResolvedType,
+    right: &ResolvedType,
+    signatures: &SignatureIndex,
+    model: &SemanticModel<'_>,
+    memo: &mut InferenceJoinMemo,
+) -> ResolvedType {
+    if let (
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    alias,
+                    return_type,
+                    positional,
+                    named,
+                    nullable,
+                    optional_positional,
+                    shape,
                 },
-            };
-        }
-        if let (
-            ResolvedType {
-                kind:
-                    ResolvedTypeKind::Function {
-                        alias,
-                        return_type,
-                        positional,
-                        named,
-                        nullable,
-                        optional_positional,
-                        shape,
-                    },
-            },
-            ResolvedType {
-                kind:
-                    ResolvedTypeKind::Function {
-                        alias: other,
-                        return_type: other_return,
-                        positional: other_positional,
-                        named: other_named,
-                        ..
-                    },
-            },
-        ) = (right, left)
-            && !alias.same_origin(other)
-        {
-            // UP synthesizes a structural function type unless both operands
-            // retain the same aliased type instance.
-            return ResolvedType {
-                kind: ResolvedTypeKind::Function {
-                    shape: shape.clone(),
-                    optional_positional: *optional_positional,
-                    alias: FunctionTypeAlias::default(),
-                    return_type: Arc::new(inference_join_memoized(
-                        &memo.project(other_return, other),
-                        &memo.project(return_type, alias),
-                        signatures,
-                        model,
-                        memo,
-                    )),
-                    positional: other_positional
-                        .iter()
-                        .zip(positional.iter())
-                        .map(|(left, right)| {
+        },
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    alias: other,
+                    return_type: other_return,
+                    positional: other_positional,
+                    named: other_named,
+                    ..
+                },
+        },
+    ) = (right, left)
+        && !alias.same_origin(other)
+    {
+        // UP synthesizes a structural function type unless both operands
+        // retain the same aliased type instance.
+        return ResolvedType {
+            kind: ResolvedTypeKind::Function {
+                shape: shape.clone(),
+                optional_positional: *optional_positional,
+                alias: FunctionTypeAlias::default(),
+                return_type: Arc::new(inference_join_memoized(
+                    &memo.project(other_return, other),
+                    &memo.project(return_type, alias),
+                    signatures,
+                    model,
+                    memo,
+                )),
+                positional: other_positional
+                    .iter()
+                    .zip(positional.iter())
+                    .map(|(left, right)| {
+                        inference_join_memoized(
+                            &memo.project(left, other),
+                            &memo.project(right, alias),
+                            signatures,
+                            model,
+                            memo,
+                        )
+                    })
+                    .collect(),
+                named: other_named
+                    .iter()
+                    .zip(named.iter())
+                    .map(|((name, left), (_, right))| {
+                        (
+                            name.clone(),
                             inference_join_memoized(
                                 &memo.project(left, other),
                                 &memo.project(right, alias),
                                 signatures,
                                 model,
                                 memo,
-                            )
-                        })
-                        .collect(),
-                    named: other_named
-                        .iter()
-                        .zip(named.iter())
-                        .map(|((name, left), (_, right))| {
-                            (
-                                name.clone(),
-                                inference_join_memoized(
-                                    &memo.project(left, other),
-                                    &memo.project(right, alias),
-                                    signatures,
-                                    model,
-                                    memo,
-                                ),
-                            )
-                        })
-                        .collect(),
-                    nullable: *nullable,
-                },
-            };
-        }
-        // Equal interfaces retain the right operand's argument provenance.
-        return right.clone();
+                            ),
+                        )
+                    })
+                    .collect(),
+                nullable: *nullable,
+            },
+        };
     }
+    right.clone()
+}
+
+fn join_special_types(left: &ResolvedType, right: &ResolvedType) -> Option<ResolvedType> {
     if matches!(
         left,
         ResolvedType {
             kind: ResolvedTypeKind::Never
         }
     ) {
-        return right.clone();
+        return Some(right.clone());
     }
     if matches!(
         left,
@@ -307,14 +390,14 @@ fn inference_join_impl(
             kind: ResolvedTypeKind::Unknown
         }
     ) {
-        return ResolvedType::UNKNOWN;
+        return Some(ResolvedType::UNKNOWN);
     }
     if let (Some(left_rank), Some(right_rank)) = (top_rank(left), top_rank(right)) {
-        return if left_rank > right_rank {
+        return Some(if left_rank > right_rank {
             left.clone()
         } else {
             right.clone()
-        };
+        });
     }
     if matches!(
         left,
@@ -324,7 +407,7 @@ fn inference_join_impl(
             kind: ResolvedTypeKind::Dynamic
         }
     ) {
-        return left.clone();
+        return Some(left.clone());
     }
     if matches!(
         right,
@@ -334,7 +417,7 @@ fn inference_join_impl(
             kind: ResolvedTypeKind::Dynamic
         }
     ) {
-        return right.clone();
+        return Some(right.clone());
     }
     if matches!(
         left,
@@ -342,7 +425,7 @@ fn inference_join_impl(
             kind: ResolvedTypeKind::Null
         }
     ) {
-        return right.with_nullable(true);
+        return Some(right.with_nullable(true));
     }
     if matches!(
         right,
@@ -350,14 +433,141 @@ fn inference_join_impl(
             kind: ResolvedTypeKind::Null
         }
     ) {
-        return left.with_nullable(true);
+        return Some(left.with_nullable(true));
     }
+    None
+}
+
+fn join_aligned_function_binders(
+    left: &ResolvedType,
+    right: &ResolvedType,
+    signatures: &SignatureIndex,
+    model: &SemanticModel<'_>,
+    memo: &mut InferenceJoinMemo,
+) -> Option<ResolvedType> {
     let nullable = left.nullable() || right.nullable();
-    let (left_base, right_base) = (left.with_nullable(false), right.with_nullable(false));
-    if left_base == right_base {
-        return inference_join_memoized(&left_base, &right_base, signatures, model, memo)
-            .with_nullable(nullable);
+    if let (
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    shape: Some(left_shape),
+                    ..
+                },
+        },
+        ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    shape: Some(right_shape),
+                    ..
+                },
+        },
+    ) = (left, right)
+        && (!left_shape.type_parameters.is_empty() || !right_shape.type_parameters.is_empty())
+    {
+        if left_shape.type_parameters.len() != right_shape.type_parameters.len() {
+            return Some(model.core_type("Function", nullable));
+        }
+        // Method tear-offs have declaration-local binders. Align those
+        // binders before joining their covariant results and parameter meets.
+        let substitutions: FxHashMap<_, _> = right_shape
+            .type_parameters
+            .iter()
+            .zip(left_shape.type_parameters.iter())
+            .filter_map(|(right, left)| match (right, left) {
+                (
+                    ResolvedType {
+                        kind: ResolvedTypeKind::TypeParameter { id: right_id, .. },
+                    },
+                    ResolvedType {
+                        kind: ResolvedTypeKind::TypeParameter { id: left_id, .. },
+                    },
+                ) if right_id != left_id => Some((right_id.clone(), left.clone())),
+                _ => None,
+            })
+            .collect();
+        if !substitutions.is_empty() {
+            for (left, right) in left_shape
+                .type_parameters
+                .iter()
+                .zip(right_shape.type_parameters.iter())
+            {
+                let (
+                    ResolvedType {
+                        kind: ResolvedTypeKind::TypeParameter { bound: left, .. },
+                    },
+                    ResolvedType {
+                        kind: ResolvedTypeKind::TypeParameter { bound: right, .. },
+                    },
+                ) = (left, right)
+                else {
+                    return Some(ResolvedType::UNKNOWN);
+                };
+                let right = model.substitute(right, &substitutions);
+                match (
+                    signatures.relation(left, crate::TypeRelation::SubtypeOf(&right), model),
+                    signatures.relation(&right, crate::TypeRelation::SubtypeOf(left), model),
+                ) {
+                    (Truth::Yes, Truth::Yes) => {}
+                    (Truth::No, _) | (_, Truth::No) => {
+                        return Some(model.core_type("Function", nullable));
+                    }
+                    _ => return Some(ResolvedType::UNKNOWN),
+                }
+            }
+            let mut right = model.substitute(right, &substitutions);
+            if let ResolvedType {
+                kind: ResolvedTypeKind::Function { shape, .. },
+            } = &mut right
+            {
+                *shape = Some(FunctionTypeShape::new(
+                    right_shape.required_named.to_vec(),
+                    left_shape.type_parameters.to_vec(),
+                ));
+            }
+            return Some(inference_join_memoized(
+                left, &right, signatures, model, memo,
+            ));
+        }
     }
+    None
+}
+
+fn meet_function_parameters(
+    left: &ResolvedType,
+    right: &ResolvedType,
+    left_alias: &FunctionTypeAlias,
+    right_alias: &FunctionTypeAlias,
+    signatures: &SignatureIndex,
+    model: &SemanticModel<'_>,
+    memo: &mut InferenceJoinMemo,
+) -> Option<ResolvedType> {
+    let left = memo.project(left, left_alias);
+    let right = memo.project(right, right_alias);
+    let (left, right) = (&left, &right);
+    if left == right {
+        return Some(inference_join_memoized(
+            left, right, signatures, model, memo,
+        ));
+    }
+    let left_to_right = signatures.relation(left, crate::TypeRelation::SubtypeOf(right), model);
+    if left_to_right == Truth::Yes {
+        return Some(left.clone());
+    }
+    match signatures.relation(right, crate::TypeRelation::SubtypeOf(left), model) {
+        Truth::Yes => Some(right.clone()),
+        Truth::No if left_to_right == Truth::No => Some(ResolvedType::NEVER),
+        _ => None,
+    }
+}
+
+fn join_functions(
+    left: &ResolvedType,
+    right: &ResolvedType,
+    signatures: &SignatureIndex,
+    model: &SemanticModel<'_>,
+    memo: &mut InferenceJoinMemo,
+) -> ResolvedType {
+    let nullable = left.nullable() || right.nullable();
     if let (
         ResolvedType {
             kind:
@@ -385,71 +595,8 @@ fn inference_join_impl(
         },
     ) = (left, right)
     {
-        if let (Some(left_shape), Some(right_shape)) = (left_shape, right_shape)
-            && (!left_shape.type_parameters.is_empty() || !right_shape.type_parameters.is_empty())
-        {
-            if left_shape.type_parameters.len() != right_shape.type_parameters.len() {
-                return model.core_type("Function", nullable);
-            }
-            // Method tear-offs have declaration-local binders. Align those
-            // binders before joining their covariant results and parameter meets.
-            let substitutions: FxHashMap<_, _> = right_shape
-                .type_parameters
-                .iter()
-                .zip(left_shape.type_parameters.iter())
-                .filter_map(|(right, left)| match (right, left) {
-                    (
-                        ResolvedType {
-                            kind: ResolvedTypeKind::TypeParameter { id: right_id, .. },
-                        },
-                        ResolvedType {
-                            kind: ResolvedTypeKind::TypeParameter { id: left_id, .. },
-                        },
-                    ) if right_id != left_id => Some((right_id.clone(), left.clone())),
-                    _ => None,
-                })
-                .collect();
-            if !substitutions.is_empty() {
-                for (left, right) in left_shape
-                    .type_parameters
-                    .iter()
-                    .zip(right_shape.type_parameters.iter())
-                {
-                    let (
-                        ResolvedType {
-                            kind: ResolvedTypeKind::TypeParameter { bound: left, .. },
-                        },
-                        ResolvedType {
-                            kind: ResolvedTypeKind::TypeParameter { bound: right, .. },
-                        },
-                    ) = (left, right)
-                    else {
-                        return ResolvedType::UNKNOWN;
-                    };
-                    let right = model.substitute(right, &substitutions);
-                    match (
-                        signatures.relation(left, crate::TypeRelation::SubtypeOf(&right), model),
-                        signatures.relation(&right, crate::TypeRelation::SubtypeOf(left), model),
-                    ) {
-                        (Truth::Yes, Truth::Yes) => {}
-                        (Truth::No, _) | (_, Truth::No) => {
-                            return model.core_type("Function", nullable);
-                        }
-                        _ => return ResolvedType::UNKNOWN,
-                    }
-                }
-                let mut right = model.substitute(right, &substitutions);
-                if let ResolvedType {
-                    kind: ResolvedTypeKind::Function { shape, .. },
-                } = &mut right
-                {
-                    *shape = Some(FunctionTypeShape::new(
-                        right_shape.required_named.to_vec(),
-                        left_shape.type_parameters.to_vec(),
-                    ));
-                }
-                return inference_join_memoized(left, &right, signatures, model, memo);
-            }
+        if let Some(joined) = join_aligned_function_binders(left, right, signatures, model, memo) {
+            return joined;
         }
         // UP requires equal required arity, but retains only the common
         // optional positional prefix when the optional tails differ.
@@ -459,24 +606,15 @@ fn inference_join_impl(
             return model.core_type("Function", nullable);
         }
         let mut meet = |left: &ResolvedType, right: &ResolvedType| {
-            let left = memo.project(left, left_alias);
-            let right = memo.project(right, right_alias);
-            let (left, right) = (&left, &right);
-            if left == right {
-                return Some(inference_join_memoized(
-                    left, right, signatures, model, memo,
-                ));
-            }
-            let left_to_right =
-                signatures.relation(left, crate::TypeRelation::SubtypeOf(right), model);
-            if left_to_right == Truth::Yes {
-                return Some(left.clone());
-            }
-            match signatures.relation(right, crate::TypeRelation::SubtypeOf(left), model) {
-                Truth::Yes => Some(right.clone()),
-                Truth::No if left_to_right == Truth::No => Some(ResolvedType::NEVER),
-                _ => None,
-            }
+            meet_function_parameters(
+                left,
+                right,
+                left_alias,
+                right_alias,
+                signatures,
+                model,
+                memo,
+            )
         };
         let Some(positional) = left_positional
             .iter()
@@ -499,23 +637,7 @@ fn inference_join_impl(
         named.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
         return ResolvedType {
             kind: ResolvedTypeKind::Function {
-                shape: match (left_shape, right_shape) {
-                    (Some(left), Some(right)) if left == right => Some(Arc::clone(left)),
-                    (Some(left), Some(right)) if left.type_parameters == right.type_parameters => {
-                        Some(FunctionTypeShape::new(
-                            named
-                                .iter()
-                                .filter(|(name, _)| {
-                                    left.required_named.contains(name)
-                                        || right.required_named.contains(name)
-                                })
-                                .map(|(name, _)| name.clone())
-                                .collect(),
-                            left.type_parameters.to_vec(),
-                        ))
-                    }
-                    _ => None,
-                },
+                shape: join_function_shape(left_shape, right_shape, &named),
                 optional_positional: (*left_optional).min(*right_optional),
                 alias: FunctionTypeAlias::default(),
                 return_type: Arc::new(inference_join_memoized(
@@ -531,6 +653,42 @@ fn inference_join_impl(
             },
         };
     }
+    unreachable!()
+}
+
+fn join_function_shape(
+    left: &Option<Arc<FunctionTypeShape>>,
+    right: &Option<Arc<FunctionTypeShape>>,
+    named: &[(String, ResolvedType)],
+) -> Option<Arc<FunctionTypeShape>> {
+    match (left, right) {
+        (Some(left), Some(right)) if left == right => Some(Arc::clone(left)),
+        (Some(left), Some(right)) if left.type_parameters == right.type_parameters => {
+            Some(FunctionTypeShape::new(
+                named
+                    .iter()
+                    .filter(|(name, _)| {
+                        left.required_named.contains(name) || right.required_named.contains(name)
+                    })
+                    .map(|(name, _)| name.clone())
+                    .collect(),
+                left.type_parameters.to_vec(),
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn join_interfaces(
+    left: &ResolvedType,
+    right: &ResolvedType,
+    signatures: &SignatureIndex,
+    model: &SemanticModel<'_>,
+    memo: &mut InferenceJoinMemo,
+    left_base: &ResolvedType,
+    right_base: &ResolvedType,
+) -> ResolvedType {
+    let nullable = left.nullable() || right.nullable();
     if let (
         ResolvedType {
             kind:
@@ -591,19 +749,13 @@ fn inference_join_impl(
         // Lifting one side to the other's class and joining arguments instead
         // recurses without end once supertypes nest their own subclasses
         // (`C extends Box<Box<C>>` joined with `Box<D>`, `D extends Box<Box<D>>`).
-        if signatures.relation(
-            &right_base,
-            crate::TypeRelation::SubtypeOf(&left_base),
-            model,
-        ) == Truth::Yes
+        if signatures.relation(right_base, crate::TypeRelation::SubtypeOf(left_base), model)
+            == Truth::Yes
         {
             return left.with_nullable(nullable);
         }
-        if signatures.relation(
-            &left_base,
-            crate::TypeRelation::SubtypeOf(&right_base),
-            model,
-        ) == Truth::Yes
+        if signatures.relation(left_base, crate::TypeRelation::SubtypeOf(right_base), model)
+            == Truth::Yes
         {
             return right.with_nullable(nullable);
         }
@@ -619,23 +771,7 @@ fn inference_join_impl(
             .common_superinterface(left, right, model)
             .map_or(ResolvedType::UNKNOWN, |bound| bound.with_nullable(nullable));
     }
-    if signatures.relation(
-        &right_base,
-        crate::TypeRelation::SubtypeOf(&left_base),
-        model,
-    ) == Truth::Yes
-    {
-        return left.with_nullable(nullable);
-    }
-    if signatures.relation(
-        &left_base,
-        crate::TypeRelation::SubtypeOf(&right_base),
-        model,
-    ) == Truth::Yes
-    {
-        return right.with_nullable(nullable);
-    }
-    ResolvedType::UNKNOWN
+    unreachable!()
 }
 
 /// The return type of the operator method `name` invoked on `receiver`.

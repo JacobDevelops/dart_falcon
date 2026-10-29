@@ -174,41 +174,7 @@ impl ExternalLibraries {
             .unwrap_or_else(PoisonError::into_inner)
             .clear();
         self.pending_contexts.clear();
-        let mut evictions = self.project_evictions.clone();
-        for library in &self.libraries {
-            for file in library.files.iter().filter(|file| is_project(&file.path)) {
-                evictions.insert(file.path.clone(), library.files[0].path.clone());
-                self.project_companions.insert(
-                    library.files[0].path.clone(),
-                    library.files.iter().map(|file| file.path.clone()).collect(),
-                );
-            }
-        }
-        if evictions != self.project_evictions
-            || self.project_evictions.keys().any(|path| !is_project(path))
-        {
-            // Rebuild the reachable graph, not just individual files: an evicted
-            // part belongs to its defining library, and a closed transitive
-            // dependency must be reached through previously attempted parents.
-            evictions.retain(|path, _| is_project(path));
-            let mut eviction_roots = FxHashMap::default();
-            for root in evictions.values() {
-                *eviction_roots.entry(root.clone()).or_default() += 1;
-            }
-            let mut companions = std::mem::take(&mut self.project_companions);
-            companions.retain(|root, _| eviction_roots.contains_key(root));
-            *self = Self {
-                project_evictions: evictions,
-                eviction_roots,
-                project_companions: companions,
-                companion_dependencies: std::mem::take(&mut self.companion_dependencies),
-                ..Self::default()
-            };
-        }
-        self.project_companions.retain(|root, companions| {
-            companions.retain(|path| !is_project(path));
-            !companions.is_empty() && (is_project(root) || self.eviction_roots.contains_key(root))
-        });
+        self.refresh_project_evictions(&is_project);
         let mut wave = Vec::new();
         for &(path, program, source) in project {
             let context = environment.context_index(path);
@@ -284,6 +250,44 @@ impl ExternalLibraries {
             self.companion_dependencies
                 .retain(|path, _| referenced.contains(path));
         }
+    }
+
+    fn refresh_project_evictions(&mut self, is_project: &impl Fn(&Path) -> bool) {
+        let mut evictions = self.project_evictions.clone();
+        for library in &self.libraries {
+            for file in library.files.iter().filter(|file| is_project(&file.path)) {
+                evictions.insert(file.path.clone(), library.files[0].path.clone());
+                self.project_companions.insert(
+                    library.files[0].path.clone(),
+                    library.files.iter().map(|file| file.path.clone()).collect(),
+                );
+            }
+        }
+        if evictions != self.project_evictions
+            || self.project_evictions.keys().any(|path| !is_project(path))
+        {
+            // Rebuild the reachable graph, not just individual files: an evicted
+            // part belongs to its defining library, and a closed transitive
+            // dependency must be reached through previously attempted parents.
+            evictions.retain(|path, _| is_project(path));
+            let mut eviction_roots = FxHashMap::default();
+            for root in evictions.values() {
+                *eviction_roots.entry(root.clone()).or_default() += 1;
+            }
+            let mut companions = std::mem::take(&mut self.project_companions);
+            companions.retain(|root, _| eviction_roots.contains_key(root));
+            *self = Self {
+                project_evictions: evictions,
+                eviction_roots,
+                project_companions: companions,
+                companion_dependencies: std::mem::take(&mut self.companion_dependencies),
+                ..Self::default()
+            };
+        }
+        self.project_companions.retain(|root, companions| {
+            companions.retain(|path| !is_project(path));
+            !companions.is_empty() && (is_project(root) || self.eviction_roots.contains_key(root))
+        });
     }
 
     fn companion_dependencies(
@@ -568,35 +572,44 @@ impl ExternalLibraries {
                     }
                 }
             }
-            for (id, _, context) in revisits {
-                let state = &self.states[id as usize];
-                if state.sdk == Some(true) {
-                    continue;
-                }
-                let Some(index) = state.primary else {
-                    continue;
-                };
-                if context == state.context {
-                    continue;
-                }
-                self.register_context(id, context);
-                if self
-                    .graph
-                    .as_ref()
-                    .is_some_and(|graph| graph.facts[graph.indices[&(id, context)]].is_some())
-                {
-                    continue;
-                }
-                let library = &self.libraries[index];
-                let dependencies =
-                    library_dependencies(environment, &self.canonical_paths, context, library);
-                let targets =
-                    self.enqueue_dependencies(dependencies, context, is_project, &mut next, true);
-                if let Some(targets) = targets {
-                    self.cache_node(environment, id, context, targets);
-                }
-            }
+            self.revisit_wave(environment, revisits, is_project, &mut next);
             wave = next;
+        }
+    }
+
+    fn revisit_wave(
+        &mut self,
+        environment: &AnalysisEnvironment,
+        revisits: Vec<(u32, PathBuf, Option<usize>)>,
+        is_project: &impl Fn(&Path) -> bool,
+        next: &mut Vec<(u32, PathBuf, Option<usize>)>,
+    ) {
+        for (id, _, context) in revisits {
+            let state = &self.states[id as usize];
+            if state.sdk == Some(true) {
+                continue;
+            }
+            let Some(index) = state.primary else {
+                continue;
+            };
+            if context == state.context {
+                continue;
+            }
+            self.register_context(id, context);
+            if self
+                .graph
+                .as_ref()
+                .is_some_and(|graph| graph.facts[graph.indices[&(id, context)]].is_some())
+            {
+                continue;
+            }
+            let library = &self.libraries[index];
+            let dependencies =
+                library_dependencies(environment, &self.canonical_paths, context, library);
+            let targets = self.enqueue_dependencies(dependencies, context, is_project, next, true);
+            if let Some(targets) = targets {
+                self.cache_node(environment, id, context, targets);
+            }
         }
     }
 
@@ -661,6 +674,15 @@ impl ExternalLibraries {
         {
             return;
         }
+        self.remove_alias_instances();
+        self.backfill_graph(environment);
+        if self.graph.is_some() {
+            self.group_graph_instances(environment);
+        }
+        self.sort_instances();
+    }
+
+    fn remove_alias_instances(&mut self) {
         if !self.aliases.is_empty() {
             let mut primary = vec![false; self.libraries.len()];
             for state in &self.states {
@@ -685,6 +707,9 @@ impl ExternalLibraries {
             }
             self.aliases.clear();
         }
+    }
+
+    fn backfill_graph(&mut self, environment: &AnalysisEnvironment) {
         if self.graph.is_some() {
             for (id, targets) in std::mem::take(&mut self.resolved_dependencies) {
                 let context = self.states[id as usize].context;
@@ -719,117 +744,127 @@ impl ExternalLibraries {
             for (id, context, dependencies) in backfill {
                 self.cache_node(environment, id, context, dependencies);
             }
-            let graph = self.graph.as_ref().unwrap();
-            let edges: Vec<Vec<usize>> = graph
-                .nodes
-                .iter()
-                .zip(&graph.facts)
-                .map(|(&(_, context), facts)| {
-                    facts.as_ref().map_or_else(Vec::new, |facts| {
-                        facts
-                            .dependencies
-                            .iter()
-                            .filter_map(|&target| graph.indices.get(&(target, context)).copied())
-                            .collect()
-                    })
-                })
-                .collect();
-            let names: Vec<&[u32]> = graph
-                .facts
-                .iter()
-                .map(|facts| {
-                    facts
-                        .as_ref()
-                        .map_or(&[][..], |facts| facts.names.as_slice())
-                })
-                .collect();
-            let closures = dependency_closures(&edges, &names, graph.names.len());
-            let mut mappings = FxHashMap::default();
-            for &(_, context) in &graph.nodes {
-                mappings.entry(context).or_insert_with(|| {
-                    let mut roots = vec![None; graph.names.len()];
-                    if let Some(config) = environment.config_in(context) {
-                        for package in &config.packages {
-                            if let Some(&id) = graph.names.get(&package.name) {
-                                roots[id as usize] = Some(&package.lib_root);
-                            }
+        }
+    }
+
+    fn group_graph_instances(&mut self, environment: &AnalysisEnvironment) {
+        let graph = self.graph.as_ref().unwrap();
+        let closures = Self::graph_dependency_closures(graph);
+        let mut mappings = FxHashMap::default();
+        for &(_, context) in &graph.nodes {
+            mappings.entry(context).or_insert_with(|| {
+                let mut roots = vec![None; graph.names.len()];
+                if let Some(config) = environment.config_in(context) {
+                    for package in &config.packages {
+                        if let Some(&id) = graph.names.get(&package.name) {
+                            roots[id as usize] = Some(&package.lib_root);
                         }
                     }
-                    roots
-                });
-            }
-            for state in &self.states {
-                if let Some(primary) = state.primary {
-                    self.libraries[primary].copy_context = state.context;
                 }
-            }
-            // Path/node IDs survive alias removal and sorting, unlike library indices.
-            let mut groups: FxHashMap<u32, Vec<(usize, usize)>> = FxHashMap::default();
-            for (node_index, &(id, context)) in graph.nodes.iter().enumerate() {
-                let Some(primary) = self.states[id as usize].primary else {
-                    continue;
-                };
-                let current_mapping = &mappings[&context];
-                let equivalent = |representative: usize| {
-                    let reference_mapping = &mappings[&graph.nodes[representative].1];
-                    closures[representative]
-                        .iter()
-                        .zip(&closures[node_index])
-                        .enumerate()
-                        .all(|(word_index, (&reference, &current))| {
-                            let mut remaining = reference | current;
-                            while remaining != 0 {
-                                let name = word_index * 64 + remaining.trailing_zeros() as usize;
-                                if current_mapping[name] != reference_mapping[name] {
-                                    return false;
-                                }
-                                remaining &= remaining - 1;
-                            }
-                            true
-                        })
-                };
-                let instances = groups.entry(id).or_insert_with(|| {
-                    vec![(
-                        graph.indices[&(id, self.states[id as usize].context)],
-                        primary,
-                    )]
-                });
-                let instance = if let Some(&(_, instance)) = instances
-                    .iter()
-                    .find(|&&(representative, _)| equivalent(representative))
-                {
-                    instance
-                } else {
-                    let library = &self.libraries[primary];
-                    let instance = self.libraries.len();
-                    self.libraries.push(ExternalLibrary {
-                        origin: library.origin.clone(),
-                        files: Arc::clone(&library.files),
-                        path_id: library.path_id,
-                        context,
-                        copy_context: context,
-                        has_unresolved_parts: library.has_unresolved_parts,
-                    });
-                    instances.push((node_index, instance));
-                    instance
-                };
-                let library = &mut self.libraries[instance];
-                library.copy_context = library.copy_context.into_iter().chain(context).min();
-                if instance != primary {
-                    library.context = library.copy_context;
-                    self.aliases.insert((id, context), instance);
-                }
-            }
-            let mut interner = StringInterner::default();
-            for instances in groups.values() {
-                for &(_, instance) in instances.iter().skip(1) {
-                    let library = &mut self.libraries[instance];
-                    library.origin =
-                        environment.origin(library.context, &library.files[0].path, &mut interner);
-                }
-            }
-            self.graph.as_mut().unwrap().dirty = false;
+                roots
+            });
         }
+        for state in &self.states {
+            if let Some(primary) = state.primary {
+                self.libraries[primary].copy_context = state.context;
+            }
+        }
+        // Path/node IDs survive alias removal and sorting, unlike library indices.
+        let mut groups: FxHashMap<u32, Vec<(usize, usize)>> = FxHashMap::default();
+        for (node_index, &(id, context)) in graph.nodes.iter().enumerate() {
+            let Some(primary) = self.states[id as usize].primary else {
+                continue;
+            };
+            let current_mapping = &mappings[&context];
+            let equivalent = |representative: usize| {
+                let reference_mapping = &mappings[&graph.nodes[representative].1];
+                closures[representative]
+                    .iter()
+                    .zip(&closures[node_index])
+                    .enumerate()
+                    .all(|(word_index, (&reference, &current))| {
+                        let mut remaining = reference | current;
+                        while remaining != 0 {
+                            let name = word_index * 64 + remaining.trailing_zeros() as usize;
+                            if current_mapping[name] != reference_mapping[name] {
+                                return false;
+                            }
+                            remaining &= remaining - 1;
+                        }
+                        true
+                    })
+            };
+            let instances = groups.entry(id).or_insert_with(|| {
+                vec![(
+                    graph.indices[&(id, self.states[id as usize].context)],
+                    primary,
+                )]
+            });
+            let instance = if let Some(&(_, instance)) = instances
+                .iter()
+                .find(|&&(representative, _)| equivalent(representative))
+            {
+                instance
+            } else {
+                let library = &self.libraries[primary];
+                let instance = self.libraries.len();
+                self.libraries.push(ExternalLibrary {
+                    origin: library.origin.clone(),
+                    files: Arc::clone(&library.files),
+                    path_id: library.path_id,
+                    context,
+                    copy_context: context,
+                    has_unresolved_parts: library.has_unresolved_parts,
+                });
+                instances.push((node_index, instance));
+                instance
+            };
+            let library = &mut self.libraries[instance];
+            library.copy_context = library.copy_context.into_iter().chain(context).min();
+            if instance != primary {
+                library.context = library.copy_context;
+                self.aliases.insert((id, context), instance);
+            }
+        }
+        let mut interner = StringInterner::default();
+        for instances in groups.values() {
+            for &(_, instance) in instances.iter().skip(1) {
+                let library = &mut self.libraries[instance];
+                library.origin =
+                    environment.origin(library.context, &library.files[0].path, &mut interner);
+            }
+        }
+        self.graph.as_mut().unwrap().dirty = false;
+    }
+
+    fn graph_dependency_closures(graph: &InstanceGraph) -> Vec<Vec<u64>> {
+        let edges: Vec<Vec<usize>> = graph
+            .nodes
+            .iter()
+            .zip(&graph.facts)
+            .map(|(&(_, context), facts)| {
+                facts.as_ref().map_or_else(Vec::new, |facts| {
+                    facts
+                        .dependencies
+                        .iter()
+                        .filter_map(|&target| graph.indices.get(&(target, context)).copied())
+                        .collect()
+                })
+            })
+            .collect();
+        let names: Vec<&[u32]> = graph
+            .facts
+            .iter()
+            .map(|facts| {
+                facts
+                    .as_ref()
+                    .map_or(&[][..], |facts| facts.names.as_slice())
+            })
+            .collect();
+        dependency_closures(&edges, &names, graph.names.len())
+    }
+
+    fn sort_instances(&mut self) {
         if self.aliases.is_empty() {
             self.libraries.sort_unstable_by(|left, right| {
                 (&left.files[0].path, left.copy_context)

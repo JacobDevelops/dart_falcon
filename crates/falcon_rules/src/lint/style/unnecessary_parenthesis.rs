@@ -225,7 +225,10 @@ fn key(span: Span) -> (usize, usize) {
 
 impl<'a> Collector<'a> {
     fn report(&mut self, span: Span) {
-        self.diagnostics.push(self.ctx.diagnostic("Remove the unnecessary parentheses.", span));
+        self.diagnostics.push(
+            self.ctx
+                .diagnostic("Remove the unnecessary parentheses.", span),
+        );
     }
 
     /// Check explicit grouping; surrounding grammar delimiters are not nodes.
@@ -310,6 +313,15 @@ impl<'a> Collector<'a> {
                 return true;
             }
         }
+        self.grouping_context_allows_removal(node, expression, parent)
+    }
+
+    fn grouping_context_allows_removal(
+        &self,
+        node: Span,
+        expression: Option<Expr<'_>>,
+        parent: Parent<'_>,
+    ) -> bool {
         // `a..b = (c..d)` and anything inside a cascade.
         if matches!(expression, Some(Expr::Cascade(_)))
             || self.in_cascade.last().copied().unwrap_or(false)
@@ -522,6 +534,50 @@ impl<'a> Collector<'a> {
         }
     }
 
+    fn check_call_children(&mut self, call: CallExpr<'a>) {
+        let callee = call.callee();
+        // A wrapped callee is a function-expression invocation.
+        let parenthesized = is_parenthesized(callee);
+        match callee {
+            Expr::Field(field) if !parenthesized => {
+                self.method_callees.insert(key(field.span()));
+                let parent = Parent::MemberTarget {
+                    name: field.field().name(),
+                    is_method: true,
+                    under_prefix: self.under_prefix.contains(&key(call.span())),
+                    null_aware: field.is_null_safe(),
+                };
+                self.check(field.object(), parent);
+            }
+            Expr::Ident(_) if !parenthesized => {}
+            callee => self.check(
+                callee,
+                Parent::InvokedFunction {
+                    has_type_arguments: !call.type_args().is_empty(),
+                },
+            ),
+        }
+        self.check_args(call.args());
+    }
+
+    fn check_cascade_children(&mut self, cascade: CascadeExpr<'a>) {
+        self.check(cascade.object(), Parent::CascadeTarget);
+        for section in cascade.sections() {
+            for op in section.ops() {
+                match op {
+                    CascadeOp::Field(_) | CascadeOp::NullAssert(_) => {}
+                    CascadeOp::Index(index) => self.check(index.index(), Parent::OtherExpression),
+                    CascadeOp::Call(call) => self.check_args(call.args()),
+                    CascadeOp::Invoke(call) => self.check_args(call.args()),
+                    CascadeOp::Assign(assign) => self.check(assign.value(), Parent::AssignedValue),
+                    CascadeOp::IndexAssign(assign) => {
+                        self.check(assign.value(), Parent::AssignedValue)
+                    }
+                }
+            }
+        }
+    }
+
     /// Checks the direct sub-expressions of `node`.
     fn check_children(&mut self, node: Expr<'a>) {
         match node {
@@ -570,51 +626,11 @@ impl<'a> Collector<'a> {
                 self.check(index.index(), Parent::OtherExpression);
             }
             Expr::Call(call) => {
-                let callee = call.callee();
-                // A wrapped callee is a function-expression invocation.
-                let parenthesized = is_parenthesized(callee);
-                match callee {
-                    Expr::Field(field) if !parenthesized => {
-                        self.method_callees.insert(key(field.span()));
-                        let parent = Parent::MemberTarget {
-                            name: field.field().name(),
-                            is_method: true,
-                            under_prefix: self.under_prefix.contains(&key(call.span())),
-                            null_aware: field.is_null_safe(),
-                        };
-                        self.check(field.object(), parent);
-                    }
-                    Expr::Ident(_) if !parenthesized => {}
-                    callee => self.check(
-                        callee,
-                        Parent::InvokedFunction {
-                            has_type_arguments: !call.type_args().is_empty(),
-                        },
-                    ),
-                }
-                self.check_args(call.args());
+                self.check_call_children(call);
             }
             Expr::New(expression) => self.check_args(expression.args()),
             Expr::Cascade(cascade) => {
-                self.check(cascade.object(), Parent::CascadeTarget);
-                for section in cascade.sections() {
-                    for op in section.ops() {
-                        match op {
-                            CascadeOp::Field(_) | CascadeOp::NullAssert(_) => {}
-                            CascadeOp::Index(index) => {
-                                self.check(index.index(), Parent::OtherExpression)
-                            }
-                            CascadeOp::Call(call) => self.check_args(call.args()),
-                            CascadeOp::Invoke(call) => self.check_args(call.args()),
-                            CascadeOp::Assign(assign) => {
-                                self.check(assign.value(), Parent::AssignedValue)
-                            }
-                            CascadeOp::IndexAssign(assign) => {
-                                self.check(assign.value(), Parent::AssignedValue)
-                            }
-                        }
-                    }
-                }
+                self.check_cascade_children(cascade);
             }
             Expr::List(list) => self.check_elements(list.elements()),
             Expr::Set(set) => self.check_elements(set.elements()),

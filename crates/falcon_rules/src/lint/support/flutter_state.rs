@@ -208,6 +208,40 @@ impl Collector<'_> {
                 })
         })
     }
+    fn check_context_reference(&mut self, expression: Expr<'_>, state: &SemanticState<'_>) {
+        if self.rule == "avoid-late-context" {
+            if matches!(expression, Expr::Ident(_) | Expr::Field(_))
+                && !self.late.is_empty()
+                && self
+                    .late
+                    .iter()
+                    .any(|(span, _)| span.contains(expression.span()))
+                && !self
+                    .closures
+                    .iter()
+                    .any(|span| span.contains(expression.span()))
+                && context_expression(expression, state)
+            {
+                self.report(expression.span());
+            }
+            return;
+        }
+        if self.rule == "use-closest-build-context"
+            && let Expr::Ident(identifier) = expression
+            && let Some((scope, closest)) = self.contexts.iter().rev().find(|(span, name)| {
+                span.contains(expression.span())
+                    && is_context(&state.environment.declared_type(name))
+            })
+            && identifier.name() != *closest
+            && !self
+                .contexts
+                .iter()
+                .any(|(span, name)| span == scope && *name == identifier.name())
+            && is_context(&state.infer(expression))
+        {
+            self.report(expression.span());
+        }
+    }
 }
 
 impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
@@ -228,38 +262,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     .push((expression.span(), parameter.name().name()));
             }
         }
-        if self.rule == "avoid-late-context" {
-            if matches!(expression, Expr::Ident(_) | Expr::Field(_))
-                && !self.late.is_empty()
-                && self
-                    .late
-                    .iter()
-                    .any(|(span, _)| span.contains(expression.span()))
-                && !self
-                    .closures
-                    .iter()
-                    .any(|span| span.contains(expression.span()))
-                && context_expression(expression, state)
-            {
-                self.report(expression.span());
-            }
-            return;
-        }
-        if self.rule == "use-closest-build-context" {
-            if let Expr::Ident(identifier) = expression
-                && let Some((scope, closest)) = self.contexts.iter().rev().find(|(span, name)| {
-                    span.contains(expression.span())
-                        && is_context(&state.environment.declared_type(name))
-                })
-                && identifier.name() != *closest
-                && !self
-                    .contexts
-                    .iter()
-                    .any(|(span, name)| span == scope && *name == identifier.name())
-                && is_context(&state.infer(expression))
-            {
-                self.report(expression.span());
-            }
+        if matches!(
+            self.rule,
+            "avoid-late-context" | "use-closest-build-context"
+        ) {
+            self.check_context_reference(expression, state);
             return;
         }
         let Expr::Call(call) = expression else {

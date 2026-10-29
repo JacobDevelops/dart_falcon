@@ -233,59 +233,15 @@ fn discover_project_inner(
         if metadata.is_file() {
             collect_file(path, filter, collect_manifests, &mut seen, &mut output);
         } else if metadata.is_dir() {
-            // Flutter plugin symlinks point into dependency caches and may cycle.
-            for item in WalkDir::new(path)
-                .follow_links(false)
-                .into_iter()
-                .filter_entry(|entry| {
-                    let kind = entry.file_type();
-                    if !kind.is_dir() {
-                        if track_watches
-                            && (kind.is_file() || (kind.is_symlink() && entry.path().is_file()))
-                            && admitted_file(entry.path(), filter, collect_manifests)
-                        {
-                            record_entry(entry, &watched, &mut watches);
-                        }
-                        return true;
-                    }
-                    if filter.excludes_directory(entry.path()) {
-                        return false;
-                    }
-                    record_entry(entry, &watched, &mut watches);
-                    let index = record_watch(entry.path(), &mut watched, &mut watches, || {
-                        entry
-                            .path()
-                            .metadata()
-                            .ok()
-                            .and_then(|metadata| metadata.modified().ok())
-                    });
-                    if let Some(index) = index {
-                        watches[index].entries.get_or_insert_with(Vec::new);
-                    }
-                    true
-                })
-            {
-                let entry = match item {
-                    Ok(entry) => entry,
-                    Err(error) => {
-                        tracing::warn!(%error, "failed to walk directory");
-                        continue;
-                    }
-                };
-                #[cfg(test)]
-                VISITED_ENTRIES.with_borrow_mut(|visited| visited.push(entry.path().to_path_buf()));
-                if entry.file_type().is_file()
-                    || (entry.file_type().is_symlink() && entry.path().is_file())
-                {
-                    collect_file(
-                        entry.path(),
-                        filter,
-                        collect_manifests,
-                        &mut seen,
-                        &mut output,
-                    );
-                }
-            }
+            discover_directory(
+                path,
+                filter,
+                collect_manifests,
+                &mut seen,
+                &mut output,
+                &mut watched,
+                &mut watches,
+            );
         }
     }
     output.files.sort();
@@ -298,6 +254,64 @@ fn discover_project_inner(
     }
     output.watches = watches;
     output
+}
+
+fn discover_directory(
+    path: &Path,
+    filter: &PathFilter,
+    collect_manifests: bool,
+    seen: &mut HashSet<PathBuf>,
+    output: &mut ProjectDiscovery,
+    watched: &mut Option<HashMap<PathBuf, usize>>,
+    watches: &mut Vec<DiscoveryWatch>,
+) {
+    let track_watches = watched.is_some();
+    // Flutter plugin symlinks point into dependency caches and may cycle.
+    for item in WalkDir::new(path)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| {
+            let kind = entry.file_type();
+            if !kind.is_dir() {
+                if track_watches
+                    && (kind.is_file() || (kind.is_symlink() && entry.path().is_file()))
+                    && admitted_file(entry.path(), filter, collect_manifests)
+                {
+                    record_entry(entry, watched, watches);
+                }
+                return true;
+            }
+            if filter.excludes_directory(entry.path()) {
+                return false;
+            }
+            record_entry(entry, watched, watches);
+            let index = record_watch(entry.path(), watched, watches, || {
+                entry
+                    .path()
+                    .metadata()
+                    .ok()
+                    .and_then(|metadata| metadata.modified().ok())
+            });
+            if let Some(index) = index {
+                watches[index].entries.get_or_insert_with(Vec::new);
+            }
+            true
+        })
+    {
+        let entry = match item {
+            Ok(entry) => entry,
+            Err(error) => {
+                tracing::warn!(%error, "failed to walk directory");
+                continue;
+            }
+        };
+        #[cfg(test)]
+        VISITED_ENTRIES.with_borrow_mut(|visited| visited.push(entry.path().to_path_buf()));
+        if entry.file_type().is_file() || (entry.file_type().is_symlink() && entry.path().is_file())
+        {
+            collect_file(entry.path(), filter, collect_manifests, seen, output);
+        }
+    }
 }
 
 fn record_watch(

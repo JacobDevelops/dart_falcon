@@ -4,8 +4,10 @@
 //! Unnamed constructors consistently use `Class.new`, including aliases and prefixes.
 //! Dynamic and unresolved targets are skipped.
 
+use falcon_analyze::{
+    AnalyzeContext, QualifiedName, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
+};
 use falcon_analyze::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, QualifiedName, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -89,13 +91,7 @@ impl Access {
 
 impl Collector<'_> {
     fn emit(&mut self, name: &str, span: Span) {
-        report(
-            self.ctx,
-            self.entries,
-            name,
-            span,
-            &mut self.diagnostics,
-        );
+        report(self.ctx, self.entries, name, span, &mut self.diagnostics);
     }
 
     fn is_unnamed_extension_member(identifier: Identifier<'_>) -> bool {
@@ -170,6 +166,137 @@ impl Collector<'_> {
             self.emit(&format!("{}.{name}", owner.name()), span);
         }
     }
+
+    fn identifier<'a>(&mut self, identifier: Identifier<'a>, state: &SemanticState<'a>) {
+        if Self::is_unnamed_extension_member(identifier)
+            || identifier
+                .syntax()
+                .parent()
+                .and_then(CascadeAssign::cast)
+                .is_some_and(|assignment| {
+                    assignment.target().unparenthesized().span() == identifier.span()
+                })
+        {
+            return;
+        }
+        if let Some(owner) = &state.constant_owner
+            && (!state
+                .signatures
+                .declared_member_facts(owner, identifier.name())
+                .is_empty()
+                || state.signatures.is_enum_value(owner, identifier.name()))
+        {
+            if let Some(receiver) = &state.enclosing_type
+                && matches!(receiver.view(), ResolvedTypeView::Interface { identity, .. } if identity == owner)
+                && !state.signatures.is_enum_value(owner, identifier.name())
+                && !state
+                    .signatures
+                    .declared_member_facts(owner, identifier.name())
+                    .iter()
+                    .any(|fact| fact.is_static)
+            {
+                self.member(
+                    receiver,
+                    identifier.name(),
+                    identifier.span(),
+                    Access::expression(Expr::Ident(identifier)),
+                    state,
+                );
+            } else {
+                self.emit(
+                    &format!("{}.{}", owner.name(), identifier.name()),
+                    identifier.span(),
+                );
+            }
+        } else if let Some(identity) = state
+            .model
+            .resolve_value(identifier.name())
+            .or_else(|| state.model.resolve_name(identifier.name()))
+        {
+            self.emit(identity.name(), identifier.span());
+        } else if let Some(receiver) = &state.enclosing_type {
+            self.member(
+                receiver,
+                identifier.name(),
+                identifier.span(),
+                Access::expression(Expr::Ident(identifier)),
+                state,
+            );
+        }
+    }
+
+    fn report_field<'a>(&mut self, field: FieldExpr<'a>, state: &SemanticState<'a>) {
+        let node = Expr::Field(field);
+        if let Some((owner, name)) =
+            falcon_analyze::resolve_call_constructor(node, &state.model, true)
+            && name == field.field().name()
+            && state.is_constructor_invocation(node)
+        {
+            let owner = state.model.unaliased(owner);
+            self.emit(&format!("{}.{name}", owner.name()), field.field().span());
+            return;
+        }
+        if let Expr::Ident(prefix) = field.object().unparenthesized()
+            && !state.environment.is_bound(prefix.name())
+            && state.type_parameters.lookup(prefix.name()).is_none()
+        {
+            let name = QualifiedName::prefixed(prefix.name(), field.field().name());
+            if let Some(identity) = state
+                .model
+                .resolve_value(name)
+                .or_else(|| state.model.resolve_name(name))
+            {
+                self.emit(identity.name(), field.field().span());
+                return;
+            }
+        }
+        let owner = match field.object().unparenthesized() {
+            Expr::Ident(name)
+                if !state.environment.is_bound(name.name())
+                    && state.type_parameters.lookup(name.name()).is_none() =>
+            {
+                state.model.resolve_name(name.name())
+            }
+            Expr::Field(ty) => {
+                if let Expr::Ident(prefix) = ty.object().unparenthesized()
+                    && !state.environment.is_bound(prefix.name())
+                    && state.type_parameters.lookup(prefix.name()).is_none()
+                {
+                    state
+                        .model
+                        .resolve_name(QualifiedName::prefixed(prefix.name(), ty.field().name()))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        if let Some(owner) = owner {
+            let owner = state.model.unaliased(owner);
+            if state
+                .signatures
+                .declared_member_facts(&owner, field.field().name())
+                .iter()
+                .any(|facts| facts.is_static)
+                || state.signatures.is_enum_value(&owner, field.field().name())
+            {
+                self.emit(
+                    &format!("{}.{}", owner.name(), field.field().name()),
+                    field.field().span(),
+                );
+                return;
+            }
+        }
+        let receiver =
+            state.infer_access_receiver(field.object(), field.field().name(), field.is_null_safe());
+        self.member(
+            &receiver,
+            field.field().name(),
+            field.field().span(),
+            Access::expression(node),
+            state,
+        );
+    }
 }
 
 impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
@@ -194,7 +321,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 }
                 _ => continue,
             };
-            if let Some(ResolvedTypeView::Interface { identity, .. }) = receiver.map(ResolvedType::view) {
+            if let Some(ResolvedTypeView::Interface { identity, .. }) =
+                receiver.map(ResolvedType::view)
+            {
                 let owner = state.model.unaliased(identity.clone());
                 self.emit(
                     &format!(
@@ -214,9 +343,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         while let Some(ancestor) = parent {
             if let Some(Expr::Call(call)) = Expr::cast(ancestor) {
                 let callee = call.callee().span();
-                if callee.contains(node.span())
-                    && state.is_constructor_invocation(call.callee())
-                {
+                if callee.contains(node.span()) && state.is_constructor_invocation(call.callee()) {
                     return;
                 }
                 break;
@@ -256,139 +383,15 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         })))
                     && state.type_parameters.lookup(identifier.name()).is_none() =>
             {
-                if Self::is_unnamed_extension_member(identifier)
-                    || identifier
-                        .syntax()
-                        .parent()
-                        .and_then(CascadeAssign::cast)
-                        .is_some_and(|assignment| {
-                            assignment.target().unparenthesized().span() == identifier.span()
-                        })
-                {
-                    return;
-                }
-                if let Some(owner) = &state.constant_owner
-                    && (!state
-                        .signatures
-                        .declared_member_facts(owner, identifier.name())
-                        .is_empty()
-                        || state.signatures.is_enum_value(owner, identifier.name()))
-                {
-                    if let Some(receiver) = &state.enclosing_type
-                        && matches!(receiver.view(), ResolvedTypeView::Interface { identity, .. } if identity == owner)
-                        && !state.signatures.is_enum_value(owner, identifier.name())
-                        && !state
-                            .signatures
-                            .declared_member_facts(owner, identifier.name())
-                            .iter()
-                            .any(|fact| fact.is_static)
-                    {
-                        self.member(
-                            receiver,
-                            identifier.name(),
-                            identifier.span(),
-                            Access::expression(node),
-                            state,
-                        );
-                    } else {
-                        self.emit(
-                            &format!("{}.{}", owner.name(), identifier.name()),
-                            identifier.span(),
-                        );
-                    }
-                } else if let Some(identity) = state
-                    .model
-                    .resolve_value(identifier.name())
-                    .or_else(|| state.model.resolve_name(identifier.name()))
-                {
-                    self.emit(identity.name(), identifier.span());
-                } else if let Some(receiver) = &state.enclosing_type {
-                    self.member(
-                        receiver,
-                        identifier.name(),
-                        identifier.span(),
-                        Access::expression(node),
-                        state,
-                    );
-                }
+                self.identifier(identifier, state);
             }
             Expr::Field(field) => {
-                if let Some((owner, name)) =
-                    falcon_analyze::resolve_call_constructor(node, &state.model, true)
-                    && name == field.field().name()
-                    && state.is_constructor_invocation(node)
-                {
-                    let owner = state.model.unaliased(owner);
-                    self.emit(&format!("{}.{name}", owner.name()), field.field().span());
-                    return;
-                }
-                if let Expr::Ident(prefix) = field.object().unparenthesized()
-                    && !state.environment.is_bound(prefix.name())
-                    && state.type_parameters.lookup(prefix.name()).is_none()
-                {
-                    let name = QualifiedName::prefixed(prefix.name(), field.field().name());
-                    if let Some(identity) = state
-                        .model
-                        .resolve_value(name)
-                        .or_else(|| state.model.resolve_name(name))
-                    {
-                        self.emit(identity.name(), field.field().span());
-                        return;
-                    }
-                }
-                let owner = match field.object().unparenthesized() {
-                    Expr::Ident(name)
-                        if !state.environment.is_bound(name.name())
-                            && state.type_parameters.lookup(name.name()).is_none() =>
-                    {
-                        state.model.resolve_name(name.name())
-                    }
-                    Expr::Field(ty) => {
-                        if let Expr::Ident(prefix) = ty.object().unparenthesized()
-                            && !state.environment.is_bound(prefix.name())
-                            && state.type_parameters.lookup(prefix.name()).is_none()
-                        {
-                            state.model.resolve_name(QualifiedName::prefixed(
-                                prefix.name(),
-                                ty.field().name(),
-                            ))
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                };
-                if let Some(owner) = owner {
-                    let owner = state.model.unaliased(owner);
-                    if state
-                        .signatures
-                        .declared_member_facts(&owner, field.field().name())
-                        .iter()
-                        .any(|facts| facts.is_static)
-                        || state.signatures.is_enum_value(&owner, field.field().name())
-                    {
-                        self.emit(
-                            &format!("{}.{}", owner.name(), field.field().name()),
-                            field.field().span(),
-                        );
-                        return;
-                    }
-                }
-                let receiver = state.infer_access_receiver(
-                    field.object(),
-                    field.field().name(),
-                    field.is_null_safe(),
-                );
-                self.member(
-                    &receiver,
-                    field.field().name(),
-                    field.field().span(),
-                    Access::expression(node),
-                    state,
-                );
+                self.report_field(field, state);
             }
             Expr::DotShorthand(shorthand) => {
-                if let Some(ResolvedTypeView::Interface { identity, .. }) = state.expected().map(ResolvedType::view) {
+                if let Some(ResolvedTypeView::Interface { identity, .. }) =
+                    state.expected().map(ResolvedType::view)
+                {
                     let owner = state.model.unaliased(identity.clone());
                     self.emit(
                         &format!("{}.{}", owner.name(), shorthand.name().name()),

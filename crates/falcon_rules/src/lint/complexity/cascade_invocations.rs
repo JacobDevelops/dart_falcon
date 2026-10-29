@@ -44,7 +44,8 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, LibraryId, MemberKind, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
+    AnalyzeContext, DeclarationIdentity, LibraryId, MemberKind, ResolvedType, ResolvedTypeView,
+    Rule, RulePreparation,
 };
 use falcon_diagnostics::{Diagnostic, Span as DiagSpan};
 use falcon_syntax::cst::visit::{Visitor, for_each_stmt_list, walk_expr_chain};
@@ -307,43 +308,7 @@ impl<'a> Scope<'_, 'a> {
                 }
                 _ => Cascadable::default(),
             },
-            Expr::Cascade(cascade) => {
-                let object = cascade.object();
-                let Some(element) = self.simple_element(object) else {
-                    return Cascadable::default();
-                };
-                let mut nodes = Vec::new();
-                let mut member_names = Vec::new();
-                for op in cascade.sections().flat_map(|section| section.ops()) {
-                    match op {
-                        CascadeOp::NullAssert(_) => {}
-                        CascadeOp::Field(field) => member_names.push(field.name()),
-                        CascadeOp::Index(index) => nodes.push(index.index()),
-                        CascadeOp::Call(call) => {
-                            member_names.push(call.name());
-                            for_each_argument(call.args(), |argument| nodes.push(argument));
-                        }
-                        CascadeOp::Invoke(invoke) => {
-                            for_each_argument(invoke.args(), |argument| nodes.push(argument));
-                        }
-                        CascadeOp::Assign(assignment) => {
-                            nodes.push(assignment.target());
-                            nodes.push(assignment.value());
-                        }
-                        CascadeOp::IndexAssign(assignment) => {
-                            nodes.push(assignment.target());
-                            nodes.push(assignment.value());
-                        }
-                    }
-                }
-                let mut critical = self.critical(&nodes, Some(&element));
-                if let Element::Property { owner, .. } = &element {
-                    critical.owner_referenced |= member_names
-                        .iter()
-                        .any(|name| self.member_of_owner(Some(object), name.name(), owner));
-                }
-                Cascadable::member_access(element, critical)
-            }
+            Expr::Cascade(cascade) => self.cascade(cascade),
             Expr::Field(field) if !field.is_null_safe() => {
                 let object = field.object();
                 let Some(element) = self.simple_element(object) else {
@@ -358,6 +323,44 @@ impl<'a> Scope<'_, 'a> {
             }
             _ => Cascadable::default(),
         }
+    }
+
+    fn cascade(&self, cascade: CascadeExpr<'a>) -> Cascadable<'a> {
+        let object = cascade.object();
+        let Some(element) = self.simple_element(object) else {
+            return Cascadable::default();
+        };
+        let mut nodes = Vec::new();
+        let mut member_names = Vec::new();
+        for op in cascade.sections().flat_map(|section| section.ops()) {
+            match op {
+                CascadeOp::NullAssert(_) => {}
+                CascadeOp::Field(field) => member_names.push(field.name()),
+                CascadeOp::Index(index) => nodes.push(index.index()),
+                CascadeOp::Call(call) => {
+                    member_names.push(call.name());
+                    for_each_argument(call.args(), |argument| nodes.push(argument));
+                }
+                CascadeOp::Invoke(invoke) => {
+                    for_each_argument(invoke.args(), |argument| nodes.push(argument));
+                }
+                CascadeOp::Assign(assignment) => {
+                    nodes.push(assignment.target());
+                    nodes.push(assignment.value());
+                }
+                CascadeOp::IndexAssign(assignment) => {
+                    nodes.push(assignment.target());
+                    nodes.push(assignment.value());
+                }
+            }
+        }
+        let mut critical = self.critical(&nodes, Some(&element));
+        if let Element::Property { owner, .. } = &element {
+            critical.owner_referenced |= member_names
+                .iter()
+                .any(|name| self.member_of_owner(Some(object), name.name(), owner));
+        }
+        Cascadable::member_access(element, critical)
     }
 
     /// The element a simple target identifier resolves to; `None` for
@@ -421,7 +424,9 @@ impl<'a> Scope<'_, 'a> {
     /// hierarchy is unresolvable.
     fn enclosing_member_owner(&self, name: &str) -> Option<Option<DeclarationIdentity>> {
         match self.state.enclosing_type.as_ref()?.view() {
-            ResolvedTypeView::Interface { identity, .. } => member_owner(identity, name, self.state),
+            ResolvedTypeView::Interface { identity, .. } => {
+                member_owner(identity, name, self.state)
+            }
             _ => None,
         }
     }
@@ -436,7 +441,8 @@ impl<'a> Scope<'_, 'a> {
         let receiver = match object {
             None => return self.enclosing_member_owner(name).flatten().as_ref() == Some(owner),
             Some(Expr::Super(_)) => {
-                let Some(ResolvedTypeView::Interface { identity, .. }) = self.state.enclosing_type.as_ref().map(ResolvedType::view)
+                let Some(ResolvedTypeView::Interface { identity, .. }) =
+                    self.state.enclosing_type.as_ref().map(ResolvedType::view)
                 else {
                     return true;
                 };
@@ -495,7 +501,9 @@ impl<'a> Scope<'_, 'a> {
                         .and_then(|index| index.parse::<usize>().ok())
                         .is_some_and(|index| (1..=positional.len()).contains(&index))
             }
-            Some(_) if receiver.is_some_and(|ty| ty.interface("dart:core", "Function")) => name != "call",
+            Some(_) if receiver.is_some_and(|ty| ty.interface("dart:core", "Function")) => {
+                name != "call"
+            }
             Some(ResolvedTypeView::Interface { .. }) => receiver.is_some_and(|receiver| {
                 self.state
                     .signatures
@@ -543,7 +551,12 @@ impl<'a> Scope<'_, 'a> {
                 if self.state.model.resolve_value(name).is_none()
                     && let Some(identity) = self.state.model.resolve_name(name)
                 {
-                    return Some(ResolvedType::new_interface(identity, Vec::new().into(), false, false));
+                    return Some(ResolvedType::new_interface(
+                        identity,
+                        Vec::new().into(),
+                        false,
+                        false,
+                    ));
                 }
                 Some(self.state.infer(object))
             }
@@ -662,9 +675,11 @@ impl<'a> Visitor<'a> for Finder<'_, '_, 'a> {
                                 CascadeOp::Call(call) => call.name(),
                                 _ => continue,
                             };
-                            finder.critical.owner_referenced |=
-                                finder.scope
-                                    .member_of_owner(Some(cascade.object()), name.name(), owner);
+                            finder.critical.owner_referenced |= finder.scope.member_of_owner(
+                                Some(cascade.object()),
+                                name.name(),
+                                owner,
+                            );
                         }
                     }
                 }
@@ -710,8 +725,8 @@ fn report(start: usize, end: usize, ctx: &AnalyzeContext, diags: &mut Vec<Diagno
 #[cfg(test)]
 mod tests {
     use super::*;
+    use falcon_analyze::ParsedFile;
     use falcon_analyze::RuleAnalysis;
-    use falcon_analyze::{ParsedFile};
     use falcon_config::FalconConfig;
     use falcon_dart_parser::parse;
     use std::path::Path;

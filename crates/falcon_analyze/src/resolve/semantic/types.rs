@@ -779,141 +779,8 @@ impl ResolvedType {
         }
         // Reject scalar differences, and accept already-shared children, before
         // allocating a memo table. Flat SDK interface comparisons stay allocation-free.
-        match (&self.kind, &other.kind) {
-            (
-                ResolvedTypeKind::Interface {
-                    occurrence: a_occurrence,
-                    identity: a,
-                    arguments: aa,
-                    nullable: an,
-                    extension_type: ae,
-                },
-                ResolvedTypeKind::Interface {
-                    occurrence: b_occurrence,
-                    identity: b,
-                    arguments: ba,
-                    nullable: bn,
-                    extension_type: be,
-                },
-            ) => {
-                if compare_aliases != AliasComparison::Ignore
-                    && !a_occurrence.same_origin(b_occurrence)
-                {
-                    return false;
-                }
-                if a != b || an != bn || ae != be || aa.len() != ba.len() {
-                    return false;
-                }
-                if aa.is_empty() || Arc::ptr_eq(aa, ba) {
-                    return true;
-                }
-            }
-            (
-                ResolvedTypeKind::TypeParameter {
-                    id: a,
-                    bound: ab,
-                    nullable: an,
-                },
-                ResolvedTypeKind::TypeParameter {
-                    id: b,
-                    bound: bb,
-                    nullable: bn,
-                },
-            ) => {
-                if a != b || an != bn {
-                    return false;
-                }
-                if Arc::ptr_eq(ab, bb) {
-                    return true;
-                }
-            }
-            (
-                ResolvedTypeKind::NonNullTypeParameter { id: a, bound: ab },
-                ResolvedTypeKind::NonNullTypeParameter { id: b, bound: bb },
-            ) => {
-                if a != b {
-                    return false;
-                }
-                if Arc::ptr_eq(ab, bb) {
-                    return true;
-                }
-            }
-            (
-                ResolvedTypeKind::Function {
-                    optional_positional: ao,
-                    return_type: ar,
-                    positional: ap,
-                    named: a,
-                    nullable: an,
-                    alias: a_alias,
-                    shape: a_shape,
-                    ..
-                },
-                ResolvedTypeKind::Function {
-                    optional_positional: bo,
-                    return_type: br,
-                    positional: bp,
-                    named: b,
-                    nullable: bn,
-                    alias: b_alias,
-                    shape: b_shape,
-                    ..
-                },
-            ) => {
-                if match compare_aliases {
-                    AliasComparison::Ignore => false,
-                    AliasComparison::Substitution => !a_alias.same_substitution_source(b_alias),
-                    AliasComparison::Origin => !a_alias.same_origin(b_alias),
-                } {
-                    return false;
-                }
-                if a_shape != b_shape {
-                    return false;
-                }
-                if ao != bo || an != bn || ap.len() != bp.len() || a.len() != b.len() {
-                    return false;
-                }
-                if Arc::ptr_eq(ar, br)
-                    && (ap.is_empty() || Arc::ptr_eq(ap, bp))
-                    && (a.is_empty() || Arc::ptr_eq(a, b))
-                {
-                    return true;
-                }
-            }
-            (
-                ResolvedTypeKind::Record {
-                    occurrence: a_occurrence,
-                    positional: ap,
-                    named: a,
-                    nullable: an,
-                },
-                ResolvedTypeKind::Record {
-                    occurrence: b_occurrence,
-                    positional: bp,
-                    named: b,
-                    nullable: bn,
-                },
-            ) => {
-                if compare_aliases != AliasComparison::Ignore
-                    && !a_occurrence.same_origin(b_occurrence)
-                {
-                    return false;
-                }
-                if an != bn || ap.len() != bp.len() || a.len() != b.len() {
-                    return false;
-                }
-                if (ap.is_empty() || Arc::ptr_eq(ap, bp)) && (a.is_empty() || Arc::ptr_eq(a, b)) {
-                    return true;
-                }
-            }
-            (ResolvedTypeKind::Unknown, ResolvedTypeKind::Unknown)
-            | (ResolvedTypeKind::Dynamic, ResolvedTypeKind::Dynamic)
-            | (ResolvedTypeKind::Void, ResolvedTypeKind::Void)
-            | (ResolvedTypeKind::Never, ResolvedTypeKind::Never)
-            | (ResolvedTypeKind::Null, ResolvedTypeKind::Null) => {
-                return true;
-            }
-            _ => return false,
+        if let Some(equal) = self.eq_shallow(other, compare_aliases) {
+            return equal;
         }
         if !seen.insert((BorrowedIdentity::new(self), BorrowedIdentity::new(other))) {
             return true;
@@ -968,6 +835,153 @@ impl ResolvedType {
         }
     }
 
+    fn eq_shallow(&self, other: &Self, compare_aliases: AliasComparison) -> Option<bool> {
+        match (&self.kind, &other.kind) {
+            (
+                ResolvedTypeKind::Interface {
+                    occurrence: a_occurrence,
+                    identity: a,
+                    arguments: aa,
+                    nullable: an,
+                    extension_type: ae,
+                },
+                ResolvedTypeKind::Interface {
+                    occurrence: b_occurrence,
+                    identity: b,
+                    arguments: ba,
+                    nullable: bn,
+                    extension_type: be,
+                },
+            ) => {
+                if compare_aliases != AliasComparison::Ignore
+                    && !a_occurrence.same_origin(b_occurrence)
+                {
+                    return Some(false);
+                }
+                if a != b || an != bn || ae != be || aa.len() != ba.len() {
+                    return Some(false);
+                }
+                if aa.is_empty() || Arc::ptr_eq(aa, ba) {
+                    return Some(true);
+                }
+            }
+            (
+                ResolvedTypeKind::TypeParameter {
+                    id: a,
+                    bound: ab,
+                    nullable: an,
+                },
+                ResolvedTypeKind::TypeParameter {
+                    id: b,
+                    bound: bb,
+                    nullable: bn,
+                },
+            ) => {
+                if a != b || an != bn {
+                    return Some(false);
+                }
+                if Arc::ptr_eq(ab, bb) {
+                    return Some(true);
+                }
+            }
+            (
+                ResolvedTypeKind::NonNullTypeParameter { id: a, bound: ab },
+                ResolvedTypeKind::NonNullTypeParameter { id: b, bound: bb },
+            ) => {
+                if a != b {
+                    return Some(false);
+                }
+                if Arc::ptr_eq(ab, bb) {
+                    return Some(true);
+                }
+            }
+            (ResolvedTypeKind::Unknown, ResolvedTypeKind::Unknown)
+            | (ResolvedTypeKind::Dynamic, ResolvedTypeKind::Dynamic)
+            | (ResolvedTypeKind::Void, ResolvedTypeKind::Void)
+            | (ResolvedTypeKind::Never, ResolvedTypeKind::Never)
+            | (ResolvedTypeKind::Null, ResolvedTypeKind::Null) => {
+                return Some(true);
+            }
+            _ => return self.eq_composite_shallow(other, compare_aliases),
+        }
+        None
+    }
+
+    fn eq_composite_shallow(&self, other: &Self, compare_aliases: AliasComparison) -> Option<bool> {
+        match (&self.kind, &other.kind) {
+            (
+                ResolvedTypeKind::Function {
+                    optional_positional: ao,
+                    return_type: ar,
+                    positional: ap,
+                    named: a,
+                    nullable: an,
+                    alias: a_alias,
+                    shape: a_shape,
+                    ..
+                },
+                ResolvedTypeKind::Function {
+                    optional_positional: bo,
+                    return_type: br,
+                    positional: bp,
+                    named: b,
+                    nullable: bn,
+                    alias: b_alias,
+                    shape: b_shape,
+                    ..
+                },
+            ) => {
+                if match compare_aliases {
+                    AliasComparison::Ignore => false,
+                    AliasComparison::Substitution => !a_alias.same_substitution_source(b_alias),
+                    AliasComparison::Origin => !a_alias.same_origin(b_alias),
+                } {
+                    return Some(false);
+                }
+                if a_shape != b_shape {
+                    return Some(false);
+                }
+                if ao != bo || an != bn || ap.len() != bp.len() || a.len() != b.len() {
+                    return Some(false);
+                }
+                if Arc::ptr_eq(ar, br)
+                    && (ap.is_empty() || Arc::ptr_eq(ap, bp))
+                    && (a.is_empty() || Arc::ptr_eq(a, b))
+                {
+                    return Some(true);
+                }
+            }
+            (
+                ResolvedTypeKind::Record {
+                    occurrence: a_occurrence,
+                    positional: ap,
+                    named: a,
+                    nullable: an,
+                },
+                ResolvedTypeKind::Record {
+                    occurrence: b_occurrence,
+                    positional: bp,
+                    named: b,
+                    nullable: bn,
+                },
+            ) => {
+                if compare_aliases != AliasComparison::Ignore
+                    && !a_occurrence.same_origin(b_occurrence)
+                {
+                    return Some(false);
+                }
+                if an != bn || ap.len() != bp.len() || a.len() != b.len() {
+                    return Some(false);
+                }
+                if (ap.is_empty() || Arc::ptr_eq(ap, bp)) && (a.is_empty() || Arc::ptr_eq(a, b)) {
+                    return Some(true);
+                }
+            }
+            _ => return Some(false),
+        }
+        None
+    }
+
     fn eq_types<'a>(
         left: &'a [Self],
         right: &'a [Self],
@@ -975,11 +989,9 @@ impl ResolvedType {
         compare_aliases: AliasComparison,
     ) -> bool {
         std::ptr::eq(left, right)
-            || (left.len() == right.len()
-                && left
-                    .iter()
-                    .zip(right)
-                    .all(|(a, b)| a.eq_memoized_with_aliases(b, seen, compare_aliases)))
+            || paired_types_match(left, right, |a, b| {
+                a.eq_memoized_with_aliases(b, seen, compare_aliases)
+            })
     }
 
     fn eq_named<'a>(
@@ -989,10 +1001,9 @@ impl ResolvedType {
         compare_aliases: AliasComparison,
     ) -> bool {
         std::ptr::eq(left, right)
-            || (left.len() == right.len()
-                && left.iter().zip(right).all(|((a, at), (b, bt))| {
-                    a == b && at.eq_memoized_with_aliases(bt, seen, compare_aliases)
-                }))
+            || named_types_match(left, right, |a, b| {
+                a.eq_memoized_with_aliases(b, seen, compare_aliases)
+            })
     }
 
     pub(super) fn structural_hash<'a>(
@@ -1307,25 +1318,16 @@ fn inference_refinement_compatible<'a>(
     )) {
         return true;
     }
-    let positional =
-        |left: &'a [ResolvedType], right: &'a [ResolvedType], seen: &mut FxHashSet<_>| {
-            left.len() == right.len()
-                && left
-                    .iter()
-                    .zip(right)
-                    .all(|(left, right)| inference_refinement_compatible(left, right, seen))
-        };
-    let named = |left: &'a [(String, ResolvedType)],
-                 right: &'a [(String, ResolvedType)],
-                 seen: &mut FxHashSet<_>| {
-        left.len() == right.len()
-            && left
-                .iter()
-                .zip(right)
-                .all(|((left_name, left), (right_name, right))| {
-                    left_name == right_name && inference_refinement_compatible(left, right, seen)
-                })
-    };
+    if matches!(
+        (&current.kind, &candidate.kind),
+        (
+            ResolvedTypeKind::Function { .. },
+            ResolvedTypeKind::Function { .. }
+        )
+    ) {
+        return inference_function_refinement_compatible(current, candidate, seen);
+    }
+    let mut compatible = |left, right| inference_refinement_compatible(left, right, seen);
     match (&current.kind, &candidate.kind) {
         (ResolvedTypeKind::Unknown, _) => true,
         (
@@ -1348,8 +1350,68 @@ fn inference_refinement_compatible<'a>(
                 && left_nullable == right_nullable
                 && left_extension == right_extension
                 && left_occurrence.same_origin(right_occurrence)
-                && positional(left_arguments, right_arguments, seen)
+                && paired_types_match(left_arguments, right_arguments, &mut compatible)
         }
+        (
+            ResolvedTypeKind::Record {
+                occurrence: left_occurrence,
+                positional: left_positional,
+                named: left_named,
+                nullable: left_nullable,
+            },
+            ResolvedTypeKind::Record {
+                occurrence: right_occurrence,
+                positional: right_positional,
+                named: right_named,
+                nullable: right_nullable,
+            },
+        ) => {
+            left_nullable == right_nullable
+                && left_occurrence.same_origin(right_occurrence)
+                && paired_types_match(left_positional, right_positional, &mut compatible)
+                && named_types_match(left_named, right_named, &mut compatible)
+        }
+        (
+            ResolvedTypeKind::TypeParameter {
+                id: left,
+                bound: left_bound,
+                nullable: left_nullable,
+            },
+            ResolvedTypeKind::TypeParameter {
+                id: right,
+                bound: right_bound,
+                nullable: right_nullable,
+            },
+        ) => {
+            left == right && left_nullable == right_nullable && compatible(left_bound, right_bound)
+        }
+        (
+            ResolvedTypeKind::NonNullTypeParameter {
+                id: left,
+                bound: left_bound,
+            },
+            ResolvedTypeKind::NonNullTypeParameter {
+                id: right,
+                bound: right_bound,
+            },
+        ) => left == right && compatible(left_bound, right_bound),
+        _ => current.eq_memoized_with_aliases(
+            candidate,
+            &mut FxHashSet::default(),
+            AliasComparison::Origin,
+        ),
+    }
+}
+
+fn inference_function_refinement_compatible<'a>(
+    current: &'a ResolvedType,
+    candidate: &'a ResolvedType,
+    seen: &mut FxHashSet<(
+        BorrowedIdentity<'a, ResolvedType>,
+        BorrowedIdentity<'a, ResolvedType>,
+    )>,
+) -> bool {
+    match (&current.kind, &candidate.kind) {
         (
             ResolvedTypeKind::Function {
                 shape: left_shape,
@@ -1377,65 +1439,51 @@ fn inference_refinement_compatible<'a>(
                     (None, None) => true,
                     (Some(left), Some(right)) => {
                         left.required_named == right.required_named
-                            && positional(&left.type_parameters, &right.type_parameters, seen)
+                            && paired_types_match(
+                                &left.type_parameters,
+                                &right.type_parameters,
+                                |left, right| inference_refinement_compatible(left, right, seen),
+                            )
                     }
                     _ => false,
                 }
                 && inference_refinement_compatible(left_return, right_return, seen)
-                && positional(left_positional, right_positional, seen)
-                && named(left_named, right_named, seen)
+                && paired_types_match(left_positional, right_positional, |left, right| {
+                    inference_refinement_compatible(left, right, seen)
+                })
+                && named_types_match(left_named, right_named, |left, right| {
+                    inference_refinement_compatible(left, right, seen)
+                })
         }
-        (
-            ResolvedTypeKind::Record {
-                occurrence: left_occurrence,
-                positional: left_positional,
-                named: left_named,
-                nullable: left_nullable,
-            },
-            ResolvedTypeKind::Record {
-                occurrence: right_occurrence,
-                positional: right_positional,
-                named: right_named,
-                nullable: right_nullable,
-            },
-        ) => {
-            left_nullable == right_nullable
-                && left_occurrence.same_origin(right_occurrence)
-                && positional(left_positional, right_positional, seen)
-                && named(left_named, right_named, seen)
-        }
-        (
-            ResolvedTypeKind::TypeParameter {
-                id: left,
-                bound: left_bound,
-                nullable: left_nullable,
-            },
-            ResolvedTypeKind::TypeParameter {
-                id: right,
-                bound: right_bound,
-                nullable: right_nullable,
-            },
-        ) => {
-            left == right
-                && left_nullable == right_nullable
-                && inference_refinement_compatible(left_bound, right_bound, seen)
-        }
-        (
-            ResolvedTypeKind::NonNullTypeParameter {
-                id: left,
-                bound: left_bound,
-            },
-            ResolvedTypeKind::NonNullTypeParameter {
-                id: right,
-                bound: right_bound,
-            },
-        ) => left == right && inference_refinement_compatible(left_bound, right_bound, seen),
-        _ => current.eq_memoized_with_aliases(
-            candidate,
-            &mut FxHashSet::default(),
-            AliasComparison::Origin,
-        ),
+        _ => unreachable!(),
     }
+}
+
+// Share traversal, not relation policy: refinement and equality differ.
+fn paired_types_match<'a>(
+    left: &'a [ResolvedType],
+    right: &'a [ResolvedType],
+    mut matches: impl FnMut(&'a ResolvedType, &'a ResolvedType) -> bool,
+) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| matches(left, right))
+}
+
+fn named_types_match<'a>(
+    left: &'a [(String, ResolvedType)],
+    right: &'a [(String, ResolvedType)],
+    mut matches: impl FnMut(&'a ResolvedType, &'a ResolvedType) -> bool,
+) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|((left_name, left), (right_name, right))| {
+                left_name == right_name && matches(left, right)
+            })
 }
 
 pub(super) fn collect_parameter_ids(ty: &ResolvedType, ids: &mut Vec<TypeParameterId>) {
@@ -1973,13 +2021,6 @@ mod type_view_tests {
         }
     }
 
-    fn provenance() -> FunctionTypeAlias {
-        FunctionTypeAlias(Some(Arc::new(AliasProvenance::Source {
-            identity: DeclarationIdentity::OBJECT,
-            origin: Some((None, 42)),
-        })))
-    }
-
     #[test]
     fn primitive_views_and_debug_retain_enum_spelling() {
         for (ty, spelling) in [
@@ -2051,23 +2092,7 @@ mod type_view_tests {
             named.clone(),
             true,
         );
-        let ResolvedTypeView::Function {
-            shape: viewed_shape,
-            optional_positional,
-            return_type,
-            positional: viewed_positional,
-            named: viewed_named,
-            nullable,
-        } = function.view()
-        else {
-            panic!("function view")
-        };
-        assert!(Arc::ptr_eq(viewed_shape.as_ref().unwrap(), &shape));
-        assert_eq!(optional_positional, 3);
-        assert!(Arc::ptr_eq(return_type, &bound));
-        assert!(Arc::ptr_eq(viewed_positional, &positional));
-        assert!(Arc::ptr_eq(viewed_named, &named));
-        assert!(nullable);
+        assert_function_view(&function, &shape, &bound, &positional, &named);
         let record = ResolvedType::new_record(positional.clone(), named.clone(), true);
         let ResolvedTypeView::Record {
             positional: viewed_positional,
@@ -2113,9 +2138,35 @@ mod type_view_tests {
         }
     }
 
+    fn assert_function_view(
+        function: &ResolvedType,
+        shape: &Arc<FunctionTypeShape>,
+        bound: &Arc<ResolvedType>,
+        positional: &Arc<[ResolvedType]>,
+        named: &Arc<[(String, ResolvedType)]>,
+    ) {
+        let ResolvedTypeView::Function {
+            shape: viewed_shape,
+            optional_positional,
+            return_type,
+            positional: viewed_positional,
+            named: viewed_named,
+            nullable,
+        } = function.view()
+        else {
+            panic!("function view")
+        };
+        assert!(Arc::ptr_eq(viewed_shape.as_ref().unwrap(), shape));
+        assert_eq!(optional_positional, 3);
+        assert!(Arc::ptr_eq(return_type, bound));
+        assert!(Arc::ptr_eq(viewed_positional, positional));
+        assert!(Arc::ptr_eq(viewed_named, named));
+        assert!(nullable);
+    }
+
     #[test]
     fn mapping_children_preserves_provenance_and_maps_all_bounds_and_slots() {
-        let metadata = provenance();
+        let metadata = super::super::type_graph_tests::provenance(42);
         let binder =
             ResolvedType::new_type_parameter(parameter_id(), Arc::new(ResolvedType::UNKNOWN), true);
         let shape = FunctionTypeShape::new(vec!["field".to_owned()], vec![binder]);
@@ -2131,67 +2182,7 @@ mod type_view_tests {
             unreachable!()
         };
         *alias = metadata.clone();
-        let unchanged = function.map_children(Clone::clone);
-        let (
-            ResolvedTypeView::Function {
-                shape: a,
-                return_type: ar,
-                positional: ap,
-                named: an,
-                ..
-            },
-            ResolvedTypeView::Function {
-                shape: b,
-                return_type: br,
-                positional: bp,
-                named: bn,
-                ..
-            },
-        ) = (function.view(), unchanged.view())
-        else {
-            unreachable!()
-        };
-        assert!(Arc::ptr_eq(a.as_ref().unwrap(), b.as_ref().unwrap()));
-        assert!(Arc::ptr_eq(ar, br));
-        assert!(Arc::ptr_eq(ap, bp));
-        assert!(Arc::ptr_eq(an, bn));
-        let mapped = function.map_children(|_| ResolvedType::NEVER);
-        let ResolvedTypeKind::Function {
-            alias,
-            shape,
-            optional_positional,
-            return_type,
-            positional,
-            named,
-            nullable,
-        } = &mapped.kind
-        else {
-            unreachable!()
-        };
-        assert!(Arc::ptr_eq(
-            alias.0.as_ref().unwrap(),
-            metadata.0.as_ref().unwrap()
-        ));
-        assert_eq!(
-            mapped.function_alias_identity(),
-            Some(&DeclarationIdentity::OBJECT)
-        );
-        assert_eq!(*optional_positional, 2);
-        assert!(*nullable);
-        assert_eq!(**return_type, ResolvedType::NEVER);
-        assert_eq!(positional.as_ref(), &[ResolvedType::NEVER]);
-        assert_eq!(named[0].1, ResolvedType::NEVER);
-        let ResolvedTypeView::TypeParameter {
-            id,
-            bound,
-            nullable,
-        } = shape.as_ref().unwrap().type_parameters[0].view()
-        else {
-            unreachable!()
-        };
-        assert_eq!(id, &parameter_id());
-        assert_eq!(**bound, ResolvedType::NEVER);
-        assert!(nullable);
+        assert_function_child_mapping(&function, &metadata);
         for mut ty in [
             ResolvedType::new_interface(
                 DeclarationIdentity::OBJECT,
@@ -2263,6 +2254,74 @@ mod type_view_tests {
                 _ => unreachable!(),
             }
         }
+        assert_parameter_child_mapping();
+    }
+
+    fn assert_function_child_mapping(function: &ResolvedType, metadata: &FunctionTypeAlias) {
+        let unchanged = function.map_children(Clone::clone);
+        let (
+            ResolvedTypeView::Function {
+                shape: a,
+                return_type: ar,
+                positional: ap,
+                named: an,
+                ..
+            },
+            ResolvedTypeView::Function {
+                shape: b,
+                return_type: br,
+                positional: bp,
+                named: bn,
+                ..
+            },
+        ) = (function.view(), unchanged.view())
+        else {
+            unreachable!()
+        };
+        assert!(Arc::ptr_eq(a.as_ref().unwrap(), b.as_ref().unwrap()));
+        assert!(Arc::ptr_eq(ar, br));
+        assert!(Arc::ptr_eq(ap, bp));
+        assert!(Arc::ptr_eq(an, bn));
+        let mapped = function.map_children(|_| ResolvedType::NEVER);
+        let ResolvedTypeKind::Function {
+            alias,
+            shape,
+            optional_positional,
+            return_type,
+            positional,
+            named,
+            nullable,
+        } = &mapped.kind
+        else {
+            unreachable!()
+        };
+        assert!(Arc::ptr_eq(
+            alias.0.as_ref().unwrap(),
+            metadata.0.as_ref().unwrap()
+        ));
+        assert_eq!(
+            mapped.function_alias_identity(),
+            Some(&DeclarationIdentity::OBJECT)
+        );
+        assert_eq!(*optional_positional, 2);
+        assert!(*nullable);
+        assert_eq!(**return_type, ResolvedType::NEVER);
+        assert_eq!(positional.as_ref(), &[ResolvedType::NEVER]);
+        assert_eq!(named[0].1, ResolvedType::NEVER);
+        let ResolvedTypeView::TypeParameter {
+            id,
+            bound,
+            nullable,
+        } = shape.as_ref().unwrap().type_parameters[0].view()
+        else {
+            unreachable!()
+        };
+        assert_eq!(id, &parameter_id());
+        assert_eq!(**bound, ResolvedType::NEVER);
+        assert!(nullable);
+    }
+
+    fn assert_parameter_child_mapping() {
         for ty in [
             ResolvedType::new_type_parameter(parameter_id(), Arc::new(ResolvedType::UNKNOWN), true),
             ResolvedType::new_non_null_type_parameter(

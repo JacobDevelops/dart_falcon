@@ -213,6 +213,25 @@ fn migration_smoke(
     Ok(())
 }
 
+fn prepare_corpus_checkout(checkout: &Path, corpus: &Corpus) -> Result<()> {
+    if corpus.sparse {
+        fs::create_dir_all(checkout)?;
+        let status = Command::new("git").arg("init").arg(checkout).output()?;
+        if !status.status.success() {
+            return Err(String::from_utf8_lossy(&status.stderr).into_owned().into());
+        }
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(checkout)
+            .args(["sparse-checkout", "set", &corpus.subpath])
+            .output()?;
+        if !status.status.success() {
+            return Err(String::from_utf8_lossy(&status.stderr).into_owned().into());
+        }
+    }
+    prepare_checkout(checkout, &corpus.url, &corpus.revision)
+}
+
 pub fn run(options: &Options) -> Result<()> {
     let root = crate::workspace_root();
     let corpora: Vec<Corpus> = serde_json::from_str(include_str!("../e2e-corpus.json"))?;
@@ -242,22 +261,7 @@ pub fn run(options: &Options) -> Result<()> {
         eprintln!("e2e {} @ {}", corpus.id, corpus.revision);
         let result = (|| -> Result<()> {
             let checkout = cache.join(&corpus.id);
-            if corpus.sparse {
-                fs::create_dir_all(&checkout)?;
-                let status = Command::new("git").arg("init").arg(&checkout).output()?;
-                if !status.status.success() {
-                    return Err(String::from_utf8_lossy(&status.stderr).into_owned().into());
-                }
-                let status = Command::new("git")
-                    .arg("-C")
-                    .arg(&checkout)
-                    .args(["sparse-checkout", "set", &corpus.subpath])
-                    .output()?;
-                if !status.status.success() {
-                    return Err(String::from_utf8_lossy(&status.stderr).into_owned().into());
-                }
-            }
-            prepare_checkout(&checkout, &corpus.url, &corpus.revision)?;
+            prepare_corpus_checkout(&checkout, corpus)?;
             let config = checkout.join(".falcon-e2e.json");
             let config_json = serde_json::json!({
                 "files": {"includes": std::iter::once("**".to_owned())

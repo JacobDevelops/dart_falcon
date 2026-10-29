@@ -427,34 +427,7 @@ mod tests {
                 .map(|token| token.id().index())
                 .eq([6])
         );
-        for start in 0..=source.len() {
-            for end in start..=source.len() {
-                let span = Span::new(start, end);
-                let contained = tokens.iter().filter(|token| {
-                    !token.is_empty()
-                        && token.offset() >= start
-                        && token.offset() + token.len() <= end
-                });
-                let coordinate = |token: &Token| {
-                    (
-                        token.kind,
-                        Span::new(token.offset(), token.offset() + token.len()),
-                    )
-                };
-                assert!(
-                    tree.tokens_in(source, span)
-                        .map(|token| (token.kind(), token.span()))
-                        .eq(contained.clone().map(coordinate))
-                );
-                assert!(
-                    tree.keywords_in(source, span, TokenKind::Ident)
-                        .map(|token| (token.kind(), token.span()))
-                        .eq(contained
-                            .filter(|token| token.kind == TokenKind::Ident)
-                            .map(coordinate))
-                );
-            }
-        }
+        assert_token_ranges(source, &tokens, &tree);
         for (open, close) in [(7, 9), (8, 10)] {
             assert_eq!(
                 tree.closing_delimiter(source, TokenId(open)).unwrap().id(),
@@ -498,6 +471,37 @@ mod tests {
             assert_eq!(tree.token_at(source, token.offset()), Some(token));
         }
         assert!(tree.token_at(source, source.len() + 1).is_none());
+    }
+
+    fn assert_token_ranges(source: &str, tokens: &[Token], tree: &SyntaxTree) {
+        for start in 0..=source.len() {
+            for end in start..=source.len() {
+                let span = Span::new(start, end);
+                let contained = tokens.iter().filter(|token| {
+                    !token.is_empty()
+                        && token.offset() >= start
+                        && token.offset() + token.len() <= end
+                });
+                let coordinate = |token: &Token| {
+                    (
+                        token.kind,
+                        Span::new(token.offset(), token.offset() + token.len()),
+                    )
+                };
+                assert!(
+                    tree.tokens_in(source, span)
+                        .map(|token| (token.kind(), token.span()))
+                        .eq(contained.clone().map(coordinate))
+                );
+                assert!(
+                    tree.keywords_in(source, span, TokenKind::Ident)
+                        .map(|token| (token.kind(), token.span()))
+                        .eq(contained
+                            .filter(|token| token.kind == TokenKind::Ident)
+                            .map(coordinate))
+                );
+            }
+        }
     }
 
     fn interpolation_fixture() -> (String, SyntaxTree) {

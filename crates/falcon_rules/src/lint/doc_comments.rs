@@ -653,49 +653,15 @@ impl DocScopes {
                 n.element_members(),
             ),
             TopLevelDecl::Extension(extension) => {
-                let mut parameters = TypeParameterScope::default();
-                parameters.push(extension.type_params(), model);
-                let members = declared_members(EffectiveMembers::declared(extension.members()));
-                if let Some(name) = extension.name() {
-                    self.extensions
-                        .insert(name.name().to_owned(), members.clone());
-                }
-                let enclosing = std::rc::Rc::new(Enclosing::Extension {
-                    on_type: model.resolve_type_in(extension.on_type(), &parameters),
-                    members,
-                });
-                let locals: Vec<_> = type_names(extension.type_params()).collect();
-                self.push(span, extension.annotations(), locals.clone(), &enclosing);
-                self.members(extension.members(), &locals, &enclosing);
+                self.extension_declaration(extension, model);
                 return;
             }
             TopLevelDecl::ClassTypeAlias(n) => {
-                let enclosing = std::rc::Rc::new(Enclosing::Type {
-                    identity: model.resolve_name(n.name().name()),
-                    members: HashMap::new(),
-                });
-                self.push(
-                    span,
-                    n.annotations(),
-                    type_names(n.type_params()).collect(),
-                    &enclosing,
-                );
+                self.class_alias_declaration(n, model);
                 return;
             }
             TopLevelDecl::Function(function) => {
-                let mut locals: Vec<_> = type_names(function.type_params()).collect();
-                locals.extend(function.params().into_iter().flat_map(param_names));
-                if let Some(params) = function.params() {
-                    self.params(params, &locals, none);
-                }
-                self.push(span, function.annotations(), locals, none);
-                if let (Some(identity), Some(params)) = (
-                    model.resolve_value(function.name().name()),
-                    function.params(),
-                ) && let Some(scope) = self.scopes.last_mut()
-                {
-                    scope.function = Some((identity, param_names(params).collect()));
-                }
+                self.function_declaration(function, model, none);
                 return;
             }
             TopLevelDecl::Variable(variable) => {
@@ -703,38 +669,7 @@ impl DocScopes {
                 return;
             }
             TopLevelDecl::TypeAlias(alias) => {
-                // A function-type alias also scopes the function type's own
-                // type parameters and named parameters.
-                let mut locals: Vec<_> = type_names(alias.type_params()).collect();
-                if let DartType::Function(function) = alias.aliased() {
-                    locals.extend(type_names(function.type_params()));
-                    locals.extend(
-                        function
-                            .params()
-                            .filter_map(|param| param.name())
-                            .map(|name| name.name().to_owned()),
-                    );
-                }
-                if let DartType::Function(function) = alias.aliased() {
-                    for param in function.params() {
-                        // A `required` modifier precedes the parameter type.
-                        let ty = param.param_type().span();
-                        let before = source[..ty.start].trim_end();
-                        let start = if param.is_required() && before.ends_with("required") {
-                            before.len() - "required".len()
-                        } else {
-                            ty.start
-                        };
-                        let end = param.name().map_or(ty.end, |name| name.span().end);
-                        self.push(
-                            Span::new(start, end),
-                            std::iter::empty(),
-                            locals.clone(),
-                            none,
-                        );
-                    }
-                }
-                self.push(span, alias.annotations(), locals, none);
+                self.alias_declaration(alias, source, none);
                 return;
             }
             TopLevelDecl::Error(_) => return,
@@ -776,6 +711,101 @@ impl DocScopes {
             }
         }
         self.members(members.declared, &locals, &enclosing);
+    }
+
+    fn class_alias_declaration(&mut self, n: ClassTypeAliasDecl<'_>, model: &SemanticModel<'_>) {
+        let span = n.span();
+        let enclosing = std::rc::Rc::new(Enclosing::Type {
+            identity: model.resolve_name(n.name().name()),
+            members: HashMap::new(),
+        });
+        self.push(
+            span,
+            n.annotations(),
+            type_names(n.type_params()).collect(),
+            &enclosing,
+        );
+    }
+
+    fn extension_declaration(&mut self, extension: ExtensionDecl<'_>, model: &SemanticModel<'_>) {
+        let span = extension.span();
+        let mut parameters = TypeParameterScope::default();
+        parameters.push(extension.type_params(), model);
+        let members = declared_members(EffectiveMembers::declared(extension.members()));
+        if let Some(name) = extension.name() {
+            self.extensions
+                .insert(name.name().to_owned(), members.clone());
+        }
+        let enclosing = std::rc::Rc::new(Enclosing::Extension {
+            on_type: model.resolve_type_in(extension.on_type(), &parameters),
+            members,
+        });
+        let locals: Vec<_> = type_names(extension.type_params()).collect();
+        self.push(span, extension.annotations(), locals.clone(), &enclosing);
+        self.members(extension.members(), &locals, &enclosing);
+    }
+
+    fn function_declaration(
+        &mut self,
+        function: FunctionDecl<'_>,
+        model: &SemanticModel<'_>,
+        none: &std::rc::Rc<Enclosing>,
+    ) {
+        let span = function.span();
+        let mut locals: Vec<_> = type_names(function.type_params()).collect();
+        locals.extend(function.params().into_iter().flat_map(param_names));
+        if let Some(params) = function.params() {
+            self.params(params, &locals, none);
+        }
+        self.push(span, function.annotations(), locals, none);
+        if let (Some(identity), Some(params)) = (
+            model.resolve_value(function.name().name()),
+            function.params(),
+        ) && let Some(scope) = self.scopes.last_mut()
+        {
+            scope.function = Some((identity, param_names(params).collect()));
+        }
+    }
+
+    fn alias_declaration(
+        &mut self,
+        alias: TypeAliasDecl<'_>,
+        source: &str,
+        none: &std::rc::Rc<Enclosing>,
+    ) {
+        let span = alias.span();
+        // A function-type alias also scopes the function type's own
+        // type parameters and named parameters.
+        let mut locals: Vec<_> = type_names(alias.type_params()).collect();
+        if let DartType::Function(function) = alias.aliased() {
+            locals.extend(type_names(function.type_params()));
+            locals.extend(
+                function
+                    .params()
+                    .filter_map(|param| param.name())
+                    .map(|name| name.name().to_owned()),
+            );
+        }
+        if let DartType::Function(function) = alias.aliased() {
+            for param in function.params() {
+                // A `required` modifier precedes the parameter type.
+                let ty = param.param_type().span();
+                let before = source[..ty.start].trim_end();
+                let start = if param.is_required() && before.ends_with("required") {
+                    before.len() - "required".len()
+                } else {
+                    ty.start
+                };
+                let end = param.name().map_or(ty.end, |name| name.span().end);
+                self.push(
+                    Span::new(start, end),
+                    std::iter::empty(),
+                    locals.clone(),
+                    none,
+                );
+            }
+        }
+        self.push(span, alias.annotations(), locals, none);
     }
 
     fn members<'a>(

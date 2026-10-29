@@ -137,39 +137,16 @@ impl TypeEnvironment {
                 let object = access.object();
                 let field = access.field();
                 let is_null_safe = access.is_null_safe();
-                let extension = if include_override
-                    && let Expr::Call(call) = object.unparenthesized()
-                    && call.args().named().is_empty()
-                    && call.args().positional().len() == 1
-                {
-                    let receiver = call.args().positional().next().unwrap();
-                    let (callee, type_args) = match call.callee().unparenthesized() {
-                        Expr::GenericInstantiation(instantiation) => {
-                            (instantiation.target(), instantiation.type_args())
-                        }
-                        callee => (callee, call.type_args()),
-                    };
-                    self.named_extension(callee, context).and_then(|identity| {
-                        let receiver = self.infer_invocation(receiver, context, None);
-                        let receiver = if is_null_safe {
-                            receiver.non_null()
-                        } else {
-                            receiver
-                        };
-                        let arguments: Vec<_> = type_args
-                            .map(|ty| model.resolve_type_in(ty, context.type_parameters))
-                            .collect();
-                        signatures.resolved_extension_override_method(
-                            &identity,
-                            &receiver,
-                            &arguments,
+                let extension = include_override
+                    .then(|| {
+                        self.extension_override_invocation(
+                            object,
                             field.name(),
-                            model,
+                            is_null_safe,
+                            context,
                         )
                     })
-                } else {
-                    None
-                };
+                    .flatten();
                 extension.or_else(|| {
                     if reached_receiver.as_ref().is_none_or(|ty| {
                         matches!(
@@ -225,6 +202,49 @@ impl TypeEnvironment {
             }
             _ => None,
         }
+    }
+
+    fn extension_override_invocation<'a, 'lookup, F: Fn(&str) -> Option<ResolvedType>>(
+        &self,
+        object: Expr<'_>,
+        field: &str,
+        is_null_safe: bool,
+        context: &InferenceContext<'a, '_, 'lookup, F>,
+    ) -> Option<(
+        &'a ResolvedSignature,
+        FxHashMap<TypeParameterId, ResolvedType>,
+    )> {
+        let Expr::Call(call) = object.unparenthesized() else {
+            return None;
+        };
+        if !call.args().named().is_empty() || call.args().positional().len() != 1 {
+            return None;
+        }
+        let receiver = call.args().positional().next().unwrap();
+        let (callee, type_args) = match call.callee().unparenthesized() {
+            Expr::GenericInstantiation(instantiation) => {
+                (instantiation.target(), instantiation.type_args())
+            }
+            callee => (callee, call.type_args()),
+        };
+        self.named_extension(callee, context).and_then(|identity| {
+            let receiver = self.infer_invocation(receiver, context, None);
+            let receiver = if is_null_safe {
+                receiver.non_null()
+            } else {
+                receiver
+            };
+            let arguments: Vec<_> = type_args
+                .map(|ty| context.model.resolve_type_in(ty, context.type_parameters))
+                .collect();
+            context.signatures.resolved_extension_override_method(
+                &identity,
+                &receiver,
+                &arguments,
+                field,
+                context.model,
+            )
+        })
     }
 
     /// Resolves contextual parameter metadata without lifting the signature's
@@ -313,6 +333,35 @@ impl TypeEnvironment {
             let receiver = callee_type.unwrap_or_else(|| {
                 self.infer_unshorted(target, context_copy(context), None, reached_receiver.take())
             });
+            self.invocation_value_signature(&receiver, target, context, metadata)?
+        };
+        let constructor_result = constructor.map(|(identity, _)| {
+            signatures.self_instantiation(identity, &signature.owner_parameters, model)
+        });
+        Ok(ResolvedInvocation {
+            signature,
+            owner,
+            type_args: explicit,
+            constructor_result,
+        })
+    }
+
+    fn invocation_value_signature<'a, 'lookup, F: Fn(&str) -> Option<ResolvedType>>(
+        &self,
+        receiver: &ResolvedType,
+        target: Expr<'_>,
+        context: &InferenceContext<'a, '_, 'lookup, F>,
+        metadata: bool,
+    ) -> Result<
+        (
+            Cow<'a, ResolvedSignature>,
+            FxHashMap<TypeParameterId, ResolvedType>,
+        ),
+        ResolvedType,
+    > {
+        let model = context.model;
+        let signatures = context.signatures;
+        Ok(
             if let ResolvedType {
                 kind:
                     ResolvedTypeKind::Function {
@@ -322,7 +371,7 @@ impl TypeEnvironment {
                         optional_positional,
                         ..
                     },
-            } = &receiver
+            } = receiver
             {
                 let return_type = receiver
                     .function_return_type()
@@ -350,9 +399,8 @@ impl TypeEnvironment {
                 }
                 (Cow::Owned(signature), FxHashMap::default())
             } else {
-                let (signature, owner) = signatures
-                    .resolved_member(&receiver, "call", model)
-                    .ok_or({
+                let (signature, owner) =
+                    signatures.resolved_member(receiver, "call", model).ok_or({
                         if matches!(
                             receiver,
                             ResolvedType {
@@ -366,17 +414,8 @@ impl TypeEnvironment {
                         }
                     })?;
                 (Cow::Borrowed(signature), owner)
-            }
-        };
-        let constructor_result = constructor.map(|(identity, _)| {
-            signatures.self_instantiation(identity, &signature.owner_parameters, model)
-        });
-        Ok(ResolvedInvocation {
-            signature,
-            owner,
-            type_args: explicit,
-            constructor_result,
-        })
+            },
+        )
     }
 }
 

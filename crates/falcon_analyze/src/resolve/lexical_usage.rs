@@ -327,6 +327,84 @@ impl UsageCollector {
             self.visit_expr(update);
         }
     }
+
+    fn visit_if_usage(&mut self, statement: IfStmt<'_>) {
+        match statement.condition() {
+            IfCondition::Expr(condition) => {
+                self.visit_expr(condition);
+                self.visit_scoped_stmt(statement.then_branch());
+                if let Some(else_branch) = statement.else_branch() {
+                    self.visit_scoped_stmt(else_branch);
+                }
+            }
+            IfCondition::Case(case) => {
+                self.visit_expr(case.expr());
+                let pattern = case.pattern();
+                let guard = case.guard();
+                self.scopes.push_scope();
+                self.visit_pattern(pattern);
+                self.bind_pattern(pattern);
+                if let Some(guard) = guard {
+                    self.visit_expr(guard);
+                }
+                self.visit_scoped_stmt(statement.then_branch());
+                self.scopes.pop_scope();
+                if let Some(else_branch) = statement.else_branch() {
+                    self.visit_scoped_stmt(else_branch);
+                }
+            }
+        }
+    }
+
+    fn visit_switch_usage(&mut self, statement: SwitchStmt<'_>) {
+        self.visit_expr(statement.subject());
+        for case in statement.cases() {
+            self.scopes.push_scope();
+            for kind in case.cases() {
+                if let SwitchCaseKind::Pattern(label) = kind {
+                    self.visit_pattern(label.pattern());
+                    self.bind_pattern(label.pattern());
+                    if let Some(guard) = label.guard() {
+                        self.visit_expr(guard);
+                    }
+                } else if let SwitchCaseKind::Expr(label) = kind {
+                    self.visit_expr(label.expr());
+                }
+            }
+            for statement in case.body() {
+                self.visit_stmt(statement);
+            }
+            self.scopes.pop_scope();
+        }
+    }
+
+    fn visit_try_catch_usage(&mut self, statement: TryCatchStmt<'_>) {
+        self.scopes.push_scope();
+        for statement in statement.body().stmts() {
+            self.visit_stmt(statement);
+        }
+        self.scopes.pop_scope();
+        for catch in statement.catches() {
+            self.scopes.push_scope();
+            if let Some(name) = catch.exception_var() {
+                self.bind(name);
+            }
+            if let Some(name) = catch.stack_trace_var() {
+                self.bind(name);
+            }
+            for statement in catch.body().stmts() {
+                self.visit_stmt(statement);
+            }
+            self.scopes.pop_scope();
+        }
+        if let Some(finally) = statement.finally() {
+            self.scopes.push_scope();
+            for statement in finally.stmts() {
+                self.visit_stmt(statement);
+            }
+            self.scopes.pop_scope();
+        }
+    }
 }
 
 impl<'a> Visitor<'a> for UsageCollector {
@@ -454,93 +532,15 @@ impl<'a> Visitor<'a> for UsageCollector {
                 }
                 self.visit_expr(assignment.value());
             }
-            Stmt::If(statement) => match statement.condition() {
-                IfCondition::Expr(condition) => {
-                    self.visit_expr(condition);
-                    self.visit_scoped_stmt(statement.then_branch());
-                    if let Some(else_branch) = statement.else_branch() {
-                        self.visit_scoped_stmt(else_branch);
-                    }
-                }
-                IfCondition::Case(case) => {
-                    self.visit_expr(case.expr());
-                    let pattern = case.pattern();
-                    let guard = case.guard();
-                    self.scopes.push_scope();
-                    self.visit_pattern(pattern);
-                    self.bind_pattern(pattern);
-                    if let Some(guard) = guard {
-                        self.visit_expr(guard);
-                    }
-                    self.visit_scoped_stmt(statement.then_branch());
-                    self.scopes.pop_scope();
-                    if let Some(else_branch) = statement.else_branch() {
-                        self.visit_scoped_stmt(else_branch);
-                    }
-                }
-            },
+            Stmt::If(statement) => self.visit_if_usage(statement),
             Stmt::For(statement) => {
                 self.scopes.push_scope();
-                if let Some(init) = statement.header().init() {
-                    self.visit_for_init(init);
-                }
-                if let Some(condition) = statement.header().condition() {
-                    self.visit_expr(condition);
-                }
-                for update in statement.header().updates() {
-                    self.visit_expr(update);
-                }
+                self.visit_for_header(statement.header());
                 self.visit_scoped_stmt(statement.body());
                 self.scopes.pop_scope();
             }
-            Stmt::Switch(statement) => {
-                self.visit_expr(statement.subject());
-                for case in statement.cases() {
-                    self.scopes.push_scope();
-                    for kind in case.cases() {
-                        if let SwitchCaseKind::Pattern(label) = kind {
-                            self.visit_pattern(label.pattern());
-                            self.bind_pattern(label.pattern());
-                            if let Some(guard) = label.guard() {
-                                self.visit_expr(guard);
-                            }
-                        } else if let SwitchCaseKind::Expr(label) = kind {
-                            self.visit_expr(label.expr());
-                        }
-                    }
-                    for statement in case.body() {
-                        self.visit_stmt(statement);
-                    }
-                    self.scopes.pop_scope();
-                }
-            }
-            Stmt::TryCatch(statement) => {
-                self.scopes.push_scope();
-                for statement in statement.body().stmts() {
-                    self.visit_stmt(statement);
-                }
-                self.scopes.pop_scope();
-                for catch in statement.catches() {
-                    self.scopes.push_scope();
-                    if let Some(name) = catch.exception_var() {
-                        self.bind(name);
-                    }
-                    if let Some(name) = catch.stack_trace_var() {
-                        self.bind(name);
-                    }
-                    for statement in catch.body().stmts() {
-                        self.visit_stmt(statement);
-                    }
-                    self.scopes.pop_scope();
-                }
-                if let Some(finally) = statement.finally() {
-                    self.scopes.push_scope();
-                    for statement in finally.stmts() {
-                        self.visit_stmt(statement);
-                    }
-                    self.scopes.pop_scope();
-                }
-            }
+            Stmt::Switch(statement) => self.visit_switch_usage(statement),
+            Stmt::TryCatch(statement) => self.visit_try_catch_usage(statement),
             Stmt::LocalFunc(function) => {
                 self.bind(function.name());
                 self.visit_nested_function(function.params(), function.body());

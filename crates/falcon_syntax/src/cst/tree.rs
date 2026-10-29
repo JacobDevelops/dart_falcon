@@ -204,25 +204,7 @@ impl SyntaxTree {
                     if !sink.stack.is_empty() {
                         sink.flush(offset);
                     }
-                    kinds.push(kind);
-                    let mut next = forward_parent;
-                    let mut current = index;
-                    while let Some(distance) = next {
-                        assert!(distance > 0, "forward parent must follow its child");
-                        current += distance;
-                        match std::mem::replace(&mut events[current], Event::Tombstone) {
-                            Event::Start {
-                                kind,
-                                forward_parent,
-                                ..
-                            } => {
-                                kinds.push(kind);
-                                next = forward_parent;
-                            }
-                            Event::Tombstone => break,
-                            _ => panic!("forward parent must be a start event"),
-                        }
-                    }
+                    collect_parent_kinds(&mut events, index, kind, forward_parent, &mut kinds);
                     for kind in kinds.drain(..).rev() {
                         sink.start(kind, offset);
                     }
@@ -282,6 +264,34 @@ impl SyntaxTree {
             token_parents: sink.parents.into_boxed_slice(),
             delimiter_pairs: OnceLock::new(),
             recovery_spans: recovery_spans.into_boxed_slice(),
+        }
+    }
+}
+
+fn collect_parent_kinds(
+    events: &mut [Event],
+    index: usize,
+    kind: NodeKind,
+    forward_parent: Option<usize>,
+    kinds: &mut Vec<NodeKind>,
+) {
+    kinds.push(kind);
+    let mut next = forward_parent;
+    let mut current = index;
+    while let Some(distance) = next {
+        assert!(distance > 0, "forward parent must follow its child");
+        current += distance;
+        match std::mem::replace(&mut events[current], Event::Tombstone) {
+            Event::Start {
+                kind,
+                forward_parent,
+                ..
+            } => {
+                kinds.push(kind);
+                next = forward_parent;
+            }
+            Event::Tombstone => break,
+            _ => panic!("forward parent must be a start event"),
         }
     }
 }
@@ -680,6 +690,10 @@ mod tests {
         assert_eq!(SyntaxElement::Node(identifier).text(), "a");
         assert_eq!(root.tokens().len(), tree.tokens(source).len());
 
+        assert_error_views(outer, missing);
+    }
+
+    fn assert_error_views(outer: SyntaxNode<'_>, missing: SyntaxNode<'_>) {
         #[derive(Clone, Copy)]
         struct ErrorView<'a>(SyntaxNode<'a>);
         impl<'a> AstNode<'a> for ErrorView<'a> {

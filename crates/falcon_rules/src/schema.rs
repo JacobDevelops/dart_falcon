@@ -119,13 +119,6 @@ pub fn config_schema() -> Value {
             }),
         );
     }
-    let string_globs = |desc: &str| {
-        json!({
-            "type": "array",
-            "items": { "type": "string" },
-            "description": desc,
-        })
-    };
 
     let mut schema = json!({
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -164,72 +157,9 @@ pub fn config_schema() -> Value {
                     )
                 }
             },
-            "linter": {
-                "type": "object",
-                "additionalProperties": false,
-                "description": "Single-file linter configuration.",
-                "properties": {
-                    "enabled": {
-                        "type": "boolean",
-                        "default": true,
-                        "description": "Master switch for the single-file linter. \
-                            Set to false to disable all file rules. Defaults to true."
-                    },
-                    "domains": {
-                        "type": ["object", "null"],
-                        "additionalProperties": false,
-                        "description": "Per-domain gating for domain-scoped rules \
-                            (for example Flutter rules).",
-                        "properties": Value::Object(domain_props)
-                    },
-                    "rules": section_rules(false, true)
-                }
-            },
-            "cross-file": {
-                "type": "object",
-                "additionalProperties": false,
-                "description": "Cross-file (whole-project) analysis configuration. \
-                    These rules scan every file and are slower than single-file rules.",
-                "properties": {
-                    "enabled": {
-                        "type": "boolean",
-                        "default": true,
-                        "description": "Master switch for cross-file analysis. Set to \
-                            false to disable all cross-file rules. Defaults to true."
-                    },
-                    "rules": section_rules(true, true)
-                }
-            },
-            "overrides": {
-                "type": "array",
-                "description": "Per-glob configuration overrides, applied in order to \
-                    files matching their `includes`.",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "description": "A single override: an `includes` glob set plus the \
-                        linter/cross-file settings to apply to the matched files.",
-                    "properties": {
-                        "includes": string_globs(
-                            "Glob patterns relative to the configuration directory \
-                             selecting the files this override applies to. Omitted \
-                             patterns apply to every file."
-                        ),
-                        "linter": {
-                            "anyOf": [
-                                {"$ref": "#/definitions/overrideLinter"},
-                                {"type": "null"}
-                            ]
-                        },
-                        "cross-file": {
-                            "anyOf": [
-                                {"$ref": "#/definitions/overrideCrossFile"},
-                                {"type": "null"}
-                            ]
-                        }
-                    }
-                }
-            },
+            "linter": linter_schema(domain_props),
+            "cross-file": cross_file_schema(),
+            "overrides": overrides_schema(),
             "max-errors": {
                 "type": ["integer", "null"],
                 "minimum": 1,
@@ -239,46 +169,7 @@ pub fn config_schema() -> Value {
                     least 1 in configuration; use the CLI flag to hide all output."
             }
         },
-        "definitions": {
-            "ruleLevel": {
-                "enum": ["off", "on", "info", "warn", "error"],
-                "description": "Severity level for a rule: `off` disables it; `on` \
-                    reports at its default severity; `info`, `warn`, and `error` set an \
-                    explicit severity."
-            },
-            "ruleFix": {
-                "enum": ["none", "safe", "unsafe"],
-                "description": "Autofix policy: `none` removes fixes; `safe` or `unsafe` \
-                    sets their safety classification. When omitted, inherit the previous \
-                    matching policy or the rule's default classification."
-            },
-            "overrideLinter": {
-                "type": "object",
-                "additionalProperties": false,
-                "description": "Linter settings applied by an override to its matched files.",
-                "properties": {
-                    "enabled": {
-                        "type": ["boolean", "null"],
-                        "description": "Master switch for the single-file linter within \
-                            this override."
-                    },
-                    "rules": section_rules(false, false)
-                }
-            },
-            "overrideCrossFile": {
-                "type": "object",
-                "additionalProperties": false,
-                "description": "Cross-file settings applied by an override to its matched files.",
-                "properties": {
-                    "enabled": {
-                        "type": ["boolean", "null"],
-                        "description": "Master switch for cross-file analysis within this \
-                            override."
-                    },
-                    "rules": section_rules(true, false)
-                }
-            }
-        }
+        "definitions": schema_definitions()
     });
     let definitions = schema["definitions"]
         .as_object_mut()
@@ -293,6 +184,132 @@ pub fn config_schema() -> Value {
         definitions.insert(name.into(), rule_config(options));
     }
     schema
+}
+
+fn string_globs(desc: &str) -> Value {
+    json!({
+        "type": "array",
+        "items": { "type": "string" },
+        "description": desc,
+    })
+}
+
+fn linter_schema(domain_props: Map<String, Value>) -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Single-file linter configuration.",
+        "properties": {
+            "enabled": {
+                "type": "boolean",
+                "default": true,
+                "description": "Master switch for the single-file linter. \
+                    Set to false to disable all file rules. Defaults to true."
+            },
+            "domains": {
+                "type": ["object", "null"],
+                "additionalProperties": false,
+                "description": "Per-domain gating for domain-scoped rules \
+                    (for example Flutter rules).",
+                "properties": Value::Object(domain_props)
+            },
+            "rules": section_rules(false, true)
+        }
+    })
+}
+
+fn cross_file_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Cross-file (whole-project) analysis configuration. \
+            These rules scan every file and are slower than single-file rules.",
+        "properties": {
+            "enabled": {
+                "type": "boolean",
+                "default": true,
+                "description": "Master switch for cross-file analysis. Set to \
+                    false to disable all cross-file rules. Defaults to true."
+            },
+            "rules": section_rules(true, true)
+        }
+    })
+}
+
+fn overrides_schema() -> Value {
+    json!({
+        "type": "array",
+        "description": "Per-glob configuration overrides, applied in order to \
+            files matching their `includes`.",
+        "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "A single override: an `includes` glob set plus the \
+                linter/cross-file settings to apply to the matched files.",
+            "properties": {
+                "includes": string_globs(
+                    "Glob patterns relative to the configuration directory \
+                     selecting the files this override applies to. Omitted \
+                     patterns apply to every file."
+                ),
+                "linter": {
+                    "anyOf": [
+                        {"$ref": "#/definitions/overrideLinter"},
+                        {"type": "null"}
+                    ]
+                },
+                "cross-file": {
+                    "anyOf": [
+                        {"$ref": "#/definitions/overrideCrossFile"},
+                        {"type": "null"}
+                    ]
+                }
+            }
+        }
+    })
+}
+
+fn schema_definitions() -> Value {
+    json!({
+        "ruleLevel": {
+            "enum": ["off", "on", "info", "warn", "error"],
+            "description": "Severity level for a rule: `off` disables it; `on` \
+                reports at its default severity; `info`, `warn`, and `error` set an \
+                explicit severity."
+        },
+        "ruleFix": {
+            "enum": ["none", "safe", "unsafe"],
+            "description": "Autofix policy: `none` removes fixes; `safe` or `unsafe` \
+                sets their safety classification. When omitted, inherit the previous \
+                matching policy or the rule's default classification."
+        },
+        "overrideLinter": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Linter settings applied by an override to its matched files.",
+            "properties": {
+                "enabled": {
+                    "type": ["boolean", "null"],
+                    "description": "Master switch for the single-file linter within \
+                        this override."
+                },
+                "rules": section_rules(false, false)
+            }
+        },
+        "overrideCrossFile": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Cross-file settings applied by an override to its matched files.",
+            "properties": {
+                "enabled": {
+                    "type": ["boolean", "null"],
+                    "description": "Master switch for cross-file analysis within this \
+                        override."
+                },
+                "rules": section_rules(true, false)
+            }
+        }
+    })
 }
 
 /// The schema serialized exactly as it is written to disk: pretty-printed with a

@@ -271,7 +271,75 @@ impl<'a> SemanticRuleVisitor<'a> for LocalCandidates<'a> {
             .find(|(scope, _)| scope.contains(node.span()))
             .map(|(_, receiver)| receiver)
             .or(state.enclosing_type.as_ref());
-        let static_owner = if let Expr::Field(access) = node {
+        if let Some(reference) = self.field_reference(node, state, enclosing) {
+            self.references.resolved_fields.push(reference);
+        }
+        if let Some(target) = self.dynamic_write(node, state) {
+            self.references.dynamic_writes.insert(target);
+        }
+        let Expr::Call(call) = node else {
+            return;
+        };
+        if self.excluded_call(call, state, enclosing) {
+            let span = call.span();
+            self.excluded_calls.push((span.start, span.end));
+        }
+    }
+
+    fn visit_cascade_assignment(
+        &mut self,
+        assignment: CascadeAssignment<'a>,
+        receiver: &ResolvedType,
+        _section: Span,
+        _state: &SemanticState<'a>,
+    ) {
+        let CascadeAssignment {
+            target,
+            value,
+            indexed,
+            ..
+        } = assignment;
+        if !matches!(value, Expr::Ident(_)) {
+            return;
+        }
+        let span = (target.span().start, target.span().end);
+        if !indexed {
+            self.references.cascade_properties.insert(span);
+        }
+        if matches!(receiver.view(), ResolvedTypeView::Dynamic) {
+            self.references.dynamic_writes.insert(span);
+        }
+    }
+
+    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
+        let Stmt::LocalVar(declaration) = node else {
+            return;
+        };
+        let Some(container) = self
+            .bodies
+            .enclosing(&declaration.span())
+            .map(|body| body.span)
+        else {
+            return;
+        };
+        for declarator in declaration.declarators() {
+            self.candidates.extend(self.rule.candidate(
+                declarator,
+                declaration.var_type(),
+                VariableKind::Local,
+                container,
+                state,
+            ));
+        }
+    }
+}
+
+impl<'a> LocalCandidates<'a> {
+    fn static_field_owner(
+        node: Expr<'a>,
+        state: &SemanticState<'a>,
+    ) -> Option<falcon_analyze::DeclarationIdentity> {
+        if let Expr::Field(access) = node {
             // Dotted declaration owners have at most a prefix and type name.
             // Reject longer receiver chains before collecting their segments.
             let segments = match access.object().unparenthesized() {
@@ -299,7 +367,16 @@ impl<'a> SemanticRuleVisitor<'a> for LocalCandidates<'a> {
             })
         } else {
             None
-        };
+        }
+    }
+
+    fn field_reference(
+        &self,
+        node: Expr<'a>,
+        state: &SemanticState<'a>,
+        enclosing: Option<&ResolvedType>,
+    ) -> Option<(Span, Span)> {
+        let static_owner = Self::static_field_owner(node, state);
         let reference = match node {
             Expr::Ident(identifier)
                 if self.references.bindings.iter().any(|binding| {
@@ -361,10 +438,12 @@ impl<'a> SemanticRuleVisitor<'a> for LocalCandidates<'a> {
                     && binding.name == identifier.name()
             })
         {
-            self.references
-                .resolved_fields
-                .push((identifier.span(), binding.declaration));
+            return Some((identifier.span(), binding.declaration));
         }
+        None
+    }
+
+    fn dynamic_write(&self, node: Expr<'a>, state: &SemanticState<'a>) -> Option<(usize, usize)> {
         if let Expr::Assign(assignment) = node
             && let Expr::Ident(identifier) = assignment.value()
             && self
@@ -389,15 +468,18 @@ impl<'a> SemanticRuleVisitor<'a> for LocalCandidates<'a> {
             )
         {
             let target = assignment.target();
-            self.references
-                .dynamic_writes
-                .insert((target.span().start, target.span().end));
+            return Some((target.span().start, target.span().end));
         }
-        let Expr::Call(call) = node else {
-            return;
-        };
+        None
+    }
+
+    fn excluded_call(
+        &self,
+        call: CallExpr<'a>,
+        state: &SemanticState<'a>,
+        enclosing: Option<&ResolvedType>,
+    ) -> bool {
         let callee = call.callee();
-        let span = call.span();
         let callable = match callee {
             Expr::GenericInstantiation(instantiation) => instantiation.target(),
             target => target,
@@ -450,11 +532,10 @@ impl<'a> SemanticRuleVisitor<'a> for LocalCandidates<'a> {
             _ => true,
         };
         if callable_value {
-            self.excluded_calls.push((span.start, span.end));
-            return;
+            return true;
         }
         let identity = resolve_call_constructor(callee, &state.model, true);
-        if identity.is_some_and(|(identity, name)| {
+        identity.is_some_and(|(identity, name)| {
             self.references
                 .resolve(identity.name(), &callee.span(), false)
                 .is_none()
@@ -472,56 +553,7 @@ impl<'a> SemanticRuleVisitor<'a> for LocalCandidates<'a> {
                                             == Some(&identity)
                                 })
                         }))
-        }) {
-            self.excluded_calls.push((span.start, span.end));
-        }
-    }
-
-    fn visit_cascade_assignment(
-        &mut self,
-        assignment: CascadeAssignment<'a>,
-        receiver: &ResolvedType,
-        _section: Span,
-        _state: &SemanticState<'a>,
-    ) {
-        let CascadeAssignment {
-            target,
-            value,
-            indexed,
-            ..
-        } = assignment;
-        if !matches!(value, Expr::Ident(_)) {
-            return;
-        }
-        let span = (target.span().start, target.span().end);
-        if !indexed {
-            self.references.cascade_properties.insert(span);
-        }
-        if matches!(receiver.view(), ResolvedTypeView::Dynamic) {
-            self.references.dynamic_writes.insert(span);
-        }
-    }
-
-    fn visit_stmt(&mut self, node: Stmt<'a>, state: &SemanticState<'a>) {
-        let Stmt::LocalVar(declaration) = node else {
-            return;
-        };
-        let Some(container) = self
-            .bodies
-            .enclosing(&declaration.span())
-            .map(|body| body.span)
-        else {
-            return;
-        };
-        for declarator in declaration.declarators() {
-            self.candidates.extend(self.rule.candidate(
-                declarator,
-                declaration.var_type(),
-                VariableKind::Local,
-                container,
-                state,
-            ));
-        }
+        })
     }
 }
 

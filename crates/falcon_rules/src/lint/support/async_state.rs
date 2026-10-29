@@ -468,19 +468,8 @@ impl<'a> Tree<'a> {
         self.nodes.get_mut(&expr(node)).unwrap().exit_override = override_exit;
         self.leave();
     }
-}
-
-impl<'a> Visitor<'a> for Tree<'a> {
-    fn visit_expr(&mut self, node: Expr<'a>) {
-        walk_expr_chain_with_exit(self, node, Self::enter_expr, Self::exit_expr);
-    }
-    fn visit_stmt(&mut self, node: Stmt<'a>) {
-        if self.conservative
-            && matches!(node, Stmt::If(branch) if matches!(branch.condition(), IfCondition::Case(_)))
-        {
-            self.patterns.insert(stmt(node));
-        }
-        let kind = match node {
+    fn statement_kind(&self, node: Stmt<'a>) -> Kind {
+        match node {
             Stmt::Block(_) => Kind::Forward,
             Stmt::Return(_) | Stmt::Throw(_) | Stmt::Rethrow(_) => Kind::Exit,
             _ if self.conservative
@@ -527,8 +516,21 @@ impl<'a> Visitor<'a> for Tree<'a> {
             Stmt::Assert(_) | Stmt::LocalFunc(_) => Kind::None,
             Stmt::PatternDecl(_) | Stmt::PatternAssign(_) => Kind::Inert,
             _ => Kind::Any,
-        };
-        self.enter(stmt(node), kind, node.span());
+        }
+    }
+}
+
+impl<'a> Visitor<'a> for Tree<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>) {
+        walk_expr_chain_with_exit(self, node, Self::enter_expr, Self::exit_expr);
+    }
+    fn visit_stmt(&mut self, node: Stmt<'a>) {
+        if self.conservative
+            && matches!(node, Stmt::If(branch) if matches!(branch.condition(), IfCondition::Case(_)))
+        {
+            self.patterns.insert(stmt(node));
+        }
+        self.enter(stmt(node), self.statement_kind(node), node.span());
         if let Stmt::Labeled(n) = node {
             self.labels.push((n.label().name(), stmt(n.stmt())));
         }
@@ -861,37 +863,14 @@ impl<G> AsyncStateVisitor<'_, G> {
     fn state(&self, key: Key) -> State {
         let node = &self.tree.nodes[&key];
         let children = &node.children;
-        if self.conservative {
-            if key.1 == 0 {
-                if self
-                    .tree
-                    .nodes
-                    .get(&self.reference)
-                    .and_then(|node| node.parent)
-                    == Some(key)
-                {
-                    return matches!(node.kind, Kind::Uncertain)
-                        .then_some(AsyncState::Barrier)
-                        .or_else(|| {
-                            matches!(
-                                node.kind,
-                                Kind::Binary(BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce)
-                            )
-                            .then_some(AsyncState::Barrier)
-                        });
-                }
-                return match self.gaps(key) {
-                    (_, true) => Some(AsyncState::Barrier),
-                    (true, false) => Some(AsyncState::Async),
-                    _ => None,
-                };
-            }
-            if matches!(
-                node.kind,
-                Kind::Catch | Kind::Case { .. } | Kind::Arm { .. }
-            ) {
-                return Some(AsyncState::Barrier);
-            }
+        if self.conservative
+            && (key.1 == 0
+                || matches!(
+                    node.kind,
+                    Kind::Catch | Kind::Case { .. } | Kind::Arm { .. }
+                ))
+        {
+            return self.conservative_state(key, node);
         }
         match &node.kind {
             Kind::None | Kind::Inert | Kind::Body | Kind::Exit => None,
@@ -933,19 +912,7 @@ impl<G> AsyncStateVisitor<'_, G> {
                 (!children.contains(&self.reference)).then_some(AsyncState::Barrier)
             }
             Kind::Label => children.first().and_then(|&k| self.state(k)),
-            Kind::Block => {
-                let parent = node.parent.and_then(|k| self.tree.nodes.get(&k));
-                let loop_body = parent.is_some_and(|p| {
-                    matches!(p.kind, Kind::Forward)
-                        && p.parent.is_some_and(|k| {
-                            matches!(
-                                self.tree.nodes[&k].kind,
-                                Kind::For { .. } | Kind::While | Kind::Do { .. }
-                            )
-                        })
-                });
-                self.block(children, loop_body)
-            }
+            Kind::Block => self.block_state(node),
             Kind::If {
                 condition,
                 guard,
@@ -976,43 +943,10 @@ impl<G> AsyncStateVisitor<'_, G> {
                 body,
                 catches,
                 finally,
-            } => {
-                if self.reference == *body {
-                    None
-                } else if catches.contains(&self.reference) {
-                    asynchronous(self.state(*body))
-                } else if *finally == Some(self.reference) {
-                    asynchronous(self.state(*body)).or_else(|| self.any(catches))
-                } else {
-                    finally
-                        .and_then(|k| self.state(k))
-                        .or_else(|| asynchronous(self.state(*body)))
-                        .or_else(|| self.any(catches))
-                }
-            }
+            } => self.try_state(*body, catches, *finally),
             Kind::Catch => children.first().and_then(|&k| asynchronous(self.state(k))),
             Kind::Switch { subject, cases } => self.switch(*subject, cases),
-            Kind::Case { guards, statements } => {
-                // Default scans preceding statements without a pattern guard.
-                // The surrounding switch still skips default guard checks.
-                if guards.last().is_some_and(Option::is_none) {
-                    return self.ordered(statements, |_| true);
-                }
-                if guards.iter().flatten().any(|g| *g == Some(self.reference)) {
-                    return None;
-                }
-                self.block(statements, false).or_else(|| {
-                    if statements.contains(&self.reference) {
-                        None
-                    } else {
-                        guards
-                            .iter()
-                            .flatten()
-                            .flatten()
-                            .find_map(|&k| asynchronous(self.state(k)))
-                    }
-                })
-            }
+            Kind::Case { guards, statements } => self.case_state(guards, statements),
             Kind::Arm { guard, body } => {
                 if *guard == Some(self.reference) {
                     None
@@ -1028,6 +962,81 @@ impl<G> AsyncStateVisitor<'_, G> {
             }
             Kind::Any => self.any(children),
         }
+    }
+    fn conservative_state(&self, key: Key, node: &Node) -> State {
+        if key.1 == 0 {
+            if self
+                .tree
+                .nodes
+                .get(&self.reference)
+                .and_then(|node| node.parent)
+                == Some(key)
+            {
+                return matches!(node.kind, Kind::Uncertain)
+                    .then_some(AsyncState::Barrier)
+                    .or_else(|| {
+                        matches!(
+                            node.kind,
+                            Kind::Binary(BinaryOp::And | BinaryOp::Or | BinaryOp::NullCoalesce)
+                        )
+                        .then_some(AsyncState::Barrier)
+                    });
+            }
+            return match self.gaps(key) {
+                (_, true) => Some(AsyncState::Barrier),
+                (true, false) => Some(AsyncState::Async),
+                _ => None,
+            };
+        }
+        Some(AsyncState::Barrier)
+    }
+    fn block_state(&self, node: &Node) -> State {
+        let parent = node.parent.and_then(|k| self.tree.nodes.get(&k));
+        let loop_body = parent.is_some_and(|p| {
+            matches!(p.kind, Kind::Forward)
+                && p.parent.is_some_and(|k| {
+                    matches!(
+                        self.tree.nodes[&k].kind,
+                        Kind::For { .. } | Kind::While | Kind::Do { .. }
+                    )
+                })
+        });
+        self.block(&node.children, loop_body)
+    }
+    fn try_state(&self, body: Key, catches: &[Key], finally: Option<Key>) -> State {
+        if self.reference == body {
+            None
+        } else if catches.contains(&self.reference) {
+            asynchronous(self.state(body))
+        } else if finally == Some(self.reference) {
+            asynchronous(self.state(body)).or_else(|| self.any(catches))
+        } else {
+            finally
+                .and_then(|k| self.state(k))
+                .or_else(|| asynchronous(self.state(body)))
+                .or_else(|| self.any(catches))
+        }
+    }
+    fn case_state(&self, guards: &[Option<Option<Key>>], statements: &[Key]) -> State {
+        // Default scans preceding statements without a pattern guard.
+        // The surrounding switch still skips default guard checks.
+        if guards.last().is_some_and(Option::is_none) {
+            return self.ordered(statements, |_| true);
+        }
+        if guards.iter().flatten().any(|g| *g == Some(self.reference)) {
+            return None;
+        }
+        self.block(statements, false).or_else(|| {
+            if statements.contains(&self.reference) {
+                None
+            } else {
+                guards
+                    .iter()
+                    .flatten()
+                    .flatten()
+                    .find_map(|&k| asynchronous(self.state(k)))
+            }
+        })
     }
     fn constant(&self, mut key: Key) -> Option<&bool> {
         while matches!(self.tree.nodes[&key].kind, Kind::Revisit) {

@@ -60,6 +60,601 @@ fn external_indexes(
     (externals, identities, types)
 }
 
+fn parsed_fixture(source: &str) -> Arc<ParsedFile> {
+    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+    assert!(errors.is_empty(), "{errors:?}");
+    Arc::new(ParsedFile {
+        source: source.to_string().into_boxed_str(),
+        tree,
+    })
+}
+
+fn external_types<'a>(
+    files: impl IntoIterator<Item = (&'a Path, &'a Arc<ParsedFile>)>,
+    externals: &ExternalLibraries,
+    identities: &IdentityIndex,
+) -> TypeIndex {
+    let mut types = TypeIndex::from_resolved_files(
+        files.into_iter().map(|(path, parsed)| {
+            (
+                path,
+                LibrarySource {
+                    program: parsed.program(),
+                    has_parse_errors: false,
+                    has_unresolved_parts: false,
+                },
+            )
+        }),
+        identities,
+    );
+    types.add_external(externals, identities);
+    types
+}
+
+fn identity_variants(
+    sources: &[IdentitySource<'_>],
+    content: &[&str],
+    external: ExternalSources<'_>,
+) -> (Arc<IdentityIndex>, [IdentityIndex; 2]) {
+    let base = Arc::new(IdentityIndex::build_external(external));
+    let variants = [
+        IdentityIndex::build(sources, content, &[], Some(external)),
+        IdentityIndex::with_external(sources, content, &[], external, Arc::clone(&base)),
+    ];
+    (base, variants)
+}
+
+fn assert_compact_constructor_headers(externals: &ExternalLibraries) {
+    use falcon_syntax::cst::{ClassMember, ConstructorInitializer, TopLevelDecl};
+
+    let file = externals.libraries().iter()
+        .find(|library| matches!(&library.origin, ExternalOrigin::Package(name) if name.as_str() == "dep"))
+        .unwrap().files.first().unwrap();
+    assert!(!file.has_parse_errors);
+    let TopLevelDecl::Class(concrete) = file.program().declarations().nth(1).unwrap() else {
+        panic!("expected compact concrete class");
+    };
+    let ClassMember::Constructor(constructor) = concrete.members().nth(1).unwrap() else {
+        panic!("expected compact constructor");
+    };
+    let super_call = constructor
+        .initializers()
+        .find_map(|initializer| match initializer {
+            ConstructorInitializer::SuperCall(call) => Some(call),
+            _ => None,
+        })
+        .expect("expected retained super-constructor name");
+    assert_eq!(super_call.call_name().unwrap().name(), "named");
+    let ClassMember::Constructor(_redirect) = concrete.members().nth(2).unwrap() else {
+        panic!("expected compact redirecting constructor");
+    };
+    let ClassMember::Operator(_operator) = concrete.members().nth(3).unwrap() else {
+        panic!("expected compact operator");
+    };
+}
+
+fn assert_distinct_reexports(
+    identities: &IdentityIndex,
+    types: &TypeIndex,
+    signatures: &SignatureIndex,
+    model: &SemanticModel<'_>,
+) {
+    use falcon_analyze::{MemberKind, MemberResult, QualifiedName};
+
+    let left = model.resolve_name("Vector").unwrap();
+    let right = model
+        .resolve_name(QualifiedName::prefixed("right", "Vector"))
+        .unwrap();
+    assert_ne!(
+        model.resolve_name("Measure").unwrap(),
+        model
+            .resolve_name(QualifiedName::prefixed("right", "Measure"))
+            .unwrap(),
+    );
+    assert_ne!(left, right);
+    assert!(identities.is_package_declaration(&left, "dep", "Vector"));
+    assert_eq!(
+        types.member_lookup_identity(&left, "left"),
+        MemberResult::Found(MemberKind::Method)
+    );
+    assert_eq!(
+        types.member_lookup_identity(&left, "right"),
+        MemberResult::Absent
+    );
+    assert_eq!(
+        types.member_lookup_identity(&right, "right"),
+        MemberResult::Found(MemberKind::Method)
+    );
+    assert!(
+        signatures.constructor(&left, "new").unwrap().positional[0]
+            .interface("dart:core", "double")
+    );
+    assert!(
+        signatures.constructor(&right, "new").unwrap().positional[0].interface("dart:core", "int")
+    );
+    assert_eq!(model.unaliased(model.resolve_name("Alias").unwrap()), left);
+    assert_eq!(
+        model.unaliased(
+            model
+                .resolve_name(QualifiedName::prefixed("right", "Alias"))
+                .unwrap()
+        ),
+        right,
+    );
+}
+
+fn assert_external_defaults_and_inferred_values(
+    signatures: &SignatureIndex,
+    model: &SemanticModel<'_>,
+) {
+    use falcon_syntax::cst::Expr;
+
+    let answer = model.resolve_value("answer").unwrap();
+    assert!(matches!(
+        signatures.constant_initializer(&answer),
+        Some(Expr::IntLit(value)) if value.value() == "42"
+    ));
+    let compute = model.resolve_value("compute").unwrap();
+    assert!(matches!(
+        signatures.function(&compute).unwrap().defaults.get("value"),
+        Some(ParameterDefault::Declared(expr))
+            if matches!(expr.expr(), Expr::IntLit(value) if value.value() == "7")
+    ));
+    let base = model.resolve_name("Base").unwrap();
+    let facts = signatures.declaration(&base).unwrap();
+    assert!(matches!(
+        signatures.constructor(&base, "new").unwrap().defaults.get("value"),
+        Some(ParameterDefault::Declared(expr))
+            if matches!(expr.expr(), Expr::IntLit(value) if value.value() == "9")
+    ));
+    assert!(matches!(
+        facts.static_consts[0].initializer.expr(),
+        Expr::IntLit(value) if value.value() == "11"
+    ));
+    assert!(model.resolve_name("Choice").is_some());
+    let box_identity = model.resolve_name("Box").unwrap();
+    let inferred_box = ResolvedType::new_interface(
+        box_identity,
+        vec![model.core_type("int", false)].into(),
+        false,
+        false,
+    );
+    for name in ["forward", "later"] {
+        assert_eq!(
+            signatures.value_type(&model.resolve_value(name).unwrap()),
+            Some(&inferred_box)
+        );
+    }
+    for name in ["inferred", "discarded"] {
+        assert_eq!(
+            signatures.field(&base, name).unwrap().1,
+            model.core_type("int", false)
+        );
+    }
+    assert_eq!(
+        signatures.value_type(&model.resolve_value("inferredTop").unwrap()),
+        Some(&ResolvedType::DYNAMIC)
+    );
+    assert_eq!(
+        signatures.field(&base, "inferredValue").unwrap().1,
+        ResolvedType::DYNAMIC
+    );
+}
+
+fn external_constant_workspace() -> (tempfile::TempDir, PathBuf) {
+    let (dir, app) = workspace();
+    write(
+        dir.path(),
+        "cache/dep/lib/dep.dart",
+        "export 'constants.dart' show Values, Choice;\n",
+    );
+    write(
+        dir.path(),
+        "cache/dep/lib/constants.dart",
+        "part 'choices.dart'; const _seed = 21; const first = 1; \
+         class Values { static const _inside = _seed; static const first = Values._inside; \
+         static const answer = first + first; static const cycleA = cycleB; static const cycleB = cycleA; \
+         static const _hidden = 0; static final mutable = 42; final instance = 42; }",
+    );
+    write(
+        dir.path(),
+        "cache/dep/lib/choices.dart",
+        "part of 'constants.dart'; enum Choice { first, second; static const selected = first; }",
+    );
+    (dir, app)
+}
+
+fn assert_package_copy_members(
+    root: &Path,
+    apps: &[PathBuf],
+    parsed: &Arc<ParsedFile>,
+    indexes: (&IdentityIndex, &IdentityIndex, &TypeIndex, &SignatureIndex),
+    order: [usize; 2],
+    incremental: bool,
+) {
+    use falcon_analyze::{MemberKind, MemberResult, MemberSelector, MemberSelectorKind};
+    let (identities, base, types, signatures) = indexes;
+    let mut resolved = Vec::with_capacity(apps.len());
+    for (app, copy) in apps.iter().zip(["getter", "method"]) {
+        let expected_path =
+            canonical_or_lexical(&root.join(format!("packages/{copy}/lib/foo.dart")));
+        let model = SemanticModel::new(app, parsed, identities, Some(types));
+        let identity = model.resolve_name("Foo").unwrap();
+        assert!(identity.is_package("foo", "Foo"));
+        assert!(identity.matches(&DeclarationIdentity::package("foo", "Foo")));
+        let receiver = ResolvedType::interface_identity(identity.clone());
+        assert_eq!(
+            signatures.relation(
+                &receiver,
+                falcon_analyze::TypeRelation::SubtypeOfDeclaration(&DeclarationIdentity::package(
+                    "foo", "Foo"
+                )),
+                &model
+            ),
+            falcon_analyze::Truth::Yes
+        );
+        for index in [identities, base] {
+            assert_eq!(
+                index.declaration_library(&identity),
+                Some(index.library(index.file(&expected_path).unwrap())),
+                "order={order:?}, incremental={incremental}",
+            );
+            for selector in [
+                MemberSelector::DECLARATION,
+                MemberSelector::new(MemberSelectorKind::Read, false, "value"),
+            ] {
+                let (path, annotations) = index
+                    .source_annotations(&identity, selector.into())
+                    .unwrap();
+                assert_eq!(path, expected_path);
+                assert_eq!(annotations.len(), 1);
+            }
+        }
+        if copy == "getter" {
+            assert_eq!(
+                types.member_lookup_identity(&identity, "value"),
+                MemberResult::Found(MemberKind::Getter)
+            );
+            let (field, _) = signatures
+                .resolved_field(&receiver, "value", &model)
+                .unwrap();
+            assert!(field.interface("dart:core", "int"));
+        } else {
+            assert_eq!(
+                types.member_lookup_identity(&identity, "value"),
+                MemberResult::Found(MemberKind::Method)
+            );
+            let (signature, _) = signatures
+                .resolved_member(&receiver, "value", &model)
+                .unwrap();
+            assert_eq!(signature.return_type, receiver);
+            assert!(
+                signatures
+                    .resolved_field(&receiver, "value", &model)
+                    .is_none()
+            );
+        }
+        resolved.push(identity);
+    }
+    assert_ne!(resolved[0], resolved[1]);
+}
+
+fn shared_dependency_workspace(
+    reaches_foo: bool,
+    through_cycle: bool,
+    source: &str,
+) -> (tempfile::TempDir, PathBuf, [PathBuf; 3]) {
+    let (dir, _) = workspace();
+    let flutter = canonical_or_lexical(&dir.path().join("flutter"));
+    let bar = dir.path().join("packages/bar");
+    let bridge = dir.path().join("packages/baz");
+    if through_cycle {
+        write(
+            &bridge,
+            "lib/baz.dart",
+            "export 'package:foo/foo.dart';\nexport 'package:bar/bar.dart';",
+        );
+    }
+    let bar_path = canonical_or_lexical(&write(
+        &bar,
+        "lib/bar.dart",
+        if through_cycle {
+            "import 'package:baz/baz.dart';\n\
+             export 'package:baz/baz.dart';\n\
+             Foo makeValue() => Foo();"
+        } else if reaches_foo {
+            "import 'package:foo/foo.dart';\n\
+             export 'package:foo/foo.dart';\n\
+             Foo makeValue() => Foo();"
+        } else {
+            "export 'src/shared.dart';\n\
+             import 'src/shared.dart';\n\
+             Shared makeValue() => Shared();"
+        },
+    ));
+    if !reaches_foo {
+        write(&bar, "lib/src/shared.dart", "class Shared {}");
+    }
+    let apps = [
+        ("first", "first"),
+        ("second", "second"),
+        ("third", "second"),
+    ]
+    .map(|(name, copy)| {
+        let package_root = dir.path().join(format!("packages/{copy}/foo"));
+        write(&package_root, "lib/foo.dart", "class Foo {}");
+        write(
+            dir.path(),
+            &format!("{name}/.dart_tool/package_config.json"),
+            &format!(
+                r#"{{"configVersion": 2, "flutterRoot": "file://{}", "packages": [
+                    {{"name": "foo", "rootUri": "file://{}", "packageUri": "lib/"}},
+                    {{"name": "bar", "rootUri": "file://{}", "packageUri": "lib/"}},
+                    {{"name": "baz", "rootUri": "file://{}", "packageUri": "lib/"}}
+                ]}}"#,
+                flutter.display(),
+                canonical_or_lexical(&package_root).display(),
+                canonical_or_lexical(&bar).display(),
+                canonical_or_lexical(&bridge).display(),
+            ),
+        );
+        canonical_or_lexical(&write(dir.path(), &format!("{name}/lib/main.dart"), source))
+    });
+    (dir, bar_path, apps)
+}
+
+fn assert_repeated_extension_preserves_topology(
+    externals: &mut ExternalLibraries,
+    extend: impl FnOnce(&mut ExternalLibraries),
+) {
+    let topology: Vec<_> = externals
+        .libraries()
+        .iter()
+        .map(|library| {
+            (
+                library.files[0].path.clone(),
+                library.context,
+                library.copy_context,
+                Arc::clone(&library.files),
+            )
+        })
+        .collect();
+    extend(externals);
+    assert_eq!(externals.libraries().len(), topology.len());
+    for (library, (path, context, copy_context, files)) in
+        externals.libraries().iter().zip(&topology)
+    {
+        assert_eq!(&library.files[0].path, path);
+        assert_eq!(library.context, *context);
+        assert_eq!(library.copy_context, *copy_context);
+        assert!(Arc::ptr_eq(&library.files, files));
+    }
+}
+
+fn contextless_dependency_workspace(
+    divergent: bool,
+    configured_outside: bool,
+) -> (tempfile::TempDir, PathBuf, Vec<PathBuf>, Vec<&'static str>) {
+    let (dir, _) = workspace();
+    let flutter = canonical_or_lexical(&dir.path().join("flutter"));
+    let bar = dir.path().join("packages/bar");
+    let foo_root = dir.path().join("packages/foo");
+    write(&foo_root, "lib/foo.dart", "class Foo {}");
+    let bar_path = canonical_or_lexical(&write(
+        &bar,
+        "lib/bar.dart",
+        if divergent {
+            "import 'package:foo/foo.dart';\nclass Shared extends Foo {}"
+        } else {
+            "class Shared {}"
+        },
+    ));
+    let mut paths = vec![canonical_or_lexical(&write(
+        dir.path(),
+        "outside/main.dart",
+        "import '../packages/bar/lib/bar.dart';",
+    ))];
+    let mut texts = vec!["import '../packages/bar/lib/bar.dart';"];
+    if configured_outside {
+        write(
+            dir.path(),
+            "outside/.dart_tool/package_config.json",
+            &format!(
+                r#"{{"configVersion": 2, "flutterRoot": "file://{}", "packages": []}}"#,
+                flutter.display(),
+            ),
+        );
+    }
+    for name in ["first", "second"]
+        .into_iter()
+        .take(if divergent || configured_outside {
+            1
+        } else {
+            2
+        })
+    {
+        write(
+            dir.path(),
+            &format!("{name}/.dart_tool/package_config.json"),
+            &format!(
+                r#"{{"configVersion": 2, "flutterRoot": "file://{}", "packages": [
+                    {{"name": "bar", "rootUri": "file://{}", "packageUri": "lib/"}},
+                    {{"name": "foo", "rootUri": "file://{}", "packageUri": "lib/"}}
+                ]}}"#,
+                flutter.display(),
+                canonical_or_lexical(&bar).display(),
+                canonical_or_lexical(&foo_root).display(),
+            ),
+        );
+        paths.push(canonical_or_lexical(&write(
+            dir.path(),
+            &format!("{name}/lib/main.dart"),
+            "import 'package:bar/bar.dart';",
+        )));
+        texts.push("import 'package:bar/bar.dart';");
+    }
+    (dir, bar_path, paths, texts)
+}
+
+fn shared_sdk_workspace(
+    divergent: bool,
+    source: &str,
+) -> (tempfile::TempDir, PathBuf, [PathBuf; 2]) {
+    let dir = tempfile::tempdir().unwrap();
+    let shared_root = dir.path().join("packages/shared");
+    let shared_path = canonical_or_lexical(&write(
+        &shared_root,
+        "lib/shared.dart",
+        if divergent {
+            "import 'dart:io';\nimport 'package:foo/foo.dart';\nIoType makeIo() => IoType();"
+        } else {
+            "import 'dart:io';\nIoType makeIo() => IoType();"
+        },
+    ));
+    let apps = ["first", "second"].map(|name| {
+        let flutter = dir.path().join(format!("{name}_flutter"));
+        let foo_root = dir.path().join(format!("packages/{name}/foo"));
+        write(&foo_root, "lib/foo.dart", "class Foo {}");
+        write(
+            &flutter,
+            "bin/cache/dart-sdk/lib/libraries.json",
+            r#"{"vm": {"libraries": {
+                "core": {"uri": "core/core.dart"},
+                "io": {"uri": "io/io.dart"}
+            }}}"#,
+        );
+        write(
+            &flutter,
+            "bin/cache/dart-sdk/lib/core/core.dart",
+            "class Object {}",
+        );
+        write(
+            &flutter,
+            "bin/cache/dart-sdk/lib/io/io.dart",
+            &format!("library dart.io;\nclass IoType {{ void {name}Only() {{}} }}"),
+        );
+        write(
+            dir.path(),
+            &format!("{name}/.dart_tool/package_config.json"),
+            &format!(
+                r#"{{"configVersion": 2, "flutterRoot": "file://{}", "packages": [
+                    {{"name": "shared", "rootUri": "file://{}", "packageUri": "lib/"}},
+                    {{"name": "foo", "rootUri": "file://{}", "packageUri": "lib/"}}
+                ]}}"#,
+                canonical_or_lexical(&flutter).display(),
+                canonical_or_lexical(&shared_root).display(),
+                canonical_or_lexical(&foo_root).display(),
+            ),
+        );
+        canonical_or_lexical(&write(dir.path(), &format!("{name}/lib/main.dart"), source))
+    });
+    (dir, shared_path, apps)
+}
+
+fn shared_doc_import_workspace(source: &str) -> (tempfile::TempDir, PathBuf, [PathBuf; 2]) {
+    let dir = tempfile::tempdir().unwrap();
+    let shared_root = dir.path().join(".pub-cache/hosted/pub.dev/shared-1.0.0");
+    let shared_path = canonical_or_lexical(&write(
+        &shared_root,
+        "lib/shared.dart",
+        "/// @docImport 'dart:io';\nlibrary;\nclass Shared {}",
+    ));
+    let apps = ["present", "absent"].map(|name| {
+        let flutter = dir.path().join(format!("{name}_flutter"));
+        write(
+            &flutter,
+            "bin/cache/dart-sdk/lib/libraries.json",
+            if name == "present" {
+                r#"{"vm": {"libraries": {
+                    "core": {"uri": "core/core.dart"},
+                    "io": {"uri": "io/io.dart"}
+                }}}"#
+            } else {
+                r#"{"vm": {"libraries": {"core": {"uri": "core/core.dart"}}}}"#
+            },
+        );
+        write(
+            &flutter,
+            "bin/cache/dart-sdk/lib/core/core.dart",
+            "class Object {}",
+        );
+        if name == "present" {
+            write(
+                &flutter,
+                "bin/cache/dart-sdk/lib/io/io.dart",
+                "library dart.io;\nclass File {}",
+            );
+        }
+        write(
+            dir.path(),
+            &format!("{name}/.dart_tool/package_config.json"),
+            &format!(
+                r#"{{"configVersion": 2, "flutterRoot": "file://{}", "packages": [
+                    {{"name": "shared", "rootUri": "file://{}", "packageUri": "lib/"}}
+                ]}}"#,
+                canonical_or_lexical(&flutter).display(),
+                canonical_or_lexical(&shared_root).display(),
+            ),
+        );
+        canonical_or_lexical(&write(dir.path(), &format!("{name}/lib/main.dart"), source))
+    });
+    (dir, shared_path, apps)
+}
+
+fn assert_shared_dependency_topology(
+    externals: &ExternalLibraries,
+    bar_path: &Path,
+    reaches_foo: bool,
+    order: [usize; 3],
+    incremental: bool,
+) {
+    let bar_instances: Vec<_> = externals
+        .libraries()
+        .iter()
+        .filter(|library| library.files[0].path.as_path() == bar_path)
+        .collect();
+    assert_eq!(
+        bar_instances.len(),
+        if reaches_foo { 2 } else { 1 },
+        "order={order:?}, incremental={incremental}",
+    );
+    if !reaches_foo {
+        let defining_paths: std::collections::BTreeSet<_> = externals
+            .libraries()
+            .iter()
+            .map(|library| &library.files[0].path)
+            .collect();
+        assert_eq!(externals.libraries().len(), defining_paths.len());
+    }
+}
+
+fn assert_sdk_authority_member(
+    types: &TypeIndex,
+    signatures: &SignatureIndex,
+    model: &SemanticModel<'_>,
+    identity: DeclarationIdentity,
+    order: [usize; 2],
+    incremental: bool,
+) {
+    use falcon_analyze::{MemberKind, MemberResult};
+    assert_eq!(
+        types.member_lookup_identity(&identity, "value"),
+        MemberResult::Found(MemberKind::Method),
+        "order={order:?}, incremental={incremental}",
+    );
+    let receiver = ResolvedType::interface_identity(identity);
+    let (signature, _) = signatures
+        .resolved_member(&receiver, "value", model)
+        .unwrap();
+    assert_eq!(signature.return_type, receiver);
+    assert!(signature.positional.is_empty());
+    assert!(
+        signatures
+            .resolved_field(&receiver, "value", model)
+            .is_none()
+    );
+}
+
 /// A fake Flutter checkout (`flutterRoot`) with its Dart SDK, a dependency
 /// package, and an app whose `package_config.json` ties them together.
 fn workspace() -> (tempfile::TempDir, PathBuf) {
@@ -470,16 +1065,8 @@ fn absent_sdk_parts_do_not_hide_missing_doc_names() {
 fn indexes_sdk_and_dependency_declarations() {
     let (_dir, app) = workspace();
     let source = fs::read_to_string(&app).unwrap();
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(&source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let parsed = parsed_fixture(&source);
     let program = parsed.program();
-    assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     assert!(environment.has_sdk());
     assert_eq!(
@@ -518,18 +1105,7 @@ fn indexes_sdk_and_dependency_declarations() {
         environment: &environment,
     };
     let identities = IdentityIndex::build(&sources, &[source.as_str()], &[], Some(external));
-    let mut types = TypeIndex::from_resolved_files(
-        [(
-            app.as_path(),
-            LibrarySource {
-                program,
-                has_parse_errors: false,
-                has_unresolved_parts: false,
-            },
-        )],
-        &identities,
-    );
-    types.add_external(&externals, &identities);
+    let types = external_types([(app.as_path(), &parsed)], &externals, &identities);
     let files = [(app.clone(), Arc::clone(&parsed))];
     let signatures = SignatureIndex::build(&files, Some(&externals), &identities, &types);
     let model = SemanticModel::new(&app, &parsed, &identities, Some(&types));
@@ -595,26 +1171,9 @@ fn compact_external_missing_parts_distinguish_absent_and_unresolved() {
     let source = "import 'package:dep/dep.dart'; import 'other.dart'; class App {}";
     let other_source = "class Base {}";
     let other = write(dir.path(), "app/lib/other.dart", other_source);
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let parsed = parsed_fixture(source);
     let program = parsed.program();
-    assert!(errors.is_empty());
-    let falcon_dart_parser::ParseResult {
-        tree: other_parsed_tree,
-        errors,
-    } = parse(other_source);
-    let other_parsed = Arc::new(ParsedFile {
-        source: (other_source).to_string().into_boxed_str(),
-        tree: other_parsed_tree,
-    });
-    let other_program = other_parsed.program();
-    assert!(errors.is_empty());
+    let other_parsed = parsed_fixture(other_source);
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     std::fs::create_dir_all(dir.path().join("cache/dep/lib/unreadable.dart")).unwrap();
     write(dir.path(), "cache/dep/lib/not-a-directory", "");
@@ -661,28 +1220,11 @@ fn compact_external_missing_parts_distinguish_absent_and_unresolved() {
                 environment: &environment,
             }),
         );
-        let mut types = TypeIndex::from_resolved_files(
-            [
-                (
-                    app.as_path(),
-                    LibrarySource {
-                        program,
-                        has_parse_errors: false,
-                        has_unresolved_parts: false,
-                    },
-                ),
-                (
-                    other.as_path(),
-                    LibrarySource {
-                        program: other_program,
-                        has_parse_errors: false,
-                        has_unresolved_parts: false,
-                    },
-                ),
-            ],
+        let types = external_types(
+            [(app.as_path(), &parsed), (other.as_path(), &other_parsed)],
+            &externals,
             &identities,
         );
-        types.add_external(&externals, &identities);
         let model = SemanticModel::new(&app, &parsed, &identities, Some(&types));
         assert!(model.resolve_name("Base").is_some(), "{missing_part}");
         assert!(model.resolve_name("App").is_some());
@@ -718,8 +1260,6 @@ fn compact_external_missing_parts_distinguish_absent_and_unresolved() {
 
 #[test]
 fn compact_external_operators_and_constructor_headers_keep_semantic_bits() {
-    use falcon_syntax::cst::{ClassMember, ConstructorInitializer, TopLevelDecl};
-
     let (dir, app) = workspace();
     write(
         dir.path(),
@@ -754,45 +1294,14 @@ fn compact_external_operators_and_constructor_headers_keep_semantic_bits() {
         r#"{"configVersion":2,"packages":[{"name":"dep","rootUri":"../../cache/dep","packageUri":"lib/","languageVersion":"3.4"}]}"#,
     );
     let source = "import 'package:dep/dep.dart'; class App implements Concrete {}";
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let parsed = parsed_fixture(source);
     let program = parsed.program();
-    assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let externals =
         ExternalLibraries::load(&environment, &[(app.as_path(), program, source)], |path| {
             path == app
         });
-    let file = externals.libraries().iter()
-        .find(|library| matches!(&library.origin, ExternalOrigin::Package(name) if name.as_str() == "dep"))
-        .unwrap().files.first().unwrap();
-    assert!(!file.has_parse_errors);
-    let TopLevelDecl::Class(concrete) = file.program().declarations().nth(1).unwrap() else {
-        panic!("expected compact concrete class");
-    };
-    let ClassMember::Constructor(constructor) = concrete.members().nth(1).unwrap() else {
-        panic!("expected compact constructor");
-    };
-    let super_call = constructor
-        .initializers()
-        .find_map(|initializer| match initializer {
-            ConstructorInitializer::SuperCall(call) => Some(call),
-            _ => None,
-        })
-        .expect("expected retained super-constructor name");
-    assert_eq!(super_call.call_name().unwrap().name(), "named");
-    let ClassMember::Constructor(_redirect) = concrete.members().nth(2).unwrap() else {
-        panic!("expected compact redirecting constructor");
-    };
-    let ClassMember::Operator(_operator) = concrete.members().nth(3).unwrap() else {
-        panic!("expected compact operator");
-    };
+    assert_compact_constructor_headers(&externals);
 
     let identities = IdentityIndex::build(
         &[IdentitySource {
@@ -807,18 +1316,7 @@ fn compact_external_operators_and_constructor_headers_keep_semantic_bits() {
             environment: &environment,
         }),
     );
-    let mut types = TypeIndex::from_resolved_files(
-        [(
-            app.as_path(),
-            LibrarySource {
-                program,
-                has_parse_errors: false,
-                has_unresolved_parts: false,
-            },
-        )],
-        &identities,
-    );
-    types.add_external(&externals, &identities);
+    let types = external_types([(app.as_path(), &parsed)], &externals, &identities);
     let signatures = SignatureIndex::build(
         &[(app.clone(), Arc::clone(&parsed))],
         Some(&externals),
@@ -896,8 +1394,6 @@ fn compact_external_types_do_not_collide_with_project_names() {
 
 #[test]
 fn reexports_keep_distinct_same_package_declarations_resolvable() {
-    use falcon_analyze::{MemberKind, MemberResult, QualifiedName};
-
     let (dir, app) = workspace();
     write(
         dir.path(),
@@ -925,16 +1421,8 @@ fn reexports_keep_distinct_same_package_declarations_resolvable() {
         write(dir.path(), &format!("cache/dep/lib/{file}"), source);
     }
     let source = "import 'package:dep/dep.dart'; import 'package:dep/right.dart' as right;";
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let parsed = parsed_fixture(source);
     let program = parsed.program();
-    assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     let externals =
         ExternalLibraries::load(&environment, &[(app.as_path(), program, source)], |path| {
@@ -970,18 +1458,7 @@ fn reexports_keep_distinct_same_package_declarations_resolvable() {
             base,
         ),
     ] {
-        let mut types = TypeIndex::from_resolved_files(
-            [(
-                app.as_path(),
-                LibrarySource {
-                    program,
-                    has_parse_errors: false,
-                    has_unresolved_parts: false,
-                },
-            )],
-            &identities,
-        );
-        types.add_external(&externals, &identities);
+        let types = external_types([(app.as_path(), &parsed)], &externals, &identities);
         let signatures = SignatureIndex::build(
             &[(app.clone(), Arc::clone(&parsed))],
             Some(&externals),
@@ -989,47 +1466,7 @@ fn reexports_keep_distinct_same_package_declarations_resolvable() {
             &types,
         );
         let model = SemanticModel::new(&app, &parsed, &identities, Some(&types));
-        let left = model.resolve_name("Vector").unwrap();
-        let right = model
-            .resolve_name(QualifiedName::prefixed("right", "Vector"))
-            .unwrap();
-        assert_ne!(
-            model.resolve_name("Measure").unwrap(),
-            model
-                .resolve_name(QualifiedName::prefixed("right", "Measure"))
-                .unwrap(),
-        );
-        assert_ne!(left, right);
-        assert!(identities.is_package_declaration(&left, "dep", "Vector"));
-        assert_eq!(
-            types.member_lookup_identity(&left, "left"),
-            MemberResult::Found(MemberKind::Method)
-        );
-        assert_eq!(
-            types.member_lookup_identity(&left, "right"),
-            MemberResult::Absent
-        );
-        assert_eq!(
-            types.member_lookup_identity(&right, "right"),
-            MemberResult::Found(MemberKind::Method)
-        );
-        assert!(
-            signatures.constructor(&left, "new").unwrap().positional[0]
-                .interface("dart:core", "double")
-        );
-        assert!(
-            signatures.constructor(&right, "new").unwrap().positional[0]
-                .interface("dart:core", "int")
-        );
-        assert_eq!(model.unaliased(model.resolve_name("Alias").unwrap()), left);
-        assert_eq!(
-            model.unaliased(
-                model
-                    .resolve_name(QualifiedName::prefixed("right", "Alias"))
-                    .unwrap()
-            ),
-            right,
-        );
+        assert_distinct_reexports(&identities, &types, &signatures, &model);
     }
 }
 
@@ -1108,16 +1545,8 @@ fn compact_external_facts_preserve_defaults_constants_and_parts() {
         "part of 'dep.dart'; enum Choice { first, second }\n",
     );
     let source = fs::read_to_string(&app).unwrap();
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(&source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let parsed = parsed_fixture(&source);
     let program = parsed.program();
-    assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     let roots = [(app.as_path(), program, source.as_str())];
     let mut externals = ExternalLibraries::load(&environment, &roots, |path| path == app);
@@ -1154,18 +1583,7 @@ fn compact_external_facts_preserve_defaults_constants_and_parts() {
             environment: &environment,
         }),
     );
-    let mut types = TypeIndex::from_resolved_files(
-        [(
-            app.as_path(),
-            LibrarySource {
-                program,
-                has_parse_errors: false,
-                has_unresolved_parts: false,
-            },
-        )],
-        &identities,
-    );
-    types.add_external(&externals, &identities);
+    let types = external_types([(app.as_path(), &parsed)], &externals, &identities);
     let signatures = SignatureIndex::build(
         &[(app.clone(), Arc::clone(&parsed))],
         Some(&externals),
@@ -1173,56 +1591,7 @@ fn compact_external_facts_preserve_defaults_constants_and_parts() {
         &types,
     );
     let model = SemanticModel::new(&app, &parsed, &identities, Some(&types));
-    let answer = model.resolve_value("answer").unwrap();
-    assert!(matches!(
-        signatures.constant_initializer(&answer),
-        Some(Expr::IntLit(value)) if value.value() == "42"
-    ));
-    let compute = model.resolve_value("compute").unwrap();
-    assert!(matches!(
-        signatures.function(&compute).unwrap().defaults.get("value"),
-        Some(ParameterDefault::Declared(expr))
-            if matches!(expr.expr(), Expr::IntLit(value) if value.value() == "7")
-    ));
-    let base = model.resolve_name("Base").unwrap();
-    let facts = signatures.declaration(&base).unwrap();
-    assert!(matches!(
-        signatures.constructor(&base, "new").unwrap().defaults.get("value"),
-        Some(ParameterDefault::Declared(expr))
-            if matches!(expr.expr(), Expr::IntLit(value) if value.value() == "9")
-    ));
-    assert!(matches!(
-        facts.static_consts[0].initializer.expr(),
-        Expr::IntLit(value) if value.value() == "11"
-    ));
-    assert!(model.resolve_name("Choice").is_some());
-    let box_identity = model.resolve_name("Box").unwrap();
-    let inferred_box = ResolvedType::new_interface(
-        box_identity,
-        vec![model.core_type("int", false)].into(),
-        false,
-        false,
-    );
-    for name in ["forward", "later"] {
-        assert_eq!(
-            signatures.value_type(&model.resolve_value(name).unwrap()),
-            Some(&inferred_box)
-        );
-    }
-    for name in ["inferred", "discarded"] {
-        assert_eq!(
-            signatures.field(&base, name).unwrap().1,
-            model.core_type("int", false)
-        );
-    }
-    assert_eq!(
-        signatures.value_type(&model.resolve_value("inferredTop").unwrap()),
-        Some(&ResolvedType::DYNAMIC)
-    );
-    assert_eq!(
-        signatures.field(&base, "inferredValue").unwrap().1,
-        ResolvedType::DYNAMIC
-    );
+    assert_external_defaults_and_inferred_values(&signatures, &model);
 }
 
 #[test]
@@ -1368,25 +1737,7 @@ fn imported_static_and_enum_constants_use_external_lexical_context() {
     use falcon_syntax::cst::TopLevelDecl;
     use std::collections::HashMap;
 
-    let (dir, app) = workspace();
-    write(
-        dir.path(),
-        "cache/dep/lib/dep.dart",
-        "export 'constants.dart' show Values, Choice;\n",
-    );
-    write(
-        dir.path(),
-        "cache/dep/lib/constants.dart",
-        "part 'choices.dart'; const _seed = 21; const first = 1; \
-         class Values { static const _inside = _seed; static const first = Values._inside; \
-         static const answer = first + first; static const cycleA = cycleB; static const cycleB = cycleA; \
-         static const _hidden = 0; static final mutable = 42; final instance = 42; }",
-    );
-    write(
-        dir.path(),
-        "cache/dep/lib/choices.dart",
-        "part of 'constants.dart'; enum Choice { first, second; static const selected = first; }",
-    );
+    let (_dir, app) = external_constant_workspace();
     let source = "import 'package:dep/dep.dart' as dep; import 'package:dep/dep.dart'; const _seed = 1; \
         const answer = dep.Values.answer; const choice = dep.Choice.first; \
         const selected = dep.Choice.selected; const other = dep.Choice.second; \
@@ -1394,16 +1745,8 @@ fn imported_static_and_enum_constants_use_external_lexical_context() {
         const instance = dep.Values.instance; const cyclic = dep.Values.cycleA; \
         const unprefixedAnswer = Values.answer; const unprefixedChoice = Choice.first;";
     fs::write(&app, source).unwrap();
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let parsed = parsed_fixture(source);
     let program = parsed.program();
-    assert!(errors.is_empty(), "{errors:?}");
     let (externals, identities, types) = external_indexes(&app, &parsed);
     let signatures = SignatureIndex::build(
         &[(app.clone(), Arc::clone(&parsed))],
@@ -2314,29 +2657,20 @@ fn executable_library_names_preserve_collisions_without_documentation_imports() 
     ));
 }
 
-#[test]
-fn package_contexts_resolve_package_uris_to_their_own_copies_in_every_order() {
-    use falcon_analyze::{MemberKind, MemberResult, MemberSelector, MemberSelectorKind};
-
-    let (dir, _) = workspace();
-    let source = "import 'package:foo/foo.dart';";
-    let flutter = canonical_or_lexical(&dir.path().join("flutter"));
-    let apps: Vec<_> = [
-        (
-            "getter",
-            "@Deprecated('getter type') class Foo { @Deprecated('getter member') int get value => 1; }",
-        ),
-        (
-            "method",
-            "@Deprecated('method type') class Foo { @Deprecated('method member') Foo value(Foo argument) => argument; }",
-        ),
-    ]
-    .into_iter()
-    .map(|(name, declaration)| {
-        let package = dir.path().join(format!("packages/{name}"));
-        write(&package, "lib/foo.dart", declaration);
+fn package_copy_apps(
+    root: &Path,
+    source: &str,
+    copies: [(&str, &str, Option<&str>); 2],
+) -> [PathBuf; 2] {
+    let flutter = canonical_or_lexical(&root.join("flutter"));
+    copies.map(|(name, library, moved)| {
+        let package = root.join(format!("packages/{name}"));
+        write(&package, "lib/foo.dart", library);
+        if let Some(moved) = moved {
+            write(&package, "lib/src/foo.dart", moved);
+        }
         write(
-            dir.path(),
+            root,
             &format!("{name}/.dart_tool/package_config.json"),
             &format!(
                 r#"{{"configVersion": 2, "flutterRoot": "file://{}", "packages": [
@@ -2346,23 +2680,32 @@ fn package_contexts_resolve_package_uris_to_their_own_copies_in_every_order() {
                 canonical_or_lexical(&package).display(),
             ),
         );
-        canonical_or_lexical(&write(
-            dir.path(),
-            &format!("{name}/lib/main.dart"),
-            source,
-        ))
+        canonical_or_lexical(&write(root, &format!("{name}/lib/main.dart"), source))
     })
-    .collect();
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+}
+
+#[test]
+fn package_contexts_resolve_package_uris_to_their_own_copies_in_every_order() {
+    let (dir, _) = workspace();
+    let source = "import 'package:foo/foo.dart';";
+    let apps = package_copy_apps(
+        dir.path(),
+        source,
+        [
+            (
+                "getter",
+                "@Deprecated('getter type') class Foo { @Deprecated('getter member') int get value => 1; }",
+                None,
+            ),
+            (
+                "method",
+                "@Deprecated('method type') class Foo { @Deprecated('method member') Foo value(Foo argument) => argument; }",
+                None,
+            ),
+        ],
+    );
+    let parsed = parsed_fixture(source);
     let program = parsed.program();
-    assert!(errors.is_empty(), "{errors:?}");
 
     for order in [[0, 1], [1, 0]] {
         let paths = order.map(|index| apps[index].as_path());
@@ -2386,98 +2729,21 @@ fn package_contexts_resolve_package_uris_to_their_own_copies_in_every_order() {
                 libraries: &externals,
                 environment: &environment,
             };
-            let base = std::sync::Arc::new(IdentityIndex::build_external(external));
-            for identities in [
-                IdentityIndex::build(&sources, &[source, source], &[], Some(external)),
-                IdentityIndex::with_external(
-                    &sources,
-                    &[source, source],
-                    &[],
-                    external,
-                    base.clone(),
-                ),
-            ] {
-                let mut types = TypeIndex::from_resolved_files(
-                    paths.map(|path| {
-                        (
-                            path,
-                            LibrarySource {
-                                program,
-                                has_parse_errors: false,
-                                has_unresolved_parts: false,
-                            },
-                        )
-                    }),
-                    &identities,
-                );
-                types.add_external(&externals, &identities);
+            let (base, variants) = identity_variants(&sources, &[source; 2], external);
+            for identities in variants {
+                let types =
+                    external_types(paths.map(|path| (path, &parsed)), &externals, &identities);
                 let files = paths.map(|path| (path.to_path_buf(), Arc::clone(&parsed)));
                 let signatures =
                     SignatureIndex::build(&files, Some(&externals), &identities, &types);
-                let mut resolved = Vec::with_capacity(apps.len());
-                for (app, copy) in apps.iter().zip(["getter", "method"]) {
-                    let expected_path = canonical_or_lexical(
-                        &dir.path().join(format!("packages/{copy}/lib/foo.dart")),
-                    );
-                    let model = SemanticModel::new(app, &parsed, &identities, Some(&types));
-                    let identity = model.resolve_name("Foo").unwrap();
-                    assert!(identity.is_package("foo", "Foo"));
-                    assert!(identity.matches(&DeclarationIdentity::package("foo", "Foo")));
-                    let receiver = ResolvedType::interface_identity(identity.clone());
-                    assert_eq!(
-                        signatures.relation(
-                            &receiver,
-                            falcon_analyze::TypeRelation::SubtypeOfDeclaration(
-                                &DeclarationIdentity::package("foo", "Foo")
-                            ),
-                            &model
-                        ),
-                        falcon_analyze::Truth::Yes
-                    );
-                    for index in [&identities, base.as_ref()] {
-                        assert_eq!(
-                            index.declaration_library(&identity),
-                            Some(index.library(index.file(&expected_path).unwrap())),
-                            "order={order:?}, incremental={incremental}",
-                        );
-                        for selector in [
-                            MemberSelector::DECLARATION,
-                            MemberSelector::new(MemberSelectorKind::Read, false, "value"),
-                        ] {
-                            let (path, annotations) = index
-                                .source_annotations(&identity, selector.into())
-                                .unwrap();
-                            assert_eq!(path, expected_path);
-                            assert_eq!(annotations.len(), 1);
-                        }
-                    }
-                    if copy == "getter" {
-                        assert_eq!(
-                            types.member_lookup_identity(&identity, "value"),
-                            MemberResult::Found(MemberKind::Getter)
-                        );
-                        let (field, _) = signatures
-                            .resolved_field(&receiver, "value", &model)
-                            .unwrap();
-                        assert!(field.interface("dart:core", "int"));
-                    } else {
-                        assert_eq!(
-                            types.member_lookup_identity(&identity, "value"),
-                            MemberResult::Found(MemberKind::Method)
-                        );
-                        let (signature, _) = signatures
-                            .resolved_member(&receiver, "value", &model)
-                            .unwrap();
-                        assert_eq!(signature.return_type, receiver);
-                        assert!(
-                            signatures
-                                .resolved_field(&receiver, "value", &model)
-                                .is_none()
-                        );
-                    }
-                    resolved.push(identity);
-                }
-                assert_ne!(resolved[0], resolved[1]);
+                assert_package_copy_members(
+                    dir.path(),
+                    &apps,
+                    &parsed,
+                    (&identities, base.as_ref(), &types, &signatures),
+                    order,
+                    incremental,
+                );
             }
         }
     }
@@ -2499,73 +2765,10 @@ fn shared_dependency_cycle_resolves_three_contexts_with_equivalent_nonprimary_in
 }
 
 fn assert_shared_dependency_instances(reaches_foo: bool, through_cycle: bool) {
-    let (dir, _) = workspace();
-    let flutter = canonical_or_lexical(&dir.path().join("flutter"));
-    let bar = dir.path().join("packages/bar");
-    let bridge = dir.path().join("packages/baz");
-    if through_cycle {
-        write(
-            &bridge,
-            "lib/baz.dart",
-            "export 'package:foo/foo.dart';\nexport 'package:bar/bar.dart';",
-        );
-    }
-    let bar_path = canonical_or_lexical(&write(
-        &bar,
-        "lib/bar.dart",
-        if through_cycle {
-            "import 'package:baz/baz.dart';\n\
-             export 'package:baz/baz.dart';\n\
-             Foo makeValue() => Foo();"
-        } else if reaches_foo {
-            "import 'package:foo/foo.dart';\n\
-             export 'package:foo/foo.dart';\n\
-             Foo makeValue() => Foo();"
-        } else {
-            "export 'src/shared.dart';\n\
-             import 'src/shared.dart';\n\
-             Shared makeValue() => Shared();"
-        },
-    ));
-    if !reaches_foo {
-        write(&bar, "lib/src/shared.dart", "class Shared {}");
-    }
     let source = "import 'package:foo/foo.dart';\nimport 'package:bar/bar.dart';";
-    let apps = [
-        ("first", "first"),
-        ("second", "second"),
-        ("third", "second"),
-    ]
-    .map(|(name, copy)| {
-        let package_root = dir.path().join(format!("packages/{copy}/foo"));
-        write(&package_root, "lib/foo.dart", "class Foo {}");
-        write(
-            dir.path(),
-            &format!("{name}/.dart_tool/package_config.json"),
-            &format!(
-                r#"{{"configVersion": 2, "flutterRoot": "file://{}", "packages": [
-                    {{"name": "foo", "rootUri": "file://{}", "packageUri": "lib/"}},
-                    {{"name": "bar", "rootUri": "file://{}", "packageUri": "lib/"}},
-                    {{"name": "baz", "rootUri": "file://{}", "packageUri": "lib/"}}
-                ]}}"#,
-                flutter.display(),
-                canonical_or_lexical(&package_root).display(),
-                canonical_or_lexical(&bar).display(),
-                canonical_or_lexical(&bridge).display(),
-            ),
-        );
-        canonical_or_lexical(&write(dir.path(), &format!("{name}/lib/main.dart"), source))
-    });
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (dir, bar_path, apps) = shared_dependency_workspace(reaches_foo, through_cycle, source);
+    let parsed = parsed_fixture(source);
     let program = parsed.program();
-    assert!(errors.is_empty(), "{errors:?}");
 
     for order in [[0, 1, 2], [2, 1, 0]] {
         let paths = order.map(|index| apps[index].as_path());
@@ -2583,46 +2786,16 @@ fn assert_shared_dependency_instances(reaches_foo: bool, through_cycle: bool) {
             } else {
                 ExternalLibraries::load(&environment, &roots, is_project)
             };
-            let topology: Vec<_> = externals
-                .libraries()
-                .iter()
-                .map(|library| {
-                    (
-                        library.files[0].path.clone(),
-                        library.context,
-                        library.copy_context,
-                        Arc::clone(&library.files),
-                    )
-                })
-                .collect();
-            externals.extend(&environment, &roots, is_project);
-            assert_eq!(externals.libraries().len(), topology.len());
-            for (library, (path, context, copy_context, files)) in
-                externals.libraries().iter().zip(&topology)
-            {
-                assert_eq!(&library.files[0].path, path);
-                assert_eq!(library.context, *context);
-                assert_eq!(library.copy_context, *copy_context);
-                assert!(Arc::ptr_eq(&library.files, files));
-            }
-            let bar_instances: Vec<_> = externals
-                .libraries()
-                .iter()
-                .filter(|library| library.files[0].path == bar_path)
-                .collect();
-            assert_eq!(
-                bar_instances.len(),
-                if reaches_foo { 2 } else { 1 },
-                "order={order:?}, incremental={incremental}",
+            assert_repeated_extension_preserves_topology(&mut externals, |externals| {
+                externals.extend(&environment, &roots, is_project);
+            });
+            assert_shared_dependency_topology(
+                &externals,
+                &bar_path,
+                reaches_foo,
+                order,
+                incremental,
             );
-            if !reaches_foo {
-                let defining_paths: std::collections::BTreeSet<_> = externals
-                    .libraries()
-                    .iter()
-                    .map(|library| &library.files[0].path)
-                    .collect();
-                assert_eq!(externals.libraries().len(), defining_paths.len());
-            }
             let sources = paths.map(|path| IdentitySource {
                 path,
                 parsed: &parsed,
@@ -2632,25 +2805,10 @@ fn assert_shared_dependency_instances(reaches_foo: bool, through_cycle: bool) {
                 libraries: &externals,
                 environment: &environment,
             };
-            let base = std::sync::Arc::new(IdentityIndex::build_external(external));
-            for identities in [
-                IdentityIndex::build(&sources, &[source; 3], &[], Some(external)),
-                IdentityIndex::with_external(&sources, &[source; 3], &[], external, base.clone()),
-            ] {
-                let mut types = TypeIndex::from_resolved_files(
-                    paths.map(|path| {
-                        (
-                            path,
-                            LibrarySource {
-                                program,
-                                has_parse_errors: false,
-                                has_unresolved_parts: false,
-                            },
-                        )
-                    }),
-                    &identities,
-                );
-                types.add_external(&externals, &identities);
+            let (base, variants) = identity_variants(&sources, &[source; 3], external);
+            for identities in variants {
+                let types =
+                    external_types(paths.map(|path| (path, &parsed)), &externals, &identities);
                 let files = paths.map(|path| (path.to_path_buf(), Arc::clone(&parsed)));
                 let signatures =
                     SignatureIndex::build(&files, Some(&externals), &identities, &types);
@@ -2713,79 +2871,9 @@ fn configured_context_omitting_shared_package_keeps_project_identity() {
 }
 
 fn assert_contextless_shared_dependency(divergent: bool, configured_outside: bool) {
-    let (dir, _) = workspace();
-    let flutter = canonical_or_lexical(&dir.path().join("flutter"));
-    let bar = dir.path().join("packages/bar");
-    let foo_root = dir.path().join("packages/foo");
-    write(&foo_root, "lib/foo.dart", "class Foo {}");
-    let bar_path = canonical_or_lexical(&write(
-        &bar,
-        "lib/bar.dart",
-        if divergent {
-            "import 'package:foo/foo.dart';\nclass Shared extends Foo {}"
-        } else {
-            "class Shared {}"
-        },
-    ));
-    let mut paths = vec![canonical_or_lexical(&write(
-        dir.path(),
-        "outside/main.dart",
-        "import '../packages/bar/lib/bar.dart';",
-    ))];
-    let mut texts = vec!["import '../packages/bar/lib/bar.dart';"];
-    if configured_outside {
-        write(
-            dir.path(),
-            "outside/.dart_tool/package_config.json",
-            &format!(
-                r#"{{"configVersion": 2, "flutterRoot": "file://{}", "packages": []}}"#,
-                flutter.display(),
-            ),
-        );
-    }
-    for name in ["first", "second"]
-        .into_iter()
-        .take(if divergent || configured_outside {
-            1
-        } else {
-            2
-        })
-    {
-        write(
-            dir.path(),
-            &format!("{name}/.dart_tool/package_config.json"),
-            &format!(
-                r#"{{"configVersion": 2, "flutterRoot": "file://{}", "packages": [
-                    {{"name": "bar", "rootUri": "file://{}", "packageUri": "lib/"}},
-                    {{"name": "foo", "rootUri": "file://{}", "packageUri": "lib/"}}
-                ]}}"#,
-                flutter.display(),
-                canonical_or_lexical(&bar).display(),
-                canonical_or_lexical(&foo_root).display(),
-            ),
-        );
-        paths.push(canonical_or_lexical(&write(
-            dir.path(),
-            &format!("{name}/lib/main.dart"),
-            "import 'package:bar/bar.dart';",
-        )));
-        texts.push("import 'package:bar/bar.dart';");
-    }
-    let parseds: Vec<_> = texts
-        .iter()
-        .map(|text| {
-            let falcon_dart_parser::ParseResult {
-                tree: parsed_tree,
-                errors,
-            } = parse(text);
-            let parsed = Arc::new(ParsedFile {
-                source: text.to_string().into_boxed_str(),
-                tree: parsed_tree,
-            });
-            assert!(errors.is_empty(), "{errors:?}");
-            parsed
-        })
-        .collect();
+    let (_dir, bar_path, paths, texts) =
+        contextless_dependency_workspace(divergent, configured_outside);
+    let parseds: Vec<_> = texts.iter().map(|text| parsed_fixture(text)).collect();
     let orders = if divergent || configured_outside {
         vec![vec![0, 1], vec![1, 0]]
     } else {
@@ -2839,11 +2927,8 @@ fn assert_contextless_shared_dependency(divergent: bool, configured_outside: boo
                 libraries: &externals,
                 environment: &environment,
             };
-            let base = std::sync::Arc::new(IdentityIndex::build_external(external));
-            for identities in [
-                IdentityIndex::build(&sources, &content, &[], Some(external)),
-                IdentityIndex::with_external(&sources, &content, &[], external, base.clone()),
-            ] {
+            let (base, variants) = identity_variants(&sources, &content, external);
+            for identities in variants {
                 for (path, parsed) in paths.iter().zip(&parseds).skip(1) {
                     let model = SemanticModel::new(path, parsed, &identities, None);
                     let identity = model.resolve_name("Shared").unwrap();
@@ -3090,31 +3175,15 @@ fn documentation_imports_split_shared_dependency_instances() {
 #[test]
 fn package_copies_keep_package_identities_when_a_declaration_moves_between_versions() {
     let (dir, _) = workspace();
-    let flutter = canonical_or_lexical(&dir.path().join("flutter"));
     let source = "import 'package:foo/foo.dart';";
-    let apps = [
-        ("old", "class Foo {}", None),
-        ("new", "export 'src/foo.dart';", Some("class Foo {}")),
-    ]
-    .map(|(name, library, moved)| {
-        let package = dir.path().join(format!("packages/{name}"));
-        write(&package, "lib/foo.dart", library);
-        if let Some(moved) = moved {
-            write(&package, "lib/src/foo.dart", moved);
-        }
-        write(
-            dir.path(),
-            &format!("{name}/.dart_tool/package_config.json"),
-            &format!(
-                r#"{{"configVersion": 2, "flutterRoot": "file://{}", "packages": [
-                    {{"name": "foo", "rootUri": "file://{}", "packageUri": "lib/"}}
-                ]}}"#,
-                flutter.display(),
-                canonical_or_lexical(&package).display(),
-            ),
-        );
-        canonical_or_lexical(&write(dir.path(), &format!("{name}/lib/main.dart"), source))
-    });
+    let apps = package_copy_apps(
+        dir.path(),
+        source,
+        [
+            ("old", "class Foo {}", None),
+            ("new", "export 'src/foo.dart';", Some("class Foo {}")),
+        ],
+    );
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree, ..
     } = parse(source);
@@ -3153,8 +3222,6 @@ fn package_copies_keep_package_identities_when_a_declaration_moves_between_versi
 
 #[test]
 fn duplicate_sdk_copies_choose_the_same_physical_authority_in_every_load_order() {
-    use falcon_analyze::{MemberKind, MemberResult};
-
     let (dir, first) = workspace();
     write(
         dir.path(),
@@ -3183,16 +3250,8 @@ fn duplicate_sdk_copies_choose_the_same_physical_authority_in_every_load_order()
     let source = "import 'dart:core';";
     let second = canonical_or_lexical(&write(dir.path(), "second/lib/main.dart", source));
     let apps = [first, second];
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let parsed = parsed_fixture(source);
     let program = parsed.program();
-    assert!(errors.is_empty(), "{errors:?}");
 
     for order in [[0, 1], [1, 0]] {
         let paths = order.map(|index| apps[index].as_path());
@@ -3224,25 +3283,10 @@ fn duplicate_sdk_copies_choose_the_same_physical_authority_in_every_load_order()
                 libraries: &externals,
                 environment: &environment,
             };
-            let base = std::sync::Arc::new(IdentityIndex::build_external(external));
-            for identities in [
-                IdentityIndex::build(&sources, &[source, source], &[], Some(external)),
-                IdentityIndex::with_external(&sources, &[source, source], &[], external, base),
-            ] {
-                let mut types = TypeIndex::from_resolved_files(
-                    paths.map(|path| {
-                        (
-                            path,
-                            LibrarySource {
-                                program,
-                                has_parse_errors: false,
-                                has_unresolved_parts: false,
-                            },
-                        )
-                    }),
-                    &identities,
-                );
-                types.add_external(&externals, &identities);
+            let (_base, variants) = identity_variants(&sources, &[source; 2], external);
+            for identities in variants {
+                let types =
+                    external_types(paths.map(|path| (path, &parsed)), &externals, &identities);
                 let files = paths.map(|path| (path.to_path_buf(), Arc::clone(&parsed)));
                 let signatures =
                     SignatureIndex::build(&files, Some(&externals), &identities, &types);
@@ -3258,21 +3302,13 @@ fn duplicate_sdk_copies_choose_the_same_physical_authority_in_every_load_order()
                         identities.declaration_library(&identity),
                         Some(identities.library(identities.file(&expected_path).unwrap())),
                     );
-                    assert_eq!(
-                        types.member_lookup_identity(&identity, "value"),
-                        MemberResult::Found(MemberKind::Method),
-                        "order={order:?}, incremental={incremental}",
-                    );
-                    let receiver = ResolvedType::interface_identity(identity);
-                    let (signature, _) = signatures
-                        .resolved_member(&receiver, "value", &model)
-                        .unwrap();
-                    assert_eq!(signature.return_type, receiver);
-                    assert!(signature.positional.is_empty());
-                    assert!(
-                        signatures
-                            .resolved_field(&receiver, "value", &model)
-                            .is_none()
+                    assert_sdk_authority_member(
+                        &types,
+                        &signatures,
+                        &model,
+                        identity,
+                        order,
+                        incremental,
                     );
                 }
             }
@@ -3288,65 +3324,10 @@ fn shared_dependency_keeps_first_loaded_sdk_types_in_signatures() {
 }
 
 fn assert_shared_dependency_sdk_types(divergent: bool) {
-    let dir = tempfile::tempdir().unwrap();
-    let shared_root = dir.path().join("packages/shared");
-    let shared_path = canonical_or_lexical(&write(
-        &shared_root,
-        "lib/shared.dart",
-        if divergent {
-            "import 'dart:io';\nimport 'package:foo/foo.dart';\nIoType makeIo() => IoType();"
-        } else {
-            "import 'dart:io';\nIoType makeIo() => IoType();"
-        },
-    ));
     let source = "import 'package:shared/shared.dart';";
-    let apps = ["first", "second"].map(|name| {
-        let flutter = dir.path().join(format!("{name}_flutter"));
-        let foo_root = dir.path().join(format!("packages/{name}/foo"));
-        write(&foo_root, "lib/foo.dart", "class Foo {}");
-        write(
-            &flutter,
-            "bin/cache/dart-sdk/lib/libraries.json",
-            r#"{"vm": {"libraries": {
-                "core": {"uri": "core/core.dart"},
-                "io": {"uri": "io/io.dart"}
-            }}}"#,
-        );
-        write(
-            &flutter,
-            "bin/cache/dart-sdk/lib/core/core.dart",
-            "class Object {}",
-        );
-        write(
-            &flutter,
-            "bin/cache/dart-sdk/lib/io/io.dart",
-            &format!("library dart.io;\nclass IoType {{ void {name}Only() {{}} }}"),
-        );
-        write(
-            dir.path(),
-            &format!("{name}/.dart_tool/package_config.json"),
-            &format!(
-                r#"{{"configVersion": 2, "flutterRoot": "file://{}", "packages": [
-                    {{"name": "shared", "rootUri": "file://{}", "packageUri": "lib/"}},
-                    {{"name": "foo", "rootUri": "file://{}", "packageUri": "lib/"}}
-                ]}}"#,
-                canonical_or_lexical(&flutter).display(),
-                canonical_or_lexical(&shared_root).display(),
-                canonical_or_lexical(&foo_root).display(),
-            ),
-        );
-        canonical_or_lexical(&write(dir.path(), &format!("{name}/lib/main.dart"), source))
-    });
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (_dir, shared_path, apps) = shared_sdk_workspace(divergent, source);
+    let parsed = parsed_fixture(source);
     let program = parsed.program();
-    assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator(
         apps.iter().map(PathBuf::as_path),
         fixture_sdk,
@@ -3392,25 +3373,10 @@ fn assert_shared_dependency_sdk_types(divergent: bool) {
                 libraries: &externals,
                 environment: &environment,
             };
-            let base = std::sync::Arc::new(IdentityIndex::build_external(external));
-            for identities in [
-                IdentityIndex::build(&sources, &[source; 2], &[], Some(external)),
-                IdentityIndex::with_external(&sources, &[source; 2], &[], external, base.clone()),
-            ] {
-                let mut types = TypeIndex::from_resolved_files(
-                    paths.map(|path| {
-                        (
-                            path,
-                            LibrarySource {
-                                program,
-                                has_parse_errors: false,
-                                has_unresolved_parts: false,
-                            },
-                        )
-                    }),
-                    &identities,
-                );
-                types.add_external(&externals, &identities);
+            let (base, variants) = identity_variants(&sources, &[source; 2], external);
+            for identities in variants {
+                let types =
+                    external_types(paths.map(|path| (path, &parsed)), &externals, &identities);
                 let files = paths.map(|path| (path.to_path_buf(), Arc::clone(&parsed)));
                 let signatures =
                     SignatureIndex::build(&files, Some(&externals), &identities, &types);
@@ -3454,63 +3420,10 @@ fn assert_shared_dependency_sdk_types(divergent: bool) {
 fn shared_dependency_doc_imports_use_first_loaded_sdk_availability() {
     use falcon_analyze::{DocName, NameIdentity};
 
-    let dir = tempfile::tempdir().unwrap();
-    let shared_root = dir.path().join(".pub-cache/hosted/pub.dev/shared-1.0.0");
-    let shared_path = canonical_or_lexical(&write(
-        &shared_root,
-        "lib/shared.dart",
-        "/// @docImport 'dart:io';\nlibrary;\nclass Shared {}",
-    ));
     let source = "import 'package:shared/shared.dart';";
-    let apps = ["present", "absent"].map(|name| {
-        let flutter = dir.path().join(format!("{name}_flutter"));
-        write(
-            &flutter,
-            "bin/cache/dart-sdk/lib/libraries.json",
-            if name == "present" {
-                r#"{"vm": {"libraries": {
-                    "core": {"uri": "core/core.dart"},
-                    "io": {"uri": "io/io.dart"}
-                }}}"#
-            } else {
-                r#"{"vm": {"libraries": {"core": {"uri": "core/core.dart"}}}}"#
-            },
-        );
-        write(
-            &flutter,
-            "bin/cache/dart-sdk/lib/core/core.dart",
-            "class Object {}",
-        );
-        if name == "present" {
-            write(
-                &flutter,
-                "bin/cache/dart-sdk/lib/io/io.dart",
-                "library dart.io;\nclass File {}",
-            );
-        }
-        write(
-            dir.path(),
-            &format!("{name}/.dart_tool/package_config.json"),
-            &format!(
-                r#"{{"configVersion": 2, "flutterRoot": "file://{}", "packages": [
-                    {{"name": "shared", "rootUri": "file://{}", "packageUri": "lib/"}}
-                ]}}"#,
-                canonical_or_lexical(&flutter).display(),
-                canonical_or_lexical(&shared_root).display(),
-            ),
-        );
-        canonical_or_lexical(&write(dir.path(), &format!("{name}/lib/main.dart"), source))
-    });
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (_dir, shared_path, apps) = shared_doc_import_workspace(source);
+    let parsed = parsed_fixture(source);
     let program = parsed.program();
-    assert!(errors.is_empty(), "{errors:?}");
     for discovery_order in [[0, 1], [1, 0]] {
         let environment = AnalysisEnvironment::discover_with_sdk_locator(
             discovery_order.map(|index| apps[index].as_path()),
@@ -3538,17 +3451,8 @@ fn shared_dependency_doc_imports_use_first_loaded_sdk_availability() {
                     libraries: &externals,
                     environment: &environment,
                 };
-                let base = std::sync::Arc::new(IdentityIndex::build_external(external));
-                for identities in [
-                    IdentityIndex::build(&sources, &[source; 2], &[], Some(external)),
-                    IdentityIndex::with_external(
-                        &sources,
-                        &[source; 2],
-                        &[],
-                        external,
-                        base.clone(),
-                    ),
-                ] {
+                let (_base, variants) = identity_variants(&sources, &[source; 2], external);
+                for identities in variants {
                     let library = identities.library(identities.file(&shared_path).unwrap());
                     assert_eq!(identities.library_name(library, "File"), DocName::Absent);
                     assert_eq!(

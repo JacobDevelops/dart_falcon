@@ -212,26 +212,12 @@ fn fix_with_cancellation(
             };
         }
         let mut diagnostics = analyze(&source);
-        if cancelled()
-            || diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.rule == SYNTAX_ERROR_DIAGNOSTIC_ID)
-        {
-            let stop = Some(if cancelled() {
-                FixStop::Cancelled
-            } else if applied.is_empty() {
-                FixStop::SyntaxErrors
-            } else {
-                FixStop::AnalysisFailure {
-                    message: "a fix produced invalid source".to_owned(),
-                    rules: vec![*applied.last().expect("a fix was applied")],
-                }
-            });
+        if let Some(stop) = syntax_analysis_stop(&diagnostics, cancelled, &applied) {
             resolve_document_positions(&mut diagnostics, &source);
             return FixOutcome {
                 source,
                 diagnostics,
-                stop,
+                stop: Some(stop),
             };
         }
         let fixable = diagnostics
@@ -267,59 +253,26 @@ fn fix_with_cancellation(
         diagnostics.sort_by_key(|diagnostic| {
             (diagnostic.span.start, diagnostic.rule, diagnostic.span.end)
         });
-        let mut next = None;
-        let mut stop = None;
-        for diagnostic in &diagnostics {
-            let Some(fix) = &diagnostic.fix else { continue };
-            if fix.kind == FixKind::Unsafe && !unsafe_fixes {
-                continue;
-            }
-            let candidate = match fix.apply(&source) {
-                Ok(candidate) => candidate,
-                Err(error) => {
-                    stop = Some(FixStop::InvalidFix {
-                        rule: diagnostic.rule,
-                        error,
-                    });
-                    break;
-                }
-            };
-            if candidate == source {
-                continue;
-            }
-            let candidate_fingerprint = fingerprint(&candidate);
-            let repeated = seen.get(&candidate_fingerprint).and_then(|states| {
-                states.iter().copied().find(|&state| {
-                    let mut previous = original.to_owned();
-                    for edit in &edits[..state] {
-                        previous = edit.apply(&previous).expect("previously applied fix");
-                    }
-                    previous == candidate
-                })
-            });
-            if let Some(start) = repeated {
-                let mut rules = applied[start..].to_vec();
-                rules.push(diagnostic.rule);
-                stop = Some(FixStop::Cycle {
-                    rules: unique_rules(rules),
-                });
-            } else if nonconverging >= limit {
-                let mut rules = applied.clone();
-                rules.push(diagnostic.rule);
-                stop = Some(FixStop::IterationLimit {
-                    rules: unique_rules(rules),
-                });
-            } else {
-                next = Some((
-                    candidate,
-                    candidate_fingerprint,
-                    diagnostic.rule,
-                    fix.clone(),
-                ));
-            }
-            break;
-        }
-        if let Some((candidate, candidate_fingerprint, rule, fix)) = next {
+        let (next, stop) = select_next_fix(
+            &diagnostics,
+            &source,
+            unsafe_fixes,
+            &FixHistory {
+                original,
+                seen: &seen,
+                applied: &applied,
+                edits: &edits,
+            },
+            nonconverging,
+            limit,
+        );
+        if let Some(PendingFix {
+            candidate,
+            candidate_fingerprint,
+            rule,
+            fix,
+        }) = next
+        {
             seen.entry(source_fingerprint)
                 .or_default()
                 .push(applied.len());
@@ -336,6 +289,108 @@ fn fix_with_cancellation(
             };
         }
     }
+}
+
+fn syntax_analysis_stop(
+    diagnostics: &[Diagnostic],
+    cancelled: &dyn Fn() -> bool,
+    applied: &[&'static str],
+) -> Option<FixStop> {
+    if cancelled()
+        || diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule == SYNTAX_ERROR_DIAGNOSTIC_ID)
+    {
+        Some(if cancelled() {
+            FixStop::Cancelled
+        } else if applied.is_empty() {
+            FixStop::SyntaxErrors
+        } else {
+            FixStop::AnalysisFailure {
+                message: "a fix produced invalid source".to_owned(),
+                rules: vec![*applied.last().expect("a fix was applied")],
+            }
+        })
+    } else {
+        None
+    }
+}
+
+struct FixHistory<'a> {
+    original: &'a str,
+    seen: &'a HashMap<(u64, usize), Vec<usize>>,
+    applied: &'a [&'static str],
+    edits: &'a [Fix],
+}
+
+struct PendingFix {
+    candidate: String,
+    candidate_fingerprint: (u64, usize),
+    rule: &'static str,
+    fix: Fix,
+}
+
+fn select_next_fix(
+    diagnostics: &[Diagnostic],
+    source: &str,
+    unsafe_fixes: bool,
+    history: &FixHistory<'_>,
+    nonconverging: usize,
+    limit: usize,
+) -> (Option<PendingFix>, Option<FixStop>) {
+    let mut next = None;
+    let mut stop = None;
+    for diagnostic in diagnostics {
+        let Some(fix) = &diagnostic.fix else { continue };
+        if fix.kind == FixKind::Unsafe && !unsafe_fixes {
+            continue;
+        }
+        let candidate = match fix.apply(source) {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                stop = Some(FixStop::InvalidFix {
+                    rule: diagnostic.rule,
+                    error,
+                });
+                break;
+            }
+        };
+        if candidate == source {
+            continue;
+        }
+        let candidate_fingerprint = fingerprint(&candidate);
+        let repeated = history.seen.get(&candidate_fingerprint).and_then(|states| {
+            states.iter().copied().find(|&state| {
+                let mut previous = history.original.to_owned();
+                for edit in &history.edits[..state] {
+                    previous = edit.apply(&previous).expect("previously applied fix");
+                }
+                previous == candidate
+            })
+        });
+        if let Some(start) = repeated {
+            let mut rules = history.applied[start..].to_vec();
+            rules.push(diagnostic.rule);
+            stop = Some(FixStop::Cycle {
+                rules: unique_rules(rules),
+            });
+        } else if nonconverging >= limit {
+            let mut rules = history.applied.to_vec();
+            rules.push(diagnostic.rule);
+            stop = Some(FixStop::IterationLimit {
+                rules: unique_rules(rules),
+            });
+        } else {
+            next = Some(PendingFix {
+                candidate,
+                candidate_fingerprint,
+                rule: diagnostic.rule,
+                fix: fix.clone(),
+            });
+        }
+        break;
+    }
+    (next, stop)
 }
 
 fn fingerprint(source: &str) -> (u64, usize) {

@@ -32,7 +32,6 @@ use crate::lint::support::directive_strings::uri_value;
 #[derive(Default)]
 pub struct DirectivesOrdering;
 
-
 /// A namespace directive (import, export, or `@docImport`) in source order.
 struct Namespace {
     /// The URI with escapes resolved, as the analyzer's `stringValue`.
@@ -109,48 +108,7 @@ impl Rule for DirectivesOrdering {
             }
         }
 
-        // Exports form their own section after all imports: walking backwards,
-        // skip trailing parts, then the trailing export block; any export left
-        // precedes an import.
-        let mut directives: Vec<(usize, DirectiveKind, Span)> = program
-            .imports()
-            .map(|d| (d.span().start, DirectiveKind::Import, d.span()))
-            .chain(
-                program
-                    .exports()
-                    .map(|d| (d.span().start, DirectiveKind::Export, d.span())),
-            )
-            .chain(
-                program
-                    .part_directives()
-                    .map(|d| (d.span().start, DirectiveKind::Part, d.span())),
-            )
-            .chain(
-                program
-                    .library_directive()
-                    .into_iter()
-                    .map(|d| (d.span().start, DirectiveKind::Other, d.span())),
-            )
-            .chain(
-                program
-                    .part_of_directive()
-                    .into_iter()
-                    .map(|d| (d.span().start, DirectiveKind::Other, d.span())),
-            )
-            .collect();
-        directives.sort_by_key(|(start, _, _)| *start);
-        for (_, _, span) in directives
-            .iter()
-            .rev()
-            .skip_while(|(_, kind, _)| *kind == DirectiveKind::Part)
-            .skip_while(|(_, kind, _)| *kind == DirectiveKind::Export)
-            .filter(|(_, kind, _)| *kind == DirectiveKind::Export)
-        {
-            report(
-                *span,
-                "Specify exports in a separate section after all imports.".to_string(),
-            );
-        }
+        check_export_section(program, &mut report);
 
         // Each section is sorted alphabetically.
         type Section = fn(&Namespace) -> bool;
@@ -171,6 +129,51 @@ impl Rule for DirectivesOrdering {
         }
 
         RulePreparation::Diagnostics(diags)
+    }
+}
+
+fn check_export_section(program: Program<'_>, report: &mut impl FnMut(Span, String)) {
+    // Exports form their own section after all imports: walking backwards,
+    // skip trailing parts, then the trailing export block; any export left
+    // precedes an import.
+    let mut directives: Vec<(usize, DirectiveKind, Span)> = program
+        .imports()
+        .map(|d| (d.span().start, DirectiveKind::Import, d.span()))
+        .chain(
+            program
+                .exports()
+                .map(|d| (d.span().start, DirectiveKind::Export, d.span())),
+        )
+        .chain(
+            program
+                .part_directives()
+                .map(|d| (d.span().start, DirectiveKind::Part, d.span())),
+        )
+        .chain(
+            program
+                .library_directive()
+                .into_iter()
+                .map(|d| (d.span().start, DirectiveKind::Other, d.span())),
+        )
+        .chain(
+            program
+                .part_of_directive()
+                .into_iter()
+                .map(|d| (d.span().start, DirectiveKind::Other, d.span())),
+        )
+        .collect();
+    directives.sort_by_key(|(start, _, _)| *start);
+    for (_, _, span) in directives
+        .iter()
+        .rev()
+        .skip_while(|(_, kind, _)| *kind == DirectiveKind::Part)
+        .skip_while(|(_, kind, _)| *kind == DirectiveKind::Export)
+        .filter(|(_, kind, _)| *kind == DirectiveKind::Export)
+    {
+        report(
+            *span,
+            "Specify exports in a separate section after all imports.".to_string(),
+        );
     }
 }
 

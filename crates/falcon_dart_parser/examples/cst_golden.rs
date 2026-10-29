@@ -155,6 +155,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    check_golden(&output, &rows, bytes, started, skipped)
+}
+
+fn check_golden(
+    output: &Path,
+    rows: &BTreeMap<String, String>,
+    bytes: u64,
+    started: Instant,
+    skipped: i32,
+) -> Result<(), Box<dyn std::error::Error>> {
     let expected = fs::read_to_string(output)?;
     let mut expected_rows = BTreeMap::new();
     for line in expected.lines() {

@@ -334,24 +334,25 @@ impl UnionFind {
     }
 }
 
+/// Parse a valid Dart source fixture shared by resolver unit tests.
+#[cfg(test)]
+pub(crate) fn parsed_fixture(source: &str) -> Arc<ParsedFile> {
+    let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
+    assert!(errors.is_empty(), "parse errors: {errors:?}");
+    Arc::new(ParsedFile {
+        source: source.into(),
+        tree,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use falcon_dart_parser::parse;
-
-    fn prog(src: &str) -> Arc<ParsedFile> {
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-        assert!(errors.is_empty(), "parse errors: {errors:?}");
-        Arc::new(ParsedFile {
-            source: src.into(),
-            tree,
-        })
-    }
 
     #[test]
     fn standalone_files_are_single_file_libraries() {
-        let a = prog("class A {}");
-        let b = prog("class B {}");
+        let a = parsed_fixture("class A {}");
+        let b = parsed_fixture("class B {}");
         let files = vec![
             (PathBuf::from("/proj/a.dart"), a.program()),
             (PathBuf::from("/proj/b.dart"), b.program()),
@@ -365,8 +366,8 @@ mod tests {
 
     #[test]
     fn owner_and_part_by_relative_uri_group_together() {
-        let owner = prog("part 'part.dart'; class Owner {}");
-        let part = prog("part of 'owner.dart'; class Extra {}");
+        let owner = parsed_fixture("part 'part.dart'; class Owner {}");
+        let part = parsed_fixture("part of 'owner.dart'; class Extra {}");
         let files = vec![
             (PathBuf::from("/proj/owner.dart"), owner.program()),
             (PathBuf::from("/proj/part.dart"), part.program()),
@@ -380,8 +381,8 @@ mod tests {
 
     #[test]
     fn part_of_by_library_name_matches_owner() {
-        let owner = prog("library my.lib; part 'p.dart';");
-        let part = prog("part of my.lib; class Extra {}");
+        let owner = parsed_fixture("library my.lib; part 'p.dart';");
+        let part = parsed_fixture("part of my.lib; class Extra {}");
         let files = vec![
             (PathBuf::from("/proj/owner.dart"), owner.program()),
             (PathBuf::from("/proj/p.dart"), part.program()),
@@ -396,9 +397,9 @@ mod tests {
     fn ambiguous_library_name_leaves_part_of_unresolved() {
         // Two files declare the same library name, so a `part of <name>;` cannot
         // pick a single owner — the link stays unresolved and no group forms.
-        let owner_a = prog("library my.lib; class A {}");
-        let owner_b = prog("library my.lib; class B {}");
-        let part = prog("part of my.lib; class Extra {}");
+        let owner_a = parsed_fixture("library my.lib; class A {}");
+        let owner_b = parsed_fixture("library my.lib; class B {}");
+        let part = parsed_fixture("part of my.lib; class Extra {}");
         let files = vec![
             (PathBuf::from("/proj/a.dart"), owner_a.program()),
             (PathBuf::from("/proj/b.dart"), owner_b.program()),
@@ -430,7 +431,7 @@ mod tests {
 
     #[test]
     fn unresolved_part_uri_flags_the_library() {
-        let owner = prog("part 'missing.dart'; class Owner {}");
+        let owner = parsed_fixture("part 'missing.dart'; class Owner {}");
         let files = vec![(PathBuf::from("/proj/owner.dart"), owner.program())];
         let g = group_libraries(&files);
         assert!(g.is_unresolved(0));
@@ -439,7 +440,7 @@ mod tests {
 
     #[test]
     fn unresolved_part_of_name_flags_the_part() {
-        let part = prog("part of nonexistent.lib; class Extra {}");
+        let part = parsed_fixture("part of nonexistent.lib; class Extra {}");
         let files = vec![(PathBuf::from("/proj/p.dart"), part.program())];
         let g = group_libraries(&files);
         assert!(g.is_unresolved(0));
@@ -450,8 +451,8 @@ mod tests {
         // The owner stitches one resolvable part and one missing part. The
         // missing part flags the owner, and the flag propagates to every member
         // of the merged group (the resolvable part inherits it).
-        let owner = prog("part 'p.dart'; part 'missing.dart'; class Owner {}");
-        let part = prog("part of 'owner.dart'; class Extra {}");
+        let owner = parsed_fixture("part 'p.dart'; part 'missing.dart'; class Owner {}");
+        let part = parsed_fixture("part of 'owner.dart'; class Extra {}");
         let files = vec![
             (PathBuf::from("/proj/owner.dart"), owner.program()),
             (PathBuf::from("/proj/p.dart"), part.program()),
@@ -464,7 +465,7 @@ mod tests {
 
     #[test]
     fn package_uri_part_is_unresolved() {
-        let owner = prog("part 'package:foo/bar.dart'; class Owner {}");
+        let owner = parsed_fixture("part 'package:foo/bar.dart'; class Owner {}");
         let files = vec![(PathBuf::from("/proj/owner.dart"), owner.program())];
         let g = group_libraries(&files);
         assert!(g.is_unresolved(0));
@@ -476,8 +477,8 @@ mod tests {
             "part 'part.dart'; class Owner {}",
             "part of 'owner.dart'; class Extra {}",
         ];
-        let owner = prog(sources[0]);
-        let part = prog(sources[1]);
+        let owner = parsed_fixture(sources[0]);
+        let part = parsed_fixture(sources[1]);
         let files = vec![
             (PathBuf::from("/proj/owner.dart"), owner.program()),
             (PathBuf::from("/proj/part.dart"), part.program()),

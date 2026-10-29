@@ -654,116 +654,8 @@ impl<'a> SemanticModel<'a> {
         match ty {
             DartType::Void(_) => ResolvedType::VOID,
             DartType::Dynamic(_) => ResolvedType::DYNAMIC,
-            DartType::Named(named) => {
-                let mut segments = named.segments();
-                if let Some(segment) = segments.next()
-                    && segments.next().is_none()
-                    && let Some(parameter) = parameters.lookup(segment.name())
-                {
-                    return parameter.with_nullable(parameter.nullable() || named.is_nullable());
-                }
-                let Some(identity) = QualifiedName::from_identifiers(named.segments())
-                    .and_then(|name| self.resolve_name(name))
-                else {
-                    return ResolvedType::UNKNOWN;
-                };
-                if identity.is_sdk("dart:core", "Null") {
-                    return ResolvedType::NULL;
-                }
-                if identity.is_sdk("dart:core", "Never") {
-                    return if named.is_nullable() {
-                        ResolvedType::NULL
-                    } else {
-                        ResolvedType::NEVER
-                    };
-                }
-                if let Some(alias) = self.identities.type_alias(&identity) {
-                    let arguments: Vec<_> = named
-                        .type_args()
-                        .map(|argument| self.resolve_type_in(argument, parameters))
-                        .collect();
-                    return self.expand_alias(
-                        &identity,
-                        alias,
-                        &arguments,
-                        named.is_nullable(),
-                        Some((self.file, self.type_occurrence(named.span().start))),
-                    );
-                }
-                let extension_type = self.types.is_some_and(|types| {
-                    types.type_kind_identity(&identity) == Some(super::TypeKind::ExtensionType)
-                });
-                ResolvedType::from_kind(ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
-                    identity,
-                    arguments: if named.type_args().is_empty() {
-                        empty_type_arguments()
-                    } else {
-                        named
-                            .type_args()
-                            .map(|argument| self.resolve_type_in(argument, parameters))
-                            .collect()
-                    },
-                    nullable: named.is_nullable(),
-                    extension_type,
-                })
-            }
-            DartType::Function(function) => {
-                let mut function_parameters = parameters.clone();
-                function_parameters.push(function.type_params(), self);
-                let mut named: Vec<_> = function
-                    .params()
-                    .filter(|param| param.is_named())
-                    .filter_map(|param| {
-                        param.name().map(|name| {
-                            (
-                                name.name().to_owned(),
-                                self.resolve_type_in(param.param_type(), &function_parameters),
-                            )
-                        })
-                    })
-                    .collect();
-                named.sort_by(|left, right| left.0.cmp(&right.0));
-                ResolvedType::from_kind(ResolvedTypeKind::Function {
-                    shape: FunctionTypeShape::from_scope(
-                        function
-                            .params()
-                            .filter(|param| param.is_named() && param.is_required())
-                            .filter_map(|param| param.name().map(|name| name.name().to_owned()))
-                            .collect(),
-                        function.type_params(),
-                        &function_parameters,
-                    ),
-                    optional_positional: function
-                        .params()
-                        .filter(|param| !param.is_named() && !param.is_required())
-                        .count(),
-                    alias: FunctionTypeAlias::default(),
-                    return_type: Arc::new(
-                        function
-                            .return_type()
-                            .map(|ty| self.resolve_type_in(ty, &function_parameters))
-                            .unwrap_or(ResolvedType::DYNAMIC),
-                    ),
-                    positional: if function.params().all(|param| param.is_named()) {
-                        empty_type_arguments()
-                    } else {
-                        function
-                            .params()
-                            .filter(|param| !param.is_named())
-                            .map(|param| {
-                                self.resolve_type_in(param.param_type(), &function_parameters)
-                            })
-                            .collect()
-                    },
-                    named: if named.is_empty() {
-                        empty_named_types()
-                    } else {
-                        named.into()
-                    },
-                    nullable: function.is_nullable(),
-                })
-            }
+            DartType::Named(named) => self.resolve_named_type(named, parameters),
+            DartType::Function(function) => self.resolve_function_type(function, parameters),
             DartType::Record(record) => {
                 let mut named: Vec<_> = record
                     .named()
@@ -793,6 +685,409 @@ impl<'a> SemanticModel<'a> {
                     nullable: record.is_nullable(),
                 })
             }
+        }
+    }
+
+    fn resolve_named_type(
+        &self,
+        named: falcon_syntax::cst::NamedType<'_>,
+        parameters: &TypeParameterScope,
+    ) -> ResolvedType {
+        let mut segments = named.segments();
+        if let Some(segment) = segments.next()
+            && segments.next().is_none()
+            && let Some(parameter) = parameters.lookup(segment.name())
+        {
+            return parameter.with_nullable(parameter.nullable() || named.is_nullable());
+        }
+        let Some(identity) = QualifiedName::from_identifiers(named.segments())
+            .and_then(|name| self.resolve_name(name))
+        else {
+            return ResolvedType::UNKNOWN;
+        };
+        if identity.is_sdk("dart:core", "Null") {
+            return ResolvedType::NULL;
+        }
+        if identity.is_sdk("dart:core", "Never") {
+            return if named.is_nullable() {
+                ResolvedType::NULL
+            } else {
+                ResolvedType::NEVER
+            };
+        }
+        if let Some(alias) = self.identities.type_alias(&identity) {
+            let arguments: Vec<_> = named
+                .type_args()
+                .map(|argument| self.resolve_type_in(argument, parameters))
+                .collect();
+            return self.expand_alias(
+                &identity,
+                alias,
+                &arguments,
+                named.is_nullable(),
+                Some((self.file, self.type_occurrence(named.span().start))),
+            );
+        }
+        let extension_type = self.types.is_some_and(|types| {
+            types.type_kind_identity(&identity) == Some(super::TypeKind::ExtensionType)
+        });
+        ResolvedType::from_kind(ResolvedTypeKind::Interface {
+            occurrence: Default::default(),
+            identity,
+            arguments: if named.type_args().is_empty() {
+                empty_type_arguments()
+            } else {
+                named
+                    .type_args()
+                    .map(|argument| self.resolve_type_in(argument, parameters))
+                    .collect()
+            },
+            nullable: named.is_nullable(),
+            extension_type,
+        })
+    }
+
+    fn resolve_function_type(
+        &self,
+        function: falcon_syntax::cst::FunctionType<'_>,
+        parameters: &TypeParameterScope,
+    ) -> ResolvedType {
+        let mut function_parameters = parameters.clone();
+        function_parameters.push(function.type_params(), self);
+        let mut named: Vec<_> = function
+            .params()
+            .filter(|param| param.is_named())
+            .filter_map(|param| {
+                param.name().map(|name| {
+                    (
+                        name.name().to_owned(),
+                        self.resolve_type_in(param.param_type(), &function_parameters),
+                    )
+                })
+            })
+            .collect();
+        named.sort_by(|left, right| left.0.cmp(&right.0));
+        ResolvedType::from_kind(ResolvedTypeKind::Function {
+            shape: FunctionTypeShape::from_scope(
+                function
+                    .params()
+                    .filter(|param| param.is_named() && param.is_required())
+                    .filter_map(|param| param.name().map(|name| name.name().to_owned()))
+                    .collect(),
+                function.type_params(),
+                &function_parameters,
+            ),
+            optional_positional: function
+                .params()
+                .filter(|param| !param.is_named() && !param.is_required())
+                .count(),
+            alias: FunctionTypeAlias::default(),
+            return_type: Arc::new(
+                function
+                    .return_type()
+                    .map(|ty| self.resolve_type_in(ty, &function_parameters))
+                    .unwrap_or(ResolvedType::DYNAMIC),
+            ),
+            positional: if function.params().all(|param| param.is_named()) {
+                empty_type_arguments()
+            } else {
+                function
+                    .params()
+                    .filter(|param| !param.is_named())
+                    .map(|param| self.resolve_type_in(param.param_type(), &function_parameters))
+                    .collect()
+            },
+            named: if named.is_empty() {
+                empty_named_types()
+            } else {
+                named.into()
+            },
+            nullable: function.is_nullable(),
+        })
+    }
+
+    fn substitute_children<'t>(
+        &self,
+        ty: &'t ResolvedType,
+        substitutions: &FxHashMap<TypeParameterId, ResolvedType>,
+        records: &mut SubstitutionMemo<'t>,
+    ) -> (ResolvedType, Option<bool>) {
+        let mut function_changed = None;
+        let result = match ty {
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        occurrence,
+                        identity,
+                        arguments,
+                        nullable,
+                        extension_type,
+                    },
+            } => ResolvedType::from_kind(ResolvedTypeKind::Interface {
+                occurrence: occurrence.clone(),
+                identity: identity.clone(),
+                arguments: arguments
+                    .iter()
+                    .map(|argument| {
+                        self.substitute_memoized_inner(argument, substitutions, records, true)
+                    })
+                    .collect(),
+                nullable: *nullable,
+                extension_type: *extension_type,
+            }),
+            ResolvedType {
+                kind: ResolvedTypeKind::Function { .. },
+            } => self.substitute_function(ty, substitutions, records, &mut function_changed),
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Record {
+                        occurrence,
+                        positional,
+                        named,
+                        nullable,
+                    },
+            } => ResolvedType::from_kind(ResolvedTypeKind::Record {
+                occurrence: occurrence.clone(),
+                positional: positional
+                    .iter()
+                    .map(|field| {
+                        self.substitute_memoized_inner(field, substitutions, records, true)
+                    })
+                    .collect(),
+                named: named
+                    .iter()
+                    .map(|(name, field)| {
+                        (
+                            name.clone(),
+                            self.substitute_memoized_inner(field, substitutions, records, true),
+                        )
+                    })
+                    .collect(),
+                nullable: *nullable,
+            }),
+            other => other.clone(),
+        };
+        (result, function_changed)
+    }
+
+    fn substitute_function<'t>(
+        &self,
+        ty: &'t ResolvedType,
+        substitutions: &FxHashMap<TypeParameterId, ResolvedType>,
+        records: &mut SubstitutionMemo<'t>,
+        function_changed: &mut Option<bool>,
+    ) -> ResolvedType {
+        match ty {
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        return_type,
+                        positional,
+                        named,
+                        nullable,
+                        alias,
+                        optional_positional,
+                        shape,
+                    },
+            } => {
+                let mut substituted = ResolvedType::from_kind(ResolvedTypeKind::Function {
+                    shape: shape.as_ref().map(|shape| {
+                        shape.substitute(substitutions, |bound| {
+                            self.substitute_memoized_inner(bound, substitutions, records, true)
+                        })
+                    }),
+                    optional_positional: *optional_positional,
+                    alias: FunctionTypeAlias::default(),
+                    return_type: Arc::new(self.substitute_memoized_inner(
+                        return_type,
+                        substitutions,
+                        records,
+                        true,
+                    )),
+                    positional: positional
+                        .iter()
+                        .map(|parameter| {
+                            self.substitute_memoized_inner(parameter, substitutions, records, true)
+                        })
+                        .collect(),
+                    named: named
+                        .iter()
+                        .map(|(name, parameter)| {
+                            (
+                                name.clone(),
+                                self.substitute_memoized_inner(
+                                    parameter,
+                                    substitutions,
+                                    records,
+                                    true,
+                                ),
+                            )
+                        })
+                        .collect(),
+                    nullable: *nullable,
+                });
+                let changed = substituted != *ty;
+                *function_changed = Some(changed);
+                if let ResolvedType {
+                    kind:
+                        ResolvedTypeKind::Function {
+                            alias: result_alias,
+                            ..
+                        },
+                } = &mut substituted
+                {
+                    *result_alias = if changed {
+                        alias.substituted()
+                    } else {
+                        alias.clone()
+                    };
+                }
+                substituted
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn structural_unrelated_interfaces(&self, left: &ResolvedType, right: &ResolvedType) -> Truth {
+        match (left, right) {
+            (
+                ResolvedType {
+                    kind:
+                        ResolvedTypeKind::Interface {
+                            identity: left_id,
+                            arguments: left_arguments,
+                            ..
+                        },
+                },
+                ResolvedType {
+                    kind:
+                        ResolvedTypeKind::Interface {
+                            identity: right_id,
+                            arguments: right_arguments,
+                            ..
+                        },
+                },
+            ) => {
+                if left_id == right_id {
+                    if left_arguments.len() != right_arguments.len() {
+                        return Truth::Unknown;
+                    }
+                    return if left_arguments
+                        .iter()
+                        .zip(right_arguments.iter())
+                        .any(|(left, right)| self.structural_unrelated(left, right) == Truth::Yes)
+                    {
+                        Truth::Yes
+                    } else {
+                        Truth::No
+                    };
+                }
+                let Some(types) = self.types else {
+                    return Truth::Unknown;
+                };
+                match (
+                    types.supertype_matches(
+                        left_id,
+                        |identity| identity.matches(right_id),
+                        |name| name == right_id.name(),
+                    ),
+                    types.supertype_matches(
+                        right_id,
+                        |identity| identity.matches(left_id),
+                        |name| name == left_id.name(),
+                    ),
+                ) {
+                    (Truth::Yes, _) | (_, Truth::Yes) => Truth::No,
+                    (Truth::No, Truth::No) => Truth::Yes,
+                    _ => Truth::Unknown,
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn structural_unrelated_fields(&self, left: &ResolvedType, right: &ResolvedType) -> Truth {
+        match (left, right) {
+            (
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function { .. },
+                },
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function { .. },
+                },
+            )
+            | (
+                ResolvedType {
+                    kind: ResolvedTypeKind::Record { .. },
+                },
+                ResolvedType {
+                    kind: ResolvedTypeKind::Record { .. },
+                },
+            ) => {
+                fn fields(ty: &ResolvedType) -> (&[ResolvedType], &[(String, ResolvedType)]) {
+                    match ty {
+                        ResolvedType {
+                            kind:
+                                ResolvedTypeKind::Function {
+                                    positional, named, ..
+                                },
+                        } => (positional.as_ref(), named.as_ref()),
+                        ResolvedType {
+                            kind:
+                                ResolvedTypeKind::Record {
+                                    positional, named, ..
+                                },
+                        } => (positional.as_ref(), named.as_ref()),
+                        _ => unreachable!(),
+                    }
+                }
+                let (left_positional, left_named) = fields(left);
+                let (right_positional, right_named) = fields(right);
+                if left_positional.len() != right_positional.len()
+                    || !left_named
+                        .iter()
+                        .map(|(name, _)| name)
+                        .eq(right_named.iter().map(|(name, _)| name))
+                {
+                    return Truth::Yes;
+                }
+                if let (
+                    ResolvedType {
+                        kind:
+                            ResolvedTypeKind::Function {
+                                return_type: left_return,
+                                ..
+                            },
+                    },
+                    ResolvedType {
+                        kind:
+                            ResolvedTypeKind::Function {
+                                return_type: right_return,
+                                ..
+                            },
+                    },
+                ) = (left, right)
+                    && self.structural_unrelated(left_return, right_return) == Truth::Yes
+                {
+                    return Truth::Yes;
+                }
+                if left_positional
+                    .iter()
+                    .zip(right_positional)
+                    .chain(
+                        left_named
+                            .iter()
+                            .zip(right_named)
+                            .map(|((_, left), (_, right))| (left, right)),
+                    )
+                    .any(|(left, right)| self.structural_unrelated(left, right) == Truth::Yes)
+                {
+                    Truth::Yes
+                } else {
+                    Truth::No
+                }
+            }
+            _ => unreachable!(),
         }
     }
 
@@ -901,13 +1196,12 @@ impl<'a> SemanticModel<'a> {
     }
 
     pub fn core_type(&self, name: &'static str, nullable: bool) -> ResolvedType {
-        ResolvedType::from_kind(ResolvedTypeKind::Interface {
-            occurrence: Default::default(),
-            identity: DeclarationIdentity::sdk("dart:core", name),
-            arguments: empty_type_arguments(),
+        ResolvedType::new_interface(
+            DeclarationIdentity::sdk("dart:core", name),
+            empty_type_arguments(),
             nullable,
-            extension_type: false,
-        })
+            false,
+        )
     }
 
     pub fn is_future_like(&self, ty: &ResolvedType) -> Truth {
@@ -1034,124 +1328,7 @@ impl<'a> SemanticModel<'a> {
             }
             return result;
         }
-        let mut function_changed = None;
-        let result = match ty {
-            ResolvedType {
-                kind:
-                    ResolvedTypeKind::Interface {
-                        occurrence,
-                        identity,
-                        arguments,
-                        nullable,
-                        extension_type,
-                    },
-            } => ResolvedType::from_kind(ResolvedTypeKind::Interface {
-                occurrence: occurrence.clone(),
-                identity: identity.clone(),
-                arguments: arguments
-                    .iter()
-                    .map(|argument| {
-                        self.substitute_memoized_inner(argument, substitutions, records, true)
-                    })
-                    .collect(),
-                nullable: *nullable,
-                extension_type: *extension_type,
-            }),
-            ResolvedType {
-                kind:
-                    ResolvedTypeKind::Function {
-                        return_type,
-                        positional,
-                        named,
-                        nullable,
-                        alias,
-                        optional_positional,
-                        shape,
-                    },
-            } => {
-                let mut substituted = ResolvedType::from_kind(ResolvedTypeKind::Function {
-                    shape: shape.as_ref().map(|shape| {
-                        shape.substitute(substitutions, |bound| {
-                            self.substitute_memoized_inner(bound, substitutions, records, true)
-                        })
-                    }),
-                    optional_positional: *optional_positional,
-                    alias: FunctionTypeAlias::default(),
-                    return_type: Arc::new(self.substitute_memoized_inner(
-                        return_type,
-                        substitutions,
-                        records,
-                        true,
-                    )),
-                    positional: positional
-                        .iter()
-                        .map(|parameter| {
-                            self.substitute_memoized_inner(parameter, substitutions, records, true)
-                        })
-                        .collect(),
-                    named: named
-                        .iter()
-                        .map(|(name, parameter)| {
-                            (
-                                name.clone(),
-                                self.substitute_memoized_inner(
-                                    parameter,
-                                    substitutions,
-                                    records,
-                                    true,
-                                ),
-                            )
-                        })
-                        .collect(),
-                    nullable: *nullable,
-                });
-                let changed = substituted != *ty;
-                function_changed = Some(changed);
-                if let ResolvedType {
-                    kind:
-                        ResolvedTypeKind::Function {
-                            alias: result_alias,
-                            ..
-                        },
-                } = &mut substituted
-                {
-                    *result_alias = if changed {
-                        alias.substituted()
-                    } else {
-                        alias.clone()
-                    };
-                }
-                substituted
-            }
-            ResolvedType {
-                kind:
-                    ResolvedTypeKind::Record {
-                        occurrence,
-                        positional,
-                        named,
-                        nullable,
-                    },
-            } => ResolvedType::from_kind(ResolvedTypeKind::Record {
-                occurrence: occurrence.clone(),
-                positional: positional
-                    .iter()
-                    .map(|field| {
-                        self.substitute_memoized_inner(field, substitutions, records, true)
-                    })
-                    .collect(),
-                named: named
-                    .iter()
-                    .map(|(name, field)| {
-                        (
-                            name.clone(),
-                            self.substitute_memoized_inner(field, substitutions, records, true),
-                        )
-                    })
-                    .collect(),
-                nullable: *nullable,
-            }),
-            other => other.clone(),
-        };
+        let (result, function_changed) = self.substitute_children(ty, substitutions, records);
         let result = if function_changed.unwrap_or_else(|| result != *ty) {
             result
         } else {
@@ -1323,56 +1500,12 @@ impl<'a> SemanticModel<'a> {
         match (left, right) {
             (
                 ResolvedType {
-                    kind:
-                        ResolvedTypeKind::Interface {
-                            identity: left_id,
-                            arguments: left_arguments,
-                            ..
-                        },
+                    kind: ResolvedTypeKind::Interface { .. },
                 },
                 ResolvedType {
-                    kind:
-                        ResolvedTypeKind::Interface {
-                            identity: right_id,
-                            arguments: right_arguments,
-                            ..
-                        },
+                    kind: ResolvedTypeKind::Interface { .. },
                 },
-            ) => {
-                if left_id == right_id {
-                    if left_arguments.len() != right_arguments.len() {
-                        return Truth::Unknown;
-                    }
-                    return if left_arguments
-                        .iter()
-                        .zip(right_arguments.iter())
-                        .any(|(left, right)| self.structural_unrelated(left, right) == Truth::Yes)
-                    {
-                        Truth::Yes
-                    } else {
-                        Truth::No
-                    };
-                }
-                let Some(types) = self.types else {
-                    return Truth::Unknown;
-                };
-                match (
-                    types.supertype_matches(
-                        left_id,
-                        |identity| identity.matches(right_id),
-                        |name| name == right_id.name(),
-                    ),
-                    types.supertype_matches(
-                        right_id,
-                        |identity| identity.matches(left_id),
-                        |name| name == left_id.name(),
-                    ),
-                ) {
-                    (Truth::Yes, _) | (_, Truth::Yes) => Truth::No,
-                    (Truth::No, Truth::No) => Truth::Yes,
-                    _ => Truth::Unknown,
-                }
-            }
+            ) => self.structural_unrelated_interfaces(left, right),
             (
                 ResolvedType {
                     kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
@@ -1412,70 +1545,7 @@ impl<'a> SemanticModel<'a> {
                 ResolvedType {
                     kind: ResolvedTypeKind::Record { .. },
                 },
-            ) => {
-                fn fields(ty: &ResolvedType) -> (&[ResolvedType], &[(String, ResolvedType)]) {
-                    match ty {
-                        ResolvedType {
-                            kind:
-                                ResolvedTypeKind::Function {
-                                    positional, named, ..
-                                },
-                        } => (positional.as_ref(), named.as_ref()),
-                        ResolvedType {
-                            kind:
-                                ResolvedTypeKind::Record {
-                                    positional, named, ..
-                                },
-                        } => (positional.as_ref(), named.as_ref()),
-                        _ => unreachable!(),
-                    }
-                }
-                let (left_positional, left_named) = fields(left);
-                let (right_positional, right_named) = fields(right);
-                if left_positional.len() != right_positional.len()
-                    || !left_named
-                        .iter()
-                        .map(|(name, _)| name)
-                        .eq(right_named.iter().map(|(name, _)| name))
-                {
-                    return Truth::Yes;
-                }
-                if let (
-                    ResolvedType {
-                        kind:
-                            ResolvedTypeKind::Function {
-                                return_type: left_return,
-                                ..
-                            },
-                    },
-                    ResolvedType {
-                        kind:
-                            ResolvedTypeKind::Function {
-                                return_type: right_return,
-                                ..
-                            },
-                    },
-                ) = (left, right)
-                    && self.structural_unrelated(left_return, right_return) == Truth::Yes
-                {
-                    return Truth::Yes;
-                }
-                if left_positional
-                    .iter()
-                    .zip(right_positional)
-                    .chain(
-                        left_named
-                            .iter()
-                            .zip(right_named)
-                            .map(|((_, left), (_, right))| (left, right)),
-                    )
-                    .any(|(left, right)| self.structural_unrelated(left, right) == Truth::Yes)
-                {
-                    Truth::Yes
-                } else {
-                    Truth::No
-                }
-            }
+            ) => self.structural_unrelated_fields(left, right),
             _ => Truth::Yes,
         }
     }

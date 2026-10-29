@@ -129,51 +129,8 @@ impl SignatureIndex {
         else {
             return None;
         };
-        let matches_access = |facts: &MemberFacts| {
-            if write {
-                facts.kind.has_setter()
-            } else {
-                matches!(facts.kind, MemberKind::Method | MemberKind::Operator)
-                    || facts.kind.has_getter()
-            }
-        };
-        let (facts, concrete_parent) = if concrete {
-            if let Some(facts) = self.declared_member(identity, identity, name, |facts| {
-                !facts.is_abstract && matches_access(facts)
-            }) {
-                (facts, None)
-            } else {
-                match self.concrete_member_in_chain(
-                    identity,
-                    identity,
-                    name,
-                    matches_access,
-                    &mut HashSet::from([identity.clone()]),
-                )? {
-                    Some((facts, parent)) => (facts, Some(parent)),
-                    None => (
-                        self.declared_member(
-                            identity,
-                            &DeclarationIdentity::OBJECT,
-                            name,
-                            |facts| !facts.is_abstract && matches_access(facts),
-                        )?,
-                        None,
-                    ),
-                }
-            }
-        } else {
-            let access = if write {
-                InstanceAccess::Write
-            } else {
-                InstanceAccess::Invoke
-            };
-            let owner = self.resolved_access_owner(receiver, name, access, model)?;
-            (
-                self.declared_member(identity, &owner, name, matches_access)?,
-                None,
-            )
-        };
+        let (facts, concrete_parent) =
+            self.parameter_contract_member(receiver, identity, name, write, concrete, model)?;
         if !write && !matches!(facts.kind, MemberKind::Method | MemberKind::Operator) {
             return Some(empty_parameter_contracts());
         }
@@ -529,32 +486,7 @@ impl SignatureIndex {
             .into_iter()
             .next()?;
         if !member.known {
-            let signature = self.member_entry(identity, name)?.signature.as_ref();
-            return Some((
-                signature.map_or_else(
-                    || {
-                        vec![ResolvedType {
-                            kind: ResolvedTypeKind::Unknown,
-                        }]
-                    },
-                    |signature| {
-                        vec![
-                            ResolvedType {
-                                kind: ResolvedTypeKind::Unknown
-                            };
-                            signature.positional.len()
-                        ]
-                    },
-                ),
-                signature.map_or_else(FxHashMap::default, |signature| {
-                    signature
-                        .named
-                        .keys()
-                        .map(|name| (name.clone(), ResolvedType::UNKNOWN))
-                        .collect()
-                }),
-                ResolvedType::UNKNOWN,
-            ));
+            return self.unknown_override_signature(identity, name);
         }
         if getter {
             return member.kind.has_getter().then(|| {
@@ -763,69 +695,7 @@ impl SignatureIndex {
             };
         if visible {
             if let Some(entry) = self.member_entry(identity, name) {
-                members.reserve(entry.facts.len());
-                for fact in entry.facts.iter().filter(|fact| {
-                    !fact.is_static
-                        && if setter {
-                            fact.kind.has_setter()
-                        } else {
-                            fact.kind != MemberKind::Setter
-                        }
-                }) {
-                    let signature = match fact.kind {
-                        MemberKind::Method | MemberKind::Operator => entry.signature.as_ref(),
-                        _ => None,
-                    };
-                    let mut shape = entry.override_shape.clone().unwrap_or_default();
-                    let (positional, named, return_type, call_parameters, known) =
-                        if let Some(signature) = signature {
-                            (
-                                signature.positional.clone(),
-                                signature
-                                    .named
-                                    .iter()
-                                    .map(|(name, ty)| (name.clone(), ty.clone()))
-                                    .collect(),
-                                signature.return_type.clone(),
-                                signature.call_parameters.clone(),
-                                entry.override_shape.is_some(),
-                            )
-                        } else if setter {
-                            shape.required_positional = 1;
-                            (
-                                vec![entry.write.clone().unwrap_or(ResolvedType {
-                                    kind: ResolvedTypeKind::Unknown,
-                                })],
-                                FxHashMap::default(),
-                                ResolvedType::VOID,
-                                Vec::new(),
-                                true,
-                            )
-                        } else {
-                            (
-                                Vec::new(),
-                                FxHashMap::default(),
-                                entry.read.clone().unwrap_or(ResolvedType::UNKNOWN),
-                                Vec::new(),
-                                !matches!(fact.kind, MemberKind::Method | MemberKind::Operator),
-                            )
-                        };
-                    members.push(InheritedMember {
-                        declaring_type: identity.clone(),
-                        kind: fact.kind,
-                        positional,
-                        named,
-                        return_type,
-                        call_parameters,
-                        shape,
-                        parameter_contracts: if CONTRACTS {
-                            fact.parameter_contracts.clone()
-                        } else {
-                            None
-                        },
-                        known,
-                    });
-                }
+                self.declared_interface_members::<CONTRACTS>(entry, identity, setter, &mut members);
             } else if let DeclarationIdentity::Sdk {
                 library,
                 name: type_name,
@@ -891,6 +761,172 @@ impl SignatureIndex {
             memo.insert(identity.clone(), members.clone());
         }
         self.substitute_inherited_members(members, identity, arguments, occurrence, model)
+    }
+
+    fn parameter_contract_member(
+        &self,
+        receiver: &ResolvedType,
+        identity: &DeclarationIdentity,
+        name: &str,
+        write: bool,
+        concrete: bool,
+        model: &SemanticModel<'_>,
+    ) -> Option<(&MemberFacts, Option<&ResolvedType>)> {
+        let matches_access = |facts: &MemberFacts| {
+            if write {
+                facts.kind.has_setter()
+            } else {
+                matches!(facts.kind, MemberKind::Method | MemberKind::Operator)
+                    || facts.kind.has_getter()
+            }
+        };
+        let member = if concrete {
+            if let Some(facts) = self.declared_member(identity, identity, name, |facts| {
+                !facts.is_abstract && matches_access(facts)
+            }) {
+                (facts, None)
+            } else {
+                match self.concrete_member_in_chain(
+                    identity,
+                    identity,
+                    name,
+                    matches_access,
+                    &mut HashSet::from([identity.clone()]),
+                )? {
+                    Some((facts, parent)) => (facts, Some(parent)),
+                    None => (
+                        self.declared_member(
+                            identity,
+                            &DeclarationIdentity::OBJECT,
+                            name,
+                            |facts| !facts.is_abstract && matches_access(facts),
+                        )?,
+                        None,
+                    ),
+                }
+            }
+        } else {
+            let access = if write {
+                InstanceAccess::Write
+            } else {
+                InstanceAccess::Invoke
+            };
+            let owner = self.resolved_access_owner(receiver, name, access, model)?;
+            (
+                self.declared_member(identity, &owner, name, matches_access)?,
+                None,
+            )
+        };
+        Some(member)
+    }
+
+    fn unknown_override_signature(
+        &self,
+        identity: &DeclarationIdentity,
+        name: &str,
+    ) -> Option<(
+        Vec<ResolvedType>,
+        FxHashMap<String, ResolvedType>,
+        ResolvedType,
+    )> {
+        let signature = self.member_entry(identity, name)?.signature.as_ref();
+        Some((
+            signature.map_or_else(
+                || {
+                    vec![ResolvedType {
+                        kind: ResolvedTypeKind::Unknown,
+                    }]
+                },
+                |signature| {
+                    vec![
+                        ResolvedType {
+                            kind: ResolvedTypeKind::Unknown
+                        };
+                        signature.positional.len()
+                    ]
+                },
+            ),
+            signature.map_or_else(FxHashMap::default, |signature| {
+                signature
+                    .named
+                    .keys()
+                    .map(|name| (name.clone(), ResolvedType::UNKNOWN))
+                    .collect()
+            }),
+            ResolvedType::UNKNOWN,
+        ))
+    }
+
+    fn declared_interface_members<const CONTRACTS: bool>(
+        &self,
+        entry: &MemberEntry,
+        identity: &DeclarationIdentity,
+        setter: bool,
+        members: &mut Vec<InheritedMember>,
+    ) {
+        members.reserve(entry.facts.len());
+        for fact in entry.facts.iter().filter(|fact| {
+            !fact.is_static
+                && if setter {
+                    fact.kind.has_setter()
+                } else {
+                    fact.kind != MemberKind::Setter
+                }
+        }) {
+            let signature = match fact.kind {
+                MemberKind::Method | MemberKind::Operator => entry.signature.as_ref(),
+                _ => None,
+            };
+            let mut shape = entry.override_shape.clone().unwrap_or_default();
+            let (positional, named, return_type, call_parameters, known) =
+                if let Some(signature) = signature {
+                    (
+                        signature.positional.clone(),
+                        signature
+                            .named
+                            .iter()
+                            .map(|(name, ty)| (name.clone(), ty.clone()))
+                            .collect(),
+                        signature.return_type.clone(),
+                        signature.call_parameters.clone(),
+                        entry.override_shape.is_some(),
+                    )
+                } else if setter {
+                    shape.required_positional = 1;
+                    (
+                        vec![entry.write.clone().unwrap_or(ResolvedType {
+                            kind: ResolvedTypeKind::Unknown,
+                        })],
+                        FxHashMap::default(),
+                        ResolvedType::VOID,
+                        Vec::new(),
+                        true,
+                    )
+                } else {
+                    (
+                        Vec::new(),
+                        FxHashMap::default(),
+                        entry.read.clone().unwrap_or(ResolvedType::UNKNOWN),
+                        Vec::new(),
+                        !matches!(fact.kind, MemberKind::Method | MemberKind::Operator),
+                    )
+                };
+            members.push(InheritedMember {
+                declaring_type: identity.clone(),
+                kind: fact.kind,
+                positional,
+                named,
+                return_type,
+                call_parameters,
+                shape,
+                parameter_contracts: if CONTRACTS {
+                    fact.parameter_contracts.clone()
+                } else {
+                    None
+                },
+                known,
+            });
+        }
     }
 
     fn substitute_inherited_members(
@@ -1078,22 +1114,13 @@ impl SignatureIndex {
 mod tests {
     use super::*;
     use crate::resolve::IdentitySource;
-    use falcon_dart_parser::parse;
+    use crate::resolve::library::parsed_fixture;
     use std::path::PathBuf;
-
-    fn parsed(source: &str) -> Arc<crate::ParsedFile> {
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        Arc::new(crate::ParsedFile {
-            source: source.into(),
-            tree,
-        })
-    }
 
     #[test]
     fn explicit_mixin_edges_preserve_order_and_snapshot_isolation() {
         let path = PathBuf::from("/project/lib/main.dart");
-        let parsed = parsed(
+        let parsed = parsed_fixture(
             "class Base { Object get value => 0; }
              mixin First { int get value => 0; }
              mixin Last { String get value => ''; }
@@ -1160,51 +1187,13 @@ mod tests {
         assert_eq!(members.len(), 1);
         assert_eq!(members[0].declaring_type, last);
 
-        index.type_facts.get_mut(&constrained).unwrap().supertypes = Some((
-            Vec::new(),
-            vec![ResolvedType::interface_identity(constrained.clone())],
-        ));
-        index.cyclic_supertypes = None;
-        let snapshot = Arc::new(index);
-        let mut overlay = SignatureIndex::borrowing_external(Arc::clone(&snapshot));
-        let child = model.resolve_name("Child").unwrap();
-        let mut local = snapshot.type_facts[&child].clone();
-        local.mixin_applications.clear();
-        local.supertypes.as_mut().unwrap().1 = vec![
-            ResolvedType::interface_identity(model.resolve_name("Base").unwrap()),
-            model.core_type("Object", false),
-        ];
-        overlay.type_facts.insert(child.clone(), local);
-        let members = candidates(&overlay, &child);
-        assert_eq!(members.len(), 1);
-        assert_eq!(
-            members[0].declaring_type,
-            model.resolve_name("Base").unwrap()
-        );
-        assert_eq!(candidates(&snapshot, &child)[0].declaring_type, last);
-        assert_eq!(candidates(&overlay, &choice)[0].declaring_type, last);
-        assert_eq!(snapshot.type_facts[&child].mixin_applications.len(), 2);
-        overlay
-            .type_facts
-            .insert(child.clone(), TypeFacts::default());
-        assert!(candidates(&overlay, &child).is_empty());
-        assert_eq!(candidates(&snapshot, &child)[0].declaring_type, last);
-        let local = overlay.type_facts.get_mut(&child).unwrap();
-        local.superclass = Some(model.core_type("Object", false));
-        local.supertypes = Some((Vec::new(), vec![model.core_type("Object", false)]));
-        local.inherited_object = Some(false);
-        assert!(candidates(&overlay, &child).is_empty());
-        assert!(snapshot.has_cyclic_supertypes(&constrained));
-        overlay
-            .type_facts
-            .insert(constrained.clone(), TypeFacts::default());
-        assert!(!overlay.has_cyclic_supertypes(&constrained));
+        assert_snapshot_isolation(index, &model, constrained, choice, last);
     }
 
     #[test]
     fn extension_type_inheritance_uses_only_explicit_superinterfaces() {
         let path = PathBuf::from("/project/lib/main.dart");
-        let parsed = parsed(
+        let parsed = parsed_fixture(
             "extension type Nullable(Object? value) {}
              extension type Described(Object? value) implements Nullable {
                String describe() => '';
@@ -1253,14 +1242,14 @@ mod tests {
     fn override_headers_settle_across_files_before_initializers() {
         let early_path = PathBuf::from("/project/lib/early.dart");
         let base_path = PathBuf::from("/project/lib/base.dart");
-        let early = parsed(
+        let early = parsed_fixture(
             "import 'base.dart'; final top = Early().measured;
              class Early extends Middle {
                late final measured = measure(''); measure(text) => 0;
              }
              class FieldSetter extends FieldBase { set value(next) {} }",
         );
-        let base = parsed(
+        let base = parsed_fixture(
             "abstract class Middle extends Base { measure(text); }
              abstract class Base { int measure(String text); }
              class FieldBase { var value = 0; }",
@@ -1350,7 +1339,7 @@ mod tests {
               final int major; Version(this.major);
               compareTo(other) => major - other.major;
             }";
-        let parsed = parsed(source);
+        let parsed = parsed_fixture(source);
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path: &path,
@@ -1366,6 +1355,99 @@ mod tests {
             &types,
         );
         let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
+        assert_inferred_override_signatures(&index, &model);
+        let d = model.resolve_name("D").unwrap();
+        assert_eq!(
+            index.field(&d, "y").unwrap().1,
+            model.core_type("int", false)
+        );
+        assert_eq!(
+            index.value_type(&model.resolve_value("top").unwrap()),
+            Some(&model.core_type("int", false))
+        );
+        let e = model.resolve_name("E").unwrap();
+        assert_eq!(
+            index
+                .member_entry(&e, "describe")
+                .unwrap()
+                .signature
+                .as_ref()
+                .unwrap()
+                .positional[0],
+            ResolvedType {
+                kind: ResolvedTypeKind::Dynamic
+            }
+        );
+        for name in ["GetterSetter", "FieldSetter"] {
+            let owner = model.resolve_name(name).unwrap();
+            assert_eq!(
+                index.member_entry(&owner, "value").unwrap().write,
+                Some(model.core_type("int", false))
+            );
+        }
+        assert_partial_override_signatures(&index, &model);
+        assert_unavailable_sdk_override(&parsed, model);
+    }
+
+    fn assert_snapshot_isolation(
+        mut index: SignatureIndex,
+        model: &SemanticModel<'_>,
+        constrained: DeclarationIdentity,
+        choice: DeclarationIdentity,
+        last: DeclarationIdentity,
+    ) {
+        let candidates = |index: &SignatureIndex, owner: &DeclarationIdentity| {
+            index.inherited_candidates::<false>(
+                owner,
+                "value",
+                false,
+                model,
+                &mut FxHashSet::from_iter([owner.clone()]),
+                &mut FxHashMap::default(),
+            )
+        };
+        index.type_facts.get_mut(&constrained).unwrap().supertypes = Some((
+            Vec::new(),
+            vec![ResolvedType::interface_identity(constrained.clone())],
+        ));
+        index.cyclic_supertypes = None;
+        let snapshot = Arc::new(index);
+        let mut overlay = SignatureIndex::borrowing_external(Arc::clone(&snapshot));
+        let child = model.resolve_name("Child").unwrap();
+        let mut local = snapshot.type_facts[&child].clone();
+        local.mixin_applications.clear();
+        local.supertypes.as_mut().unwrap().1 = vec![
+            ResolvedType::interface_identity(model.resolve_name("Base").unwrap()),
+            model.core_type("Object", false),
+        ];
+        overlay.type_facts.insert(child.clone(), local);
+        let members = candidates(&overlay, &child);
+        assert_eq!(members.len(), 1);
+        assert_eq!(
+            members[0].declaring_type,
+            model.resolve_name("Base").unwrap()
+        );
+        assert_eq!(candidates(&snapshot, &child)[0].declaring_type, last);
+        assert_eq!(candidates(&overlay, &choice)[0].declaring_type, last);
+        assert_eq!(snapshot.type_facts[&child].mixin_applications.len(), 2);
+        overlay
+            .type_facts
+            .insert(child.clone(), TypeFacts::default());
+        assert!(candidates(&overlay, &child).is_empty());
+        assert_eq!(candidates(&snapshot, &child)[0].declaring_type, last);
+        let local = overlay.type_facts.get_mut(&child).unwrap();
+        local.superclass = Some(model.core_type("Object", false));
+        local.supertypes = Some((Vec::new(), vec![model.core_type("Object", false)]));
+        local.inherited_object = Some(false);
+        assert!(candidates(&overlay, &child).is_empty());
+        assert!(snapshot.has_cyclic_supertypes(&constrained));
+        overlay
+            .type_facts
+            .insert(constrained.clone(), TypeFacts::default());
+        assert!(!overlay.has_cyclic_supertypes(&constrained));
+    }
+
+    fn assert_inferred_override_signatures(index: &SignatureIndex, model: &SemanticModel<'_>) {
         let c = model.resolve_name("C").unwrap();
         assert_eq!(
             index
@@ -1421,35 +1503,9 @@ mod tests {
                 .return_type,
             model.core_type("int", false)
         );
-        let d = model.resolve_name("D").unwrap();
-        assert_eq!(
-            index.field(&d, "y").unwrap().1,
-            model.core_type("int", false)
-        );
-        assert_eq!(
-            index.value_type(&model.resolve_value("top").unwrap()),
-            Some(&model.core_type("int", false))
-        );
-        let e = model.resolve_name("E").unwrap();
-        assert_eq!(
-            index
-                .member_entry(&e, "describe")
-                .unwrap()
-                .signature
-                .as_ref()
-                .unwrap()
-                .positional[0],
-            ResolvedType {
-                kind: ResolvedTypeKind::Dynamic
-            }
-        );
-        for name in ["GetterSetter", "FieldSetter"] {
-            let owner = model.resolve_name(name).unwrap();
-            assert_eq!(
-                index.member_entry(&owner, "value").unwrap().write,
-                Some(model.core_type("int", false))
-            );
-        }
+    }
+
+    fn assert_partial_override_signatures(index: &SignatureIndex, model: &SemanticModel<'_>) {
         let unavailable = model.resolve_name("Unavailable").unwrap();
         assert_eq!(
             index.member(&unavailable, "method").unwrap().positional[0],
@@ -1503,6 +1559,9 @@ mod tests {
             index.member(&api_repo, "load").unwrap().positional[0],
             model.core_type("String", false)
         );
+    }
+
+    fn assert_unavailable_sdk_override(parsed: &crate::ParsedFile, model: SemanticModel<'_>) {
         let sdk_child = model.resolve_name("SdkChild").unwrap();
         // Install the unavailable SDK edge before any inference publishes the
         // omitted parameter, rather than trying to replace a settled Dynamic.
@@ -1549,7 +1608,7 @@ mod tests {
                  abstract class KnownConflict implements Cmp, Q {{}}
                  abstract class KindConflict implements P, Getter {{}}"
             );
-            let parsed = parsed(&source);
+            let parsed = parsed_fixture(&source);
             let identities = IdentityIndex::from_project_files(
                 &[IdentitySource {
                     path: &path,
@@ -1616,7 +1675,7 @@ mod tests {
     #[test]
     fn repeated_diamonds_cache_one_unsubstituted_interface_signature() {
         let path = PathBuf::from("/project/lib/main.dart");
-        let parsed = parsed(
+        let parsed = parsed_fixture(
             "abstract class Base<T> { T make(); }
              abstract class L1<T> implements Base<T> {}
              abstract class R1<T> implements Base<T> {}

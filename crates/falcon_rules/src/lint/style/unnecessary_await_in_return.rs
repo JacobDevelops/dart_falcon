@@ -18,7 +18,9 @@
 //!
 //! Adopted from the official `unnecessary_await_in_return` lint.
 
-use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth, TypeRelation};
+use falcon_analyze::{
+    AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth, TypeRelation,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -77,37 +79,53 @@ impl<'a> Collector<'a> {
             None if body.async_marker == AsyncMarker::Async
                 && matches!(body.owner, BodyOwner::Closure | BodyOwner::LocalFunction) =>
             {
-                let argument = future_argument(&operand);
-                let inferred = flattened(argument.clone());
                 let context = self
                     .closure_returns
                     .iter()
                     .find(|(span, _)| *span == body.span)
                     .and_then(|(_, ty)| ty.as_ref());
-                match context {
-                    Some(context) if matches!(context.view(), ResolvedTypeView::Unknown) => false,
-                    Some(context)
-                        if is_future(context) || context.interface("dart:async", "FutureOr") =>
-                    {
-                        let contextual = future_argument(context);
-                        let result = if assignable(&inferred, &contextual, state) {
-                            &inferred
-                        } else {
-                            &contextual
-                        };
-                        assignable(&argument, result, state)
-                    }
-                    context if context.is_none_or(|context| matches!(context.view(), ResolvedTypeView::Void | ResolvedTypeView::Dynamic)) => {
-                        assignable(&argument, &inferred, state)
-                    }
-                    _ => false,
-                }
+                closure_await_is_unnecessary(&operand, context, state)
             }
             None => false,
         };
         if unnecessary {
-            self.diagnostics.push(self.ctx.diagnostic("Remove the unnecessary `await`.", Span::new(await_span.start, await_span.start + "await".len())));
+            self.diagnostics.push(self.ctx.diagnostic(
+                "Remove the unnecessary `await`.",
+                Span::new(await_span.start, await_span.start + "await".len()),
+            ));
         }
+    }
+}
+
+fn closure_await_is_unnecessary(
+    operand: &ResolvedType,
+    context: Option<&ResolvedType>,
+    state: &SemanticState<'_>,
+) -> bool {
+    let argument = future_argument(operand);
+    let inferred = flattened(argument.clone());
+    match context {
+        Some(context) if matches!(context.view(), ResolvedTypeView::Unknown) => false,
+        Some(context) if is_future(context) || context.interface("dart:async", "FutureOr") => {
+            let contextual = future_argument(context);
+            let result = if assignable(&inferred, &contextual, state) {
+                &inferred
+            } else {
+                &contextual
+            };
+            assignable(&argument, result, state)
+        }
+        context
+            if context.is_none_or(|context| {
+                matches!(
+                    context.view(),
+                    ResolvedTypeView::Void | ResolvedTypeView::Dynamic
+                )
+            }) =>
+        {
+            assignable(&argument, &inferred, state)
+        }
+        _ => false,
     }
 }
 
@@ -168,7 +186,12 @@ fn assignable(actual: &ResolvedType, expected: &ResolvedType, state: &SemanticSt
     if matches!(actual.view(), ResolvedTypeView::Unknown) {
         return false;
     }
-    if actual == expected || matches!(expected.view(), ResolvedTypeView::Dynamic | ResolvedTypeView::Void) {
+    if actual == expected
+        || matches!(
+            expected.view(),
+            ResolvedTypeView::Dynamic | ResolvedTypeView::Void
+        )
+    {
         return true;
     }
     if matches!(actual.view(), ResolvedTypeView::Never) {
@@ -232,6 +255,14 @@ fn assignable(actual: &ResolvedType, expected: &ResolvedType, state: &SemanticSt
             .zip(expected_arguments.iter())
             .all(|(actual, expected)| assignable(actual, expected, state));
     }
+    assignable_to_supertype(actual, expected, state)
+}
+
+fn assignable_to_supertype(
+    actual: &ResolvedType,
+    expected: &ResolvedType,
+    state: &SemanticState<'_>,
+) -> bool {
     let ResolvedTypeView::Interface {
         identity,
         arguments,
@@ -270,10 +301,11 @@ fn assignable(actual: &ResolvedType, expected: &ResolvedType, state: &SemanticSt
         }
         _ if arguments.is_empty() => {
             (expected.nullable() || !actual.nullable())
-                && state
-                    .signatures
-                    .relation(actual, TypeRelation::SubtypeOfDeclaration(identity), &state.model)
-                    == Truth::Yes
+                && state.signatures.relation(
+                    actual,
+                    TypeRelation::SubtypeOfDeclaration(identity),
+                    &state.model,
+                ) == Truth::Yes
         }
         _ => false,
     }

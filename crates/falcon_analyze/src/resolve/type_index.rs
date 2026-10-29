@@ -34,7 +34,7 @@ use std::sync::{Arc, OnceLock};
 use falcon_syntax::cst::*;
 
 use super::Truth;
-use super::{DeclarationIdentity, FileId, IdentityIndex, QualifiedName};
+use super::{DeclarationIdentity, FileId, IdentityIndex, LibraryId, QualifiedName};
 use crate::environment::ExternalLibraries;
 use std::path::Path;
 
@@ -285,32 +285,9 @@ impl TypeIndex {
                 TopLevelDecl::MixinClass(class) => class.annotations(),
                 _ => AstChildren::new(program.syntax()),
             };
-            let mut annotations_unknown = false;
-            shape.is_immutable = false;
-            for annotation in annotations {
-                match QualifiedName::from_identifiers(annotation.name()).and_then(|name| {
-                    identities
-                        .resolve_imported_member(library, name)
-                        .or_else(|| identities.resolve_declaration(library, name))
-                        .or_else(|| identities.resolve_value_declaration(library, name))
-                }) {
-                    Some(identity) => {
-                        shape.is_immutable |=
-                            identities.is_package_declaration(&identity, "meta", "immutable")
-                                || identities.is_package_declaration(
-                                    &identity,
-                                    "meta",
-                                    "Immutable",
-                                );
-                    }
-                    None => {
-                        annotations_unknown |= annotation
-                            .name()
-                            .last()
-                            .is_some_and(|name| matches!(name.name(), "immutable" | "Immutable"))
-                    }
-                }
-            }
+            let (is_immutable, annotations_unknown) =
+                Self::resolve_immutable_annotations(annotations, library, identities);
+            shape.is_immutable = is_immutable;
             let mut resolved = Vec::with_capacity(
                 first.len()
                     + second.len()
@@ -340,6 +317,36 @@ impl TypeIndex {
                 },
             );
         }
+    }
+
+    fn resolve_immutable_annotations<'a>(
+        annotations: AstChildren<'a, Annotation<'a>>,
+        library: LibraryId,
+        identities: &IdentityIndex,
+    ) -> (bool, bool) {
+        let mut annotations_unknown = false;
+        let mut is_immutable = false;
+        for annotation in annotations {
+            match QualifiedName::from_identifiers(annotation.name()).and_then(|name| {
+                identities
+                    .resolve_imported_member(library, name)
+                    .or_else(|| identities.resolve_declaration(library, name))
+                    .or_else(|| identities.resolve_value_declaration(library, name))
+            }) {
+                Some(identity) => {
+                    is_immutable |=
+                        identities.is_package_declaration(&identity, "meta", "immutable")
+                            || identities.is_package_declaration(&identity, "meta", "Immutable");
+                }
+                None => {
+                    annotations_unknown |= annotation
+                        .name()
+                        .last()
+                        .is_some_and(|name| matches!(name.name(), "immutable" | "Immutable"))
+                }
+            }
+        }
+        (is_immutable, annotations_unknown)
     }
 
     pub fn type_kind_identity(&self, identity: &DeclarationIdentity) -> Option<TypeKind> {
@@ -985,18 +992,29 @@ fn core_table() -> &'static HashMap<&'static str, CoreType> {
 }
 
 fn build_core_table() -> HashMap<&'static str, CoreType> {
-    use MemberKind::{Getter, Method, Operator};
     let mut t: HashMap<&'static str, CoreType> = HashMap::new();
 
-    let ty = |name: &str, members: Vec<(&'static str, MemberKind)>| CoreType {
+    add_core_sequences(&mut t);
+    add_core_collections(&mut t);
+    add_core_scalars(&mut t);
+    add_core_remaining(&mut t);
+
+    t
+}
+
+fn ty(name: &str, members: Vec<(&'static str, MemberKind)>) -> CoreType {
+    CoreType {
         supertypes: super::sdk_hierarchy::SDK_HIERARCHY
             .iter()
             .find(|entry| entry.name == name)
             .expect("every curated core type has shared SDK edges")
             .supertypes,
         members,
-    };
+    }
+}
 
+fn add_core_sequences(t: &mut HashMap<&'static str, CoreType>) {
+    use MemberKind::{Getter, Method, Operator};
     let object = ty(
         "Object",
         vec![
@@ -1082,7 +1100,10 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
             ],
         ),
     );
+}
 
+fn add_core_collections(t: &mut HashMap<&'static str, CoreType>) {
+    use MemberKind::{Getter, Method, Operator};
     t.insert(
         "Set",
         ty(
@@ -1172,7 +1193,10 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
             ],
         ),
     );
+}
 
+fn add_core_scalars(t: &mut HashMap<&'static str, CoreType>) {
+    use MemberKind::{Getter, Method};
     t.insert(
         "num",
         ty(
@@ -1240,7 +1264,10 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
 
     t.insert("Comparable", ty("Comparable", vec![("compareTo", Method)]));
     t.insert("Pattern", ty("Pattern", vec![("allMatches", Method)]));
+}
 
+fn add_core_remaining(t: &mut HashMap<&'static str, CoreType>) {
+    use MemberKind::Method;
     t.insert(
         "Queue",
         ty(
@@ -1264,14 +1291,13 @@ fn build_core_table() -> HashMap<&'static str, CoreType> {
     t.insert("LinkedHashSet", ty("LinkedHashSet", vec![]));
     t.insert("HashSet", ty("HashSet", vec![]));
     t.insert("SplayTreeSet", ty("SplayTreeSet", vec![]));
-
-    t
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ParsedFile;
+    use crate::resolve::parsed_fixture;
     use falcon_dart_parser::parse;
     use std::sync::Arc;
 
@@ -1337,15 +1363,6 @@ mod tests {
         assert!(table["Object"].supertypes.is_empty());
     }
 
-    fn program(src: &str) -> Arc<ParsedFile> {
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
-        assert!(errors.is_empty(), "parse errors: {errors:?}");
-        Arc::new(ParsedFile {
-            source: src.into(),
-            tree,
-        })
-    }
-
     fn annotation_packages<'a>(
         meta: &'a Arc<ParsedFile>,
         flutter: &'a Arc<ParsedFile>,
@@ -1381,7 +1398,7 @@ mod tests {
     }
 
     fn index(src: &str) -> TypeIndex {
-        let parsed = program(src);
+        let parsed = parsed_fixture(src);
         TypeIndex::from_program(parsed.tree.program(&parsed.source))
     }
 
@@ -1695,7 +1712,7 @@ mod tests {
 
     #[test]
     fn no_parse_errors_leaves_index_complete() {
-        let good = program("class Good { void m() {} }");
+        let good = parsed_fixture("class Good { void m() {} }");
         let idx = TypeIndex::from_program(good.tree.program(&good.source));
         assert_eq!(
             idx.member_lookup("Good", "m"),
@@ -1745,8 +1762,8 @@ mod tests {
         use super::super::IdentitySource;
         let a_path = Path::new("/project/a.dart");
         let b_path = Path::new("/project/b.dart");
-        let a = program("class Animal { void breathe() {} }");
-        let b = program("import 'a.dart'; class Dog extends Animal { void bark() {} }");
+        let a = parsed_fixture("class Animal { void breathe() {} }");
+        let b = parsed_fixture("import 'a.dart'; class Dog extends Animal { void bark() {} }");
         let sources = [
             IdentitySource {
                 path: a_path,
@@ -1805,10 +1822,11 @@ mod tests {
         let left_path = Path::new("/project/left.dart");
         let right_path = Path::new("/project/right.dart");
         let app_path = Path::new("/project/app.dart");
-        let left =
-            program("class Base { const Base(); void left() {} } class String { void local() {} }");
-        let right = program("class Base { Base(); void right() {} }");
-        let app = program(
+        let left = parsed_fixture(
+            "class Base { const Base(); void left() {} } class String { void local() {} }",
+        );
+        let right = parsed_fixture("class Base { Base(); void right() {} }");
+        let app = parsed_fixture(
             "import 'left.dart' as l; import 'right.dart' as r; class L extends l.Base {} class R extends r.Base {}",
         );
         let files = [(left_path, &left), (right_path, &right), (app_path, &app)];
@@ -1887,8 +1905,8 @@ mod tests {
         use super::super::IdentitySource;
         let good_path = Path::new("/project/good.dart");
         let bad_path = Path::new("/project/bad.dart");
-        let good = program("class C { void known() {} }");
-        let bad = program("class C {}");
+        let good = parsed_fixture("class C { void known() {} }");
+        let bad = parsed_fixture("class C {}");
         let identities = IdentityIndex::from_project_files(
             &[
                 IdentitySource {
@@ -1941,8 +1959,9 @@ mod tests {
     fn resolved_immutable_annotations_preserve_aliases_and_uncertainty() {
         use super::super::IdentitySource;
         let path = Path::new("/project/annotations.dart");
-        let meta = program("class Immutable { const Immutable(); } const immutable = Immutable();");
-        let flutter = program("export 'package:meta/meta.dart' show immutable;");
+        let meta =
+            parsed_fixture("class Immutable { const Immutable(); } const immutable = Immutable();");
+        let flutter = parsed_fixture("export 'package:meta/meta.dart' show immutable;");
         for (source, expected) in [
             (
                 "import 'package:meta/meta.dart'; @immutable class C {} class Child extends C {}",
@@ -2002,7 +2021,7 @@ mod tests {
             ),
             ("class C {} class Child extends C {}", Truth::No),
         ] {
-            let program = program(source);
+            let program = parsed_fixture(source);
             let (mut sources, packages) = annotation_packages(&meta, &flutter);
             sources.push(IdentitySource {
                 path,
@@ -2048,14 +2067,14 @@ mod tests {
         let app_path = Path::new("/project/app.dart");
         let clean_path = Path::new("/project/clean.dart");
         for parse_error in [false, true] {
-            let bad = program(if parse_error {
+            let bad = parsed_fixture(if parse_error {
                 "class Duration {} class Map {}"
             } else {
                 "part 'missing.dart'; class Duration {} class Map {}"
             });
-            let facade = program("export 'bad.dart';");
-            let app = program("import 'facade.dart'; class C extends Duration {}");
-            let clean = program("class Good { void own() {} }");
+            let facade = parsed_fixture("export 'bad.dart';");
+            let app = parsed_fixture("import 'facade.dart'; class C extends Duration {}");
+            let clean = parsed_fixture("class Good { void own() {} }");
             let sources = [
                 IdentitySource {
                     path: bad_path,
@@ -2135,11 +2154,12 @@ mod tests {
         use super::super::IdentitySource;
         let facade_path = Path::new("/project/facade.dart");
         let app_path = Path::new("/project/app.dart");
-        let meta = program("class Immutable { const Immutable(); } const immutable = Immutable();");
-        let flutter = program("export 'package:meta/meta.dart' show immutable;");
+        let meta =
+            parsed_fixture("class Immutable { const Immutable(); } const immutable = Immutable();");
+        let flutter = parsed_fixture("export 'package:meta/meta.dart' show immutable;");
         for exported in ["package:meta/meta.dart", "package:flutter/foundation.dart"] {
-            let facade = program(&format!("export '{exported}' show immutable;"));
-            let app = program("import 'facade.dart' as f; @f.immutable class C {}");
+            let facade = parsed_fixture(&format!("export '{exported}' show immutable;"));
+            let app = parsed_fixture("import 'facade.dart' as f; @f.immutable class C {}");
             let (mut sources, packages) = annotation_packages(&meta, &flutter);
             sources.extend([
                 IdentitySource {

@@ -189,7 +189,22 @@ impl SignatureIndex {
         } else {
             Truth::Unknown
         };
-        let unrelated = match (&left, &right) {
+        let unrelated = self.promoted_unrelated(&left, &right, model, memo);
+        match (neither_subtype, unrelated) {
+            (_, Truth::No) => Truth::No,
+            (Truth::Yes, unrelated) => unrelated,
+            _ => Truth::Unknown,
+        }
+    }
+
+    fn promoted_unrelated(
+        &self,
+        left: &ResolvedType,
+        right: &ResolvedType,
+        model: &SemanticModel<'_>,
+        memo: &mut RelationMemo,
+    ) -> Truth {
+        match (left, right) {
             (
                 ResolvedType {
                     kind: ResolvedTypeKind::Interface { .. },
@@ -197,7 +212,7 @@ impl SignatureIndex {
                 ResolvedType {
                     kind: ResolvedTypeKind::Interface { .. },
                 },
-            ) => self.interfaces_unrelated(&left, &right, model, memo),
+            ) => self.interfaces_unrelated(left, right, model, memo),
             (
                 ResolvedType {
                     kind: ResolvedTypeKind::TypeParameter { bound: left, .. },
@@ -243,11 +258,6 @@ impl SignatureIndex {
                 },
             ) => Truth::Yes,
             _ => Truth::No,
-        };
-        match (neither_subtype, unrelated) {
-            (_, Truth::No) => Truth::No,
-            (Truth::Yes, unrelated) => unrelated,
-            _ => Truth::Unknown,
         }
     }
 
@@ -534,6 +544,17 @@ impl SignatureIndex {
             ) => return accepts_null(sup),
             _ => {}
         }
+        self.nullable_subtype(sub, sup, model, prove_unknown_top, memo)
+    }
+
+    fn nullable_subtype(
+        &self,
+        sub: &ResolvedType,
+        sup: &ResolvedType,
+        model: &SemanticModel<'_>,
+        prove_unknown_top: bool,
+        memo: &mut RelationMemo,
+    ) -> Truth {
         if sub.nullable() {
             match accepts_null(sup) {
                 Truth::Yes => {}
@@ -601,46 +622,38 @@ impl SignatureIndex {
                     kind: ResolvedTypeKind::NonNullTypeParameter { .. },
                 },
             ) => Truth::No,
+            _ => self.structural_subtype(&sub, &sup, model, prove_unknown_top, memo),
+        }
+    }
+
+    fn structural_subtype(
+        &self,
+        sub: &ResolvedType,
+        sup: &ResolvedType,
+        model: &SemanticModel<'_>,
+        prove_unknown_top: bool,
+        memo: &mut RelationMemo,
+    ) -> Truth {
+        match (&sub.kind, &sup.kind) {
+            (ResolvedTypeKind::Function { .. }, ResolvedTypeKind::Function { .. }) => {
+                self.function_subtype(sub, sup, model, prove_unknown_top, memo)
+            }
+            (ResolvedTypeKind::Function { .. }, ResolvedTypeKind::Interface { identity, .. }) => {
+                identity.is_sdk("dart:core", "Function").into()
+            }
+            (ResolvedTypeKind::Record { .. }, ResolvedTypeKind::Interface { identity, .. }) => {
+                identity.is_sdk("dart:core", "Record").into()
+            }
             (
-                ResolvedType {
-                    kind: ResolvedTypeKind::Function { .. },
+                ResolvedTypeKind::Record {
+                    positional: sub_positional,
+                    named: sub_named,
+                    ..
                 },
-                ResolvedType {
-                    kind: ResolvedTypeKind::Function { .. },
-                },
-            ) => self.function_subtype(&sub, &sup, model, prove_unknown_top, memo),
-            (
-                ResolvedType {
-                    kind: ResolvedTypeKind::Function { .. },
-                },
-                ResolvedType {
-                    kind: ResolvedTypeKind::Interface { identity, .. },
-                },
-            ) => identity.is_sdk("dart:core", "Function").into(),
-            (
-                ResolvedType {
-                    kind: ResolvedTypeKind::Record { .. },
-                },
-                ResolvedType {
-                    kind: ResolvedTypeKind::Interface { identity, .. },
-                },
-            ) => identity.is_sdk("dart:core", "Record").into(),
-            (
-                ResolvedType {
-                    kind:
-                        ResolvedTypeKind::Record {
-                            positional: sub_positional,
-                            named: sub_named,
-                            ..
-                        },
-                },
-                ResolvedType {
-                    kind:
-                        ResolvedTypeKind::Record {
-                            positional: sup_positional,
-                            named: sup_named,
-                            ..
-                        },
+                ResolvedTypeKind::Record {
+                    positional: sup_positional,
+                    named: sup_named,
+                    ..
                 },
             ) => {
                 if sub_positional.len() != sup_positional.len()
@@ -665,42 +678,21 @@ impl SignatureIndex {
                     }))
             }
             (
-                ResolvedType {
-                    kind: ResolvedTypeKind::Interface { .. },
-                },
-                ResolvedType {
-                    kind: ResolvedTypeKind::Function { .. },
-                }
-                | ResolvedType {
-                    kind: ResolvedTypeKind::Record { .. },
-                },
+                ResolvedTypeKind::Interface { .. },
+                ResolvedTypeKind::Function { .. } | ResolvedTypeKind::Record { .. },
             )
-            | (
-                ResolvedType {
-                    kind: ResolvedTypeKind::Function { .. },
-                }
-                | ResolvedType {
-                    kind: ResolvedTypeKind::Record { .. },
-                },
-                _,
-            ) => Truth::No,
+            | (ResolvedTypeKind::Function { .. } | ResolvedTypeKind::Record { .. }, _) => Truth::No,
             (
-                ResolvedType {
-                    kind:
-                        ResolvedTypeKind::Interface {
-                            identity: sub_identity,
-                            ..
-                        },
+                ResolvedTypeKind::Interface {
+                    identity: sub_identity,
+                    ..
                 },
-                ResolvedType {
-                    kind:
-                        ResolvedTypeKind::Interface {
-                            identity: sup_identity,
-                            arguments: sup_arguments,
-                            ..
-                        },
+                ResolvedTypeKind::Interface {
+                    identity: sup_identity,
+                    arguments: sup_arguments,
+                    ..
                 },
-            ) => match self.instantiated_identity(&sub, sup_identity, model) {
+            ) => match self.instantiated_identity(sub, sup_identity, model) {
                 Some(instantiated) => {
                     let arguments = instantiated.arguments();
                     if arguments.len() != sup_arguments.len() {
@@ -778,27 +770,16 @@ impl SignatureIndex {
 
         // Generic functions are compared after alpha-renaming the target's
         // binders to the source's binders; their bounds must then be equivalent.
-        let mut substitutions = FxHashMap::default();
-        for (sub, sup) in sub_shape
-            .type_parameters
-            .iter()
-            .zip(sup_shape.type_parameters.iter())
-        {
-            let (
-                ResolvedType {
-                    kind: ResolvedTypeKind::TypeParameter { id: sub_id, .. },
-                },
-                ResolvedType {
-                    kind: ResolvedTypeKind::TypeParameter { id: sup_id, .. },
-                },
-            ) = (sub, sup)
-            else {
-                return Truth::Unknown;
-            };
-            if sub_id != sup_id {
-                substitutions.insert(sup_id.clone(), sub.clone());
-            }
-        }
+        let (substitutions, mut result) = match self.function_type_parameter_relation(
+            &sub_shape.type_parameters,
+            &sup_shape.type_parameters,
+            model,
+            prove_unknown_top,
+            memo,
+        ) {
+            Ok(relation) => relation,
+            Err(result) => return result,
+        };
         let substitute = |ty| {
             if substitutions.is_empty() {
                 Cow::Borrowed(ty)
@@ -806,39 +787,6 @@ impl SignatureIndex {
                 Cow::Owned(model.substitute(ty, &substitutions))
             }
         };
-        let mut result = Truth::Yes;
-        for (sub, sup) in sub_shape
-            .type_parameters
-            .iter()
-            .zip(sup_shape.type_parameters.iter())
-        {
-            let (
-                ResolvedType {
-                    kind:
-                        ResolvedTypeKind::TypeParameter {
-                            bound: sub_bound, ..
-                        },
-                },
-                ResolvedType {
-                    kind:
-                        ResolvedTypeKind::TypeParameter {
-                            bound: sup_bound, ..
-                        },
-                },
-            ) = (sub, sup)
-            else {
-                return Truth::Unknown;
-            };
-            let sup_bound = substitute(sup_bound.as_ref());
-            result = all([
-                result,
-                self.subtype_memoized(sub_bound, &sup_bound, model, prove_unknown_top, memo),
-                self.subtype_memoized(&sup_bound, sub_bound, model, prove_unknown_top, memo),
-            ]);
-            if result == Truth::No {
-                return result;
-            }
-        }
         let sup_return = substitute(sup_return.as_ref());
         result = all([
             result,
@@ -868,6 +816,67 @@ impl SignatureIndex {
             }
         }
         result
+    }
+
+    fn function_type_parameter_relation(
+        &self,
+        sub_parameters: &[ResolvedType],
+        sup_parameters: &[ResolvedType],
+        model: &SemanticModel<'_>,
+        prove_unknown_top: bool,
+        memo: &mut RelationMemo,
+    ) -> Result<(FxHashMap<super::TypeParameterId, ResolvedType>, Truth), Truth> {
+        let mut substitutions = FxHashMap::default();
+        for (sub, sup) in sub_parameters.iter().zip(sup_parameters.iter()) {
+            let (
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { id: sub_id, .. },
+                },
+                ResolvedType {
+                    kind: ResolvedTypeKind::TypeParameter { id: sup_id, .. },
+                },
+            ) = (sub, sup)
+            else {
+                return Err(Truth::Unknown);
+            };
+            if sub_id != sup_id {
+                substitutions.insert(sup_id.clone(), sub.clone());
+            }
+        }
+        let mut result = Truth::Yes;
+        for (sub, sup) in sub_parameters.iter().zip(sup_parameters.iter()) {
+            let (
+                ResolvedType {
+                    kind:
+                        ResolvedTypeKind::TypeParameter {
+                            bound: sub_bound, ..
+                        },
+                },
+                ResolvedType {
+                    kind:
+                        ResolvedTypeKind::TypeParameter {
+                            bound: sup_bound, ..
+                        },
+                },
+            ) = (sub, sup)
+            else {
+                return Err(Truth::Unknown);
+            };
+            let sup_bound = if substitutions.is_empty() {
+                Cow::Borrowed(sup_bound.as_ref())
+            } else {
+                Cow::Owned(model.substitute(sup_bound, &substitutions))
+            };
+            result = all([
+                result,
+                self.subtype_memoized(sub_bound, &sup_bound, model, prove_unknown_top, memo),
+                self.subtype_memoized(&sup_bound, sub_bound, model, prove_unknown_top, memo),
+            ]);
+            if result == Truth::No {
+                return Err(result);
+            }
+        }
+        Ok((substitutions, result))
     }
 
     /// The analyzer's `extensionTypeErasure`; `None` when a representation
@@ -982,6 +991,27 @@ impl SignatureIndex {
             })),
             ResolvedType {
                 kind:
+                    ResolvedTypeKind::TypeParameter { .. }
+                    | ResolvedTypeKind::NonNullTypeParameter { .. }
+                    | ResolvedTypeKind::Function { .. }
+                    | ResolvedTypeKind::Record { .. },
+            } => Some(self.erase_structural(ty, model, memo, active)?),
+            other => return Some(other.clone()),
+        };
+        memo.insert(key, result.clone());
+        result
+    }
+
+    fn erase_structural<'a>(
+        &self,
+        ty: &'a ResolvedType,
+        model: &SemanticModel<'_>,
+        memo: &mut FxHashMap<BorrowedIdentity<'a, ResolvedType>, Option<ResolvedType>>,
+        active: &mut FxHashSet<DeclarationIdentity>,
+    ) -> Option<ResolvedType> {
+        match ty {
+            ResolvedType {
+                kind:
                     ResolvedTypeKind::TypeParameter {
                         id,
                         bound,
@@ -1014,25 +1044,7 @@ impl SignatureIndex {
             } => Some(ResolvedType::from_kind(ResolvedTypeKind::Function {
                 optional_positional: *optional_positional,
                 shape: match shape {
-                    Some(shape) => {
-                        let mut parameters = None;
-                        for (index, parameter) in shape.type_parameters.iter().enumerate() {
-                            let erased = self.erase_memoized(parameter, model, memo, active)?;
-                            if erased != *parameter {
-                                parameters.get_or_insert_with(|| shape.type_parameters.to_vec())
-                                    [index] = erased;
-                            }
-                        }
-                        match parameters {
-                            Some(parameters) => {
-                                Some(std::sync::Arc::new(super::FunctionTypeShape {
-                                    required_named: shape.required_named.clone(),
-                                    type_parameters: parameters.into(),
-                                }))
-                            }
-                            None => Some(shape.clone()),
-                        }
-                    }
+                    Some(shape) => Some(self.erase_function_shape(shape, model, memo, active)?),
                     None => None,
                 },
                 alias: alias.clone(),
@@ -1080,10 +1092,31 @@ impl SignatureIndex {
                     .into(),
                 nullable: *nullable,
             })),
-            other => return Some(other.clone()),
-        };
-        memo.insert(key, result.clone());
-        result
+            _ => None,
+        }
+    }
+
+    fn erase_function_shape<'a>(
+        &self,
+        shape: &'a std::sync::Arc<super::FunctionTypeShape>,
+        model: &SemanticModel<'_>,
+        memo: &mut FxHashMap<BorrowedIdentity<'a, ResolvedType>, Option<ResolvedType>>,
+        active: &mut FxHashSet<DeclarationIdentity>,
+    ) -> Option<std::sync::Arc<super::FunctionTypeShape>> {
+        let mut parameters = None;
+        for (index, parameter) in shape.type_parameters.iter().enumerate() {
+            let erased = self.erase_memoized(parameter, model, memo, active)?;
+            if erased != *parameter {
+                parameters.get_or_insert_with(|| shape.type_parameters.to_vec())[index] = erased;
+            }
+        }
+        Some(match parameters {
+            Some(parameters) => std::sync::Arc::new(super::FunctionTypeShape {
+                required_named: shape.required_named.clone(),
+                type_parameters: parameters.into(),
+            }),
+            None => shape.clone(),
+        })
     }
 }
 

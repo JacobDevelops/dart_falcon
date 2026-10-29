@@ -1058,135 +1058,12 @@ fn equal_severity_collisions_preserve_canonical_options_then_first_legacy_option
 fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
     use std::collections::BTreeSet;
 
-    use falcon_analyze::{
-        AnalyzeContext, IdentityIndex, IdentitySource, LibrarySource, RulePreparation,
-        SemanticModel, SignatureIndex, TypeIndex, group_libraries, library_unit,
-    };
-    use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use falcon_rules::meta::RuleKind;
 
-    let whole_file_checks = [
-        ("always-use-package-imports", "Import URI schemes."),
-        (
-            "avoid-abbreviations-in-doc-comments",
-            "Raw documentation comment lines.",
-        ),
-        ("avoid-banned-exports", "Export directive URI matches."),
-        (
-            "avoid-barrel-files",
-            "Whole-file exports without declarations.",
-        ),
-        (
-            "avoid-double-slash-imports",
-            "Import directive URI path segments.",
-        ),
-        (
-            "avoid-duplicate-exports",
-            "Export URI and visibility comparison.",
-        ),
-        (
-            "avoid-duplicate-named-imports",
-            "Import URI and prefix comparison.",
-        ),
-        (
-            "avoid-duplicate-test-assertions",
-            "Test filename and framework import eligibility before semantic collection.",
-        ),
-        (
-            "avoid-commented-out-code",
-            "Raw non-documentation comment tokens.",
-        ),
-        (
-            "avoid-empty-test-groups",
-            "Test filename and framework import eligibility before semantic collection.",
-        ),
-        (
-            "avoid-top-level-members-in-tests",
-            "Test filename eligibility before structural collection.",
-        ),
-        ("avoid-relative-lib-imports", "Import URI path segments."),
-        (
-            "avoid-web-libraries-in-flutter",
-            "Import URIs under Flutter package conditions.",
-        ),
-        ("combinators-ordering", "Import combinator ordering."),
-        ("comment-references", "Documentation reference blocks."),
-        (
-            "conditional-uri-does-not-exist",
-            "Conditional URI filesystem resolution.",
-        ),
-        (
-            "dangling-library-doc-comments",
-            "Documentation token attachment and source trivia.",
-        ),
-        ("directives-ordering", "Ordering across directive lists."),
-        ("eol-at-end-of-file", "Whole-source line-ending suffix."),
-        ("file-names", "File path basename."),
-        ("flutter-style-todos", "Comment token text."),
-        (
-            "format-comment",
-            "Source comment grouping and sentence formatting.",
-        ),
-        ("implementation-imports", "Import URIs and package layout."),
-        ("library-names", "Library directive name."),
-        ("library-prefixes", "Import directive prefixes."),
-        ("max-lines-for-file", "Whole-source line count."),
-        (
-            "missing-test-assertion",
-            "Test filename and framework import eligibility before semantic collection.",
-        ),
-        (
-            "no-leading-underscores-for-library-prefixes",
-            "Import directive prefixes.",
-        ),
-        (
-            "prefer-correct-test-file-name",
-            "Package test directory and filename eligibility before structural collection.",
-        ),
-        (
-            "prefer-expect-later",
-            "Test filename and framework import eligibility before semantic collection.",
-        ),
-        (
-            "prefer-test-matchers",
-            "Test filename and framework import eligibility before semantic collection.",
-        ),
-        (
-            "prefer-unique-test-names",
-            "Test filename and framework import eligibility before semantic collection.",
-        ),
-        (
-            "prefer-commenting-analyzer-ignores",
-            "Analyzer ignore comment tokens and adjacent explanation trivia.",
-        ),
-        (
-            "prefer-relative-imports",
-            "Import URIs and package directory context.",
-        ),
-        (
-            "slash-for-doc-comments",
-            "Documentation comment token spelling.",
-        ),
-        (
-            "unintended-html-in-doc-comment",
-            "Documentation source text and fences.",
-        ),
-        (
-            "unnecessary-library-directive",
-            "Library directives and preceding documentation trivia.",
-        ),
-        (
-            "unnecessary-library-name",
-            "Optional library directive name.",
-        ),
-        (
-            "use-string-in-part-of-directives",
-            "Part-of directive form.",
-        ),
-    ];
+    let whole_file_checks = WHOLE_FILE_CHECKS;
     let expected: BTreeSet<_> = whole_file_checks
-        .into_iter()
+        .iter()
+        .copied()
         .map(|(name, reason)| {
             assert!(!reason.is_empty());
             name
@@ -1207,7 +1084,28 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
     .unwrap();
     std::fs::create_dir(package.path().join("lib")).unwrap();
     let path = package.path().join("lib/structural_collectors.dart");
-    let config: FalconConfig = serde_json::from_value(serde_json::json!({
+    let config = collector_probe_config();
+    let source = collector_probe_source();
+    for (language_override, part_directive) in [
+        ("", ""),
+        ("// @dart = 2.19\n", ""),
+        ("", "part 'probe_part.dart';\n"),
+        ("", "part of 'probe_owner.dart';\n"),
+    ] {
+        let source = format!("{language_override}{part_directive}{source}");
+        check_collector_probe(
+            &path,
+            &config,
+            source,
+            part_directive,
+            &mut diagnostics_only,
+        );
+    }
+    assert_eq!(diagnostics_only, expected);
+}
+
+fn collector_probe_config() -> falcon_config::FalconConfig {
+    serde_json::from_value(serde_json::json!({
         "linter": {
             "rules": {
                 "style": {
@@ -1258,8 +1156,130 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
             }
         }
     }))
-    .unwrap();
-    let source = r#"
+    .unwrap()
+}
+const WHOLE_FILE_CHECKS: &[(&str, &str)] = &[
+    ("always-use-package-imports", "Import URI schemes."),
+    (
+        "avoid-abbreviations-in-doc-comments",
+        "Raw documentation comment lines.",
+    ),
+    ("avoid-banned-exports", "Export directive URI matches."),
+    (
+        "avoid-barrel-files",
+        "Whole-file exports without declarations.",
+    ),
+    (
+        "avoid-double-slash-imports",
+        "Import directive URI path segments.",
+    ),
+    (
+        "avoid-duplicate-exports",
+        "Export URI and visibility comparison.",
+    ),
+    (
+        "avoid-duplicate-named-imports",
+        "Import URI and prefix comparison.",
+    ),
+    (
+        "avoid-duplicate-test-assertions",
+        "Test filename and framework import eligibility before semantic collection.",
+    ),
+    (
+        "avoid-commented-out-code",
+        "Raw non-documentation comment tokens.",
+    ),
+    (
+        "avoid-empty-test-groups",
+        "Test filename and framework import eligibility before semantic collection.",
+    ),
+    (
+        "avoid-top-level-members-in-tests",
+        "Test filename eligibility before structural collection.",
+    ),
+    ("avoid-relative-lib-imports", "Import URI path segments."),
+    (
+        "avoid-web-libraries-in-flutter",
+        "Import URIs under Flutter package conditions.",
+    ),
+    ("combinators-ordering", "Import combinator ordering."),
+    ("comment-references", "Documentation reference blocks."),
+    (
+        "conditional-uri-does-not-exist",
+        "Conditional URI filesystem resolution.",
+    ),
+    (
+        "dangling-library-doc-comments",
+        "Documentation token attachment and source trivia.",
+    ),
+    ("directives-ordering", "Ordering across directive lists."),
+    ("eol-at-end-of-file", "Whole-source line-ending suffix."),
+    ("file-names", "File path basename."),
+    ("flutter-style-todos", "Comment token text."),
+    (
+        "format-comment",
+        "Source comment grouping and sentence formatting.",
+    ),
+    ("implementation-imports", "Import URIs and package layout."),
+    ("library-names", "Library directive name."),
+    ("library-prefixes", "Import directive prefixes."),
+    ("max-lines-for-file", "Whole-source line count."),
+    (
+        "missing-test-assertion",
+        "Test filename and framework import eligibility before semantic collection.",
+    ),
+    (
+        "no-leading-underscores-for-library-prefixes",
+        "Import directive prefixes.",
+    ),
+    (
+        "prefer-correct-test-file-name",
+        "Package test directory and filename eligibility before structural collection.",
+    ),
+    (
+        "prefer-expect-later",
+        "Test filename and framework import eligibility before semantic collection.",
+    ),
+    (
+        "prefer-test-matchers",
+        "Test filename and framework import eligibility before semantic collection.",
+    ),
+    (
+        "prefer-unique-test-names",
+        "Test filename and framework import eligibility before semantic collection.",
+    ),
+    (
+        "prefer-commenting-analyzer-ignores",
+        "Analyzer ignore comment tokens and adjacent explanation trivia.",
+    ),
+    (
+        "prefer-relative-imports",
+        "Import URIs and package directory context.",
+    ),
+    (
+        "slash-for-doc-comments",
+        "Documentation comment token spelling.",
+    ),
+    (
+        "unintended-html-in-doc-comment",
+        "Documentation source text and fences.",
+    ),
+    (
+        "unnecessary-library-directive",
+        "Library directives and preceding documentation trivia.",
+    ),
+    (
+        "unnecessary-library-name",
+        "Optional library directive name.",
+    ),
+    (
+        "use-string-in-part-of-directives",
+        "Part-of directive form.",
+    ),
+];
+
+fn collector_probe_source() -> &'static str {
+    r#"
 typedef _Callback = void Function();
 int? _deferred;
 class Probe {
@@ -1278,106 +1298,131 @@ void main() {
   const bool.fromEnvironment('COLLECTOR_PROBE');
 }
 // This deliberately long source line makes the line-length collector eligible for its shared callback traversal.
-"#;
-    for (language_override, part_directive) in [
-        ("", ""),
-        ("// @dart = 2.19\n", ""),
-        ("", "part 'probe_part.dart';\n"),
-        ("", "part of 'probe_owner.dart';\n"),
-    ] {
-        let source = format!("{language_override}{part_directive}{source}");
-        let parsed = parse(&source);
-        assert!(parsed.errors.is_empty());
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into_boxed_str(),
-            tree: parsed.tree,
-        });
-        let program = parsed.program();
-        let (sibling_name, sibling_source) = if part_directive.is_empty() {
-            ("probe_part.dart", "")
-        } else if program.part_of_directive().is_some() {
-            ("probe_owner.dart", "part 'structural_collectors.dart';")
-        } else {
-            ("probe_part.dart", "part of 'structural_collectors.dart';")
-        };
-        let sibling_path = path.with_file_name(sibling_name);
-        let sibling = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: sibling_source.into(),
-            tree: parse(sibling_source).tree,
-        });
-        let grouping =
-            group_libraries(&[(path.clone(), program), (sibling_path, sibling.program())]);
-        let unit = library_unit(&grouping, &[&parsed, &sibling], 0);
-        let identities = IdentityIndex::from_project_files(
-            &[IdentitySource {
-                path: &path,
-                parsed: &parsed,
+"#
+}
+
+fn check_collector_probe(
+    path: &std::path::Path,
+    config: &falcon_config::FalconConfig,
+    source: String,
+    part_directive: &str,
+    diagnostics_only: &mut std::collections::BTreeSet<&'static str>,
+) {
+    use falcon_analyze::{
+        AnalyzeContext, IdentityIndex, IdentitySource, LibrarySource, SemanticModel,
+        SignatureIndex, TypeIndex, group_libraries, library_unit,
+    };
+    use falcon_dart_parser::parse;
+    let parsed = parse(&source);
+    assert!(parsed.errors.is_empty());
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: source.into_boxed_str(),
+        tree: parsed.tree,
+    });
+    let program = parsed.program();
+    let (sibling_name, sibling_source) = if part_directive.is_empty() {
+        ("probe_part.dart", "")
+    } else if program.part_of_directive().is_some() {
+        ("probe_owner.dart", "part 'structural_collectors.dart';")
+    } else {
+        ("probe_part.dart", "part of 'structural_collectors.dart';")
+    };
+    let sibling_path = path.with_file_name(sibling_name);
+    let sibling = std::sync::Arc::new(falcon_analyze::ParsedFile {
+        source: sibling_source.into(),
+        tree: parse(sibling_source).tree,
+    });
+    let grouping = group_libraries(&[
+        (path.to_path_buf(), program),
+        (sibling_path, sibling.program()),
+    ]);
+    let unit = library_unit(&grouping, &[&parsed, &sibling], 0);
+    let identities = IdentityIndex::from_project_files(
+        &[IdentitySource {
+            path,
+            parsed: &parsed,
+            has_parse_errors: false,
+        }],
+        &[],
+    );
+    let types = TypeIndex::from_resolved_files(
+        [(
+            path,
+            LibrarySource {
+                program,
                 has_parse_errors: false,
-            }],
-            &[],
-        );
-        let types = TypeIndex::from_resolved_files(
-            [(
-                path.as_path(),
-                LibrarySource {
-                    program,
-                    has_parse_errors: false,
-                    has_unresolved_parts: false,
-                },
-            )],
-            &identities,
-        );
-        let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
-        let signatures = SignatureIndex::from_program(program, &model);
-        let context = AnalyzeContext::new(&path, &config, &parsed)
-            .with_types(&types)
-            .with_identities(&identities)
-            .with_signatures(&signatures)
-            .with_library(&unit);
-        let unresolved_context = AnalyzeContext::new(&path, &config, &parsed);
-        for metadata in RULE_METADATA {
-            let RuleKind::File {
-                make,
-                needs_resolution,
-            } = metadata.kind
-            else {
-                continue;
-            };
-            let preparation = make().prepare(program, &context);
-            if !needs_resolution {
-                assert_eq!(
-                    std::mem::discriminant(&make().prepare(program, &unresolved_context)),
-                    std::mem::discriminant(&preparation),
-                    "{} changes preparation kind without resolution but is not declared resolved",
+                has_unresolved_parts: false,
+            },
+        )],
+        &identities,
+    );
+    let model = SemanticModel::new(path, &parsed, &identities, Some(&types));
+    let signatures = SignatureIndex::from_program(program, &model);
+    let context = AnalyzeContext::new(path, config, &parsed)
+        .with_types(&types)
+        .with_identities(&identities)
+        .with_signatures(&signatures)
+        .with_library(&unit);
+    let unresolved_context = AnalyzeContext::new(path, config, &parsed);
+    check_rule_preparations(
+        program,
+        &context,
+        &unresolved_context,
+        part_directive,
+        diagnostics_only,
+    );
+}
+
+fn check_rule_preparations<'a>(
+    program: falcon_syntax::cst::Program<'a>,
+    context: &'a falcon_analyze::AnalyzeContext<'a>,
+    unresolved_context: &'a falcon_analyze::AnalyzeContext<'a>,
+    part_directive: &str,
+    diagnostics_only: &mut std::collections::BTreeSet<&'static str>,
+) {
+    use falcon_analyze::RulePreparation;
+    use falcon_rules::meta::RuleKind;
+    for metadata in RULE_METADATA {
+        let RuleKind::File {
+            make,
+            needs_resolution,
+        } = metadata.kind
+        else {
+            continue;
+        };
+        let preparation = make().prepare(program, context);
+        if !needs_resolution {
+            assert_eq!(
+                std::mem::discriminant(&make().prepare(program, unresolved_context)),
+                std::mem::discriminant(&preparation),
+                "{} changes preparation kind without resolution but is not declared resolved",
+                metadata.name
+            );
+        }
+        match preparation {
+            RulePreparation::Structural(collector) => {
+                assert!(
+                    collector.has_derived_interests(),
+                    "{} must derive callback interests with structural_visitor!",
                     metadata.name
                 );
-            }
-            match preparation {
-                RulePreparation::Structural(collector) => {
-                    assert!(
-                        collector.has_derived_interests(),
-                        "{} must derive callback interests with structural_visitor!",
-                        metadata.name
-                    );
-                    if part_directive.is_empty() {
-                        diagnostics_only.remove(metadata.name);
-                    }
+                if part_directive.is_empty() {
+                    diagnostics_only.remove(metadata.name);
                 }
-                RulePreparation::Semantic(_) => {
-                    assert!(
-                        needs_resolution,
-                        "{} returns a semantic collector but is not declared resolved",
-                        metadata.name
-                    );
-                    if part_directive.is_empty() {
-                        diagnostics_only.remove(metadata.name);
-                    }
-                }
-                RulePreparation::Diagnostics(_) => {}
             }
+            RulePreparation::Semantic(_) => {
+                assert!(
+                    needs_resolution,
+                    "{} returns a semantic collector but is not declared resolved",
+                    metadata.name
+                );
+                if part_directive.is_empty() {
+                    diagnostics_only.remove(metadata.name);
+                }
+            }
+            RulePreparation::Diagnostics(_) => {}
         }
     }
-    assert_eq!(diagnostics_only, expected);
 }
 
 #[test]

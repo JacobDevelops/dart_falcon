@@ -83,138 +83,210 @@ impl TypeEnvironment {
                 (param.name().name().to_owned(), ty)
             })
             .collect();
-        let return_type = match function.return_type {
-            Some(declared) => model.resolve_type_in(declared, &function_parameters),
-            None => {
-                let body_context = contextual.map(|(alias, return_type, _, _)| {
-                    let return_type = return_type.clone().projected_from(alias);
-                    if function.async_marker == AsyncMarker::Async
-                        && return_type.interface("dart:async", "Future")
-                    {
-                        ResolvedType {
-                            kind: ResolvedTypeKind::Interface {
-                                occurrence: Default::default(),
-                                identity: DeclarationIdentity::sdk("dart:async", "FutureOr"),
-                                arguments: return_type.type_arguments().collect(),
-                                nullable: false,
-                                extension_type: false,
-                            },
-                        }
-                    } else {
-                        return_type.clone()
-                    }
-                });
-                let return_type = match function.body {
-                    FunctionBody::Arrow(arrow) => environment.infer_with_context(
-                        arrow.expr(),
-                        model,
-                        signatures,
-                        &function_parameters,
-                        body_context.as_ref(),
-                        lookup,
-                    ),
-                    FunctionBody::Block(block) => {
-                        let mut returns = ClosureReturns {
-                            environment,
-                            conservative_writes: false,
-                            flow: super::flow::FlowContext {
-                                model,
-                                signatures,
-                                type_parameters: &function_parameters,
-                                field_promotions: self.field_promotions,
-                            },
-                            context: body_context.as_ref(),
-                            lookup,
-                            types: Vec::new(),
-                            exhaustive_switches: Vec::new(),
-                            never_expressions: FxHashSet::default(),
-                            expression_never: None,
-                        };
-                        for statement in block.stmts() {
-                            returns.visit_stmt(statement);
-                        }
-                        // A reachable end returns `null` implicitly.
-                        if super::flow::completes_normally(
-                            block.stmts(),
-                            &|expression| returns.never_expressions.contains(&expression.span()),
-                            &|statement| returns.exhaustive_switches.contains(&statement.span()),
-                        ) {
-                            returns.types.push(ResolvedType::NULL);
-                        }
-                        let inferred = returns
-                            .types
-                            .into_iter()
-                            .map(|ty| {
-                                if function.async_marker == AsyncMarker::Async {
-                                    flatten_async_return(ty, signatures, model)
-                                } else {
-                                    ty
-                                }
-                            })
-                            .reduce(|left, right| inference_join(&left, &right, signatures, model))
-                            .unwrap_or(ResolvedType::NULL);
-                        // Inference imputes `void` when the return context is
-                        // `void`, or `FutureOr<void>` for an `async` literal.
-                        let imputes_void = body_context.as_ref().is_some_and(|context| {
-                            matches!(
-                                context,
-                                ResolvedType {
-                                    kind: ResolvedTypeKind::Void
-                                }
-                            ) || (function.async_marker == AsyncMarker::Async
-                                && context.interface("dart:async", "FutureOr")
-                                && matches!(
-                                    context.arguments().first(),
-                                    Some(ResolvedType {
-                                        kind: ResolvedTypeKind::Void
-                                    })
-                                ))
-                        });
-                        if imputes_void {
-                            ResolvedType::VOID
-                        } else {
-                            inferred
-                        }
-                    }
-                    FunctionBody::Native(_) => ResolvedType::UNKNOWN,
-                };
-                if function.async_marker == AsyncMarker::Async {
-                    let argument = flatten_async_return(return_type, signatures, model);
-                    ResolvedType::new_interface(
-                        DeclarationIdentity::sdk("dart:async", "Future"),
-                        vec![argument].into(),
-                        false,
-                        false,
-                    )
-                } else {
-                    return_type
-                }
-            }
+        let return_type = environment.infer_function_return(
+            &function,
+            model,
+            signatures,
+            &function_parameters,
+            expected,
+            lookup,
+        );
+        resolved_function_type(
+            function,
+            &function_parameters,
+            return_type,
+            positional,
+            named,
+        )
+    }
+
+    fn infer_function_return(
+        self,
+        function: &FunctionSyntax<'_>,
+        model: &SemanticModel<'_>,
+        signatures: &SignatureIndex,
+        function_parameters: &TypeParameterScope,
+        expected: Option<&ResolvedType>,
+        lookup: &impl Fn(&str) -> Option<ResolvedType>,
+    ) -> ResolvedType {
+        use falcon_syntax::cst::AsyncMarker;
+        if let Some(declared) = function.return_type {
+            return model.resolve_type_in(declared, function_parameters);
+        }
+        let body_context = match expected {
+            Some(ResolvedType {
+                kind:
+                    ResolvedTypeKind::Function {
+                        alias, return_type, ..
+                    },
+            }) => Some(function_body_context(
+                return_type,
+                alias,
+                function.async_marker,
+            )),
+            _ => None,
         };
+        let return_type = match function.body {
+            FunctionBody::Arrow(arrow) => self.infer_with_context(
+                arrow.expr(),
+                model,
+                signatures,
+                function_parameters,
+                body_context.as_ref(),
+                lookup,
+            ),
+            FunctionBody::Block(block) => {
+                let flow = FlowContext {
+                    model,
+                    signatures,
+                    type_parameters: function_parameters,
+                    field_promotions: self.field_promotions,
+                };
+                self.infer_function_block(
+                    block,
+                    function.async_marker,
+                    flow,
+                    body_context.as_ref(),
+                    lookup,
+                )
+            }
+            FunctionBody::Native(_) => ResolvedType::UNKNOWN,
+        };
+        if function.async_marker == AsyncMarker::Async {
+            let argument = flatten_async_return(return_type, signatures, model);
+            ResolvedType::new_interface(
+                DeclarationIdentity::sdk("dart:async", "Future"),
+                vec![argument].into(),
+                false,
+                false,
+            )
+        } else {
+            return_type
+        }
+    }
+
+    fn infer_function_block(
+        self,
+        block: falcon_syntax::cst::Block<'_>,
+        async_marker: falcon_syntax::cst::AsyncMarker,
+        flow: FlowContext<'_, '_>,
+        context: Option<&ResolvedType>,
+        lookup: &impl Fn(&str) -> Option<ResolvedType>,
+    ) -> ResolvedType {
+        use falcon_syntax::cst::AsyncMarker;
+        let signatures = flow.signatures;
+        let model = flow.model;
+        let mut returns = ClosureReturns {
+            environment: self,
+            conservative_writes: false,
+            flow,
+            context,
+            lookup,
+            types: Vec::new(),
+            exhaustive_switches: Vec::new(),
+            never_expressions: FxHashSet::default(),
+            expression_never: None,
+        };
+        for statement in block.stmts() {
+            returns.visit_stmt(statement);
+        }
+        // A reachable end returns `null` implicitly.
+        if super::flow::completes_normally(
+            block.stmts(),
+            &|expression| returns.never_expressions.contains(&expression.span()),
+            &|statement| returns.exhaustive_switches.contains(&statement.span()),
+        ) {
+            returns.types.push(ResolvedType::NULL);
+        }
+        let inferred = returns
+            .types
+            .into_iter()
+            .map(|ty| {
+                if async_marker == AsyncMarker::Async {
+                    flatten_async_return(ty, signatures, model)
+                } else {
+                    ty
+                }
+            })
+            .reduce(|left, right| inference_join(&left, &right, signatures, model))
+            .unwrap_or(ResolvedType::NULL);
+        // Inference imputes `void` when the return context is
+        // `void`, or `FutureOr<void>` for an `async` literal.
+        let imputes_void = context.is_some_and(|context| {
+            matches!(
+                context,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Void
+                }
+            ) || (async_marker == AsyncMarker::Async
+                && context.interface("dart:async", "FutureOr")
+                && matches!(
+                    context.arguments().first(),
+                    Some(ResolvedType {
+                        kind: ResolvedTypeKind::Void
+                    })
+                ))
+        });
+        if imputes_void {
+            ResolvedType::VOID
+        } else {
+            inferred
+        }
+    }
+}
+
+fn function_body_context(
+    return_type: &ResolvedType,
+    alias: &FunctionTypeAlias,
+    async_marker: falcon_syntax::cst::AsyncMarker,
+) -> ResolvedType {
+    use falcon_syntax::cst::AsyncMarker;
+    let return_type = return_type.clone().projected_from(alias);
+    if async_marker == AsyncMarker::Async && return_type.interface("dart:async", "Future") {
         ResolvedType {
-            kind: ResolvedTypeKind::Function {
-                shape: FunctionTypeShape::from_scope(
-                    function
-                        .params
-                        .named()
-                        .filter(|param| matches!(param.kind(), ParamKind::Named { required: true }))
-                        .map(|param| param.name().name().to_owned())
-                        .collect(),
-                    function.type_params,
-                    &function_parameters,
-                ),
-                optional_positional: function
-                    .params
-                    .positional()
-                    .filter(|param| param.kind() == ParamKind::OptionalPositional)
-                    .count(),
-                alias: FunctionTypeAlias::default(),
-                return_type: Arc::new(return_type),
-                positional: positional.into(),
-                named: named.into(),
+            kind: ResolvedTypeKind::Interface {
+                occurrence: Default::default(),
+                identity: DeclarationIdentity::sdk("dart:async", "FutureOr"),
+                arguments: return_type.type_arguments().collect(),
                 nullable: false,
+                extension_type: false,
             },
         }
+    } else {
+        return_type.clone()
+    }
+}
+
+fn resolved_function_type(
+    function: FunctionSyntax<'_>,
+    function_parameters: &TypeParameterScope,
+    return_type: ResolvedType,
+    positional: Vec<ResolvedType>,
+    named: Vec<(String, ResolvedType)>,
+) -> ResolvedType {
+    ResolvedType {
+        kind: ResolvedTypeKind::Function {
+            shape: FunctionTypeShape::from_scope(
+                function
+                    .params
+                    .named()
+                    .filter(|param| matches!(param.kind(), ParamKind::Named { required: true }))
+                    .map(|param| param.name().name().to_owned())
+                    .collect(),
+                function.type_params,
+                function_parameters,
+            ),
+            optional_positional: function
+                .params
+                .positional()
+                .filter(|param| param.kind() == ParamKind::OptionalPositional)
+                .count(),
+            alias: FunctionTypeAlias::default(),
+            return_type: Arc::new(return_type),
+            positional: positional.into(),
+            named: named.into(),
+            nullable: false,
+        },
     }
 }
 
@@ -318,11 +390,195 @@ impl<L: Fn(&str) -> Option<ResolvedType>> ClosureReturns<'_, '_, L> {
         self.flow
             .declare_pattern(&mut self.environment, pattern, matched);
     }
+
+    fn visit_if_returns(&mut self, statement: falcon_syntax::cst::IfStmt<'_>) {
+        use falcon_syntax::cst::IfCondition;
+        match statement.condition() {
+            IfCondition::Expr(condition) => {
+                self.visit_expr(condition);
+                let before = self.environment.clone();
+                self.flow
+                    .assume_condition(&mut self.environment, condition, true);
+                self.scoped(|returns| returns.visit_stmt(statement.then_branch()));
+                let then_exits = self.statement_exits(statement.then_branch());
+                let then_environment = std::mem::replace(&mut self.environment, before);
+                self.flow
+                    .assume_condition(&mut self.environment, condition, false);
+                let else_exits = if let Some(branch) = statement.else_branch() {
+                    self.scoped(|returns| returns.visit_stmt(branch));
+                    self.statement_exits(branch)
+                } else {
+                    false
+                };
+                // Unlike the scoped walker, closure inference keeps the else
+                // snapshot when neither branch can complete.
+                if !then_exits || !else_exits {
+                    FlowContext::join_branches(
+                        &mut self.environment,
+                        then_environment,
+                        then_exits,
+                        else_exits,
+                    );
+                }
+            }
+            IfCondition::Case(case) => {
+                let value = case.expr();
+                let pattern = case.pattern();
+                self.visit_expr(value);
+                let matched = self.infer(value, None);
+                let before = self.environment.clone();
+                self.scoped(|returns| {
+                    returns.declare_pattern(pattern, matched);
+                    returns.visit_stmt(statement.then_branch());
+                });
+                let then_environment = self.environment.clone();
+                FlowContext::join_branches(&mut self.environment, before, false, false);
+                if let Some(branch) = statement.else_branch() {
+                    self.visit_stmt(branch);
+                }
+                FlowContext::join_branches(&mut self.environment, then_environment, false, false);
+            }
+        }
+    }
+
+    fn visit_for_returns(&mut self, statement: falcon_syntax::cst::ForStmt<'_>) {
+        use falcon_syntax::cst::ForInit;
+        self.scoped(|returns| {
+            match statement.header().init() {
+                Some(ForInit::VarDecl(declaration)) => returns.declare_local(declaration),
+                Some(ForInit::ForIn(binding)) if binding.declares_variable() => {
+                    let var_type = binding.var_type();
+                    let name = binding.name();
+                    let iterable = binding.iterable();
+                    let ty = match var_type {
+                        Some(ty) => returns
+                            .flow
+                            .model
+                            .resolve_type_in(ty, returns.flow.type_parameters),
+                        None => returns
+                            .flow
+                            .iterable_element(&returns.infer(iterable, None), statement.is_await()),
+                    };
+                    returns.environment.declare(name.name().to_owned(), ty);
+                }
+                Some(ForInit::PatternForIn(binding)) => {
+                    let pattern = binding.pattern();
+                    let iterable = binding.iterable();
+                    let matched = returns
+                        .flow
+                        .iterable_element(&returns.infer(iterable, None), statement.is_await());
+                    returns.declare_pattern(pattern, matched);
+                }
+                // A bare `for (x in xs)` writes the enclosing `x`.
+                Some(ForInit::Exprs(_) | ForInit::ForIn(_)) | None => {}
+            }
+            returns.visit_stmt(statement.body());
+        });
+    }
+
+    fn visit_try_returns(&mut self, statement: falcon_syntax::cst::TryCatchStmt<'_>) {
+        let before = self.environment.clone();
+        let depth = before.depth();
+        self.scoped(|returns| {
+            for statement in statement.body().stmts() {
+                returns.visit_stmt(statement);
+            }
+        });
+        let mut exits = self.environment.clone();
+        for catch in statement.catches() {
+            FlowContext::join_paths(
+                &mut self.environment,
+                [
+                    (Cow::Borrowed(&before), true),
+                    (Cow::Borrowed(&exits), true),
+                ],
+                depth,
+                false,
+            );
+            self.scoped(|returns| {
+                // Untyped `catch (e, s)` binds `Object` and `StackTrace`.
+                if let Some(name) = catch.exception_var() {
+                    let model = returns.flow.model;
+                    let ty = catch.exception_type().map_or_else(
+                        || model.core_type("Object", false),
+                        |ty| model.resolve_type_in(ty, returns.flow.type_parameters),
+                    );
+                    returns.environment.declare(name.name().to_owned(), ty);
+                }
+                if let Some(name) = catch.stack_trace_var() {
+                    let ty = returns.flow.model.core_type("StackTrace", false);
+                    returns.environment.declare(name.name().to_owned(), ty);
+                }
+                for statement in catch.body().stmts() {
+                    returns.visit_stmt(statement);
+                }
+            });
+            FlowContext::join_paths(
+                &mut exits,
+                [(Cow::Borrowed(&self.environment), true)],
+                depth,
+                true,
+            );
+        }
+        FlowContext::join_paths(
+            &mut self.environment,
+            [(Cow::Owned(before), true), (Cow::Borrowed(&exits), true)],
+            depth,
+            false,
+        );
+        if let Some(finally) = statement.finally() {
+            self.scoped(|returns| {
+                for statement in finally.stmts() {
+                    returns.visit_stmt(statement);
+                }
+            });
+        }
+    }
+
+    fn visit_switch_returns(&mut self, statement: falcon_syntax::cst::SwitchStmt<'_>) {
+        use falcon_syntax::cst::SwitchCaseKind;
+        self.visit_expr(statement.subject());
+        let matched = self.infer(statement.subject(), None);
+        if self.flow.switch_is_exhaustive(statement, &matched) {
+            self.exhaustive_switches.push(statement.span());
+        }
+        let before = self.environment.clone();
+        let depth = before.depth();
+        let mut exits = before.clone();
+        for case in statement.cases() {
+            FlowContext::join_paths(
+                &mut self.environment,
+                [
+                    (Cow::Borrowed(&before), true),
+                    (Cow::Borrowed(&exits), true),
+                ],
+                depth,
+                false,
+            );
+            self.scoped(|returns| {
+                for kind in case.cases() {
+                    if let SwitchCaseKind::Pattern(label) = kind {
+                        returns.declare_pattern(label.pattern(), matched.clone());
+                    }
+                }
+                for statement in case.body() {
+                    returns.visit_stmt(statement);
+                }
+            });
+            FlowContext::join_paths(
+                &mut exits,
+                [(Cow::Borrowed(&self.environment), true)],
+                depth,
+                true,
+            );
+        }
+        self.environment = exits;
+    }
 }
 
 impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureReturns<'_, '_, L> {
     fn visit_stmt(&mut self, statement: falcon_syntax::cst::Stmt<'tree>) {
-        use falcon_syntax::cst::{ForInit, IfCondition, Stmt, SwitchCaseKind};
+        use falcon_syntax::cst::{IfCondition, Stmt};
         let loop_start = match statement {
             Stmt::For(statement) => Some(statement.span().start),
             Stmt::While(statement) => Some(statement.span().start),
@@ -393,190 +649,10 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for ClosureRetur
                 self.declare_pattern(declaration.pattern(), matched);
             }
             Stmt::Block(_) => self.scoped(|returns| walk_stmt(returns, statement)),
-            Stmt::If(statement) => match statement.condition() {
-                IfCondition::Expr(condition) => {
-                    self.visit_expr(condition);
-                    let before = self.environment.clone();
-                    self.flow
-                        .assume_condition(&mut self.environment, condition, true);
-                    self.scoped(|returns| returns.visit_stmt(statement.then_branch()));
-                    let then_exits = self.statement_exits(statement.then_branch());
-                    let then_environment = std::mem::replace(&mut self.environment, before);
-                    self.flow
-                        .assume_condition(&mut self.environment, condition, false);
-                    let else_exits = if let Some(branch) = statement.else_branch() {
-                        self.scoped(|returns| returns.visit_stmt(branch));
-                        self.statement_exits(branch)
-                    } else {
-                        false
-                    };
-                    // Unlike the scoped walker, closure inference keeps the else
-                    // snapshot when neither branch can complete.
-                    if !then_exits || !else_exits {
-                        FlowContext::join_branches(
-                            &mut self.environment,
-                            then_environment,
-                            then_exits,
-                            else_exits,
-                        );
-                    }
-                    if let Some(entry) = optional_entry {
-                        FlowContext::join_branches(&mut self.environment, entry, false, false);
-                    }
-                    self.conservative_writes = conservative_before;
-                    return;
-                }
-                IfCondition::Case(case) => {
-                    let value = case.expr();
-                    let pattern = case.pattern();
-                    self.visit_expr(value);
-                    let matched = self.infer(value, None);
-                    let before = self.environment.clone();
-                    self.scoped(|returns| {
-                        returns.declare_pattern(pattern, matched);
-                        returns.visit_stmt(statement.then_branch());
-                    });
-                    let then_environment = self.environment.clone();
-                    FlowContext::join_branches(&mut self.environment, before, false, false);
-                    if let Some(branch) = statement.else_branch() {
-                        self.visit_stmt(branch);
-                    }
-                    FlowContext::join_branches(
-                        &mut self.environment,
-                        then_environment,
-                        false,
-                        false,
-                    );
-                }
-            },
-            Stmt::For(statement) => self.scoped(|returns| {
-                match statement.header().init() {
-                    Some(ForInit::VarDecl(declaration)) => returns.declare_local(declaration),
-                    Some(ForInit::ForIn(binding)) if binding.declares_variable() => {
-                        let var_type = binding.var_type();
-                        let name = binding.name();
-                        let iterable = binding.iterable();
-                        let ty = match var_type {
-                            Some(ty) => returns
-                                .flow
-                                .model
-                                .resolve_type_in(ty, returns.flow.type_parameters),
-                            None => returns.flow.iterable_element(
-                                &returns.infer(iterable, None),
-                                statement.is_await(),
-                            ),
-                        };
-                        returns.environment.declare(name.name().to_owned(), ty);
-                    }
-                    Some(ForInit::PatternForIn(binding)) => {
-                        let pattern = binding.pattern();
-                        let iterable = binding.iterable();
-                        let matched = returns
-                            .flow
-                            .iterable_element(&returns.infer(iterable, None), statement.is_await());
-                        returns.declare_pattern(pattern, matched);
-                    }
-                    // A bare `for (x in xs)` writes the enclosing `x`.
-                    Some(ForInit::Exprs(_) | ForInit::ForIn(_)) | None => {}
-                }
-                returns.visit_stmt(statement.body());
-            }),
-            Stmt::TryCatch(statement) => {
-                let before = self.environment.clone();
-                let depth = before.depth();
-                self.scoped(|returns| {
-                    for statement in statement.body().stmts() {
-                        returns.visit_stmt(statement);
-                    }
-                });
-                let mut exits = self.environment.clone();
-                for catch in statement.catches() {
-                    FlowContext::join_paths(
-                        &mut self.environment,
-                        [
-                            (Cow::Borrowed(&before), true),
-                            (Cow::Borrowed(&exits), true),
-                        ],
-                        depth,
-                        false,
-                    );
-                    self.scoped(|returns| {
-                        // Untyped `catch (e, s)` binds `Object` and `StackTrace`.
-                        if let Some(name) = catch.exception_var() {
-                            let model = returns.flow.model;
-                            let ty = catch.exception_type().map_or_else(
-                                || model.core_type("Object", false),
-                                |ty| model.resolve_type_in(ty, returns.flow.type_parameters),
-                            );
-                            returns.environment.declare(name.name().to_owned(), ty);
-                        }
-                        if let Some(name) = catch.stack_trace_var() {
-                            let ty = returns.flow.model.core_type("StackTrace", false);
-                            returns.environment.declare(name.name().to_owned(), ty);
-                        }
-                        for statement in catch.body().stmts() {
-                            returns.visit_stmt(statement);
-                        }
-                    });
-                    FlowContext::join_paths(
-                        &mut exits,
-                        [(Cow::Borrowed(&self.environment), true)],
-                        depth,
-                        true,
-                    );
-                }
-                FlowContext::join_paths(
-                    &mut self.environment,
-                    [(Cow::Owned(before), true), (Cow::Borrowed(&exits), true)],
-                    depth,
-                    false,
-                );
-                if let Some(finally) = statement.finally() {
-                    self.scoped(|returns| {
-                        for statement in finally.stmts() {
-                            returns.visit_stmt(statement);
-                        }
-                    });
-                }
-            }
-            Stmt::Switch(statement) => {
-                self.visit_expr(statement.subject());
-                let matched = self.infer(statement.subject(), None);
-                if self.flow.switch_is_exhaustive(statement, &matched) {
-                    self.exhaustive_switches.push(statement.span());
-                }
-                let before = self.environment.clone();
-                let depth = before.depth();
-                let mut exits = before.clone();
-                for case in statement.cases() {
-                    FlowContext::join_paths(
-                        &mut self.environment,
-                        [
-                            (Cow::Borrowed(&before), true),
-                            (Cow::Borrowed(&exits), true),
-                        ],
-                        depth,
-                        false,
-                    );
-                    self.scoped(|returns| {
-                        for kind in case.cases() {
-                            if let SwitchCaseKind::Pattern(label) = kind {
-                                returns.declare_pattern(label.pattern(), matched.clone());
-                            }
-                        }
-                        for statement in case.body() {
-                            returns.visit_stmt(statement);
-                        }
-                    });
-                    FlowContext::join_paths(
-                        &mut exits,
-                        [(Cow::Borrowed(&self.environment), true)],
-                        depth,
-                        true,
-                    );
-                }
-                self.environment = exits;
-            }
+            Stmt::If(statement) => self.visit_if_returns(statement),
+            Stmt::For(statement) => self.visit_for_returns(statement),
+            Stmt::TryCatch(statement) => self.visit_try_returns(statement),
+            Stmt::Switch(statement) => self.visit_switch_returns(statement),
             _ => walk_stmt(self, statement),
         }
         if let Some(entry) = optional_entry {

@@ -190,6 +190,391 @@ pub fn resolve_new_constructor<'a>(
     ))
 }
 
+struct SignatureInference<'a, 'context, 'model, 'lookup, F: Fn(&str) -> Option<ResolvedType>> {
+    environment: &'a TypeEnvironment,
+    signature: &'a ResolvedSignature,
+    call_parameters: &'a [TypeParameterId],
+    return_type: &'a ResolvedType,
+    owner: &'a FxHashMap<TypeParameterId, ResolvedType>,
+    context: &'a InferenceContext<'context, 'model, 'lookup, F>,
+    substitutions: FxHashMap<TypeParameterId, ResolvedType>,
+    inferred: FxHashMap<TypeParameterId, ResolvedType>,
+    upper: FxHashMap<TypeParameterId, ResolvedType>,
+    partial: FxHashMap<TypeParameterId, ResolvedType>,
+    argument_context: FxHashMap<TypeParameterId, ResolvedType>,
+}
+
+impl<'a, F: Fn(&str) -> Option<ResolvedType>> SignatureInference<'a, '_, '_, '_, F> {
+    fn infer_downward(&mut self, expected: Option<&ResolvedType>) {
+        // A dynamic result context supplies no downward type schema. Freezing
+        // it here would discard upward constraints from ordinary arguments.
+        if let Some(expected) = expected.filter(|ty| {
+            !matches!(
+                ty,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Dynamic
+                }
+            )
+        }) {
+            let mut constraints = TypeConstraintContext {
+                parameters: self.call_parameters,
+                inferred: &mut self.inferred,
+                upper: &mut self.upper,
+                signatures: self.context.signatures,
+                model: self.context.model,
+                poison_unknown: false,
+                partial: Some(&mut self.partial),
+            };
+            infer_type_constraints(
+                &self.context.model.substitute(self.return_type, self.owner),
+                expected,
+                false,
+                &mut constraints,
+            );
+        }
+        for id in self.call_parameters {
+            if let Some(mut candidate) = inference_candidate(
+                self.inferred.get(id),
+                self.upper.get(id),
+                self.context.signatures,
+                self.context.model,
+            ) {
+                // A result context constrains inference only within the
+                // parameter's bound. In particular, `int?` cannot instantiate
+                // a parameter bounded by `num`: its downward solution is int.
+                // A top-type context meets a declared bound instead.
+                let bound = parameter_bound(self.return_type, id)
+                    .or_else(|| {
+                        self.signature
+                            .positional
+                            .iter()
+                            .find_map(|ty| parameter_bound(ty, id))
+                    })
+                    .or_else(|| {
+                        self.signature
+                            .named
+                            .values()
+                            .find_map(|ty| parameter_bound(ty, id))
+                    });
+                if let Some(bound) = bound {
+                    let bound = self.context.model.substitute(bound, &self.substitutions);
+                    if !self.inferred.contains_key(id)
+                        && let Some(met) = self.context.signatures.declared_bound_meet(
+                            id,
+                            &candidate,
+                            &bound,
+                            self.call_parameters,
+                        )
+                    {
+                        candidate = met;
+                    } else if self.context.signatures.relation(
+                        &candidate,
+                        crate::TypeRelation::SubtypeOf(&bound),
+                        self.context.model,
+                    ) == Truth::No
+                    {
+                        let non_null = candidate.non_null();
+                        if self.context.signatures.relation(
+                            &non_null,
+                            crate::TypeRelation::SubtypeOf(&bound),
+                            self.context.model,
+                        ) == Truth::Yes
+                        {
+                            candidate = non_null;
+                        } else if self.context.signatures.relation(
+                            &bound,
+                            crate::TypeRelation::SubtypeOf(&candidate),
+                            self.context.model,
+                        ) == Truth::Yes
+                        {
+                            candidate = bound;
+                        } else {
+                            continue;
+                        }
+                    }
+                }
+                self.substitutions.insert(id.clone(), candidate);
+            }
+        }
+    }
+
+    fn update_substitutions(&mut self, fixed: &HashSet<TypeParameterId>, include_upper: bool) {
+        for id in self.call_parameters {
+            if fixed.contains(id) || (!include_upper && !self.inferred.contains_key(id)) {
+                continue;
+            }
+            if let Some(mut candidate) = inference_candidate(
+                self.inferred.get(id),
+                self.upper.get(id),
+                self.context.signatures,
+                self.context.model,
+            ) {
+                if !self.inferred.contains_key(id)
+                    && let Some(bound) = parameter_bound(self.return_type, id)
+                        .or_else(|| {
+                            self.signature
+                                .positional
+                                .iter()
+                                .find_map(|ty| parameter_bound(ty, id))
+                        })
+                        .or_else(|| {
+                            self.signature
+                                .named
+                                .values()
+                                .find_map(|ty| parameter_bound(ty, id))
+                        })
+                    && let Some(met) = self.context.signatures.declared_bound_meet(
+                        id,
+                        &candidate,
+                        &self.context.model.substitute(bound, &self.substitutions),
+                        self.call_parameters,
+                    )
+                {
+                    candidate = met;
+                }
+                self.argument_context.insert(id.clone(), candidate.clone());
+                self.substitutions.insert(id.clone(), candidate);
+            }
+        }
+    }
+
+    fn infer_argument(
+        &mut self,
+        parameter: &ResolvedType,
+        argument: Expr<'_>,
+        expected_argument: &ResolvedType,
+    ) {
+        let formal = self.context.model.substitute(parameter, self.owner);
+        // Preserve partial callable contexts without passing unresolved
+        // schemas to ordinary expressions.
+        let mut actual = self.environment.infer_with_context(
+            argument,
+            self.context.model,
+            self.context.signatures,
+            self.context.type_parameters,
+            (matches!(
+                expected_argument,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Function { .. }
+                }
+            ) || !has_inference_holes(expected_argument))
+            .then_some(expected_argument),
+            self.context.lookup,
+        );
+        if actual == ResolvedType::UNKNOWN
+            && let Some(fallback) = self.context.argument_fallback
+            && let Some(ty) = fallback.lookup(argument)
+        {
+            actual = ty;
+        }
+        let mut constraints = TypeConstraintContext {
+            parameters: self.call_parameters,
+            inferred: &mut self.inferred,
+            upper: &mut self.upper,
+            signatures: self.context.signatures,
+            model: self.context.model,
+            poison_unknown: true,
+            partial: None,
+        };
+        infer_type_constraints(&formal, &actual, true, &mut constraints);
+    }
+
+    fn has_unresolved_inputs(&self, parameter: &ResolvedType, argument: Expr<'_>) -> bool {
+        if !self
+            .call_parameters
+            .iter()
+            .any(|id| !self.substitutions.contains_key(id))
+        {
+            return false;
+        }
+        let Expr::FuncExpr(function) = argument else {
+            return false;
+        };
+        let ResolvedType {
+            kind: ResolvedTypeKind::Function {
+                positional, named, ..
+            },
+        } = parameter
+        else {
+            return false;
+        };
+        let depends_on_call = |ty: &ResolvedType| {
+            let ty = if self.owner.is_empty() {
+                Cow::Borrowed(ty)
+            } else {
+                Cow::Owned(self.context.model.substitute(ty, self.owner))
+            };
+            self.call_parameters.iter().any(|id| {
+                !self.substitutions.contains_key(id) && mentions_any(&ty, std::slice::from_ref(id))
+            })
+        };
+        let params = function.params();
+        params
+            .positional()
+            .zip(positional.iter())
+            .any(|(param, ty)| {
+                param.param_type().is_none()
+                    && param.function_params().is_none()
+                    && depends_on_call(ty)
+            })
+            || params.named().any(|param| {
+                param.param_type().is_none()
+                    && param.function_params().is_none()
+                    && named
+                        .iter()
+                        .find(|(name, _)| name == param.name().name())
+                        .is_some_and(|(_, ty)| depends_on_call(ty))
+            })
+    }
+
+    fn infer_stages<'syntax>(
+        &mut self,
+        args: Option<falcon_syntax::cst::ArgList<'syntax>>,
+        deferred: &mut Vec<(&'a ResolvedType, Expr<'syntax>)>,
+        fixed: &HashSet<TypeParameterId>,
+    ) {
+        let signature = self.signature;
+        // Each stage uses a frozen context. Independent closure results must
+        // join before they contextualize closures that consume those results.
+        for closures in [false, true] {
+            for (parameter, argument) in signature
+                .positional
+                .iter()
+                .zip(args.into_iter().flat_map(|args| args.positional()))
+                .chain(
+                    args.into_iter()
+                        .flat_map(|args| args.named())
+                        .filter_map(|argument| {
+                            signature
+                                .named
+                                .get(argument.name().name())
+                                .map(|parameter| (parameter, argument.value()))
+                        }),
+                )
+            {
+                if matches!(argument, Expr::FuncExpr(_)) != closures {
+                    continue;
+                }
+                let expected_argument = self
+                    .context
+                    .model
+                    .substitute(parameter, &self.argument_context);
+                if closures && self.has_unresolved_inputs(parameter, argument) {
+                    if deferred.capacity() == 0 {
+                        deferred.reserve(
+                            args.map_or(0, |args| args.positional().len() + args.named().len()),
+                        );
+                    }
+                    deferred.push((parameter, argument));
+                    continue;
+                }
+                self.infer_argument(parameter, argument, &expected_argument);
+            }
+            self.update_substitutions(fixed, false);
+        }
+    }
+
+    fn infer_deferred(
+        &mut self,
+        deferred: &mut Vec<(&ResolvedType, Expr<'_>)>,
+        mut argument_contexts: Option<&mut HashMap<usize, ResolvedType>>,
+        fixed: &HashSet<TypeParameterId>,
+    ) {
+        let mut complete_unresolved = false;
+        while !deferred.is_empty() {
+            let remaining = deferred.len();
+            deferred.retain(|&(parameter, argument)| {
+                let mut expected_argument = self
+                    .context
+                    .model
+                    .substitute(parameter, &self.argument_context);
+                let unresolved = self.has_unresolved_inputs(parameter, argument);
+                if unresolved && !complete_unresolved {
+                    return true;
+                }
+                if unresolved {
+                    let ResolvedType {
+                        kind: ResolvedTypeKind::Function { return_type, .. },
+                    } = &expected_argument
+                    else {
+                        unreachable!()
+                    };
+                    let return_type = Arc::clone(return_type);
+                    // Cycles and callbacks without producers complete only
+                    // missing input variables to top, not the return schema.
+                    for id in self.call_parameters {
+                        if !self.substitutions.contains_key(id) {
+                            self.argument_context
+                                .insert(id.clone(), self.context.model.core_type("Object", true));
+                        }
+                    }
+                    expected_argument = self
+                        .context
+                        .model
+                        .substitute(parameter, &self.argument_context);
+                    if let ResolvedType {
+                        kind:
+                            ResolvedTypeKind::Function {
+                                return_type: result,
+                                ..
+                            },
+                    } = &mut expected_argument
+                    {
+                        *result = return_type;
+                    }
+                    for id in self.call_parameters {
+                        if !self.substitutions.contains_key(id) {
+                            self.argument_context
+                                .insert(id.clone(), ResolvedType::UNKNOWN);
+                        }
+                    }
+                    if let Some(contexts) = argument_contexts.as_deref_mut() {
+                        contexts.insert(argument.span().start, expected_argument.clone());
+                    }
+                }
+                self.infer_argument(parameter, argument, &expected_argument);
+                false
+            });
+            self.update_substitutions(fixed, false);
+            complete_unresolved = deferred.len() == remaining;
+        }
+    }
+
+    fn complete_defaults(&mut self) {
+        for id in self.call_parameters {
+            if self.substitutions.contains_key(id) {
+                continue;
+            }
+            let default = if self.inferred.contains_key(id) || self.upper.contains_key(id) {
+                ResolvedType::UNKNOWN
+            } else if let Some(schema) = self.partial.remove(id) {
+                schema
+            } else if let Some(default) = self.context.signatures.owner_defaults.get(id) {
+                self.context.model.substitute(default, &self.substitutions)
+            } else if self.context.signatures.bound_declared.get(id) == Some(&false) {
+                ResolvedType::DYNAMIC
+            } else {
+                parameter_bound(self.return_type, id)
+                    .or_else(|| {
+                        self.signature
+                            .positional
+                            .iter()
+                            .find_map(|ty| parameter_bound(ty, id))
+                    })
+                    .or_else(|| {
+                        self.signature
+                            .named
+                            .values()
+                            .find_map(|ty| parameter_bound(ty, id))
+                    })
+                    .map(|bound| self.context.model.substitute(bound, &self.substitutions))
+                    .unwrap_or(ResolvedType::UNKNOWN)
+            };
+            self.substitutions.entry(id.clone()).or_insert(default);
+        }
+    }
+}
+
 impl TypeEnvironment {
     /// Solves generic call parameters; owner and explicit substitutions are fixed.
     pub fn infer_signature_substitutions<'syntax, F: Fn(&str) -> Option<ResolvedType>>(
@@ -235,7 +620,7 @@ impl TypeEnvironment {
         type_args: AstChildren<'_, DartType<'_>>,
         context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
-        mut argument_contexts: Option<&mut HashMap<usize, ResolvedType>>,
+        argument_contexts: Option<&mut HashMap<usize, ResolvedType>>,
     ) -> FxHashMap<TypeParameterId, ResolvedType> {
         let args = args.into();
         let (signature, call_parameters, return_type, owner) = signature;
@@ -257,399 +642,44 @@ impl TypeEnvironment {
             }));
             return substitutions;
         }
-        let mut inferred =
-            FxHashMap::with_capacity_and_hasher(call_parameters.len(), Default::default());
-        let mut upper =
-            FxHashMap::with_capacity_and_hasher(call_parameters.len(), Default::default());
-        let mut partial = FxHashMap::default();
-        // A dynamic result context supplies no downward type schema. Freezing
-        // it here would discard upward constraints from ordinary arguments.
-        if let Some(expected) = expected.filter(|ty| {
-            !matches!(
-                ty,
-                ResolvedType {
-                    kind: ResolvedTypeKind::Dynamic
-                }
-            )
-        }) {
-            let mut constraints = TypeConstraintContext {
-                parameters: call_parameters,
-                inferred: &mut inferred,
-                upper: &mut upper,
-                signatures: context.signatures,
-                model: context.model,
-                poison_unknown: false,
-                partial: Some(&mut partial),
-            };
-            infer_type_constraints(
-                &context.model.substitute(return_type, owner),
-                expected,
-                false,
-                &mut constraints,
-            );
-        }
-        for id in call_parameters {
-            if let Some(mut candidate) = inference_candidate(
-                inferred.get(id),
-                upper.get(id),
-                context.signatures,
-                context.model,
-            ) {
-                // A result context constrains inference only within the
-                // parameter's bound. In particular, `int?` cannot instantiate
-                // a parameter bounded by `num`: its downward solution is int.
-                // A top-type context meets a declared bound instead.
-                let bound = parameter_bound(return_type, id)
-                    .or_else(|| {
-                        signature
-                            .positional
-                            .iter()
-                            .find_map(|ty| parameter_bound(ty, id))
-                    })
-                    .or_else(|| {
-                        signature
-                            .named
-                            .values()
-                            .find_map(|ty| parameter_bound(ty, id))
-                    });
-                if let Some(bound) = bound {
-                    let bound = context.model.substitute(bound, &substitutions);
-                    if !inferred.contains_key(id)
-                        && let Some(met) = context.signatures.declared_bound_meet(
-                            id,
-                            &candidate,
-                            &bound,
-                            call_parameters,
-                        )
-                    {
-                        candidate = met;
-                    } else if context.signatures.relation(
-                        &candidate,
-                        crate::TypeRelation::SubtypeOf(&bound),
-                        context.model,
-                    ) == Truth::No
-                    {
-                        let non_null = candidate.non_null();
-                        if context.signatures.relation(
-                            &non_null,
-                            crate::TypeRelation::SubtypeOf(&bound),
-                            context.model,
-                        ) == Truth::Yes
-                        {
-                            candidate = non_null;
-                        } else if context.signatures.relation(
-                            &bound,
-                            crate::TypeRelation::SubtypeOf(&candidate),
-                            context.model,
-                        ) == Truth::Yes
-                        {
-                            candidate = bound;
-                        } else {
-                            continue;
-                        }
-                    }
-                }
-                substitutions.insert(id.clone(), candidate);
-            }
-        }
-        let fixed = substitutions
+        let mut inference = SignatureInference {
+            environment: self,
+            signature,
+            call_parameters,
+            return_type,
+            owner,
+            context,
+            substitutions,
+            inferred: FxHashMap::with_capacity_and_hasher(
+                call_parameters.len(),
+                Default::default(),
+            ),
+            upper: FxHashMap::with_capacity_and_hasher(call_parameters.len(), Default::default()),
+            partial: FxHashMap::default(),
+            argument_context: FxHashMap::default(),
+        };
+        inference.infer_downward(expected);
+        let fixed = inference
+            .substitutions
             .iter()
             .filter(|(_, ty)| !has_inference_holes(ty))
             .map(|(id, _)| id.clone())
             .collect::<HashSet<_>>();
-        let update_substitutions =
-            |substitutions: &mut FxHashMap<TypeParameterId, ResolvedType>,
-             argument_context: &mut FxHashMap<TypeParameterId, ResolvedType>,
-             inferred: &FxHashMap<TypeParameterId, ResolvedType>,
-             upper: &FxHashMap<TypeParameterId, ResolvedType>,
-             include_upper: bool| {
-                for id in call_parameters {
-                    if fixed.contains(id) || (!include_upper && !inferred.contains_key(id)) {
-                        continue;
-                    }
-                    if let Some(mut candidate) = inference_candidate(
-                        inferred.get(id),
-                        upper.get(id),
-                        context.signatures,
-                        context.model,
-                    ) {
-                        if !inferred.contains_key(id)
-                            && let Some(bound) = parameter_bound(return_type, id)
-                                .or_else(|| {
-                                    signature
-                                        .positional
-                                        .iter()
-                                        .find_map(|ty| parameter_bound(ty, id))
-                                })
-                                .or_else(|| {
-                                    signature
-                                        .named
-                                        .values()
-                                        .find_map(|ty| parameter_bound(ty, id))
-                                })
-                            && let Some(met) = context.signatures.declared_bound_meet(
-                                id,
-                                &candidate,
-                                &context.model.substitute(bound, substitutions),
-                                call_parameters,
-                            )
-                        {
-                            candidate = met;
-                        }
-                        argument_context.insert(id.clone(), candidate.clone());
-                        substitutions.insert(id.clone(), candidate);
-                    }
-                }
-            };
-        let infer_argument =
-            |parameter: &ResolvedType,
-             argument: Expr<'_>,
-             expected_argument: &ResolvedType,
-             inferred: &mut FxHashMap<TypeParameterId, ResolvedType>,
-             upper: &mut FxHashMap<TypeParameterId, ResolvedType>| {
-                let formal = context.model.substitute(parameter, owner);
-                // Preserve partial callable contexts without passing unresolved
-                // schemas to ordinary expressions.
-                let mut actual = self.infer_with_context(
-                    argument,
-                    context.model,
-                    context.signatures,
-                    context.type_parameters,
-                    (matches!(
-                        expected_argument,
-                        ResolvedType {
-                            kind: ResolvedTypeKind::Function { .. }
-                        }
-                    ) || !has_inference_holes(expected_argument))
-                    .then_some(expected_argument),
-                    context.lookup,
-                );
-                if actual == ResolvedType::UNKNOWN
-                    && let Some(fallback) = context.argument_fallback
-                    && let Some(ty) = fallback.lookup(argument)
-                {
-                    actual = ty;
-                }
-                let mut constraints = TypeConstraintContext {
-                    parameters: call_parameters,
-                    inferred,
-                    upper,
-                    signatures: context.signatures,
-                    model: context.model,
-                    poison_unknown: true,
-                    partial: None,
-                };
-                infer_type_constraints(&formal, &actual, true, &mut constraints);
-            };
-        let has_unresolved_inputs =
-            |parameter: &ResolvedType,
-             argument: Expr<'_>,
-             substitutions: &FxHashMap<TypeParameterId, ResolvedType>| {
-                if !call_parameters
-                    .iter()
-                    .any(|id| !substitutions.contains_key(id))
-                {
-                    return false;
-                }
-                let Expr::FuncExpr(function) = argument else {
-                    return false;
-                };
-                let ResolvedType {
-                    kind:
-                        ResolvedTypeKind::Function {
-                            positional, named, ..
-                        },
-                } = parameter
-                else {
-                    return false;
-                };
-                let depends_on_call = |ty: &ResolvedType| {
-                    let ty = if owner.is_empty() {
-                        Cow::Borrowed(ty)
-                    } else {
-                        Cow::Owned(context.model.substitute(ty, owner))
-                    };
-                    call_parameters.iter().any(|id| {
-                        !substitutions.contains_key(id)
-                            && mentions_any(&ty, std::slice::from_ref(id))
-                    })
-                };
-                let params = function.params();
-                params
-                    .positional()
-                    .zip(positional.iter())
-                    .any(|(param, ty)| {
-                        param.param_type().is_none()
-                            && param.function_params().is_none()
-                            && depends_on_call(ty)
-                    })
-                    || params.named().any(|param| {
-                        param.param_type().is_none()
-                            && param.function_params().is_none()
-                            && named
-                                .iter()
-                                .find(|(name, _)| name == param.name().name())
-                                .is_some_and(|(_, ty)| depends_on_call(ty))
-                    })
-            };
-        let mut argument_context = substitutions.clone();
+        inference.argument_context = inference.substitutions.clone();
         for id in call_parameters {
-            argument_context
+            inference
+                .argument_context
                 .entry(id.clone())
                 .or_insert(ResolvedType::UNKNOWN);
         }
         let mut deferred = Vec::new();
-        // Each stage uses a frozen context. Independent closure results must
-        // join before they contextualize closures that consume those results.
-        for closures in [false, true] {
-            for (parameter, argument) in signature
-                .positional
-                .iter()
-                .zip(args.into_iter().flat_map(|args| args.positional()))
-                .chain(
-                    args.into_iter()
-                        .flat_map(|args| args.named())
-                        .filter_map(|argument| {
-                            signature
-                                .named
-                                .get(argument.name().name())
-                                .map(|parameter| (parameter, argument.value()))
-                        }),
-                )
-            {
-                if matches!(argument, Expr::FuncExpr(_)) != closures {
-                    continue;
-                }
-                let expected_argument = context.model.substitute(parameter, &argument_context);
-                if closures && has_unresolved_inputs(parameter, argument, &substitutions) {
-                    if deferred.capacity() == 0 {
-                        deferred.reserve(
-                            args.map_or(0, |args| args.positional().len() + args.named().len()),
-                        );
-                    }
-                    deferred.push((parameter, argument));
-                    continue;
-                }
-                infer_argument(
-                    parameter,
-                    argument,
-                    &expected_argument,
-                    &mut inferred,
-                    &mut upper,
-                );
-            }
-            update_substitutions(
-                &mut substitutions,
-                &mut argument_context,
-                &inferred,
-                &upper,
-                false,
-            );
-        }
-        let mut complete_unresolved = false;
-        while !deferred.is_empty() {
-            let remaining = deferred.len();
-            deferred.retain(|&(parameter, argument)| {
-                let mut expected_argument = context.model.substitute(parameter, &argument_context);
-                let unresolved = has_unresolved_inputs(parameter, argument, &substitutions);
-                if unresolved && !complete_unresolved {
-                    return true;
-                }
-                if unresolved {
-                    let ResolvedType {
-                        kind: ResolvedTypeKind::Function { return_type, .. },
-                    } = &expected_argument
-                    else {
-                        unreachable!()
-                    };
-                    let return_type = Arc::clone(return_type);
-                    // Cycles and callbacks without producers complete only
-                    // missing input variables to top, not the return schema.
-                    for id in call_parameters {
-                        if !substitutions.contains_key(id) {
-                            argument_context
-                                .insert(id.clone(), context.model.core_type("Object", true));
-                        }
-                    }
-                    expected_argument = context.model.substitute(parameter, &argument_context);
-                    if let ResolvedType {
-                        kind:
-                            ResolvedTypeKind::Function {
-                                return_type: result,
-                                ..
-                            },
-                    } = &mut expected_argument
-                    {
-                        *result = return_type;
-                    }
-                    for id in call_parameters {
-                        if !substitutions.contains_key(id) {
-                            argument_context.insert(id.clone(), ResolvedType::UNKNOWN);
-                        }
-                    }
-                    if let Some(contexts) = argument_contexts.as_deref_mut() {
-                        contexts.insert(argument.span().start, expected_argument.clone());
-                    }
-                }
-                infer_argument(
-                    parameter,
-                    argument,
-                    &expected_argument,
-                    &mut inferred,
-                    &mut upper,
-                );
-                false
-            });
-            update_substitutions(
-                &mut substitutions,
-                &mut argument_context,
-                &inferred,
-                &upper,
-                false,
-            );
-            complete_unresolved = deferred.len() == remaining;
-        }
+        inference.infer_stages(args, &mut deferred, &fixed);
+        inference.infer_deferred(&mut deferred, argument_contexts, &fixed);
         // Pure contravariant evidence constrains the final solution, but must
         // not supply horizontal input contexts to sibling closures.
-        update_substitutions(
-            &mut substitutions,
-            &mut argument_context,
-            &inferred,
-            &upper,
-            true,
-        );
-        for id in call_parameters {
-            if substitutions.contains_key(id) {
-                continue;
-            }
-            let default = if inferred.contains_key(id) || upper.contains_key(id) {
-                ResolvedType::UNKNOWN
-            } else if let Some(schema) = partial.remove(id) {
-                schema
-            } else if let Some(default) = context.signatures.owner_defaults.get(id) {
-                context.model.substitute(default, &substitutions)
-            } else if context.signatures.bound_declared.get(id) == Some(&false) {
-                ResolvedType::DYNAMIC
-            } else {
-                parameter_bound(return_type, id)
-                    .or_else(|| {
-                        signature
-                            .positional
-                            .iter()
-                            .find_map(|ty| parameter_bound(ty, id))
-                    })
-                    .or_else(|| {
-                        signature
-                            .named
-                            .values()
-                            .find_map(|ty| parameter_bound(ty, id))
-                    })
-                    .map(|bound| context.model.substitute(bound, &substitutions))
-                    .unwrap_or(ResolvedType::UNKNOWN)
-            };
-            substitutions.entry(id.clone()).or_insert(default);
-        }
-        substitutions
+        inference.update_substitutions(&fixed, true);
+        inference.complete_defaults();
+        inference.substitutions
     }
 
     pub(super) fn infer_constructor<F: Fn(&str) -> Option<ResolvedType>>(
@@ -672,75 +702,7 @@ impl TypeEnvironment {
                     .expand_alias(&identity, alias, &arguments, false, None)
                     .with_nullable(false);
             }
-            // Without explicit arguments the alias's own parameters are the
-            // inference variables: constructor parameters are rewritten from
-            // the class's parameters into the alias's instantiation of them.
-            let Some(template) = context.model.alias_template(alias) else {
-                return ResolvedType::UNKNOWN;
-            };
-            let (alias_parameters, aliased) = template.as_ref();
-            let ResolvedType {
-                kind:
-                    ResolvedTypeKind::Interface {
-                        identity: class,
-                        arguments: class_arguments,
-                        ..
-                    },
-            } = &aliased
-            else {
-                return ResolvedType::UNKNOWN;
-            };
-            let Some((class_parameters, _)) = context
-                .signatures
-                .type_facts
-                .get(class)
-                .and_then(|facts| facts.supertypes.as_ref())
-            else {
-                return aliased.with_nullable(false);
-            };
-            let class_substitutions =
-                context
-                    .signatures
-                    .owner_substitutions(class_parameters, class_arguments, None);
-            let Some(constructor) = context.signatures.constructor(class, name) else {
-                return if name == "new" {
-                    let defaults = alias_parameters
-                        .iter()
-                        .map(|(_, id, default)| (id.clone(), default.clone()))
-                        .collect();
-                    context
-                        .model
-                        .substitute(aliased, &defaults)
-                        .with_nullable(false)
-                } else {
-                    ResolvedType::UNKNOWN
-                };
-            };
-            let mut signature = constructor.clone();
-            for ty in signature
-                .positional
-                .iter_mut()
-                .chain(signature.named.values_mut())
-            {
-                *ty = context.model.substitute(ty, &class_substitutions);
-            }
-            signature.owner_parameters = Vec::new();
-            signature.call_parameters = alias_parameters
-                .iter()
-                .map(|(_, id, _)| id.clone())
-                .collect();
-            signature.return_type = aliased.with_nullable(false);
-            let substitutions = self.infer_signature_substitutions(
-                &signature,
-                args,
-                AstChildren::empty(),
-                context,
-                expected,
-                &FxHashMap::default(),
-            );
-            return context
-                .model
-                .substitute(&signature.return_type, &substitutions);
+            return self.infer_alias_constructor(alias, name, args, context, expected);
         }
         let extension_type =
             context.signatures.type_kind(&identity) == Some(TypeKind::ExtensionType);
@@ -781,6 +743,85 @@ impl TypeEnvironment {
             None,
         );
         context.model.substitute(&return_type, &substitutions)
+    }
+
+    fn infer_alias_constructor<F: Fn(&str) -> Option<ResolvedType>>(
+        &self,
+        alias: &TypeAlias,
+        name: &str,
+        args: falcon_syntax::cst::ArgList<'_>,
+        context: &InferenceContext<'_, '_, '_, F>,
+        expected: Option<&ResolvedType>,
+    ) -> ResolvedType {
+        // Without explicit arguments the alias's own parameters are the
+        // inference variables: constructor parameters are rewritten from
+        // the class's parameters into the alias's instantiation of them.
+        let Some(template) = context.model.alias_template(alias) else {
+            return ResolvedType::UNKNOWN;
+        };
+        let (alias_parameters, aliased) = template.as_ref();
+        let ResolvedType {
+            kind:
+                ResolvedTypeKind::Interface {
+                    identity: class,
+                    arguments: class_arguments,
+                    ..
+                },
+        } = &aliased
+        else {
+            return ResolvedType::UNKNOWN;
+        };
+        let Some((class_parameters, _)) = context
+            .signatures
+            .type_facts
+            .get(class)
+            .and_then(|facts| facts.supertypes.as_ref())
+        else {
+            return aliased.with_nullable(false);
+        };
+        let class_substitutions =
+            context
+                .signatures
+                .owner_substitutions(class_parameters, class_arguments, None);
+        let Some(constructor) = context.signatures.constructor(class, name) else {
+            return if name == "new" {
+                let defaults = alias_parameters
+                    .iter()
+                    .map(|(_, id, default)| (id.clone(), default.clone()))
+                    .collect();
+                context
+                    .model
+                    .substitute(aliased, &defaults)
+                    .with_nullable(false)
+            } else {
+                ResolvedType::UNKNOWN
+            };
+        };
+        let mut signature = constructor.clone();
+        for ty in signature
+            .positional
+            .iter_mut()
+            .chain(signature.named.values_mut())
+        {
+            *ty = context.model.substitute(ty, &class_substitutions);
+        }
+        signature.owner_parameters = Vec::new();
+        signature.call_parameters = alias_parameters
+            .iter()
+            .map(|(_, id, _)| id.clone())
+            .collect();
+        signature.return_type = aliased.with_nullable(false);
+        let substitutions = self.infer_signature_substitutions(
+            &signature,
+            args,
+            AstChildren::empty(),
+            context,
+            expected,
+            &FxHashMap::default(),
+        );
+        context
+            .model
+            .substitute(&signature.return_type, &substitutions)
     }
 
     pub fn infer_with_signatures(
@@ -1185,233 +1226,282 @@ pub(super) fn infer_type_constraints(
         ResolvedType {
             kind: ResolvedTypeKind::TypeParameter { id, nullable, .. },
         } if context.parameters.contains(id) => {
-            if matches!(actual, ResolvedType { kind: ResolvedTypeKind::TypeParameter { id: other, .. } } if context.parameters.contains(other))
-            {
-                return;
-            }
-            let actual = if *nullable
-                && !matches!(
-                    actual,
-                    ResolvedType {
-                        kind: ResolvedTypeKind::Null
-                    }
-                ) {
-                actual.with_nullable(false)
-            } else {
-                actual.clone()
-            };
-            // A partial schema cannot fix a whole variable before argument
-            // inference, but remains useful when no argument constrains it.
-            if !context.poison_unknown && has_inference_holes(&actual) {
-                if let Some(partial) = context.partial.as_deref_mut() {
-                    partial
-                        .entry(id.clone())
-                        .and_modify(|previous| {
-                            if *previous != actual {
-                                *previous = ResolvedType::UNKNOWN;
-                            }
-                        })
-                        .or_insert(actual);
-                }
-                return;
-            }
-            let candidates = if covariant {
-                &mut *context.inferred
-            } else {
-                &mut *context.upper
-            };
-            let ty = candidates.get(id).map_or_else(
-                || actual.clone(),
-                |previous| {
-                    if matches!(
-                        previous,
-                        ResolvedType {
-                            kind: ResolvedTypeKind::Unknown
-                        }
-                    ) {
-                        return ResolvedType::UNKNOWN;
-                    }
-                    let joined =
-                        inference_join(previous, &actual, context.signatures, context.model);
-                    if covariant {
-                        joined
-                    } else if joined == *previous {
-                        actual.clone()
-                    } else if joined == actual {
-                        previous.clone()
-                    } else {
-                        ResolvedType::UNKNOWN
-                    }
-                },
-            );
-            candidates.insert(id.clone(), ty);
+            infer_parameter_constraints(id, *nullable, actual, covariant, context);
         }
         ResolvedType {
             kind: ResolvedTypeKind::Interface { identity, .. },
         } => {
-            // A raw result context still constrains each type argument to its
-            // instantiate-to-bound default. Projecting only the formal type
-            // would otherwise zip its arguments against an empty raw schema.
-            let actual = if covariant {
-                Cow::Borrowed(actual)
-            } else {
-                context
-                    .signatures
-                    .normalized_raw_type(Cow::Borrowed(actual))
-            };
-            let actual = actual.as_ref();
-            if !covariant
-                && actual.interface("dart:async", "FutureOr")
-                && !identity.is_sdk("dart:async", "FutureOr")
-                && let Some(argument) = actual.type_argument(0)
-            {
-                let argument = argument.with_nullable(argument.nullable() || actual.nullable());
-                if let Some(future) = context.signatures.instantiated_supertype(
-                    formal,
-                    "dart:async",
-                    "Future",
-                    context.model,
-                ) {
-                    if let Some(formal_argument) = future.type_argument(0) {
-                        infer_type_constraints(&formal_argument, &argument, false, context);
-                    }
-                } else {
-                    infer_type_constraints(formal, &argument, false, context);
-                }
-                return;
-            }
-            let aligned = if covariant {
-                context
-                    .signatures
-                    .instantiated_identity(actual, identity, context.model)
-            } else if let ResolvedType {
-                kind: ResolvedTypeKind::Interface { identity, .. },
-            } = actual
-            {
-                context
-                    .signatures
-                    .instantiated_identity(formal, identity, context.model)
-            } else {
-                None
-            };
-            if let Some(aligned) = aligned {
-                let (formal_arguments, actual_arguments) = if covariant {
-                    (formal, &aligned)
-                } else {
-                    (&aligned, actual)
-                };
-                for (formal, actual) in formal_arguments
-                    .type_arguments()
-                    .zip(actual_arguments.type_arguments())
-                {
-                    infer_type_constraints(&formal, &actual, covariant, context);
-                }
-            } else if identity.is_sdk("dart:async", "FutureOr")
-                && let Some(formal_argument) = formal.type_argument(0)
-            {
-                let actual_argument = if actual.interface("dart:async", "Future") {
-                    actual.type_argument(0).unwrap_or_else(|| actual.clone())
-                } else {
-                    actual.clone()
-                };
-                let actual_argument =
-                    actual_argument.with_nullable(actual_argument.nullable() || actual.nullable());
-                infer_type_constraints(&formal_argument, &actual_argument, covariant, context);
-            }
+            infer_interface_constraints(formal, identity, actual, covariant, context);
         }
         ResolvedType {
             kind:
                 ResolvedTypeKind::Function {
-                    alias: formal_alias,
+                    alias,
                     return_type,
                     positional,
                     named,
                     ..
                 },
         } => {
-            if let ResolvedType {
-                kind:
-                    ResolvedTypeKind::Function {
-                        alias: actual_alias,
-                        return_type: actual_return,
-                        positional: actual_positional,
-                        named: actual_named,
-                        ..
-                    },
-            } = actual
-            {
-                infer_type_constraints(
-                    &return_type.as_ref().clone().projected_from(formal_alias),
-                    &actual_return.as_ref().clone().projected_from(actual_alias),
-                    covariant,
-                    context,
-                );
-                for (formal, actual) in positional.iter().zip(actual_positional.iter()) {
-                    infer_type_constraints(
-                        &formal.clone().projected_from(formal_alias),
-                        &actual.clone().projected_from(actual_alias),
-                        !covariant,
-                        context,
-                    );
-                }
-                for (name, formal) in named.iter() {
-                    if let Some((_, actual)) = actual_named
-                        .iter()
-                        .find(|(actual_name, _)| actual_name == name)
-                    {
-                        infer_type_constraints(
-                            &formal.clone().projected_from(formal_alias),
-                            &actual.clone().projected_from(actual_alias),
-                            !covariant,
-                            context,
-                        );
-                    }
-                }
-            }
+            infer_function_constraints(
+                alias,
+                return_type,
+                positional,
+                named,
+                actual,
+                covariant,
+                context,
+            );
         }
         ResolvedType {
             kind:
                 ResolvedTypeKind::Record {
-                    occurrence: formal_occurrence,
+                    occurrence,
                     positional,
                     named,
                     ..
                 },
         } => {
-            if let ResolvedType {
-                kind:
-                    ResolvedTypeKind::Record {
-                        occurrence: actual_occurrence,
-                        positional: actual_positional,
-                        named: actual_named,
-                        ..
-                    },
-            } = actual
-            {
-                for (formal, actual) in positional.iter().zip(actual_positional.iter()) {
-                    infer_type_constraints(
-                        &formal.clone().projected_from(formal_occurrence),
-                        &actual.clone().projected_from(actual_occurrence),
-                        covariant,
-                        context,
-                    );
-                }
-                for (name, formal) in named.iter() {
-                    if let Some((_, actual)) = actual_named
-                        .iter()
-                        .find(|(actual_name, _)| actual_name == name)
-                    {
-                        infer_type_constraints(
-                            &formal.clone().projected_from(formal_occurrence),
-                            &actual.clone().projected_from(actual_occurrence),
-                            covariant,
-                            context,
-                        );
-                    }
-                }
-            }
+            infer_record_constraints(occurrence, positional, named, actual, covariant, context);
         }
         _ => {}
+    }
+}
+
+fn infer_parameter_constraints(
+    id: &TypeParameterId,
+    nullable: bool,
+    actual: &ResolvedType,
+    covariant: bool,
+    context: &mut TypeConstraintContext<'_, '_>,
+) {
+    if matches!(actual, ResolvedType { kind: ResolvedTypeKind::TypeParameter { id: other, .. } } if context.parameters.contains(other))
+    {
+        return;
+    }
+    let actual = if nullable
+        && !matches!(
+            actual,
+            ResolvedType {
+                kind: ResolvedTypeKind::Null
+            }
+        ) {
+        actual.with_nullable(false)
+    } else {
+        actual.clone()
+    };
+    // A partial schema cannot fix a whole variable before argument
+    // inference, but remains useful when no argument constrains it.
+    if !context.poison_unknown && has_inference_holes(&actual) {
+        if let Some(partial) = context.partial.as_deref_mut() {
+            partial
+                .entry(id.clone())
+                .and_modify(|previous| {
+                    if *previous != actual {
+                        *previous = ResolvedType::UNKNOWN;
+                    }
+                })
+                .or_insert(actual);
+        }
+        return;
+    }
+    let candidates = if covariant {
+        &mut *context.inferred
+    } else {
+        &mut *context.upper
+    };
+    let ty = candidates.get(id).map_or_else(
+        || actual.clone(),
+        |previous| {
+            if matches!(
+                previous,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Unknown
+                }
+            ) {
+                return ResolvedType::UNKNOWN;
+            }
+            let joined = inference_join(previous, &actual, context.signatures, context.model);
+            if covariant {
+                joined
+            } else if joined == *previous {
+                actual.clone()
+            } else if joined == actual {
+                previous.clone()
+            } else {
+                ResolvedType::UNKNOWN
+            }
+        },
+    );
+    candidates.insert(id.clone(), ty);
+}
+
+fn infer_interface_constraints(
+    formal: &ResolvedType,
+    identity: &DeclarationIdentity,
+    actual: &ResolvedType,
+    covariant: bool,
+    context: &mut TypeConstraintContext<'_, '_>,
+) {
+    // A raw result context still constrains each type argument to its
+    // instantiate-to-bound default. Projecting only the formal type
+    // would otherwise zip its arguments against an empty raw schema.
+    let actual = if covariant {
+        Cow::Borrowed(actual)
+    } else {
+        context
+            .signatures
+            .normalized_raw_type(Cow::Borrowed(actual))
+    };
+    let actual = actual.as_ref();
+    if !covariant
+        && actual.interface("dart:async", "FutureOr")
+        && !identity.is_sdk("dart:async", "FutureOr")
+        && let Some(argument) = actual.type_argument(0)
+    {
+        let argument = argument.with_nullable(argument.nullable() || actual.nullable());
+        if let Some(future) =
+            context
+                .signatures
+                .instantiated_supertype(formal, "dart:async", "Future", context.model)
+        {
+            if let Some(formal_argument) = future.type_argument(0) {
+                infer_type_constraints(&formal_argument, &argument, false, context);
+            }
+        } else {
+            infer_type_constraints(formal, &argument, false, context);
+        }
+        return;
+    }
+    let aligned = if covariant {
+        context
+            .signatures
+            .instantiated_identity(actual, identity, context.model)
+    } else if let ResolvedType {
+        kind: ResolvedTypeKind::Interface { identity, .. },
+    } = actual
+    {
+        context
+            .signatures
+            .instantiated_identity(formal, identity, context.model)
+    } else {
+        None
+    };
+    if let Some(aligned) = aligned {
+        let (formal_arguments, actual_arguments) = if covariant {
+            (formal, &aligned)
+        } else {
+            (&aligned, actual)
+        };
+        for (formal, actual) in formal_arguments
+            .type_arguments()
+            .zip(actual_arguments.type_arguments())
+        {
+            infer_type_constraints(&formal, &actual, covariant, context);
+        }
+    } else if identity.is_sdk("dart:async", "FutureOr")
+        && let Some(formal_argument) = formal.type_argument(0)
+    {
+        let actual_argument = if actual.interface("dart:async", "Future") {
+            actual.type_argument(0).unwrap_or_else(|| actual.clone())
+        } else {
+            actual.clone()
+        };
+        let actual_argument =
+            actual_argument.with_nullable(actual_argument.nullable() || actual.nullable());
+        infer_type_constraints(&formal_argument, &actual_argument, covariant, context);
+    }
+}
+
+fn infer_function_constraints(
+    formal_alias: &FunctionTypeAlias,
+    return_type: &ResolvedType,
+    positional: &[ResolvedType],
+    named: &[(String, ResolvedType)],
+    actual: &ResolvedType,
+    covariant: bool,
+    context: &mut TypeConstraintContext<'_, '_>,
+) {
+    if let ResolvedType {
+        kind:
+            ResolvedTypeKind::Function {
+                alias: actual_alias,
+                return_type: actual_return,
+                positional: actual_positional,
+                named: actual_named,
+                ..
+            },
+    } = actual
+    {
+        infer_type_constraints(
+            &return_type.clone().projected_from(formal_alias),
+            &actual_return.as_ref().clone().projected_from(actual_alias),
+            covariant,
+            context,
+        );
+        for (formal, actual) in positional.iter().zip(actual_positional.iter()) {
+            infer_type_constraints(
+                &formal.clone().projected_from(formal_alias),
+                &actual.clone().projected_from(actual_alias),
+                !covariant,
+                context,
+            );
+        }
+        for (name, formal) in named.iter() {
+            if let Some((_, actual)) = actual_named
+                .iter()
+                .find(|(actual_name, _)| actual_name == name)
+            {
+                infer_type_constraints(
+                    &formal.clone().projected_from(formal_alias),
+                    &actual.clone().projected_from(actual_alias),
+                    !covariant,
+                    context,
+                );
+            }
+        }
+    }
+}
+
+fn infer_record_constraints(
+    formal_occurrence: &FunctionTypeAlias,
+    positional: &[ResolvedType],
+    named: &[(String, ResolvedType)],
+    actual: &ResolvedType,
+    covariant: bool,
+    context: &mut TypeConstraintContext<'_, '_>,
+) {
+    if let ResolvedType {
+        kind:
+            ResolvedTypeKind::Record {
+                occurrence: actual_occurrence,
+                positional: actual_positional,
+                named: actual_named,
+                ..
+            },
+    } = actual
+    {
+        for (formal, actual) in positional.iter().zip(actual_positional.iter()) {
+            infer_type_constraints(
+                &formal.clone().projected_from(formal_occurrence),
+                &actual.clone().projected_from(actual_occurrence),
+                covariant,
+                context,
+            );
+        }
+        for (name, formal) in named.iter() {
+            if let Some((_, actual)) = actual_named
+                .iter()
+                .find(|(actual_name, _)| actual_name == name)
+            {
+                infer_type_constraints(
+                    &formal.clone().projected_from(formal_occurrence),
+                    &actual.clone().projected_from(actual_occurrence),
+                    covariant,
+                    context,
+                );
+            }
+        }
     }
 }
 

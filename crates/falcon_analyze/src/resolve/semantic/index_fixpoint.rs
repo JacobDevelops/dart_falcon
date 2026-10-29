@@ -555,6 +555,353 @@ impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> Visitor<'a> for InitializerDepend
     }
 }
 
+enum InferenceWork<'a> {
+    Constructor(index_build::ConstructorInferenceEntry<'a>),
+    Override(DeclarationIdentity, ClassMember<'a>),
+    Member {
+        identity: DeclarationIdentity,
+        name: &'a str,
+        expression: Option<Expr<'a>>,
+        context: Arc<(TypeEnvironment, TypeParameterScope)>,
+    },
+    Value(DeclarationIdentity, Expr<'a>),
+}
+
+impl InferenceWork<'_> {
+    fn header(&self) -> bool {
+        matches!(
+            self,
+            Self::Constructor(_)
+                | Self::Override(..)
+                | Self::Member {
+                    expression: None,
+                    ..
+                }
+        )
+    }
+
+    fn output_ref(&self) -> InferenceInputRef<'_> {
+        match self {
+            Self::Value(identity, _) => InferenceInputRef::Value(identity),
+            Self::Constructor(index_build::ConstructorInferenceEntry::Alias {
+                identity, ..
+            }) => InferenceInputRef::Constructors(identity),
+            Self::Constructor(_) => InferenceInputRef::Constructor(self.identity(), self.name()),
+            _ => InferenceInputRef::Member(self.identity(), self.name()),
+        }
+    }
+
+    fn output(&self) -> InferenceInput {
+        self.output_ref().into_owned()
+    }
+
+    fn identity(&self) -> &DeclarationIdentity {
+        match self {
+            Self::Constructor(
+                index_build::ConstructorInferenceEntry::Alias { identity, .. }
+                | index_build::ConstructorInferenceEntry::Declaration { identity, .. },
+            )
+            | Self::Override(identity, _)
+            | Self::Member { identity, .. }
+            | Self::Value(identity, _) => identity,
+        }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            Self::Constructor(index_build::ConstructorInferenceEntry::Alias { name, .. }) => name,
+            Self::Constructor(index_build::ConstructorInferenceEntry::Declaration {
+                constructor_name,
+                ..
+            }) => constructor_name,
+            Self::Override(_, member) => match member {
+                ClassMember::Method(method) => method.name().name(),
+                ClassMember::Operator(operator) => operator.lookup_name(),
+                ClassMember::Setter(setter) => setter.name().name(),
+                _ => unreachable!("non-callable override inference entry"),
+            },
+            Self::Member { name, .. } => name,
+            Self::Value(..) => "initializer",
+        }
+    }
+
+    fn infer(
+        &self,
+        signatures: &mut SignatureIndex,
+        model: &SemanticModel<'_>,
+        pending: &mut FxHashMap<DeclarationIdentity, ResolvedType>,
+        retry_partial: bool,
+    ) {
+        match self {
+            Self::Constructor(entry) => {
+                signatures.resolve_constructor_entry(entry, model);
+            }
+            Self::Override(identity, member) => {
+                signatures.inherit_method_types(
+                    identity,
+                    *member,
+                    model,
+                    &mut inherited::OverrideInferenceLookup::default(),
+                );
+            }
+            Self::Member {
+                identity,
+                name,
+                expression,
+                context,
+            } => {
+                signatures.infer_member_type(
+                    identity,
+                    name,
+                    *expression,
+                    model,
+                    &context.0,
+                    &context.1,
+                );
+            }
+            Self::Value(identity, expression) => {
+                signatures.resolve_value_initializer(
+                    identity,
+                    *expression,
+                    model,
+                    pending,
+                    retry_partial,
+                );
+            }
+        }
+    }
+}
+
+type InferenceProducerData = (
+    Vec<InferenceInput>,
+    Arc<FxHashMap<InferenceInput, Vec<usize>>>,
+);
+
+struct InferenceWorklist<'a> {
+    entries: Vec<(usize, InferenceWork<'a>)>,
+    headers: std::collections::VecDeque<usize>,
+    bodies: std::collections::VecDeque<usize>,
+    queued: Vec<bool>,
+    visits: Vec<usize>,
+    reads: Vec<FxHashSet<InferenceInput>>,
+    subscribers: FxHashMap<InferenceInput, FxHashSet<usize>>,
+    pending: FxHashMap<DeclarationIdentity, ResolvedType>,
+    retry_partial: bool,
+    recording: InferenceRecording,
+    blocked: std::collections::BTreeSet<usize>,
+    settling: Option<usize>,
+    producer_data: Option<InferenceProducerData>,
+    settlement: Option<std::rc::Rc<std::cell::RefCell<InferenceSettlement>>>,
+}
+
+impl<'a> InferenceWorklist<'a> {
+    fn new(entries: Vec<(usize, InferenceWork<'a>)>) -> Self {
+        let count = entries.len();
+        let mut state = Self {
+            entries,
+            headers: std::collections::VecDeque::with_capacity(count),
+            bodies: std::collections::VecDeque::with_capacity(count),
+            queued: vec![true; count],
+            visits: vec![0; count],
+            reads: vec![FxHashSet::default(); count],
+            subscribers: FxHashMap::default(),
+            pending: FxHashMap::default(),
+            retry_partial: true,
+            recording: InferenceRecording::default(),
+            blocked: std::collections::BTreeSet::new(),
+            settling: None,
+            producer_data: None,
+            settlement: None,
+        };
+        for (id, (_, work)) in state.entries.iter().enumerate() {
+            if work.header() {
+                state.headers.push_back(id);
+            } else {
+                state.bodies.push_back(id);
+            }
+        }
+        state
+    }
+
+    fn run(
+        &mut self,
+        signatures: &mut SignatureIndex,
+        programs: &[(Program<'_>, SemanticModel<'_>)],
+    ) {
+        // A backstop proportional to possible producer/consumer pairs must not
+        // reject long chains or wide fan-in. Queue exhaustion and monotone
+        // writes establish convergence independently of this generous budget.
+        let work_count = self.entries.len().max(1);
+        let visit_limit = work_count.saturating_mul(work_count).saturating_mul(8);
+        loop {
+            let processed = self.headers.pop_front().or_else(|| self.bodies.pop_front());
+            if let Some(id) = processed {
+                self.process(id, visit_limit, signatures, programs);
+            } else if !self.pending.is_empty() {
+                self.publish_pending(signatures);
+            } else {
+                if !self.queue_settlement() {
+                    break;
+                }
+                continue;
+            }
+            self.notify_subscribers(processed);
+        }
+    }
+
+    fn process(
+        &mut self,
+        id: usize,
+        visit_limit: usize,
+        signatures: &mut SignatureIndex,
+        programs: &[(Program<'_>, SemanticModel<'_>)],
+    ) {
+        self.queued[id] = false;
+        self.visits[id] += 1;
+        assert!(
+            self.visits[id] <= visit_limit,
+            "declaration inference did not converge for {:?}.{}; previously read inputs: {:?}",
+            self.entries[id].1.identity(),
+            self.entries[id].1.name(),
+            self.reads[id]
+        );
+        let (file, work) = &self.entries[id];
+        #[cfg(test)]
+        INFERENCE_VISITS.with(|visits| {
+            if let Some(counts) = visits.borrow_mut().last_mut() {
+                let input = work.output();
+                *counts.entry(input).or_default() += 1;
+            }
+        });
+        let model = &programs[*file].1;
+        self.recording.blocked = false;
+        self.recording.settlement = if self.settling.take() == Some(id) {
+            self.settlement.clone()
+        } else {
+            None
+        };
+        self.recording.output = self.recording.settlement.as_ref().map(|_| work.output());
+        let recorder = InferenceRecorder::start(std::mem::take(&mut self.recording));
+        work.infer(signatures, model, &mut self.pending, self.retry_partial);
+        self.recording = recorder.finish();
+        if let Some(state) = &self.settlement {
+            let state_ref = state.as_ref().borrow();
+            let expanded = self
+                .recording
+                .reads
+                .difference(&self.reads[id])
+                .any(|input| {
+                    input.as_input() != work.output_ref()
+                        && !state_ref.input_stable(input.as_input())
+                });
+            let invalidate = expanded
+                || (self.recording.blocked
+                    && (self.recording.settlement.is_some() || !self.blocked.contains(&id)));
+            drop(state_ref);
+            if invalidate {
+                self.settlement = None;
+            } else if self.recording.settlement.is_some() {
+                state.borrow_mut().pending.remove(&id);
+            }
+        }
+        if self.recording.blocked {
+            self.blocked.insert(id);
+        } else {
+            self.blocked.remove(&id);
+        }
+        for input in self.reads[id].difference(&self.recording.reads) {
+            self.subscribers.get_mut(input).unwrap().remove(&id);
+        }
+        for input in self.recording.reads.difference(&self.reads[id]) {
+            self.subscribers
+                .entry(input.clone())
+                .or_default()
+                .insert(id);
+        }
+        std::mem::swap(&mut self.reads[id], &mut self.recording.reads);
+        self.recording.reads.clear();
+    }
+
+    fn publish_pending(&mut self, signatures: &mut SignatureIndex) {
+        self.recording.blocked = false;
+        self.recording.settlement = None;
+        self.recording.output = None;
+        let recorder = InferenceRecorder::start(std::mem::take(&mut self.recording));
+        for (identity, ty) in self.pending.drain() {
+            signatures.publish_value_type(&identity, ty);
+        }
+        self.retry_partial = false;
+        self.recording = recorder.finish();
+    }
+
+    fn queue_settlement(&mut self) -> bool {
+        if self.blocked.is_empty() {
+            return false;
+        }
+        let (outputs, producers) = self.producer_data.get_or_insert_with(|| {
+            let outputs: Vec<_> = self.entries.iter().map(|(_, work)| work.output()).collect();
+            let mut producers: FxHashMap<InferenceInput, Vec<usize>> = FxHashMap::default();
+            for (id, (_, work)) in self.entries.iter().enumerate() {
+                producers.entry(outputs[id].clone()).or_default().push(id);
+                if matches!(
+                    work,
+                    InferenceWork::Constructor(
+                        index_build::ConstructorInferenceEntry::Declaration { .. }
+                    )
+                ) {
+                    producers
+                        .entry(InferenceInput::Constructors(work.identity().clone()))
+                        .or_default()
+                        .push(id);
+                }
+            }
+            (outputs, Arc::new(producers))
+        });
+        let state = self.settlement.get_or_insert_with(|| {
+            std::rc::Rc::new(std::cell::RefCell::new(InferenceSettlement::new(
+                Arc::clone(producers),
+                outputs,
+                &self.reads,
+                &self.blocked,
+            )))
+        });
+        let id = loop {
+            let Some(id) = state.borrow_mut().order.pop_front() else {
+                return false;
+            };
+            if self.blocked.contains(&id) {
+                break id;
+            }
+            state.borrow_mut().pending.remove(&id);
+        };
+        self.settling = Some(id);
+        self.queued[id] = true;
+        if self.entries[id].1.header() {
+            self.headers.push_back(id);
+        } else {
+            self.bodies.push_back(id);
+        }
+        true
+    }
+
+    fn notify_subscribers(&mut self, processed: Option<usize>) {
+        for input in self.recording.writes.drain() {
+            if let Some(dependents) = self.subscribers.get(&input) {
+                for &id in dependents {
+                    if Some(id) != processed && !self.queued[id] {
+                        self.queued[id] = true;
+                        if self.entries[id].1.header() {
+                            self.headers.push_back(id);
+                        } else {
+                            self.bodies.push_back(id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl SignatureIndex {
     /// Visit each initializer once, resolving import prefixes to declaration
     /// identities before finding cycles across all indexed libraries.
@@ -736,82 +1083,6 @@ impl SignatureIndex {
     }
 
     pub(super) fn infer_programs(&mut self, programs: &[(Program<'_>, SemanticModel<'_>)]) {
-        enum Work<'a> {
-            Constructor(index_build::ConstructorInferenceEntry<'a>),
-            Override(DeclarationIdentity, ClassMember<'a>),
-            Member {
-                identity: DeclarationIdentity,
-                name: &'a str,
-                expression: Option<Expr<'a>>,
-                context: Arc<(TypeEnvironment, TypeParameterScope)>,
-            },
-            Value(DeclarationIdentity, Expr<'a>),
-        }
-        impl Work<'_> {
-            fn header(&self) -> bool {
-                matches!(
-                    self,
-                    Self::Constructor(_)
-                        | Self::Override(..)
-                        | Self::Member {
-                            expression: None,
-                            ..
-                        }
-                )
-            }
-
-            fn output_ref(&self) -> InferenceInputRef<'_> {
-                match self {
-                    Self::Value(identity, _) => InferenceInputRef::Value(identity),
-                    Self::Constructor(index_build::ConstructorInferenceEntry::Alias {
-                        identity,
-                        ..
-                    }) => InferenceInputRef::Constructors(identity),
-                    Self::Constructor(_) => {
-                        InferenceInputRef::Constructor(self.identity(), self.name())
-                    }
-                    _ => InferenceInputRef::Member(self.identity(), self.name()),
-                }
-            }
-
-            fn output(&self) -> InferenceInput {
-                self.output_ref().into_owned()
-            }
-
-            fn identity(&self) -> &DeclarationIdentity {
-                match self {
-                    Self::Constructor(
-                        index_build::ConstructorInferenceEntry::Alias { identity, .. }
-                        | index_build::ConstructorInferenceEntry::Declaration { identity, .. },
-                    )
-                    | Self::Override(identity, _)
-                    | Self::Member { identity, .. }
-                    | Self::Value(identity, _) => identity,
-                }
-            }
-
-            fn name(&self) -> &str {
-                match self {
-                    Self::Constructor(index_build::ConstructorInferenceEntry::Alias {
-                        name,
-                        ..
-                    }) => name,
-                    Self::Constructor(index_build::ConstructorInferenceEntry::Declaration {
-                        constructor_name,
-                        ..
-                    }) => constructor_name,
-                    Self::Override(_, member) => match member {
-                        ClassMember::Method(method) => method.name().name(),
-                        ClassMember::Operator(operator) => operator.lookup_name(),
-                        ClassMember::Setter(setter) => setter.name().name(),
-                        _ => unreachable!("non-callable override inference entry"),
-                    },
-                    Self::Member { name, .. } => name,
-                    Self::Value(..) => "initializer",
-                }
-            }
-        }
-
         let mut dependencies = FxHashMap::default();
         let mut entries = Vec::new();
         for (file, (program, model)) in programs.iter().enumerate() {
@@ -819,292 +1090,104 @@ impl SignatureIndex {
             entries.extend(
                 Self::constructor_inference_entries(*program, model)
                     .into_iter()
-                    .map(|entry| (file, Work::Constructor(entry))),
+                    .map(|entry| (file, InferenceWork::Constructor(entry))),
             );
             for declaration in program.declarations() {
-                if let TopLevelDecl::Variable(variable) = declaration {
-                    if variable.var_type().is_none() {
-                        for declarator in variable.declarators() {
-                            if model.owns_declaration(declarator.name().name())
-                                && let Some(identity) =
-                                    model.resolve_value(declarator.name().name())
-                                && let Some(expression) = declarator.initializer()
-                            {
-                                entries.push((file, Work::Value(identity, expression)));
-                            }
-                        }
-                    }
-                    continue;
-                }
-                if !model.owns_top_level_declaration(declaration) {
-                    continue;
-                }
-                let (name, members) = match declaration {
-                    TopLevelDecl::Class(class) => (class.name(), class.members()),
-                    TopLevelDecl::MixinClass(class) => (class.name(), class.members()),
-                    TopLevelDecl::Mixin(mixin) => (mixin.name(), mixin.members()),
-                    TopLevelDecl::Enum(enumeration) => (enumeration.name(), enumeration.members()),
-                    TopLevelDecl::ExtensionType(extension) => {
-                        (extension.name(), extension.members())
-                    }
-                    _ => continue,
-                };
-                let Some(identity) = model.resolve_name(name.name()) else {
-                    continue;
-                };
-                let mut context = None;
-                let mut member_context = || {
-                    Arc::clone(context.get_or_insert_with(|| {
-                        let mut scope = TypeParameterScope::default();
-                        let parameters = declaration.type_params();
-                        scope.push(parameters.clone(), model);
-                        let receiver = ResolvedType::from_kind(ResolvedTypeKind::Interface {
-                            occurrence: Default::default(),
-                            identity: identity.clone(),
-                            arguments: parameters
-                                .filter_map(|parameter| scope.lookup(parameter.name().name()))
-                                .collect(),
-                            nullable: false,
-                            extension_type: matches!(declaration, TopLevelDecl::ExtensionType(_)),
-                        });
-                        let mut environment = TypeEnvironment::new();
-                        environment.declare_receiver(receiver);
-                        Arc::new((environment, scope))
-                    }))
-                };
-                for member in members {
-                    if !matches!(declaration, TopLevelDecl::ExtensionType(_))
-                        && inherits_method_types(member)
-                    {
-                        entries.push((file, Work::Override(identity.clone(), member)));
-                    }
-                    match member {
-                        ClassMember::Field(field) if field.field_type().is_none() => {
-                            for declarator in field.declarators() {
-                                entries.push((
-                                    file,
-                                    Work::Member {
-                                        identity: identity.clone(),
-                                        name: declarator.name().name(),
-                                        expression: declarator.initializer(),
-                                        context: member_context(),
-                                    },
-                                ));
-                            }
-                        }
-                        ClassMember::Getter(getter) if getter.return_type().is_none() => {
-                            entries.push((
-                                file,
-                                Work::Member {
-                                    identity: identity.clone(),
-                                    name: getter.name().name(),
-                                    expression: None,
-                                    context: member_context(),
-                                },
-                            ));
-                        }
-                        _ => {}
-                    }
-                }
+                Self::collect_inference_declaration(declaration, model, file, &mut entries);
             }
         }
         self.cyclic_values
             .retain(|identity| !dependencies.contains_key(identity));
         self.cyclic_values
             .extend(Self::cyclic_value_identities(&dependencies));
-        let mut headers = std::collections::VecDeque::with_capacity(entries.len());
-        let mut bodies = std::collections::VecDeque::with_capacity(entries.len());
-        let mut queued = vec![true; entries.len()];
-        let mut visits = vec![0usize; entries.len()];
-        let mut reads = vec![FxHashSet::default(); entries.len()];
-        let mut subscribers: FxHashMap<InferenceInput, FxHashSet<usize>> = FxHashMap::default();
-        for (id, (_, work)) in entries.iter().enumerate() {
-            if work.header() {
-                headers.push_back(id);
-            } else {
-                bodies.push_back(id);
+        InferenceWorklist::new(entries).run(self, programs);
+    }
+
+    fn collect_inference_declaration<'a>(
+        declaration: TopLevelDecl<'a>,
+        model: &SemanticModel<'_>,
+        file: usize,
+        entries: &mut Vec<(usize, InferenceWork<'a>)>,
+    ) {
+        if let TopLevelDecl::Variable(variable) = declaration {
+            if variable.var_type().is_none() {
+                for declarator in variable.declarators() {
+                    if model.owns_declaration(declarator.name().name())
+                        && let Some(identity) = model.resolve_value(declarator.name().name())
+                        && let Some(expression) = declarator.initializer()
+                    {
+                        entries.push((file, InferenceWork::Value(identity, expression)));
+                    }
+                }
             }
+            return;
         }
-        let mut pending = FxHashMap::default();
-        let mut retry_partial = true;
-        let mut recording = InferenceRecording::default();
-        let mut blocked = std::collections::BTreeSet::new();
-        let mut settling = None;
-        let mut producer_data = None;
-        let mut settlement: Option<std::rc::Rc<std::cell::RefCell<InferenceSettlement>>> = None;
-        // A backstop proportional to possible producer/consumer pairs must not
-        // reject long chains or wide fan-in. Queue exhaustion and monotone
-        // writes establish convergence independently of this generous budget.
-        let work_count = entries.len().max(1);
-        let visit_limit = work_count.saturating_mul(work_count).saturating_mul(8);
-        'worklist: loop {
-            let processed = headers.pop_front().or_else(|| bodies.pop_front());
-            if let Some(id) = processed {
-                queued[id] = false;
-                visits[id] += 1;
-                assert!(
-                    visits[id] <= visit_limit,
-                    "declaration inference did not converge for {:?}.{}; previously read inputs: {:?}",
-                    entries[id].1.identity(),
-                    entries[id].1.name(),
-                    reads[id]
-                );
-                let (file, work) = &entries[id];
-                #[cfg(test)]
-                INFERENCE_VISITS.with(|visits| {
-                    if let Some(counts) = visits.borrow_mut().last_mut() {
-                        let input = work.output();
-                        *counts.entry(input).or_default() += 1;
-                    }
+        if !model.owns_top_level_declaration(declaration) {
+            return;
+        }
+        let (name, members) = match declaration {
+            TopLevelDecl::Class(class) => (class.name(), class.members()),
+            TopLevelDecl::MixinClass(class) => (class.name(), class.members()),
+            TopLevelDecl::Mixin(mixin) => (mixin.name(), mixin.members()),
+            TopLevelDecl::Enum(enumeration) => (enumeration.name(), enumeration.members()),
+            TopLevelDecl::ExtensionType(extension) => (extension.name(), extension.members()),
+            _ => return,
+        };
+        let Some(identity) = model.resolve_name(name.name()) else {
+            return;
+        };
+        let mut context = None;
+        let mut member_context = || {
+            Arc::clone(context.get_or_insert_with(|| {
+                let mut scope = TypeParameterScope::default();
+                let parameters = declaration.type_params();
+                scope.push(parameters.clone(), model);
+                let receiver = ResolvedType::from_kind(ResolvedTypeKind::Interface {
+                    occurrence: Default::default(),
+                    identity: identity.clone(),
+                    arguments: parameters
+                        .filter_map(|parameter| scope.lookup(parameter.name().name()))
+                        .collect(),
+                    nullable: false,
+                    extension_type: matches!(declaration, TopLevelDecl::ExtensionType(_)),
                 });
-                let model = &programs[*file].1;
-                recording.blocked = false;
-                recording.settlement = if settling.take() == Some(id) {
-                    settlement.clone()
-                } else {
-                    None
-                };
-                recording.output = recording.settlement.as_ref().map(|_| work.output());
-                let recorder = InferenceRecorder::start(std::mem::take(&mut recording));
-                match work {
-                    Work::Constructor(entry) => {
-                        self.resolve_constructor_entry(entry, model);
-                    }
-                    Work::Override(identity, member) => {
-                        self.inherit_method_types(
-                            identity,
-                            *member,
-                            model,
-                            &mut inherited::OverrideInferenceLookup::default(),
-                        );
-                    }
-                    Work::Member {
-                        identity,
-                        name,
-                        expression,
-                        context,
-                    } => {
-                        self.infer_member_type(
-                            identity,
-                            name,
-                            *expression,
-                            model,
-                            &context.0,
-                            &context.1,
-                        );
-                    }
-                    Work::Value(identity, expression) => {
-                        self.resolve_value_initializer(
-                            identity,
-                            *expression,
-                            model,
-                            &mut pending,
-                            retry_partial,
-                        );
-                    }
-                }
-                recording = recorder.finish();
-                if let Some(state) = &settlement {
-                    let state_ref = state.as_ref().borrow();
-                    let expanded = recording.reads.difference(&reads[id]).any(|input| {
-                        input.as_input() != work.output_ref()
-                            && !state_ref.input_stable(input.as_input())
-                    });
-                    let invalidate = expanded
-                        || (recording.blocked
-                            && (recording.settlement.is_some() || !blocked.contains(&id)));
-                    drop(state_ref);
-                    if invalidate {
-                        settlement = None;
-                    } else if recording.settlement.is_some() {
-                        state.borrow_mut().pending.remove(&id);
-                    }
-                }
-                if recording.blocked {
-                    blocked.insert(id);
-                } else {
-                    blocked.remove(&id);
-                }
-                for input in reads[id].difference(&recording.reads) {
-                    subscribers.get_mut(input).unwrap().remove(&id);
-                }
-                for input in recording.reads.difference(&reads[id]) {
-                    subscribers.entry(input.clone()).or_default().insert(id);
-                }
-                std::mem::swap(&mut reads[id], &mut recording.reads);
-                recording.reads.clear();
-            } else if !pending.is_empty() {
-                recording.blocked = false;
-                recording.settlement = None;
-                recording.output = None;
-                let recorder = InferenceRecorder::start(std::mem::take(&mut recording));
-                for (identity, ty) in pending.drain() {
-                    self.publish_value_type(&identity, ty);
-                }
-                retry_partial = false;
-                recording = recorder.finish();
-            } else {
-                if blocked.is_empty() {
-                    break;
-                }
-                let (outputs, producers) = producer_data.get_or_insert_with(|| {
-                    let outputs: Vec<_> = entries.iter().map(|(_, work)| work.output()).collect();
-                    let mut producers: FxHashMap<InferenceInput, Vec<usize>> = FxHashMap::default();
-                    for (id, (_, work)) in entries.iter().enumerate() {
-                        producers.entry(outputs[id].clone()).or_default().push(id);
-                        if matches!(
-                            work,
-                            Work::Constructor(
-                                index_build::ConstructorInferenceEntry::Declaration { .. }
-                            )
-                        ) {
-                            producers
-                                .entry(InferenceInput::Constructors(work.identity().clone()))
-                                .or_default()
-                                .push(id);
-                        }
-                    }
-                    (outputs, Arc::new(producers))
-                });
-                let state = settlement.get_or_insert_with(|| {
-                    std::rc::Rc::new(std::cell::RefCell::new(InferenceSettlement::new(
-                        Arc::clone(producers),
-                        outputs,
-                        &reads,
-                        &blocked,
-                    )))
-                });
-                let id = loop {
-                    let Some(id) = state.borrow_mut().order.pop_front() else {
-                        break 'worklist;
-                    };
-                    if blocked.contains(&id) {
-                        break id;
-                    }
-                    state.borrow_mut().pending.remove(&id);
-                };
-                settling = Some(id);
-                queued[id] = true;
-                if entries[id].1.header() {
-                    headers.push_back(id);
-                } else {
-                    bodies.push_back(id);
-                }
-                continue;
+                let mut environment = TypeEnvironment::new();
+                environment.declare_receiver(receiver);
+                Arc::new((environment, scope))
+            }))
+        };
+        for member in members {
+            if !matches!(declaration, TopLevelDecl::ExtensionType(_))
+                && inherits_method_types(member)
+            {
+                entries.push((file, InferenceWork::Override(identity.clone(), member)));
             }
-            for input in recording.writes.drain() {
-                if let Some(dependents) = subscribers.get(&input) {
-                    for &id in dependents {
-                        if Some(id) != processed && !queued[id] {
-                            queued[id] = true;
-                            if entries[id].1.header() {
-                                headers.push_back(id);
-                            } else {
-                                bodies.push_back(id);
-                            }
-                        }
+            match member {
+                ClassMember::Field(field) if field.field_type().is_none() => {
+                    for declarator in field.declarators() {
+                        entries.push((
+                            file,
+                            InferenceWork::Member {
+                                identity: identity.clone(),
+                                name: declarator.name().name(),
+                                expression: declarator.initializer(),
+                                context: member_context(),
+                            },
+                        ));
                     }
                 }
+                ClassMember::Getter(getter) if getter.return_type().is_none() => {
+                    entries.push((
+                        file,
+                        InferenceWork::Member {
+                            identity: identity.clone(),
+                            name: getter.name().name(),
+                            expression: None,
+                            context: member_context(),
+                        },
+                    ));
+                }
+                _ => {}
             }
         }
     }
@@ -1333,6 +1416,44 @@ impl SignatureIndex {
         )
     }
 
+    fn initializer_name_pending(
+        &self,
+        expression: Expr<'_>,
+        environment: &TypeEnvironment,
+        owner: Option<&DeclarationIdentity>,
+        model: &SemanticModel<'_>,
+    ) -> bool {
+        let mut unresolved = false;
+        if let Some(name) = initializer_value_name(expression)
+            && !environment.is_bound(name.prefix.unwrap_or(name.name))
+        {
+            let member_owner = match name.prefix {
+                None => owner.cloned(),
+                Some(prefix) => model.resolve_name(prefix),
+            };
+            let member = member_owner.as_ref().and_then(|owner| {
+                self.member_entry(owner, name.name)
+                    .and_then(|entry| entry.field.as_ref().map(|(_, ty)| ty))
+            });
+            let variable = model.resolve_value(name).filter(|identity| {
+                // A cycle's Unknown is terminal, not work waiting for
+                // another pass. Its acyclic consumers can still infer.
+                !self.is_cyclic_value(identity)
+            });
+            unresolved |= member
+                .or_else(|| {
+                    variable
+                        .as_ref()
+                        .and_then(|identity| self.value_type(identity))
+                })
+                .is_some_and(has_inference_holes);
+            if let Some(owner) = member_owner {
+                unresolved |= self.member_type_pending(&owner, name.name);
+            }
+        }
+        unresolved
+    }
+
     pub(super) fn declaration_dependencies_known_using_lookup(
         &self,
         expression: Expr<'_>,
@@ -1349,33 +1470,7 @@ impl SignatureIndex {
         InitializerDependencies {
             environment: environment.clone(),
             inspect: |expression: Expr<'_>, environment: &TypeEnvironment| {
-                if let Some(name) = initializer_value_name(expression)
-                    && !environment.is_bound(name.prefix.unwrap_or(name.name))
-                {
-                    let member_owner = match name.prefix {
-                        None => owner.cloned(),
-                        Some(prefix) => model.resolve_name(prefix),
-                    };
-                    let member = member_owner.as_ref().and_then(|owner| {
-                        self.member_entry(owner, name.name)
-                            .and_then(|entry| entry.field.as_ref().map(|(_, ty)| ty))
-                    });
-                    let variable = model.resolve_value(name).filter(|identity| {
-                        // A cycle's Unknown is terminal, not work waiting for
-                        // another pass. Its acyclic consumers can still infer.
-                        !self.is_cyclic_value(identity)
-                    });
-                    unresolved |= member
-                        .or_else(|| {
-                            variable
-                                .as_ref()
-                                .and_then(|identity| self.value_type(identity))
-                        })
-                        .is_some_and(has_inference_holes);
-                    if let Some(owner) = member_owner {
-                        unresolved |= self.member_type_pending(&owner, name.name);
-                    }
-                }
+                unresolved |= self.initializer_name_pending(expression, environment, owner, model);
                 if let Expr::Field(access) = expression {
                     let object = access.object();
                     let field = access.field();
@@ -1468,6 +1563,36 @@ impl SignatureIndex {
         }
     }
 
+    fn has_concrete_no_such_method(
+        &self,
+        receiver: &ResolvedType,
+        declaring: &SemanticModel<'_>,
+    ) -> bool {
+        let Some(ResolvedType {
+            kind: ResolvedTypeKind::Interface {
+                identity: owner, ..
+            },
+        }) = self.resolved_owner_through(
+            receiver,
+            "noSuchMethod",
+            InstanceAccess::Invoke,
+            false,
+            declaring,
+        )
+        else {
+            return false;
+        };
+        !owner.is_sdk("dart:core", "Object")
+            && self
+                .member_entry(&owner, "noSuchMethod")
+                .is_some_and(|entry| {
+                    entry
+                        .facts
+                        .iter()
+                        .any(|fact| !fact.is_static && !fact.is_abstract)
+                })
+    }
+
     /// Block promotion of private getters that a concrete `noSuchMethod`
     /// forwards. Each lookup views members from the library that owns the
     /// declaration or private name, never from an arbitrary indexed file.
@@ -1517,31 +1642,7 @@ impl SignatureIndex {
                 types,
                 identities.declaration_library(identity),
             );
-            let Some(ResolvedType {
-                kind:
-                    ResolvedTypeKind::Interface {
-                        identity: owner, ..
-                    },
-            }) = self.resolved_owner_through(
-                &receiver,
-                "noSuchMethod",
-                InstanceAccess::Invoke,
-                false,
-                &declaring,
-            )
-            else {
-                continue;
-            };
-            if owner.is_sdk("dart:core", "Object")
-                || !self
-                    .member_entry(&owner, "noSuchMethod")
-                    .is_some_and(|entry| {
-                        entry
-                            .facts
-                            .iter()
-                            .any(|fact| !fact.is_static && !fact.is_abstract)
-                    })
-            {
+            if !self.has_concrete_no_such_method(&receiver, &declaring) {
                 continue;
             }
             let mut getters = HashSet::new();

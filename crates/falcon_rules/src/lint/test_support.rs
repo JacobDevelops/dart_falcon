@@ -142,49 +142,7 @@ pub fn analyze_flutter_rule(
     let root = directory.path();
     let app = root.join("app");
 
-    for path in [
-        app.join(".dart_tool"),
-        app.join("lib"),
-        root.join("flutter/packages/flutter/lib"),
-        root.join("meta/lib"),
-    ] {
-        std::fs::create_dir_all(path).unwrap();
-    }
-    write_sdk(
-        root,
-        &[(
-            "core",
-            include_str!("../../tests/support/sdk/lib/core/core.dart"),
-        )],
-    );
-    std::fs::write(
-        root.join("flutter/packages/flutter/lib/widgets.dart"),
-        r"
-abstract class Key { const Key.empty(); }
-abstract class LocalKey extends Key { const LocalKey() : super.empty(); }
-abstract class GlobalKey<T> extends Key { const GlobalKey() : super.empty(); }
-abstract class Widget {
-  const Widget({this.key});
-  final Key? key;
-}
-abstract class StatelessWidget extends Widget { const StatelessWidget({super.key}); }
-",
-    )
-    .unwrap();
-    std::fs::write(
-            root.join("meta/lib/meta.dart"),
-            "class _Annotation { const _Annotation(); } const visibleForTesting = _Annotation(); const internal = _Annotation();",
-        )
-        .unwrap();
-    std::fs::write(
-        app.join(".dart_tool/package_config.json"),
-        r#"{"configVersion":2,"flutterRoot":"../../flutter","packages":[
-                {"name":"app","rootUri":"../","packageUri":"lib/"},
-                {"name":"flutter","rootUri":"../../flutter/packages/flutter","packageUri":"lib/"},
-                {"name":"meta","rootUri":"../../meta","packageUri":"lib/"}
-            ]}"#,
-    )
-    .unwrap();
+    write_flutter_fixture(root, &app);
     let path = app.join("lib/main.dart");
     std::fs::write(&path, source).unwrap();
     let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
@@ -241,4 +199,50 @@ abstract class StatelessWidget extends Widget { const StatelessWidget({super.key
         .with_identities(&identities)
         .with_signatures(&signatures);
     rule.analyze(name, program, &context)
+}
+
+fn write_flutter_fixture(root: &Path, app: &Path) {
+    for path in [
+        app.join(".dart_tool"),
+        app.join("lib"),
+        root.join("flutter/packages/flutter/lib"),
+        root.join("meta/lib"),
+    ] {
+        std::fs::create_dir_all(path).unwrap();
+    }
+    write_sdk(
+        root,
+        &[(
+            "core",
+            include_str!("../../tests/support/sdk/lib/core/core.dart"),
+        )],
+    );
+    std::fs::write(
+        root.join("flutter/packages/flutter/lib/widgets.dart"),
+        r"
+abstract class Key { const Key.empty(); }
+abstract class LocalKey extends Key { const LocalKey() : super.empty(); }
+abstract class GlobalKey<T> extends Key { const GlobalKey() : super.empty(); }
+abstract class Widget {
+  const Widget({this.key});
+  final Key? key;
+}
+abstract class StatelessWidget extends Widget { const StatelessWidget({super.key}); }
+",
+    )
+    .unwrap();
+    std::fs::write(
+            root.join("meta/lib/meta.dart"),
+            "class _Annotation { const _Annotation(); } const visibleForTesting = _Annotation(); const internal = _Annotation();",
+        )
+        .unwrap();
+    std::fs::write(
+        app.join(".dart_tool/package_config.json"),
+        r#"{"configVersion":2,"flutterRoot":"../../flutter","packages":[
+                {"name":"app","rootUri":"../","packageUri":"lib/"},
+                {"name":"flutter","rootUri":"../../flutter/packages/flutter","packageUri":"lib/"},
+                {"name":"meta","rootUri":"../../meta","packageUri":"lib/"}
+            ]}"#,
+    )
+    .unwrap();
 }

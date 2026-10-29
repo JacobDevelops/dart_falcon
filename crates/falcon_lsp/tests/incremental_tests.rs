@@ -438,6 +438,39 @@ fn affected_documents_share_one_invalidated_semantic_snapshot() {
 
 #[test]
 fn external_semantic_indexes_survive_edits_and_refresh_dependency_facts() {
+    let dir = TempDir::new().unwrap();
+    let (mut state, app, dependency) = external_semantic_fixture(&dir);
+    let path = app.join("lib/main.dart");
+    let source = "import 'package:dep/dep.dart';\nvoid check() { calculate(); }\n";
+    fs::write(&path, source).unwrap();
+    let uri = format!("file://{}", path.display());
+    state.open(&uri, source.to_string(), Some(1));
+    let builds = state.semantic_snapshot_build_count();
+    let resets = state.external_reset_count();
+    assert_eq!(builds, 1);
+    assert_eq!(state.external_index_build_count(), 1);
+    assert!(
+        state.document(&uri).unwrap().last_diagnostics.is_empty(),
+        "the missing generated declaration has no known return value"
+    );
+
+    assert_external_indexes_survive_edits(
+        &mut state,
+        &uri,
+        source,
+        &dependency,
+        &app,
+        builds,
+        resets,
+    );
+
+    let (replacement, imported) =
+        assert_external_imports_and_remapping(&mut state, &uri, &app, &dependency, &dir);
+
+    assert_external_backedges_refresh(&mut state, &uri, &app, &replacement, imported);
+}
+
+fn external_semantic_fixture(dir: &TempDir) -> (LspState, std::path::PathBuf, std::path::PathBuf) {
     let config = r#"{
         "linter": { "rules": {
             "recommended": false,
@@ -445,7 +478,6 @@ fn external_semantic_indexes_survive_edits_and_refresh_dependency_facts() {
         } },
         "cross-file": { "enabled": false }
     }"#;
-    let dir = TempDir::new().unwrap();
     let flutter = dir.path().join("flutter");
     let sdk = flutter.join("bin/cache/dart-sdk/lib");
     let dependency = dir.path().join("cache/dep");
@@ -483,29 +515,27 @@ fn external_semantic_indexes_survive_edits_and_refresh_dependency_facts() {
     .unwrap();
     let config_path = app.join("falcon.json");
     fs::write(&config_path, config).unwrap();
-    let mut state = LspState::new_with_sdk_locator(Some(config_path), |config| {
+    let state = LspState::new_with_sdk_locator(Some(config_path), |config| {
         falcon_analyze::DartSdk::load(&config?.flutter_root.as_ref()?.join("bin/cache/dart-sdk"))
     });
-    let path = app.join("lib/main.dart");
-    let source = "import 'package:dep/dep.dart';\nvoid check() { calculate(); }\n";
-    fs::write(&path, source).unwrap();
-    let uri = format!("file://{}", path.display());
-    state.open(&uri, source.to_string(), Some(1));
-    let builds = state.semantic_snapshot_build_count();
-    let resets = state.external_reset_count();
-    assert_eq!(builds, 1);
-    assert_eq!(state.external_index_build_count(), 1);
-    assert!(
-        state.document(&uri).unwrap().last_diagnostics.is_empty(),
-        "the missing generated declaration has no known return value"
-    );
+    (state, app, dependency)
+}
 
-    state.analyze(&uri);
+fn assert_external_indexes_survive_edits(
+    state: &mut LspState,
+    uri: &str,
+    source: &str,
+    dependency: &std::path::Path,
+    app: &std::path::Path,
+    builds: u64,
+    resets: u64,
+) {
+    state.analyze(uri);
     assert_eq!(state.semantic_snapshot_build_count(), builds);
     assert_eq!(state.external_reset_count(), resets);
 
-    state.change(&uri, format!("{source}\n"), Some(2));
-    state.analyze(&uri);
+    state.change(uri, format!("{source}\n"), Some(2));
+    state.analyze(uri);
     assert_eq!(
         state.external_index_build_count(),
         1,
@@ -519,7 +549,7 @@ fn external_semantic_indexes_survive_edits_and_refresh_dependency_facts() {
     )
     .unwrap();
     state.watched_files_changed(&[dependency.join("lib/generated.dart")]);
-    let diagnostics = state.analyze(&uri);
+    let diagnostics = state.analyze(uri);
     assert!(
         diagnostics
             .iter()
@@ -534,24 +564,24 @@ fn external_semantic_indexes_survive_edits_and_refresh_dependency_facts() {
         "newly materialized parts rebuild external facts"
     );
 
-    state.analyze(&uri);
+    state.analyze(uri);
     assert_eq!(state.semantic_snapshot_build_count(), builds + 1);
     assert_eq!(state.external_reset_count(), resets + 1);
 
     // A refreshed project overlay must not retain the previous declaration.
     let shadowed = format!("{source}\nvoid calculate() {{}}\n");
-    state.change(&uri, shadowed, Some(3));
+    state.change(uri, shadowed, Some(3));
     assert!(
         !state
-            .analyze(&uri)
+            .analyze(uri)
             .iter()
             .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
     );
     assert_eq!(state.external_index_build_count(), 2);
-    state.change(&uri, source.to_string(), Some(4));
+    state.change(uri, source.to_string(), Some(4));
     assert!(
         state
-            .analyze(&uri)
+            .analyze(uri)
             .iter()
             .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
     );
@@ -560,7 +590,7 @@ fn external_semantic_indexes_survive_edits_and_refresh_dependency_facts() {
     state.open(&other_uri, "class Other {}\n".to_string(), Some(1));
     assert!(
         state
-            .analyze(&uri)
+            .analyze(uri)
             .iter()
             .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
     );
@@ -591,19 +621,27 @@ fn external_semantic_indexes_survive_edits_and_refresh_dependency_facts() {
     state.watched_files_changed(std::slice::from_ref(&generated));
     assert!(
         !state
-            .analyze(&uri)
+            .analyze(uri)
             .iter()
             .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
     );
     assert_eq!(state.external_index_build_count(), 3);
+}
 
+fn assert_external_imports_and_remapping(
+    state: &mut LspState,
+    uri: &str,
+    app: &std::path::Path,
+    dependency: &std::path::Path,
+    dir: &TempDir,
+) -> (std::path::PathBuf, &'static str) {
     // New imports extend the external graph and invalidate its indexed layer.
     fs::write(dependency.join("lib/extra.dart"), "int extra() => 1;\n").unwrap();
     let imported = "import 'package:dep/extra.dart';\nvoid check() { extra(); }\n";
-    state.change(&uri, imported.to_string(), Some(5));
+    state.change(uri, imported.to_string(), Some(5));
     assert!(
         state
-            .analyze(&uri)
+            .analyze(uri)
             .iter()
             .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
     );
@@ -611,10 +649,10 @@ fn external_semantic_indexes_survive_edits_and_refresh_dependency_facts() {
 
     // Package declarations remain available without an SDK, matching the CLI.
     let mut sdkless = LspState::new_with_sdk_locator(Some(app.join("falcon.json")), |_| None);
-    sdkless.open(&uri, imported.to_string(), Some(1));
+    sdkless.open(uri, imported.to_string(), Some(1));
     assert!(
         sdkless
-            .analyze(&uri)
+            .analyze(uri)
             .iter()
             .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
     );
@@ -644,15 +682,24 @@ fn external_semantic_indexes_survive_edits_and_refresh_dependency_facts() {
     state.watched_files_changed(std::slice::from_ref(&package_config));
     assert!(
         !state
-            .analyze(&uri)
+            .analyze(uri)
             .iter()
             .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
     );
     assert_eq!(state.external_index_build_count(), 5);
-    state.change(&uri, format!("{imported}\n"), Some(6));
-    state.analyze(&uri);
+    state.change(uri, format!("{imported}\n"), Some(6));
+    state.analyze(uri);
     assert_eq!(state.external_index_build_count(), 5);
+    (replacement, imported)
+}
 
+fn assert_external_backedges_refresh(
+    state: &mut LspState,
+    uri: &str,
+    app: &std::path::Path,
+    replacement: &std::path::Path,
+    imported: &str,
+) {
     // External back-edges cannot freeze project declarations in a cached base.
     let api_path = app.join("lib/api.dart");
     let api_uri = format!("file://{}", api_path.display());
@@ -664,27 +711,27 @@ fn external_semantic_indexes_survive_edits_and_refresh_dependency_facts() {
     .unwrap();
     state.watched_files_changed(&[replacement.join("lib/extra.dart")]);
     state.change(
-        &uri,
+        uri,
         "import 'package:dep/extra.dart';\nvoid check() { calculate(); }\n".to_string(),
         Some(7),
     );
     assert!(
         state
-            .analyze(&uri)
+            .analyze(uri)
             .iter()
             .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
     );
     state.open(&api_uri, "void calculate() {}\n".to_string(), Some(1));
     assert!(
         !state
-            .analyze(&uri)
+            .analyze(uri)
             .iter()
             .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
     );
     state.change(&api_uri, "int calculate() => 1;\n".to_string(), Some(2));
     assert!(
         state
-            .analyze(&uri)
+            .analyze(uri)
             .iter()
             .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
     );
@@ -696,22 +743,22 @@ fn external_semantic_indexes_survive_edits_and_refresh_dependency_facts() {
     )
     .unwrap();
     state.watched_files_changed(&[replacement.join("lib/extra.dart")]);
-    state.change(&uri, imported.to_string(), Some(8));
+    state.change(uri, imported.to_string(), Some(8));
     assert!(
         state
-            .analyze(&uri)
+            .analyze(uri)
             .iter()
             .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
     );
     let combined_builds = state.external_index_build_count();
     state.change(&api_uri, "void calculate() {}\n".to_string(), Some(3));
-    state.analyze(&uri);
+    state.analyze(uri);
     assert!(
         state.external_index_build_count() > combined_builds,
         "a documentation import of an editable file must rebuild the combined indexes"
     );
     let unchanged = state.external_index_build_count();
-    state.analyze(&uri);
+    state.analyze(uri);
     assert_eq!(
         state.external_index_build_count(),
         unchanged,

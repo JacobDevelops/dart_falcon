@@ -440,36 +440,7 @@ fn migrate_flat_config(root: &mut Value, report: &mut Migration) -> Result<(), S
         for (name, setting) in &entries {
             let meta = meta_for(name)
                 .ok_or_else(|| format!("cannot migrate legacy `{key}.{name}`: no rule mapping"))?;
-            let config = if key == "severity_override" {
-                setting.clone()
-            } else {
-                let object = setting.as_object().ok_or_else(|| {
-                    format!("cannot migrate legacy `{key}.{name}`: expected an object")
-                })?;
-                if let Some(unknown) = object
-                    .keys()
-                    .find(|key| !matches!(key.as_str(), "enabled" | "options"))
-                {
-                    return Err(format!(
-                        "cannot migrate legacy `{key}.{name}.{unknown}`: no mapping"
-                    ));
-                }
-                let enabled = match object.get("enabled") {
-                    None | Some(Value::Bool(true)) => true,
-                    Some(Value::Bool(false)) => false,
-                    _ => {
-                        return Err(format!(
-                            "cannot migrate legacy `{key}.{name}.enabled`: expected a boolean"
-                        ));
-                    }
-                };
-                let level = if enabled { "warn" } else { "off" };
-                if let Some(options) = object.get("options") {
-                    json!({"level":level,"options":options})
-                } else {
-                    json!(level)
-                }
-            };
+            let config = legacy_rule_setting(key, name, setting)?;
             let section = if meta.is_cross_file() {
                 "cross-file"
             } else {
@@ -489,47 +460,97 @@ fn migrate_flat_config(root: &mut Value, report: &mut Migration) -> Result<(), S
                 .as_object_mut()
                 .ok_or_else(|| format!("cannot migrate legacy `{key}` into a non-object group"))?;
             let group_path = format!("{section}.rules.{}", meta.group.as_str());
-            if key == "severity_override" {
-                let (canonical, warnings) =
-                    canonicalize_rule_entries(std::mem::take(entries), &group_path);
-                *entries = canonical;
-                report.warnings.extend(warnings);
-                let existing = entries.get_mut(meta.name);
-                let disabled = existing.as_ref().is_some_and(|existing| {
-                    existing.as_str() == Some("off")
-                        || existing.get("level").and_then(Value::as_str) == Some("off")
-                });
-                if disabled {
-                    report.warnings.push(format!(
-                        "ignored legacy `{key}.{name}`: discarded value {config}; keeping the rule disabled"
-                    ));
-                } else {
-                    match existing {
-                        Some(Value::Object(existing)) => {
-                            existing.insert("level".into(), config);
-                        }
-                        Some(existing) => *existing = config,
-                        None => {
-                            entries.insert(meta.name.into(), config);
-                        }
-                    }
-                }
-            } else {
-                let (merged, warnings) = canonicalize_rule_entries(
-                    std::mem::take(entries)
-                        .into_iter()
-                        .chain(std::iter::once((name.clone(), config))),
-                    &group_path,
-                );
-                *entries = merged;
-                report.warnings.extend(warnings);
-            }
+            merge_legacy_rule(key, name, meta.name, config, entries, &group_path, report);
             report.migrated_count += 1;
         }
         root.as_object_mut()
             .expect("legacy key in object")
             .shift_remove(key);
     }
+    migrate_flat_excludes(root)?;
+    Ok(())
+}
+
+fn legacy_rule_setting(key: &str, name: &str, setting: &Value) -> Result<Value, String> {
+    let config = if key == "severity_override" {
+        setting.clone()
+    } else {
+        let object = setting
+            .as_object()
+            .ok_or_else(|| format!("cannot migrate legacy `{key}.{name}`: expected an object"))?;
+        if let Some(unknown) = object
+            .keys()
+            .find(|key| !matches!(key.as_str(), "enabled" | "options"))
+        {
+            return Err(format!(
+                "cannot migrate legacy `{key}.{name}.{unknown}`: no mapping"
+            ));
+        }
+        let enabled = match object.get("enabled") {
+            None | Some(Value::Bool(true)) => true,
+            Some(Value::Bool(false)) => false,
+            _ => {
+                return Err(format!(
+                    "cannot migrate legacy `{key}.{name}.enabled`: expected a boolean"
+                ));
+            }
+        };
+        let level = if enabled { "warn" } else { "off" };
+        if let Some(options) = object.get("options") {
+            json!({"level":level,"options":options})
+        } else {
+            json!(level)
+        }
+    };
+    Ok(config)
+}
+
+fn merge_legacy_rule(
+    key: &str,
+    name: &str,
+    rule_name: &str,
+    config: Value,
+    entries: &mut Map<String, Value>,
+    group_path: &str,
+    report: &mut Migration,
+) {
+    if key == "severity_override" {
+        let (canonical, warnings) = canonicalize_rule_entries(std::mem::take(entries), group_path);
+        *entries = canonical;
+        report.warnings.extend(warnings);
+        let existing = entries.get_mut(rule_name);
+        let disabled = existing.as_ref().is_some_and(|existing| {
+            existing.as_str() == Some("off")
+                || existing.get("level").and_then(Value::as_str) == Some("off")
+        });
+        if disabled {
+            report.warnings.push(format!(
+                "ignored legacy `{key}.{name}`: discarded value {config}; keeping the rule disabled"
+            ));
+        } else {
+            match existing {
+                Some(Value::Object(existing)) => {
+                    existing.insert("level".into(), config);
+                }
+                Some(existing) => *existing = config,
+                None => {
+                    entries.insert(rule_name.into(), config);
+                }
+            }
+        }
+    } else {
+        let (merged, warnings) = canonicalize_rule_entries(
+            std::mem::take(entries)
+                .into_iter()
+                .chain(std::iter::once((name.to_owned(), config))),
+            group_path,
+        );
+        *entries = merged;
+        report.warnings.extend(warnings);
+    }
+}
+
+fn migrate_flat_excludes(root: &mut Value) -> Result<(), String> {
     if let Some(excludes) = root.get_mut("exclude_patterns").map(std::mem::take) {
         let excludes = excludes
             .as_array()
@@ -635,44 +656,7 @@ fn serialize_config(
         match loaded {
             Ok(loaded) => {
                 if legacy_flat {
-                    let config = &loaded.config;
-                    let affected = RULE_METADATA
-                        .iter()
-                        .filter(|meta| {
-                            let group = meta.group.as_str();
-                            let (enabled, rules, resolved) = if meta.is_cross_file() {
-                                (
-                                    config.cross_file.enabled,
-                                    &config.cross_file.rules,
-                                    config.cross_file.resolve_rule(
-                                        group,
-                                        meta.name,
-                                        meta.recommended,
-                                    ),
-                                )
-                            } else {
-                                (
-                                    config.linter.enabled,
-                                    &config.linter.rules,
-                                    config.linter.resolve_rule(
-                                        group,
-                                        meta.name,
-                                        meta.recommended,
-                                        meta.domain_names(),
-                                    ),
-                                )
-                            };
-                            enabled
-                                && !rules
-                                    .groups
-                                    .get(group)
-                                    .is_some_and(|rules| rules.contains_key(meta.name))
-                                && resolved.is_none()
-                        })
-                        .count();
-                    warnings.push(format!(
-                        "legacy flat configs ran all rules by default; migrated configs run recommended plus explicitly listed rules (subject to section/domain settings). {affected} unlisted rules no longer run by default; enable desired rules explicitly by group in `linter.rules` or `cross-file.rules` using `\"warn\"`, `\"info\"`, or `\"error\"`"
-                    ));
+                    warn_legacy_default_rules(&loaded.config, warnings);
                 }
                 for warning in loaded.warnings {
                     if !warnings.contains(&warning) {
@@ -726,41 +710,7 @@ fn serialize_config(
                 if matches!(target.last(), Some(ConfigPathSegment::Index(_))) {
                     removals.push(target.to_vec());
                 }
-                let rule_path = match target {
-                    [
-                        ConfigPathSegment::Key(key),
-                        ConfigPathSegment::Index(_),
-                        rest @ ..,
-                    ] if key == "overrides" => rest,
-                    path => path,
-                };
-                if let [
-                    ConfigPathSegment::Key(section),
-                    ConfigPathSegment::Key(rules),
-                    ConfigPathSegment::Key(group),
-                    ConfigPathSegment::Key(rule),
-                    ConfigPathSegment::Key(options),
-                    ConfigPathSegment::Key(_),
-                ] = rule_path
-                    && matches!(section.as_str(), "linter" | "cross-file")
-                    && rules == "rules"
-                    && falcon_config::RULE_GROUPS.contains(&group.as_str())
-                    && options == "options"
-                    && meta_for(rule).is_some_and(|meta| !meta.has_options())
-                    && let Some(rule) = target[..target.len() - 2]
-                        .iter()
-                        .try_fold(&mut value, |value, segment| match segment {
-                            ConfigPathSegment::Key(key) => value.get_mut(key),
-                            ConfigPathSegment::Index(index) => value.get_mut(*index),
-                        })
-                        .and_then(Value::as_object_mut)
-                    && rule
-                        .get("options")
-                        .and_then(Value::as_object)
-                        .is_some_and(Map::is_empty)
-                {
-                    rule.shift_remove("options");
-                }
+                remove_empty_rule_options(&mut value, target);
             }
         }
     }
@@ -768,6 +718,82 @@ fn serialize_config(
         .map_err(|e| format!("failed to serialize falcon.json: {e}"))?;
     json.push('\n');
     Ok(json)
+}
+
+fn warn_legacy_default_rules(config: &falcon_config::FalconConfig, warnings: &mut Vec<String>) {
+    let affected = RULE_METADATA
+        .iter()
+        .filter(|meta| {
+            let group = meta.group.as_str();
+            let (enabled, rules, resolved) = if meta.is_cross_file() {
+                (
+                    config.cross_file.enabled,
+                    &config.cross_file.rules,
+                    config
+                        .cross_file
+                        .resolve_rule(group, meta.name, meta.recommended),
+                )
+            } else {
+                (
+                    config.linter.enabled,
+                    &config.linter.rules,
+                    config.linter.resolve_rule(
+                        group,
+                        meta.name,
+                        meta.recommended,
+                        meta.domain_names(),
+                    ),
+                )
+            };
+            enabled
+                && !rules
+                    .groups
+                    .get(group)
+                    .is_some_and(|rules| rules.contains_key(meta.name))
+                && resolved.is_none()
+        })
+        .count();
+    warnings.push(format!(
+        "legacy flat configs ran all rules by default; migrated configs run recommended plus explicitly listed rules (subject to section/domain settings). {affected} unlisted rules no longer run by default; enable desired rules explicitly by group in `linter.rules` or `cross-file.rules` using `\"warn\"`, `\"info\"`, or `\"error\"`"
+    ));
+}
+
+fn remove_empty_rule_options(value: &mut Value, target: &[ConfigPathSegment]) {
+    let rule_path = match target {
+        [
+            ConfigPathSegment::Key(key),
+            ConfigPathSegment::Index(_),
+            rest @ ..,
+        ] if key == "overrides" => rest,
+        path => path,
+    };
+    if let [
+        ConfigPathSegment::Key(section),
+        ConfigPathSegment::Key(rules),
+        ConfigPathSegment::Key(group),
+        ConfigPathSegment::Key(rule),
+        ConfigPathSegment::Key(options),
+        ConfigPathSegment::Key(_),
+    ] = rule_path
+        && matches!(section.as_str(), "linter" | "cross-file")
+        && rules == "rules"
+        && falcon_config::RULE_GROUPS.contains(&group.as_str())
+        && options == "options"
+        && meta_for(rule).is_some_and(|meta| !meta.has_options())
+        && let Some(rule) = target[..target.len() - 2]
+            .iter()
+            .try_fold(value, |value, segment| match segment {
+                ConfigPathSegment::Key(key) => value.get_mut(key),
+                ConfigPathSegment::Index(index) => value.get_mut(*index),
+            })
+            .and_then(Value::as_object_mut)
+        && rule
+            .get("options")
+            .and_then(Value::as_object)
+            .is_some_and(Map::is_empty)
+    {
+        rule.shift_remove("options");
+    }
 }
 
 fn repair_includes(

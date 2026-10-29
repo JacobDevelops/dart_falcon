@@ -12,6 +12,8 @@ mod semantic;
 mod type_index;
 
 #[cfg(test)]
+pub(crate) use library::parsed_fixture;
+#[cfg(test)]
 pub(crate) use semantic::tests::with_model;
 
 pub use identity::{

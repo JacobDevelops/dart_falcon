@@ -294,6 +294,29 @@ struct CachedDiskFile {
     stamp: Option<FileStamp>,
 }
 
+impl CachedDiskFile {
+    fn new(
+        file: &ProjectFile,
+        language_version: Option<LanguageVersion>,
+        stamp: Option<FileStamp>,
+    ) -> Self {
+        Self {
+            parsed: Arc::clone(&file.parsed),
+            has_parse_errors: file.has_parse_errors,
+            language_version,
+            stamp,
+        }
+    }
+
+    fn project_file(&self, path: &Path) -> ProjectFile {
+        ProjectFile {
+            path: path.to_path_buf(),
+            parsed: Arc::clone(&self.parsed),
+            has_parse_errors: self.has_parse_errors,
+        }
+    }
+}
+
 struct RootConfig {
     config: FalconConfig,
     analysis: ProjectAnalysis,
@@ -787,43 +810,7 @@ impl LspState {
         let paths: Vec<_> = paths
             .iter()
             .map(|path| watched_path(path))
-            .filter(|path| {
-                inputs_changed
-                    || is_dart_file(path)
-                    || path.is_dir()
-                    || matches!(
-                        path.file_name().and_then(|name| name.to_str()),
-                        Some(
-                            "falcon.json"
-                                | ".falcon.json"
-                                | "melos.yaml"
-                                | "pubspec.yaml"
-                                | "pubspec.lock"
-                                | "pubspec_overrides.yaml"
-                                | "package_config.json"
-                        )
-                    )
-                    || self
-                        .disk_files
-                        .keys()
-                        .any(|cached| cached.starts_with(path))
-                    || self.project_paths.as_ref().is_some_and(|files| {
-                        files.iter().any(|(cached, _)| cached.starts_with(path))
-                    })
-                    || self
-                        .watched_local_paths
-                        .iter()
-                        .any(|cached| cached.starts_with(path))
-                    || self
-                        .cross_file_external_cache
-                        .as_ref()
-                        .is_some_and(|cache| cache.loaded(path))
-                    || (!path.exists()
-                        && self
-                            .environment
-                            .watched_dependency_roots()
-                            .any(|root| path.starts_with(root)))
-            })
+            .filter(|path| self.relevant_watched_path(path, inputs_changed))
             .collect();
         if paths.is_empty() {
             return Vec::new();
@@ -859,26 +846,7 @@ impl LspState {
                 .values()
                 .any(|document| document.path == *path)
         };
-        let dependency_changed = paths.iter().any(|path| {
-            !open(path)
-                && (self
-                    .watched_local_paths
-                    .iter()
-                    .any(|cached| cached.starts_with(path))
-                    || self
-                        .cross_file_external_cache
-                        .as_ref()
-                        .is_some_and(|cache| cache.loaded(path))
-                    || (self
-                        .environment
-                        .watched_dependency_roots()
-                        .any(|root| path.starts_with(root))
-                        && !self
-                            .semantic_snapshot
-                            .as_ref()
-                            .is_some_and(|snapshot| snapshot.by_path.contains_key(path))
-                        && !self.watched_project_source(path)))
-        });
+        let dependency_changed = self.watched_dependency_changed(&paths);
         let project_changed = paths.iter().any(|path| {
             !open(path)
                 && (self
@@ -918,6 +886,71 @@ impl LspState {
                 (uri, diagnostics)
             })
             .collect()
+    }
+
+    fn relevant_watched_path(&self, path: &Path, inputs_changed: bool) -> bool {
+        inputs_changed
+            || is_dart_file(path)
+            || path.is_dir()
+            || matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some(
+                    "falcon.json"
+                        | ".falcon.json"
+                        | "melos.yaml"
+                        | "pubspec.yaml"
+                        | "pubspec.lock"
+                        | "pubspec_overrides.yaml"
+                        | "package_config.json"
+                )
+            )
+            || self
+                .disk_files
+                .keys()
+                .any(|cached| cached.starts_with(path))
+            || self
+                .project_paths
+                .as_ref()
+                .is_some_and(|files| files.iter().any(|(cached, _)| cached.starts_with(path)))
+            || self
+                .watched_local_paths
+                .iter()
+                .any(|cached| cached.starts_with(path))
+            || self
+                .cross_file_external_cache
+                .as_ref()
+                .is_some_and(|cache| cache.loaded(path))
+            || (!path.exists()
+                && self
+                    .environment
+                    .watched_dependency_roots()
+                    .any(|root| path.starts_with(root)))
+    }
+
+    fn watched_dependency_changed(&self, paths: &[PathBuf]) -> bool {
+        paths.iter().any(|path| {
+            !self
+                .documents
+                .values()
+                .any(|document| document.path == *path)
+                && (self
+                    .watched_local_paths
+                    .iter()
+                    .any(|cached| cached.starts_with(path))
+                    || self
+                        .cross_file_external_cache
+                        .as_ref()
+                        .is_some_and(|cache| cache.loaded(path))
+                    || (self
+                        .environment
+                        .watched_dependency_roots()
+                        .any(|root| path.starts_with(root))
+                        && !self
+                            .semantic_snapshot
+                            .as_ref()
+                            .is_some_and(|snapshot| snapshot.by_path.contains_key(path))
+                        && !self.watched_project_source(path)))
+        })
     }
 
     fn reset_external_environment(&mut self) {
@@ -1777,98 +1810,13 @@ impl LspState {
             );
             return (indexes, rebuilt, Some(Arc::clone(&cache.identities)));
         }
-        let graph_roots: Vec<_> = files
-            .iter()
-            .map(|file| {
-                let program = file.program();
-                let mut uris: Vec<_> = program
-                    .imports()
-                    .map(|import| import.uri().value().into_owned())
-                    .chain(
-                        program
-                            .exports()
-                            .map(|export| export.uri().value().into_owned()),
-                    )
-                    .chain(
-                        program
-                            .part_directives()
-                            .map(|part| part.uri().value().into_owned()),
-                    )
-                    .collect();
-                if let Some(uri) = program.part_of_directive().and_then(|part| part.uri()) {
-                    uris.push(uri.value().into_owned());
-                }
-                uris.extend(falcon_analyze::doc_imports(program, file.source()).map(str::to_owned));
-                (file.path.clone(), uris)
-            })
-            .collect();
+        let graph_roots = Self::cross_file_graph_roots(&files);
         if !self
             .cross_file_external_cache
             .as_ref()
             .is_some_and(|cache| cache.roots == graph_roots)
         {
-            self.capture_fallback_dependency_watches();
-            let roots: Vec<_> = files
-                .iter()
-                .map(|file| (file.path.as_path(), file.program(), file.source()))
-                .collect();
-            let dynamic = self.dynamic_file_watching;
-            let environment = &self.environment;
-            let stamps = std::sync::Mutex::new(&mut self.fallback_stamps);
-            let libraries = ExternalLibraries::load_with_source_observer(
-                environment,
-                &roots,
-                |path| paths.contains(path),
-                |path, origin| {
-                    if !dynamic
-                        && (matches!(origin, ExternalOrigin::Project)
-                            || environment
-                                .watched_dependency_roots()
-                                .any(|root| path.starts_with(root)))
-                    {
-                        stamps
-                            .lock()
-                            .unwrap()
-                            .entry(path.to_path_buf())
-                            .or_insert_with(|| FileStamp::read(path));
-                    }
-                },
-            );
-            let topology = ExternalTopology::build(&libraries, &self.environment);
-            let depends_on_project = files
-                .iter()
-                .any(|file| topology.project_dependency_targets.contains(&file.path));
-            let watched_paths = libraries
-                .libraries()
-                .iter()
-                .flat_map(|library| library.files.iter())
-                .map(|file| file.path.as_path())
-                .chain(libraries.attempted_project_paths())
-                .chain(libraries.project_companions())
-                .map(watched_path)
-                .collect();
-            if let Some(cache) = self.cross_file_external_cache.as_mut().filter(|cache| {
-                !depends_on_project
-                    && cache.indexes.is_some()
-                    && cache.libraries.same_index_inputs(&libraries)
-            }) {
-                cache.roots = graph_roots;
-                cache.watched_paths = watched_paths;
-            } else {
-                let indexes = (!depends_on_project).then(|| {
-                    ExternalIndexCache::build(ExternalSources {
-                        libraries: &libraries,
-                        environment: &self.environment,
-                    })
-                });
-                self.cross_file_external_cache = Some(CrossFileExternalCache {
-                    roots: graph_roots,
-                    libraries,
-                    indexes,
-                    watched_paths,
-                });
-            }
-            self.cross_file_external_load_count += 1;
+            self.rebuild_cross_file_external(&files, &paths, graph_roots);
         }
         let cache = self.cross_file_external_cache.as_ref().unwrap();
         let previous = previous.filter(|previous| {
@@ -1893,6 +1841,104 @@ impl LspState {
                 .as_ref()
                 .map(|external| Arc::clone(&external.identities)),
         )
+    }
+
+    fn cross_file_graph_roots(files: &[&ProjectFile]) -> Vec<(PathBuf, Vec<String>)> {
+        files
+            .iter()
+            .map(|file| {
+                let program = file.program();
+                let mut uris: Vec<_> = program
+                    .imports()
+                    .map(|import| import.uri().value().into_owned())
+                    .chain(
+                        program
+                            .exports()
+                            .map(|export| export.uri().value().into_owned()),
+                    )
+                    .chain(
+                        program
+                            .part_directives()
+                            .map(|part| part.uri().value().into_owned()),
+                    )
+                    .collect();
+                if let Some(uri) = program.part_of_directive().and_then(|part| part.uri()) {
+                    uris.push(uri.value().into_owned());
+                }
+                uris.extend(falcon_analyze::doc_imports(program, file.source()).map(str::to_owned));
+                (file.path.clone(), uris)
+            })
+            .collect()
+    }
+
+    fn rebuild_cross_file_external(
+        &mut self,
+        files: &[&ProjectFile],
+        paths: &HashSet<&Path>,
+        graph_roots: Vec<(PathBuf, Vec<String>)>,
+    ) {
+        self.capture_fallback_dependency_watches();
+        let roots: Vec<_> = files
+            .iter()
+            .map(|file| (file.path.as_path(), file.program(), file.source()))
+            .collect();
+        let dynamic = self.dynamic_file_watching;
+        let environment = &self.environment;
+        let stamps = std::sync::Mutex::new(&mut self.fallback_stamps);
+        let libraries = ExternalLibraries::load_with_source_observer(
+            environment,
+            &roots,
+            |path| paths.contains(path),
+            |path, origin| {
+                if !dynamic
+                    && (matches!(origin, ExternalOrigin::Project)
+                        || environment
+                            .watched_dependency_roots()
+                            .any(|root| path.starts_with(root)))
+                {
+                    stamps
+                        .lock()
+                        .unwrap()
+                        .entry(path.to_path_buf())
+                        .or_insert_with(|| FileStamp::read(path));
+                }
+            },
+        );
+        let topology = ExternalTopology::build(&libraries, &self.environment);
+        let depends_on_project = files
+            .iter()
+            .any(|file| topology.project_dependency_targets.contains(&file.path));
+        let watched_paths = libraries
+            .libraries()
+            .iter()
+            .flat_map(|library| library.files.iter())
+            .map(|file| file.path.as_path())
+            .chain(libraries.attempted_project_paths())
+            .chain(libraries.project_companions())
+            .map(watched_path)
+            .collect();
+        if let Some(cache) = self.cross_file_external_cache.as_mut().filter(|cache| {
+            !depends_on_project
+                && cache.indexes.is_some()
+                && cache.libraries.same_index_inputs(&libraries)
+        }) {
+            cache.roots = graph_roots;
+            cache.watched_paths = watched_paths;
+        } else {
+            let indexes = (!depends_on_project).then(|| {
+                ExternalIndexCache::build(ExternalSources {
+                    libraries: &libraries,
+                    environment: &self.environment,
+                })
+            });
+            self.cross_file_external_cache = Some(CrossFileExternalCache {
+                roots: graph_roots,
+                libraries,
+                indexes,
+                watched_paths,
+            });
+        }
+        self.cross_file_external_load_count += 1;
     }
 
     /// Build both LSP views with identical grouping and resolver layering.
@@ -2127,6 +2173,52 @@ impl LspState {
         if self.semantic_snapshot_error.is_some() {
             return;
         }
+        self.extend_semantic_external_libraries(&files);
+        let companion_failure = self.collect_semantic_companions(&mut files);
+        if let Some((path, error)) = companion_failure {
+            self.record_semantic_worker_failure(&path, error);
+            return;
+        }
+        // Open buffers and promoted companions can arrive in graph traversal
+        // order. Declaration edits must not renumber unchanged project files.
+        files.sort_unstable_by(|left, right| left.path.cmp(&right.path));
+        // A dependency importing a project file depends on mutable buffer facts.
+        // Keep the ordinary combined build for that graph instead of freezing
+        // unresolved/project references into the immutable external layer.
+        let topology_matches = self
+            .external_topology
+            .as_ref()
+            .is_some_and(|cache| cache.matches(&self.external_libraries));
+        self.refresh_local_source_watches();
+        // URI resolution can canonicalize paths. Retain these immutable graph
+        // edges rather than repeating filesystem work for every text edit.
+        if !topology_matches {
+            self.external_topology = Some(ExternalTopology::build(
+                &self.external_libraries,
+                &self.environment,
+            ));
+        }
+        let external_depends_on_project = self.external_topology.as_ref().is_some_and(|cache| {
+            files
+                .iter()
+                .any(|file| cache.project_dependency_targets.contains(&file.path))
+        });
+        if external_depends_on_project {
+            self.external_indexes = None;
+        } else if !topology_matches || self.external_indexes.is_none() {
+            self.external_indexes = Some(ExternalIndexCache::build(ExternalSources {
+                libraries: &self.external_libraries,
+                environment: &self.environment,
+            }));
+            self.external_index_build_count += 1;
+        }
+        if self.external_indexes.is_none() {
+            self.external_index_build_count += 1;
+        }
+        self.install_semantic_snapshot(files, topology_matches, external_depends_on_project);
+    }
+
+    fn extend_semantic_external_libraries(&mut self, files: &[ProjectFile]) {
         self.capture_fallback_dependency_watches();
         {
             let project_paths: HashSet<&Path> = files
@@ -2180,6 +2272,12 @@ impl LspState {
             }
             self.watched_dependency_generation += 1;
         }
+    }
+
+    fn collect_semantic_companions(
+        &mut self,
+        files: &mut Vec<ProjectFile>,
+    ) -> Option<(PathBuf, std::io::Error)> {
         // An open dependency part promotes its whole library to the project
         // view. Keep the buffered member and read only its unopened companions.
         let mut seen: HashSet<PathBuf> = files.iter().map(|file| file.path.clone()).collect();
@@ -2269,24 +2367,10 @@ impl LspState {
                 Err(error) => warn!("failed to read {}: {}", path.display(), error),
             }
         }
-        if let Some((path, error)) = companion_failure {
-            self.record_semantic_worker_failure(&path, error);
-            return;
-        }
-        // Open buffers and promoted companions can arrive in graph traversal
-        // order. Declaration edits must not renumber unchanged project files.
-        files.sort_unstable_by(|left, right| left.path.cmp(&right.path));
-        let external = ExternalSources {
-            libraries: &self.external_libraries,
-            environment: &self.environment,
-        };
-        // A dependency importing a project file depends on mutable buffer facts.
-        // Keep the ordinary combined build for that graph instead of freezing
-        // unresolved/project references into the immutable external layer.
-        let topology_matches = self
-            .external_topology
-            .as_ref()
-            .is_some_and(|cache| cache.matches(&self.external_libraries));
+        companion_failure
+    }
+
+    fn refresh_local_source_watches(&mut self) {
         let mut local_sources: Vec<_> = self.loaded_project_paths().collect();
         local_sources.sort_unstable();
         local_sources.dedup();
@@ -2309,28 +2393,14 @@ impl LspState {
                 self.watched_dependency_generation += 1;
             }
         }
-        // URI resolution can canonicalize paths. Retain these immutable graph
-        // edges rather than repeating filesystem work for every text edit.
-        if !topology_matches {
-            self.external_topology = Some(ExternalTopology::build(
-                &self.external_libraries,
-                &self.environment,
-            ));
-        }
-        let external_depends_on_project = self.external_topology.as_ref().is_some_and(|cache| {
-            files
-                .iter()
-                .any(|file| cache.project_dependency_targets.contains(&file.path))
-        });
-        if external_depends_on_project {
-            self.external_indexes = None;
-        } else if !topology_matches || self.external_indexes.is_none() {
-            self.external_indexes = Some(ExternalIndexCache::build(external));
-            self.external_index_build_count += 1;
-        }
-        if self.external_indexes.is_none() {
-            self.external_index_build_count += 1;
-        }
+    }
+
+    fn install_semantic_snapshot(
+        &mut self,
+        files: Vec<ProjectFile>,
+        topology_matches: bool,
+        external_depends_on_project: bool,
+    ) {
         let project_files: Vec<_> = files.iter().collect();
         let previous = self.previous_semantic_snapshot.take().filter(|snapshot| {
             topology_matches
@@ -2422,10 +2492,133 @@ impl LspState {
     /// The boolean is false when oversized ingestion left the workspace incomplete;
     /// cross-file rules must not infer absence from that partial set.
     fn collect_project_files(&mut self, view: ProjectView) -> (Vec<ProjectFile>, bool) {
+        let paths = self.discover_project_paths();
+        let mut complete = true;
+        self.refresh_environment(
+            paths
+                .iter()
+                .filter(|(_, is_dart)| *is_dart || matches!(view, ProjectView::CrossFile))
+                .map(|(path, _)| path.as_path()),
+        );
+        self.refresh_document_versions();
+        let open_by_path: HashMap<&Path, &DocumentState> = self
+            .documents
+            .values()
+            .map(|doc| (doc.path.as_path(), doc))
+            .collect();
+        let capacity = paths.len() + self.documents.len();
+        let mut files = Vec::with_capacity(capacity);
+        let mut seen = HashSet::with_capacity(capacity);
+        let mut worker_failure = None;
+        for (normalized, is_dart) in &paths {
+            if !is_dart && matches!(view, ProjectView::Semantic) {
+                if !self.dynamic_file_watching && !self.fallback_stamps.contains_key(normalized) {
+                    let stamp = FileStamp::read(normalized);
+                    self.fallback_stamps.insert(normalized.clone(), stamp);
+                }
+                continue;
+            }
+            let path = normalized.as_path();
+            seen.insert(path);
+            if let Some(doc) = open_by_path.get(path) {
+                if doc.source_rejected {
+                    complete = false;
+                    continue;
+                }
+                files.push(ProjectFile {
+                    path: normalized.clone(),
+                    parsed: Arc::clone(&doc.parsed),
+                    has_parse_errors: doc.has_parse_errors,
+                });
+                continue;
+            }
+            let (language_version, stamp) = self.project_disk_revision(path, *is_dart);
+            if let Some(cached) = self.disk_files.get(path)
+                && cached.language_version == language_version
+                && stamp.as_ref().is_none_or(|stamp| &cached.stamp == stamp)
+            {
+                files.push(cached.project_file(normalized));
+                continue;
+            }
+            let stamp = stamp.unwrap_or_else(|| FileStamp::read(path));
+            self.disk_read_count += 1;
+            let fallback_stamp = stamp.clone();
+            if !self.dynamic_file_watching {
+                self.fallback_stamps
+                    .entry(path.to_path_buf())
+                    .or_insert(fallback_stamp);
+            }
+            let Ok(source) = Self::read_project_source(path, &mut complete) else {
+                continue;
+            };
+            if let Some(cached) = self.disk_files.get_mut(path)
+                && cached.language_version == language_version
+                && cached.parsed.source.as_ref() == source
+            {
+                cached.stamp = stamp;
+                files.push(cached.project_file(normalized));
+                continue;
+            }
+            if *is_dart {
+                self.disk_parse_count += 1;
+            }
+            let file = match self.parse_project_source(path, source, language_version, *is_dart) {
+                Ok(file) => file,
+                Err(error) => {
+                    worker_failure = Some((normalized.clone(), error));
+                    complete = false;
+                    break;
+                }
+            };
+            self.disk_files.insert(
+                normalized.clone(),
+                CachedDiskFile::new(&file, language_version, stamp),
+            );
+            files.push(file);
+        }
+        if matches!(view, ProjectView::Semantic) {
+            Self::append_open_semantic_files(&mut files, open_by_path, &seen);
+        }
+        self.project_paths = Some(paths);
+        if let Some((path, error)) = worker_failure {
+            self.record_semantic_worker_failure(&path, error);
+        }
+        (files, complete)
+    }
+
+    fn read_project_source(path: &Path, complete: &mut bool) -> std::io::Result<String> {
+        match falcon_analyze::read_source(path) {
+            Ok(source) => Ok(source),
+            Err(error) => {
+                warn!("failed to read {}: {}", path.display(), error);
+                if falcon_analyze::is_source_too_large(&error) {
+                    *complete = false;
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn project_disk_revision(
+        &self,
+        path: &Path,
+        is_dart: bool,
+    ) -> (Option<LanguageVersion>, Option<Option<FileStamp>>) {
+        let language_version = is_dart
+            .then(|| self.environment.package_language_version(path))
+            .flatten();
+        let stamp = self
+            .semantic_snapshot
+            .is_none()
+            .then(|| FileStamp::read(path));
+        (language_version, stamp)
+    }
+
+    fn discover_project_paths(&mut self) -> Vec<(PathBuf, bool)> {
         if self.project_path_patterns != self.config.files.includes.patterns() {
             self.project_paths = None;
         }
-        let paths = self.project_paths.take().unwrap_or_else(|| {
+        self.project_paths.take().unwrap_or_else(|| {
             self.workspace_walk_count += 1;
             self.project_path_patterns = self.config.files.includes.patterns().to_vec();
             let mut paths = Vec::new();
@@ -2473,161 +2666,49 @@ impl LspState {
                     || companions.contains(path.as_path())
             });
             paths
-        });
-        let mut complete = true;
-        self.refresh_environment(
-            paths
-                .iter()
-                .filter(|(_, is_dart)| *is_dart || matches!(view, ProjectView::CrossFile))
-                .map(|(path, _)| path.as_path()),
-        );
-        self.refresh_document_versions();
-        let open_by_path: HashMap<&Path, &DocumentState> = self
-            .documents
-            .values()
-            .map(|doc| (doc.path.as_path(), doc))
-            .collect();
-        let capacity = paths.len() + self.documents.len();
-        let mut files = Vec::with_capacity(capacity);
-        let mut seen = HashSet::with_capacity(capacity);
-        let mut worker_failure = None;
-        for (normalized, is_dart) in &paths {
-            if !is_dart && matches!(view, ProjectView::Semantic) {
-                if !self.dynamic_file_watching && !self.fallback_stamps.contains_key(normalized) {
-                    let stamp = FileStamp::read(normalized);
-                    self.fallback_stamps.insert(normalized.clone(), stamp);
-                }
-                continue;
-            }
-            let path = normalized.as_path();
-            seen.insert(path);
-            if let Some(doc) = open_by_path.get(path) {
-                if doc.source_rejected {
-                    complete = false;
-                    continue;
-                }
+        })
+    }
+
+    fn parse_project_source(
+        &self,
+        path: &Path,
+        source: String,
+        language_version: Option<LanguageVersion>,
+        is_dart: bool,
+    ) -> std::io::Result<ProjectFile> {
+        if !is_dart {
+            return Ok(manifest_file(path.to_path_buf(), source));
+        }
+        let result = try_parse_for_package(&source, language_version);
+        #[cfg(test)]
+        let result = self.inject_parser_failure(path, result);
+        let parsed = result.map_err(|error| {
+            std::io::Error::other(format!("parsing {}: {error}", path.display()))
+        })?;
+        Ok(ProjectFile {
+            path: path.to_path_buf(),
+            has_parse_errors: !parsed.errors.is_empty(),
+            parsed: Arc::new(ParsedFile {
+                source: source.into_boxed_str(),
+                tree: parsed.tree,
+            }),
+        })
+    }
+
+    fn append_open_semantic_files(
+        files: &mut Vec<ProjectFile>,
+        open_by_path: HashMap<&Path, &DocumentState>,
+        seen: &HashSet<&Path>,
+    ) {
+        for (path, doc) in open_by_path {
+            if !doc.source_rejected && !seen.contains(path) {
                 files.push(ProjectFile {
-                    path: normalized.clone(),
+                    path: path.to_path_buf(),
                     parsed: Arc::clone(&doc.parsed),
                     has_parse_errors: doc.has_parse_errors,
                 });
-                continue;
-            }
-            let language_version = is_dart
-                .then(|| self.environment.package_language_version(path))
-                .flatten();
-            let stamp = self
-                .semantic_snapshot
-                .is_none()
-                .then(|| FileStamp::read(path));
-            if let Some(cached) = self.disk_files.get(path)
-                && cached.language_version == language_version
-                && stamp.as_ref().is_none_or(|stamp| &cached.stamp == stamp)
-            {
-                files.push(ProjectFile {
-                    path: normalized.clone(),
-                    parsed: Arc::clone(&cached.parsed),
-                    has_parse_errors: cached.has_parse_errors,
-                });
-                continue;
-            }
-            let stamp = stamp.unwrap_or_else(|| FileStamp::read(path));
-            self.disk_read_count += 1;
-            let fallback_stamp = stamp.clone();
-            if !self.dynamic_file_watching {
-                self.fallback_stamps
-                    .entry(path.to_path_buf())
-                    .or_insert(fallback_stamp);
-            }
-            let source = match falcon_analyze::read_source(path) {
-                Ok(source) => source,
-                Err(e) => {
-                    warn!("failed to read {}: {}", path.display(), e);
-                    if falcon_analyze::is_source_too_large(&e) {
-                        complete = false;
-                    }
-                    continue;
-                }
-            };
-            if let Some(cached) = self.disk_files.get_mut(path)
-                && cached.language_version == language_version
-                && cached.parsed.source.as_ref() == source
-            {
-                cached.stamp = stamp;
-                files.push(ProjectFile {
-                    path: normalized.clone(),
-                    parsed: Arc::clone(&cached.parsed),
-                    has_parse_errors: cached.has_parse_errors,
-                });
-                continue;
-            }
-            let (tree, has_parse_errors) = if *is_dart {
-                let package_version = language_version;
-                self.disk_parse_count += 1;
-                let result = try_parse_for_package(&source, package_version);
-                #[cfg(test)]
-                let result = self.inject_parser_failure(path, result);
-                let parsed = match result {
-                    Ok(parsed) => parsed,
-                    Err(error) => {
-                        worker_failure = Some((
-                            normalized.clone(),
-                            std::io::Error::other(format!("parsing {}: {error}", path.display())),
-                        ));
-                        complete = false;
-                        break;
-                    }
-                };
-                (parsed.tree, !parsed.errors.is_empty())
-            } else {
-                let file = manifest_file(normalized.clone(), source);
-                self.disk_files.insert(
-                    file.path.clone(),
-                    CachedDiskFile {
-                        parsed: Arc::clone(&file.parsed),
-                        has_parse_errors: file.has_parse_errors,
-                        language_version,
-                        stamp,
-                    },
-                );
-                files.push(file);
-                continue;
-            };
-            let parsed = Arc::new(ParsedFile {
-                source: source.into_boxed_str(),
-                tree,
-            });
-            self.disk_files.insert(
-                normalized.clone(),
-                CachedDiskFile {
-                    parsed: Arc::clone(&parsed),
-                    has_parse_errors,
-                    language_version,
-                    stamp,
-                },
-            );
-            files.push(ProjectFile {
-                path: normalized.clone(),
-                parsed,
-                has_parse_errors,
-            });
-        }
-        if matches!(view, ProjectView::Semantic) {
-            for (path, doc) in open_by_path {
-                if !doc.source_rejected && !seen.contains(path) {
-                    files.push(ProjectFile {
-                        path: path.to_path_buf(),
-                        parsed: Arc::clone(&doc.parsed),
-                        has_parse_errors: doc.has_parse_errors,
-                    });
-                }
             }
         }
-        self.project_paths = Some(paths);
-        if let Some((path, error)) = worker_failure {
-            self.record_semantic_worker_failure(&path, error);
-        }
-        (files, complete)
     }
 }
 

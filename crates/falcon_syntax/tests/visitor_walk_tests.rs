@@ -691,8 +691,6 @@ fn shorthand_pattern_labels_are_not_duplicate_source_names() {
 
 #[test]
 fn default_expression_walk_handles_hundred_thousand_link_arena_chains() {
-    use falcon_syntax::TokenKind;
-
     const LINKS: usize = 100_000;
     for (kind, suffix, identifiers_per_link, types_per_link) in [
         (NodeKind::BinaryExpr, "+a", 1, 0),
@@ -708,146 +706,7 @@ fn default_expression_walk_handles_hundred_thousand_link_arena_chains() {
         (NodeKind::AsExpr, " as dynamic", 0, 1),
         (NodeKind::IsExpr, " is dynamic", 0, 1),
     ] {
-        // Use one parsed link to capture valid child shapes, then build the
-        // deep arena directly so parser depth policies cannot mask regressions.
-        let template_source = format!("var value = a{suffix};");
-        let template = parse(&template_source);
-        assert!(template.errors.is_empty(), "{:?}", template.errors);
-        let TopLevelDecl::Variable(variable) = template
-            .tree
-            .program(&template_source)
-            .declarations()
-            .next()
-            .unwrap()
-        else {
-            panic!("expected variable");
-        };
-        let expr = variable
-            .declarators()
-            .next()
-            .unwrap()
-            .initializer()
-            .unwrap();
-        assert_eq!(expr.syntax().kind(), kind);
-
-        fn append_events(element: SyntaxElement<'_>, base: usize, events: &mut Vec<Event>) {
-            match element {
-                SyntaxElement::Node(node) => {
-                    events.push(Event::Start {
-                        kind: node.kind(),
-                        forward_parent: None,
-                        offset: node.span().start - base,
-                    });
-                    for child in node.children_with_tokens() {
-                        append_events(child, base, events);
-                    }
-                    events.push(Event::Finish);
-                }
-                SyntaxElement::Token(token) => events.push(Event::Token {
-                    kind: token.kind(),
-                    len: token.text().len(),
-                    offset: token.offset() - base,
-                }),
-            }
-        }
-
-        fn append_shifted(events: &mut Vec<Event>, template: &[Event], shift: usize) {
-            for event in template {
-                let mut event = event.clone();
-                match &mut event {
-                    Event::Start { offset, .. } | Event::Token { offset, .. } => {
-                        *offset += shift;
-                    }
-                    _ => {}
-                }
-                events.push(event);
-            }
-        }
-
-        // Assignment values and conditional else branches are right-associative
-        // in parsed source; exercise those spines rather than synthetic targets
-        // or conditions nested on the left.
-        let right_nested = matches!(kind, NodeKind::AssignExpr | NodeKind::ConditionalExpr);
-        let children: Vec<_> = expr.syntax().children_with_tokens().collect();
-        let edge_children = if right_nested {
-            &children[..children.len() - 1]
-        } else {
-            &children[1..]
-        };
-        let mut edge_events = Vec::new();
-        for child in edge_children {
-            append_events(*child, expr.span().start, &mut edge_events);
-        }
-        let mut source = String::with_capacity(1 + LINKS * suffix.len());
-        source.push('a');
-        for _ in 0..LINKS {
-            source.push_str(suffix);
-        }
-        let mut events = Vec::with_capacity(3 + LINKS * (edge_events.len() + 2));
-        for link in 0..LINKS {
-            events.push(Event::Start {
-                kind,
-                forward_parent: None,
-                offset: if right_nested { link * suffix.len() } else { 0 },
-            });
-            if right_nested {
-                append_shifted(&mut events, &edge_events, link * suffix.len());
-            }
-        }
-        let leaf_offset = if right_nested {
-            LINKS * suffix.len()
-        } else {
-            0
-        };
-        events.extend([
-            Event::Start {
-                kind: NodeKind::Identifier,
-                forward_parent: None,
-                offset: leaf_offset,
-            },
-            Event::Token {
-                kind: TokenKind::Ident,
-                len: 1,
-                offset: leaf_offset,
-            },
-            Event::Finish,
-        ]);
-        for link in 0..LINKS {
-            if !right_nested {
-                append_shifted(&mut events, &edge_events, link * suffix.len());
-            }
-            events.push(Event::Finish);
-        }
-        let tree = SyntaxTree::build(&source, &[], events);
-        struct Counter {
-            identifiers: usize,
-            types: usize,
-            last_offset: Option<usize>,
-        }
-        impl Counter {
-            fn advance(&mut self, start: usize) {
-                if let Some(previous) = self.last_offset {
-                    assert!(previous < start);
-                }
-                self.last_offset = Some(start);
-            }
-        }
-        impl<'a> Visitor<'a> for Counter {
-            fn visit_identifier(&mut self, node: Identifier<'a>) {
-                self.advance(node.span().start);
-                self.identifiers += 1;
-            }
-
-            fn visit_name(&mut self, node: Identifier<'a>) {
-                self.visit_identifier(node);
-            }
-
-            fn visit_dart_type(&mut self, node: DartType<'a>) {
-                assert!(matches!(node, DartType::Dynamic(_)));
-                self.advance(node.span().start);
-                self.types += 1;
-            }
-        }
+        let (source, tree) = expression_arena_chain(kind, suffix, LINKS);
         let mut counter = Counter {
             identifiers: 0,
             types: 0,
@@ -877,6 +736,152 @@ fn default_expression_walk_handles_hundred_thousand_link_arena_chains() {
             1 + LINKS * (1 + expression_children),
             "{kind:?}"
         );
+    }
+}
+
+fn expression_arena_chain(kind: NodeKind, suffix: &str, links: usize) -> (String, SyntaxTree) {
+    use falcon_syntax::TokenKind;
+
+    // Use one parsed link to capture valid child shapes, then build the
+    // deep arena directly so parser depth policies cannot mask regressions.
+    let template_source = format!("var value = a{suffix};");
+    let template = parse(&template_source);
+    assert!(template.errors.is_empty(), "{:?}", template.errors);
+    let TopLevelDecl::Variable(variable) = template
+        .tree
+        .program(&template_source)
+        .declarations()
+        .next()
+        .unwrap()
+    else {
+        panic!("expected variable");
+    };
+    let expr = variable
+        .declarators()
+        .next()
+        .unwrap()
+        .initializer()
+        .unwrap();
+    assert_eq!(expr.syntax().kind(), kind);
+    // Assignment values and conditional else branches are right-associative
+    // in parsed source; exercise those spines rather than synthetic targets
+    // or conditions nested on the left.
+    let right_nested = matches!(kind, NodeKind::AssignExpr | NodeKind::ConditionalExpr);
+    let children: Vec<_> = expr.syntax().children_with_tokens().collect();
+    let edge_children = if right_nested {
+        &children[..children.len() - 1]
+    } else {
+        &children[1..]
+    };
+    let mut edge_events = Vec::new();
+    for child in edge_children {
+        append_events(*child, expr.span().start, &mut edge_events);
+    }
+    let mut source = String::with_capacity(1 + links * suffix.len());
+    source.push('a');
+    for _ in 0..links {
+        source.push_str(suffix);
+    }
+    let mut events = Vec::with_capacity(3 + links * (edge_events.len() + 2));
+    for link in 0..links {
+        events.push(Event::Start {
+            kind,
+            forward_parent: None,
+            offset: if right_nested { link * suffix.len() } else { 0 },
+        });
+        if right_nested {
+            append_shifted(&mut events, &edge_events, link * suffix.len());
+        }
+    }
+    let leaf_offset = if right_nested {
+        links * suffix.len()
+    } else {
+        0
+    };
+    events.extend([
+        Event::Start {
+            kind: NodeKind::Identifier,
+            forward_parent: None,
+            offset: leaf_offset,
+        },
+        Event::Token {
+            kind: TokenKind::Ident,
+            len: 1,
+            offset: leaf_offset,
+        },
+        Event::Finish,
+    ]);
+    for link in 0..links {
+        if !right_nested {
+            append_shifted(&mut events, &edge_events, link * suffix.len());
+        }
+        events.push(Event::Finish);
+    }
+    let tree = SyntaxTree::build(&source, &[], events);
+    (source, tree)
+}
+
+fn append_events(element: SyntaxElement<'_>, base: usize, events: &mut Vec<Event>) {
+    match element {
+        SyntaxElement::Node(node) => {
+            events.push(Event::Start {
+                kind: node.kind(),
+                forward_parent: None,
+                offset: node.span().start - base,
+            });
+            for child in node.children_with_tokens() {
+                append_events(child, base, events);
+            }
+            events.push(Event::Finish);
+        }
+        SyntaxElement::Token(token) => events.push(Event::Token {
+            kind: token.kind(),
+            len: token.text().len(),
+            offset: token.offset() - base,
+        }),
+    }
+}
+
+fn append_shifted(events: &mut Vec<Event>, template: &[Event], shift: usize) {
+    for event in template {
+        let mut event = event.clone();
+        match &mut event {
+            Event::Start { offset, .. } | Event::Token { offset, .. } => {
+                *offset += shift;
+            }
+            _ => {}
+        }
+        events.push(event);
+    }
+}
+
+struct Counter {
+    identifiers: usize,
+    types: usize,
+    last_offset: Option<usize>,
+}
+impl Counter {
+    fn advance(&mut self, start: usize) {
+        if let Some(previous) = self.last_offset {
+            assert!(previous < start);
+        }
+        self.last_offset = Some(start);
+    }
+}
+impl<'a> Visitor<'a> for Counter {
+    fn visit_identifier(&mut self, node: Identifier<'a>) {
+        self.advance(node.span().start);
+        self.identifiers += 1;
+    }
+
+    fn visit_name(&mut self, node: Identifier<'a>) {
+        self.visit_identifier(node);
+    }
+
+    fn visit_dart_type(&mut self, node: DartType<'a>) {
+        assert!(matches!(node, DartType::Dynamic(_)));
+        self.advance(node.span().start);
+        self.types += 1;
     }
 }
 

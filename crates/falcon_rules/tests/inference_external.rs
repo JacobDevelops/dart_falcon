@@ -225,26 +225,7 @@ fn dependency_frontend_fail_uses_its_declaring_library() {
     let root = directory.path();
     let app = root.join("app");
 
-    std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
-    std::fs::create_dir_all(app.join("lib")).unwrap();
-    std::fs::create_dir_all(root.join("test_api/lib/src/frontend")).unwrap();
-    inference::sdk_fixture::write_sdk(
-        root,
-        &[("core", include_str!("support/sdk/lib/core/core.dart"))],
-    );
-    std::fs::write(
-        app.join(".dart_tool/package_config.json"),
-        r#"{"configVersion":2,"flutterRoot":"../../flutter","packages":[
-            {"name":"app","rootUri":"../","packageUri":"lib/"},
-            {"name":"test_api","rootUri":"../../test_api","packageUri":"lib/"}
-        ]}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        root.join("test_api/lib/src/frontend/expect.dart"),
-        "Never fail(String message) => throw message;",
-    )
-    .unwrap();
+    write_frontend_dependency_fixture(root, &app);
     let source = r#"import 'package:test_api/src/frontend/expect.dart';
 import 'package:test_api/src/frontend/expect.dart' as expectations;
 void unprefixed() {
@@ -317,6 +298,29 @@ void shadowed() {
         .with_signatures(&signatures);
     let diagnostics = UseTestThrowsMatchers.analyze(UseTestThrowsMatchers::NAME, program, &context);
     inference::assert_diagnostics(source, "use-test-throws-matchers", &diagnostics, 2);
+}
+
+fn write_frontend_dependency_fixture(root: &std::path::Path, app: &std::path::Path) {
+    std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
+    std::fs::create_dir_all(app.join("lib")).unwrap();
+    std::fs::create_dir_all(root.join("test_api/lib/src/frontend")).unwrap();
+    inference::sdk_fixture::write_sdk(
+        root,
+        &[("core", include_str!("support/sdk/lib/core/core.dart"))],
+    );
+    std::fs::write(
+        app.join(".dart_tool/package_config.json"),
+        r#"{"configVersion":2,"flutterRoot":"../../flutter","packages":[
+            {"name":"app","rootUri":"../","packageUri":"lib/"},
+            {"name":"test_api","rootUri":"../../test_api","packageUri":"lib/"}
+        ]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("test_api/lib/src/frontend/expect.dart"),
+        "Never fail(String message) => throw message;",
+    )
+    .unwrap();
 }
 
 #[test]

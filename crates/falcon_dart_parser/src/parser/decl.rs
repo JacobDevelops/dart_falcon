@@ -620,34 +620,7 @@ impl<'src> Parser<'src> {
         } = modifiers;
         let saved = self.checkpoint();
         if is_final || is_const || is_late {
-            // Only the enclosing type's name can introduce a const constructor.
-            if is_const && self.cur().kind.is_identifier_like() && self.ctx.ctor_name.is_some() {
-                let name_text = self.cur_text();
-                let p1 = self.peek(1).kind;
-                let dotted = p1 == TokenKind::Dot && self.is_ctor_name_at_offset(2);
-                let is_ctor =
-                    self.ctx.ctor_name == Some(name_text) && (dotted || p1 == TokenKind::LParen);
-                if is_ctor {
-                    let ctor_saved = self.checkpoint();
-                    let name_marker = self.start();
-                    self.advance();
-                    name_marker.complete(self, NodeKind::Identifier);
-                    if self.eat(TokenKind::Dot).is_some() {
-                        self.expect_ctor_name();
-                    }
-                    if self.at(TokenKind::LParen) {
-                        self.parse_formal_param_list();
-                        self.parse_constructor_initializers();
-                        self.parse_function_body(AsyncMarker::Sync);
-                        return NodeKind::ConstructorDecl;
-                    }
-                    self.restore(ctor_saved);
-                }
-            }
-            self.try_parse_type_followed_by(TokenKind::is_identifier_like);
-            let name = self.expect_ident();
-            self.finish_field(name);
-            return NodeKind::FieldDecl;
+            return self.parse_modified_field_or_constructor(is_const);
         }
 
         if self.is_type_start() {
@@ -721,6 +694,37 @@ impl<'src> Parser<'src> {
         self.eat(TokenKind::Semicolon);
         recovery.complete(self, NodeKind::Error);
         NodeKind::ErrorNode
+    }
+
+    fn parse_modified_field_or_constructor(&mut self, is_const: bool) -> NodeKind {
+        // Only the enclosing type's name can introduce a const constructor.
+        if is_const && self.cur().kind.is_identifier_like() && self.ctx.ctor_name.is_some() {
+            let name_text = self.cur_text();
+            let p1 = self.peek(1).kind;
+            let dotted = p1 == TokenKind::Dot && self.is_ctor_name_at_offset(2);
+            let is_ctor =
+                self.ctx.ctor_name == Some(name_text) && (dotted || p1 == TokenKind::LParen);
+            if is_ctor {
+                let ctor_saved = self.checkpoint();
+                let name_marker = self.start();
+                self.advance();
+                name_marker.complete(self, NodeKind::Identifier);
+                if self.eat(TokenKind::Dot).is_some() {
+                    self.expect_ctor_name();
+                }
+                if self.at(TokenKind::LParen) {
+                    self.parse_formal_param_list();
+                    self.parse_constructor_initializers();
+                    self.parse_function_body(AsyncMarker::Sync);
+                    return NodeKind::ConstructorDecl;
+                }
+                self.restore(ctor_saved);
+            }
+        }
+        self.try_parse_type_followed_by(TokenKind::is_identifier_like);
+        let name = self.expect_ident();
+        self.finish_field(name);
+        NodeKind::FieldDecl
     }
 
     fn finish_field(&mut self, name: CompletedMarker) {

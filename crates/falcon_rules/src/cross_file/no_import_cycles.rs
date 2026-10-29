@@ -31,18 +31,11 @@ impl CrossFileRule for NoImportCycles {
         _config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
     ) -> Vec<Diagnostic> {
-        let mut representatives = BTreeMap::new();
-        for (index, file) in files.iter().enumerate() {
-            let canonical = canonical_package_path(&file.path);
-            let representative = representatives.entry(canonical).or_insert(index);
-            // Path ordering normalizes `.` components; compare original spellings.
-            if file.path.as_os_str() < files[*representative].path.as_os_str() {
-                *representative = index;
-            }
-        }
-        let (paths, representatives): (Vec<PathBuf>, Vec<usize>) =
-            representatives.into_iter().unzip();
-        let file_packages: Vec<_> = files.iter().map(|file| environment.file_package(&file.path)).collect();
+        let (paths, representatives) = canonical_representatives(files);
+        let file_packages: Vec<_> = files
+            .iter()
+            .map(|file| environment.file_package(&file.path))
+            .collect();
         let packages = project_packages(&file_packages);
         let by_path: HashMap<&Path, usize> = paths
             .iter()
@@ -68,14 +61,18 @@ impl CrossFileRule for NoImportCycles {
                 )
             });
             for uri in imports.chain(exports) {
-                let target =
-                    match resolve_directive_uri(&paths[index], &uri.value(), file_packages[representative].identity(), &packages) {
-                        Some(ResolvedRef::Path(path)) => by_path
-                            .get(canonical_package_path(&path).as_path())
-                            .copied(),
-                        // Without package identity a suffix match cannot prove an import.
-                        Some(ResolvedRef::Suffix(_)) | None => None,
-                    };
+                let target = match resolve_directive_uri(
+                    &paths[index],
+                    &uri.value(),
+                    file_packages[representative].identity(),
+                    &packages,
+                ) {
+                    Some(ResolvedRef::Path(path)) => by_path
+                        .get(canonical_package_path(&path).as_path())
+                        .copied(),
+                    // Without package identity a suffix match cannot prove an import.
+                    Some(ResolvedRef::Suffix(_)) | None => None,
+                };
                 if let Some(target) = target {
                     let span = uri.span();
                     graph[index].push((
@@ -91,12 +88,7 @@ impl CrossFileRule for NoImportCycles {
             graph[index].dedup_by_key(|(target, _)| *target);
         }
 
-        let mut reverse = vec![Vec::new(); graph.len()];
-        for (source, edges) in graph.iter().enumerate() {
-            for &(target, _) in edges {
-                reverse[target].push(source);
-            }
-        }
+        let reverse = reverse_graph(&graph);
         let (components, sizes) = strongly_connected_components(&graph, &reverse);
         let mut diagnostics = Vec::new();
         let mut reported = vec![false; sizes.len()];
@@ -111,54 +103,23 @@ impl CrossFileRule for NoImportCycles {
                 continue;
             }
             reported[component] = true;
-            parents[start] = start;
-            pending.clear();
-            pending.push(start);
-            let mut cursor = 0;
-            let mut closing = None;
-            'search: while let Some(&source) = pending.get(cursor) {
-                cursor += 1;
-                for &(target, _) in &graph[source] {
-                    if target == start {
-                        closing = Some(source);
-                        break 'search;
-                    }
-                    if components[target] == component && parents[target] == usize::MAX {
-                        parents[target] = source;
-                        pending.push(target);
-                    }
-                }
-            }
-            let mut source =
-                closing.expect("A cyclic component contains a cycle through each node");
-            cycle.clear();
-            cycle.push(source);
-            while source != start {
-                source = parents[source];
-                cycle.push(source);
-            }
-            cycle.reverse();
-            cycle.push(start);
+            shortest_cycle(
+                &graph,
+                &components,
+                start,
+                &mut parents,
+                &mut pending,
+                &mut cycle,
+            );
             let span = edges
                 .iter()
                 .find(|&&(target, _)| target == cycle[1])
                 .map(|&(_, span)| span)
                 .unwrap();
-            let root = file_packages[representatives[start]].metadata()
+            let root = file_packages[representatives[start]]
+                .metadata()
                 .and_then(|package| package.manifest.parent().map(canonical_package_path));
-            let mut message = String::from("Remove a dependency to break this import/export cycle: `");
-            for (index, &node) in cycle.iter().enumerate() {
-                if index > 0 {
-                    message.push_str("` -> `");
-                }
-                let path = paths[node].as_path();
-                let shown = root
-                    .as_deref()
-                    .and_then(|root| path.strip_prefix(root).ok())
-                    .unwrap_or(path);
-                message.push_str(&shown.to_string_lossy());
-            }
-            message.push_str("`.");
+            let message = cycle_message(&paths, &cycle, root.as_deref());
             diagnostics.push(Diagnostic::new(
                 "",
                 Severity::Warning,
@@ -172,6 +133,83 @@ impl CrossFileRule for NoImportCycles {
         }
         diagnostics
     }
+}
+
+fn canonical_representatives(files: &[ProjectFile]) -> (Vec<PathBuf>, Vec<usize>) {
+    let mut representatives = BTreeMap::new();
+    for (index, file) in files.iter().enumerate() {
+        let canonical = canonical_package_path(&file.path);
+        let representative = representatives.entry(canonical).or_insert(index);
+        // Path ordering normalizes `.` components; compare original spellings.
+        if file.path.as_os_str() < files[*representative].path.as_os_str() {
+            *representative = index;
+        }
+    }
+    representatives.into_iter().unzip()
+}
+
+fn shortest_cycle(
+    graph: &[Vec<(usize, Span)>],
+    components: &[usize],
+    start: usize,
+    parents: &mut [usize],
+    pending: &mut Vec<usize>,
+    cycle: &mut Vec<usize>,
+) {
+    let component = components[start];
+    parents[start] = start;
+    pending.clear();
+    pending.push(start);
+    let mut cursor = 0;
+    let mut closing = None;
+    'search: while let Some(&source) = pending.get(cursor) {
+        cursor += 1;
+        for &(target, _) in &graph[source] {
+            if target == start {
+                closing = Some(source);
+                break 'search;
+            }
+            if components[target] == component && parents[target] == usize::MAX {
+                parents[target] = source;
+                pending.push(target);
+            }
+        }
+    }
+    let mut source = closing.expect("A cyclic component contains a cycle through each node");
+    cycle.clear();
+    cycle.push(source);
+    while source != start {
+        source = parents[source];
+        cycle.push(source);
+    }
+    cycle.reverse();
+    cycle.push(start);
+}
+
+fn cycle_message(paths: &[PathBuf], cycle: &[usize], root: Option<&Path>) -> String {
+    let mut message = String::from("Remove a dependency to break this import/export cycle: `");
+    for (index, &node) in cycle.iter().enumerate() {
+        if index > 0 {
+            message.push_str("` -> `");
+        }
+        let path = paths[node].as_path();
+        let shown = root
+            .and_then(|root| path.strip_prefix(root).ok())
+            .unwrap_or(path);
+        message.push_str(&shown.to_string_lossy());
+    }
+    message.push_str("`.");
+    message
+}
+
+fn reverse_graph(graph: &[Vec<(usize, Span)>]) -> Vec<Vec<usize>> {
+    let mut reverse = vec![Vec::new(); graph.len()];
+    for (source, edges) in graph.iter().enumerate() {
+        for &(target, _) in edges {
+            reverse[target].push(source);
+        }
+    }
+    reverse
 }
 
 fn strongly_connected_components(
@@ -297,14 +335,8 @@ mod tests {
             "cross-file": { "rules": { "correctness": { "no-import-cycles": "warn" } } }
         }))
         .unwrap();
-        let diagnostics = crate::run_cross_file(
-            &environment,
-            &registry,
-            &files,
-            &config,
-            None,
-        )
-        .unwrap();
+        let diagnostics =
+            crate::run_cross_file(&environment, &registry, &files, &config, None).unwrap();
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].rule, "no-import-cycles");
         assert!(
@@ -324,8 +356,14 @@ mod tests {
             std::fs::write(directory.join("pubspec.yaml"), format!("name: {name}\n")).unwrap();
         }
         let files = [
-            file(alpha.join("lib/a.dart").to_str().unwrap(), "import 'package:beta/b.dart';"),
-            file(beta.join("lib/b.dart").to_str().unwrap(), "export 'package:alpha/a.dart';"),
+            file(
+                alpha.join("lib/a.dart").to_str().unwrap(),
+                "import 'package:beta/b.dart';",
+            ),
+            file(
+                beta.join("lib/b.dart").to_str().unwrap(),
+                "export 'package:alpha/a.dart';",
+            ),
         ];
         let findings = diagnostics(&files);
         assert_eq!(findings.len(), 1, "{findings:?}");

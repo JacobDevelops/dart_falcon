@@ -25,8 +25,9 @@
 //! Adopted from the official `use_setters_to_change_properties` lint.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
-    SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal, TypeParameterScope,
+    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, ResolvedTypeView, Rule,
+    RulePreparation, SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal,
+    TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -145,28 +146,11 @@ fn changes_property<'a>(
     ) else {
         return false;
     };
-    let mut owner_type = owner_type;
-    while let ResolvedTypeView::TypeParameter { bound, .. }
-    | ResolvedTypeView::NonNullTypeParameter { bound, .. } = owner_type.view()
-    {
-        owner_type = bound;
-    }
-    let ResolvedTypeView::Interface {
-        identity: owner, ..
-    } = owner_type.view()
-    else {
+    let Some((owner_type, owner)) = property_owner(owner_type) else {
         return false;
     };
-    let expr = match body {
-        FunctionBody::Arrow(arrow) => arrow.expr(),
-        FunctionBody::Block(block) => {
-            let mut statements = block.stmts();
-            match (statements.next(), statements.next()) {
-                (Some(Stmt::Expr(statement)), None) => statement.expr(),
-                _ => return false,
-            }
-        }
-        FunctionBody::Native(_) => return false,
+    let Some(expr) = property_body_expression(body) else {
+        return false;
     };
     let Expr::Assign(assignment) = expr.unparenthesized() else {
         return false;
@@ -254,7 +238,39 @@ fn changes_property<'a>(
         }
         _ => false,
     };
-    assigns_field && (extension || !overrides_method(method, owner, signatures, unresolved_super, *model))
+    assigns_field
+        && (extension || !overrides_method(method, owner, signatures, unresolved_super, *model))
+}
+
+fn property_owner(owner_type: &ResolvedType) -> Option<(&ResolvedType, &DeclarationIdentity)> {
+    let mut owner_type = owner_type;
+    while let ResolvedTypeView::TypeParameter { bound, .. }
+    | ResolvedTypeView::NonNullTypeParameter { bound, .. } = owner_type.view()
+    {
+        owner_type = bound;
+    }
+    let ResolvedTypeView::Interface {
+        identity: owner, ..
+    } = owner_type.view()
+    else {
+        return None;
+    };
+    Some((owner_type, owner))
+}
+
+fn property_body_expression(body: FunctionBody<'_>) -> Option<Expr<'_>> {
+    let expr = match body {
+        FunctionBody::Arrow(arrow) => arrow.expr(),
+        FunctionBody::Block(block) => {
+            let mut statements = block.stmts();
+            match (statements.next(), statements.next()) {
+                (Some(Stmt::Expr(statement)), None) => statement.expr(),
+                _ => return None,
+            }
+        }
+        FunctionBody::Native(_) => return None,
+    };
+    Some(expr)
 }
 
 /// A field or setter of this name declared by the type itself.
@@ -292,4 +308,3 @@ fn overrides_method(
             |facts| facts.iter().any(|fact| fact.kind == MemberKind::Method),
         )
 }
-

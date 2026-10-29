@@ -446,49 +446,7 @@ fn real_worker_cancels_and_supersedes_before_an_ignored_notification() {
         "textDocument": { "uri": uri, "languageId": "dart", "version": 1, "text": "void oldName() {}" }
     })).into()).unwrap();
     blocked.recv_timeout(TIMEOUT).unwrap();
-    client
-        .sender
-        .send(
-            Request::new(
-                1.into(),
-                HoverRequest::METHOD.to_string(),
-                json!({
-                    "textDocument": { "uri": uri }, "position": { "line": 0, "character": 0 }
-                }),
-            )
-            .into(),
-        )
-        .unwrap();
-    client
-        .sender
-        .send(
-            ServerNotification::new(
-                DidChangeTextDocument::METHOD.to_string(),
-                json!({
-                    "textDocument": { "uri": uri, "version": 2 },
-                    "contentChanges": [{ "text": "void newName() {}" }]
-                }),
-            )
-            .into(),
-        )
-        .unwrap();
-    client
-        .sender
-        .send(
-            ServerNotification::new(
-                DidChangeTextDocument::METHOD.to_string(),
-                json!({
-                    "textDocument": { "uri": "file:///falcon.json", "version": 1 },
-                    "contentChanges": [{ "text": "{}" }]
-                }),
-            )
-            .into(),
-        )
-        .unwrap();
-    client
-        .sender
-        .send(ServerNotification::new("$/cancelRequest".to_string(), json!({ "id": 1 })).into())
-        .unwrap();
+    queue_cancelled_hover_and_edits(&client, &uri);
     let Message::Response(cancelled) = client.receiver.recv_timeout(TIMEOUT).unwrap() else {
         panic!("worker must not block cancellation");
     };
@@ -540,6 +498,52 @@ fn real_worker_cancels_and_supersedes_before_an_ignored_notification() {
         0,
         "a cancelled queued request must never enter the worker handler"
     );
+}
+
+fn queue_cancelled_hover_and_edits(client: &Connection, uri: &str) {
+    client
+        .sender
+        .send(
+            Request::new(
+                1.into(),
+                HoverRequest::METHOD.to_string(),
+                json!({
+                    "textDocument": { "uri": uri }, "position": { "line": 0, "character": 0 }
+                }),
+            )
+            .into(),
+        )
+        .unwrap();
+    client
+        .sender
+        .send(
+            ServerNotification::new(
+                DidChangeTextDocument::METHOD.to_string(),
+                json!({
+                    "textDocument": { "uri": uri, "version": 2 },
+                    "contentChanges": [{ "text": "void newName() {}" }]
+                }),
+            )
+            .into(),
+        )
+        .unwrap();
+    client
+        .sender
+        .send(
+            ServerNotification::new(
+                DidChangeTextDocument::METHOD.to_string(),
+                json!({
+                    "textDocument": { "uri": "file:///falcon.json", "version": 1 },
+                    "contentChanges": [{ "text": "{}" }]
+                }),
+            )
+            .into(),
+        )
+        .unwrap();
+    client
+        .sender
+        .send(ServerNotification::new("$/cancelRequest".to_string(), json!({ "id": 1 })).into())
+        .unwrap();
 }
 
 #[test]

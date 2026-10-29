@@ -173,15 +173,7 @@ mod tests {
 
     use super::*;
     use crate::ParsedFile;
-
-    fn parsed(source: &str) -> Arc<ParsedFile> {
-        let result = falcon_dart_parser::parse(source);
-        assert!(result.errors.is_empty(), "{:?}", result.errors);
-        Arc::new(ParsedFile {
-            source: source.into(),
-            tree: result.tree,
-        })
-    }
+    use crate::resolve::parsed_fixture;
 
     fn sources(files: &[(PathBuf, Arc<ParsedFile>)]) -> Vec<IdentitySource<'_>> {
         files
@@ -211,7 +203,7 @@ mod tests {
         ];
         let mut files: Vec<_> = initial
             .iter()
-            .map(|(path, source)| (PathBuf::from(path), parsed(source)))
+            .map(|(path, source)| (PathBuf::from(path), parsed_fixture(source)))
             .collect();
         let (mut indexes, _) = build_semantic_indexes(&sources(&files), &[], None, None);
         let unrelated = indexes.identities.library(
@@ -235,7 +227,7 @@ mod tests {
             (0, "class A { bool get value => true; }"),
             (3, "class Piece {}"),
         ] {
-            files[file].1 = parsed(source);
+            files[file].1 = parsed_fixture(source);
             let input = sources(&files);
             let (_, rebuilt) = update_semantic_indexes(&mut indexes, &input, &[], None, None);
             assert!(rebuilt < files.len(), "unrelated library was rebuilt");
@@ -293,10 +285,10 @@ mod tests {
 
     #[test]
     fn restored_original_body_after_refresh_matches_fresh_flow_indexes() {
-        let original = parsed(
+        let original = parsed_fixture(
             "void run(bool flag) { int value = 0; while (flag) { value; final write = () { value; }; write(); } }",
         );
-        let edited = parsed(
+        let edited = parsed_fixture(
             "void run(bool flag) { int value = 0; while (flag) { value = 1; final write = () { value = 2; }; write(); } }",
         );
         assert_eq!(
@@ -307,7 +299,7 @@ mod tests {
             (PathBuf::from("/project/body.dart"), Arc::clone(&original)),
             (
                 PathBuf::from("/project/other.dart"),
-                parsed("class Other {}"),
+                parsed_fixture("class Other {}"),
             ),
         ];
         let (mut indexes, _) = build_semantic_indexes(&sources(&files), &[], None, None);
@@ -317,7 +309,7 @@ mod tests {
         assert!(!discarded.region_writes.is_empty());
         assert!(!discarded.callable_captured_writes.is_empty());
 
-        files[1].1 = parsed("class Other { int value = 0; }");
+        files[1].1 = parsed_fixture("class Other { int value = 0; }");
         let input = sources(&files);
         let (_, rebuilt) = update_semantic_indexes(&mut indexes, &input, &[], None, None);
         assert_eq!(rebuilt, 1);
@@ -347,11 +339,13 @@ mod tests {
         let mut files = vec![
             (
                 PathBuf::from("/project/a.dart"),
-                parsed("class A { int value = 0; }"),
+                parsed_fixture("class A { int value = 0; }"),
             ),
             (
                 PathBuf::from("/project/dependent.dart"),
-                parsed("import 'a.dart'; class Dependent extends A {} final value = A().value;"),
+                parsed_fixture(
+                    "import 'a.dart'; class Dependent extends A {} final value = A().value;",
+                ),
             ),
         ];
         files.reserve(1_024);
@@ -365,11 +359,11 @@ mod tests {
                 .collect();
             files.push((
                 PathBuf::from(format!("/project/independent{ordinal}.dart")),
-                parsed(&source),
+                parsed_fixture(&source),
             ));
         }
         let original = Arc::clone(&files[0].1);
-        let edited = parsed("class A { String value = 'changed'; }");
+        let edited = parsed_fixture("class A { String value = 'changed'; }");
         let (mut indexes, _) = build_semantic_indexes(&sources(&files), &[], None, None);
         let mut incremental = Vec::with_capacity(7);
         let mut full = Vec::with_capacity(7);

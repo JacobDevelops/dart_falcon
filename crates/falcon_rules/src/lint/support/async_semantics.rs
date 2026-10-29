@@ -524,6 +524,81 @@ impl<'a> Collector<'a> {
             _ => {}
         }
     }
+    fn cascade(&mut self, cascade: CascadeExpr<'a>, state: &SemanticState<'a>) {
+        let base = receiver_type(cascade.object(), state, &self.globals);
+        for section in cascade.sections() {
+            let mut receiver = Cow::Borrowed(&base);
+            let mut operations = section.ops().peekable();
+            while let Some(operation) = operations.next() {
+                match operation {
+                    CascadeOp::NullAssert(_) => {
+                        receiver = Cow::Owned(receiver.non_null());
+                    }
+                    CascadeOp::Call(call) => {
+                        self.arguments(call.args(), state);
+                        self.instance_callbacks(&receiver, call.name().name(), call.args());
+                        if operations.peek().is_some() {
+                            receiver = Cow::Owned(
+                                state
+                                    .signatures
+                                    .resolved_member(&receiver, call.name().name(), &state.model)
+                                    .map(|(signature, substitutions)| {
+                                        state
+                                            .model
+                                            .substitute(&signature.return_type, &substitutions)
+                                    })
+                                    .unwrap_or(ResolvedType::UNKNOWN),
+                            );
+                        }
+                    }
+                    CascadeOp::Invoke(invoke) => {
+                        self.arguments(invoke.args(), state);
+                        if operations.peek().is_some() {
+                            receiver = Cow::Owned(state.cascade_invoke_return_type(
+                                &receiver,
+                                invoke.type_args(),
+                                invoke.args(),
+                            ));
+                        }
+                    }
+                    CascadeOp::Field(field) => {
+                        if operations.peek().is_some() {
+                            receiver = Cow::Owned(
+                                state
+                                    .signatures
+                                    .resolved_field(&receiver, field.name().name(), &state.model)
+                                    .or_else(|| {
+                                        state.signatures.resolved_extension_getter(
+                                            &receiver,
+                                            field.name().name(),
+                                            &state.model,
+                                        )
+                                    })
+                                    .map(|(ty, substitutions)| {
+                                        state.model.substitute(&ty, &substitutions)
+                                    })
+                                    .unwrap_or(ResolvedType::UNKNOWN),
+                            );
+                        }
+                    }
+                    CascadeOp::Index(_) => {
+                        receiver = Cow::Owned(
+                            state
+                                .signatures
+                                .resolved_member(&receiver, "[]", &state.model)
+                                .map(|(signature, substitutions)| {
+                                    state
+                                        .model
+                                        .substitute(&signature.return_type, &substitutions)
+                                })
+                                .unwrap_or(ResolvedType::UNKNOWN),
+                        );
+                    }
+                    CascadeOp::Assign(..) | CascadeOp::IndexAssign(..) => {}
+                }
+            }
+        }
+    }
 }
 
 impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
@@ -600,90 +675,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 }
                 self.method_callbacks(callee, args, state);
             }
-            Expr::Cascade(cascade) => {
-                let base = receiver_type(cascade.object(), state, &self.globals);
-                for section in cascade.sections() {
-                    let mut receiver = Cow::Borrowed(&base);
-                    let mut operations = section.ops().peekable();
-                    while let Some(operation) = operations.next() {
-                        match operation {
-                            CascadeOp::NullAssert(_) => {
-                                receiver = Cow::Owned(receiver.non_null());
-                            }
-                            CascadeOp::Call(call) => {
-                                self.arguments(call.args(), state);
-                                self.instance_callbacks(&receiver, call.name().name(), call.args());
-                                if operations.peek().is_some() {
-                                    receiver = Cow::Owned(
-                                        state
-                                            .signatures
-                                            .resolved_member(
-                                                &receiver,
-                                                call.name().name(),
-                                                &state.model,
-                                            )
-                                            .map(|(signature, substitutions)| {
-                                                state.model.substitute(
-                                                    &signature.return_type,
-                                                    &substitutions,
-                                                )
-                                            })
-                                            .unwrap_or(ResolvedType::UNKNOWN),
-                                    );
-                                }
-                            }
-                            CascadeOp::Invoke(invoke) => {
-                                self.arguments(invoke.args(), state);
-                                if operations.peek().is_some() {
-                                    receiver = Cow::Owned(state.cascade_invoke_return_type(
-                                        &receiver,
-                                        invoke.type_args(),
-                                        invoke.args(),
-                                    ));
-                                }
-                            }
-                            CascadeOp::Field(field) => {
-                                if operations.peek().is_some() {
-                                    receiver = Cow::Owned(
-                                        state
-                                            .signatures
-                                            .resolved_field(
-                                                &receiver,
-                                                field.name().name(),
-                                                &state.model,
-                                            )
-                                            .or_else(|| {
-                                                state.signatures.resolved_extension_getter(
-                                                    &receiver,
-                                                    field.name().name(),
-                                                    &state.model,
-                                                )
-                                            })
-                                            .map(|(ty, substitutions)| {
-                                                state.model.substitute(&ty, &substitutions)
-                                            })
-                                            .unwrap_or(ResolvedType::UNKNOWN),
-                                    );
-                                }
-                            }
-                            CascadeOp::Index(_) => {
-                                receiver = Cow::Owned(
-                                    state
-                                        .signatures
-                                        .resolved_member(&receiver, "[]", &state.model)
-                                        .map(|(signature, substitutions)| {
-                                            state
-                                                .model
-                                                .substitute(&signature.return_type, &substitutions)
-                                        })
-                                        .unwrap_or(ResolvedType::UNKNOWN),
-                                );
-                            }
-                            CascadeOp::Assign(..) | CascadeOp::IndexAssign(..) => {}
-                        }
-                    }
-                }
-            }
+            Expr::Cascade(cascade) => self.cascade(cascade, state),
             Expr::New(new) => {
                 let args = new.args();
                 self.arguments(args, state);

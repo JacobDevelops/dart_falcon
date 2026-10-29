@@ -36,22 +36,21 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 
 use falcon_analyze::{
-    AnalyzeContext, ConstantValue, DeclarationIdentity, MemberSelector,
-    MemberSelectorKind as SelectorKind, QualifiedName, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
-    ConstantContext, SemanticModel, SignatureIndex, SourceSelector, TypeParameterScope, evaluate_constant,
-    resolve_new_constructor,
+    AnalyzeContext, ConstantContext, ConstantValue, DeclarationIdentity, MemberSelector,
+    MemberSelectorKind as SelectorKind, QualifiedName, ResolvedType, ResolvedTypeView, Rule,
+    RulePreparation, SemanticModel, SignatureIndex, SourceSelector, TypeParameterScope,
+    evaluate_constant, resolve_new_constructor,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::TokenKind;
 use falcon_syntax::cst::visit::{
-    Visitor, walk_annotation, walk_class_member, walk_dart_type, walk_expr_chain, walk_formal_param,
-    walk_function_decl, walk_method_decl, walk_stmt, walk_top_level_decl,
+    Visitor, walk_annotation, walk_class_member, walk_dart_type, walk_expr_chain,
+    walk_formal_param, walk_function_decl, walk_method_decl, walk_stmt, walk_top_level_decl,
 };
 use falcon_syntax::cst::*;
 
 use crate::lint::doc_comments::{DocElement, DocLookup, DocResolver, DocScopes, references};
 use falcon_analyze::{CascadeAssignment, SemanticRuleVisitor, SemanticState};
-
 
 #[derive(Default)]
 pub struct DeprecatedMemberUseFromSamePackage;
@@ -62,7 +61,7 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        let Some(package) = ctx.package() else {
+        let Some(_) = ctx.package() else {
             return RulePreparation::Diagnostics(Vec::new());
         };
         let Some(state) = SemanticState::new(program, ctx) else {
@@ -129,117 +128,8 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
         for target in &frontier.types.0 {
             uses.report(&target.borrow());
         }
-        for (uri, combinators, directive_span) in program
-            .imports()
-            .map(|node| (node.uri(), node.combinators(), node.span()))
-            .chain(
-                program
-                    .exports()
-                    .map(|node| (node.uri(), node.combinators(), node.span())),
-            )
-        {
-            let Some(crate::cross_file::ResolvedRef::Path(path)) =
-                crate::cross_file::resolve_directive_uri(
-                    ctx.file_path(),
-                    &uri.value(),
-                    Some(package),
-                    std::slice::from_ref(package),
-                )
-            else {
-                continue;
-            };
-            let Some(identities) = ctx.identities() else {
-                continue;
-            };
-            let Some(file) = identities.file(&path) else {
-                continue;
-            };
-            let library = identities.library(file);
-            if let Some((source, annotations)) = identities.library_source_annotations(&path)
-                && let Some(node) = annotations.first()
-                && let Some(message) = deprecation(
-                    annotations.iter().map(|node| node.cast::<Annotation>()),
-                    SemanticModel::new(&path, &node.file, identities, ctx.types()),
-                    ctx.signatures(),
-                )
-            {
-                let name = identities
-                    .library_uri(library)
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| file_uri(source));
-                uses.emit_message(source, &name, directive_span, &message);
-            }
-            for combinator in combinators {
-                if let ImportCombinator::Show(combinator) = combinator {
-                    for name in combinator.names() {
-                        if let Some(owner) = identities.exported_any(library, name.name()) {
-                            uses.report(&Target {
-                                owner,
-                                selector: MemberSelector::DECLARATION.into(),
-                                name: name.name().into(),
-                                span: name.span(),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-        let sdk_loaded = ctx
-            .identities()
-            .is_some_and(|identities| identities.has_sdk_sources());
-        let scopes = DocScopes::new(program, &state.model, ctx.source());
-        let resolver = DocResolver::new(
-            program,
-            &state.model,
-            &state.signatures,
-            &scopes,
-            sdk_loaded,
-        );
-        for block in ctx.tree().doc_blocks(ctx.source()) {
-            let Some(scope) = scopes.scope_for(&block) else {
-                continue;
-            };
-            if uses.excluded.contains_offset(scope.span.start) {
-                continue;
-            }
-            let (links, _) = references(&block);
-            for link in links {
-                let Some(parsed) = link.parse() else {
-                    continue;
-                };
-                let lookups = resolver.resolve(&parsed, scope);
-                for (name, lookup) in parsed.names.iter().zip(lookups) {
-                    let span = Span::new(name.offset, name.offset + name.text.len());
-                    let target = match lookup {
-                        DocLookup::Found(DocElement::Declaration {
-                            identity: Some(owner),
-                            ..
-                        }) => Target {
-                            name: name.text.into(),
-                            owner,
-                            selector: MemberSelector::DECLARATION.into(),
-                            span,
-                        },
-                        DocLookup::Found(DocElement::Member { owner, selector }) => {
-                            if selector.member.kind == SelectorKind::Constructor {
-                                constructor_target(owner, selector.member.name, span)
-                            } else {
-                                Target {
-                                    owner,
-                                    selector,
-                                    name: name.text.into(),
-                                    span,
-                                }
-                            }
-                        }
-                        _ => continue,
-                    };
-                    // The documented declaration was checked against the
-                    // deprecated frontier above.
-                    uses.emit(&target);
-                }
-            }
-        }
+        uses.report_directives(program);
+        uses.report_documentation(program, &state);
         RulePreparation::Semantic(Box::new(uses))
     }
 }
@@ -360,13 +250,12 @@ impl<'a> Visitor<'a> for Frontier<'a> {
             TopLevelDecl::ExtensionType(n) => (self.model.resolve_name(n.name().name()), None),
             _ => (None, None),
         };
-        let superclass =
-            superclass.and_then(
-                |ty| match self.model.resolve_type_in(ty, &self.parameters).view() {
-                    ResolvedTypeView::Interface { identity, .. } => Some(identity.clone()),
-                    _ => None,
-                },
-            );
+        let superclass = superclass.and_then(|ty| {
+            match self.model.resolve_type_in(ty, &self.parameters).view() {
+                ResolvedTypeView::Interface { identity, .. } => Some(identity.clone()),
+                _ => None,
+            }
+        });
         let old_owner = std::mem::replace(&mut self.owner, owner);
         let old_superclass = std::mem::replace(&mut self.superclass, superclass);
         walk_top_level_decl(self, node);
@@ -444,7 +333,8 @@ impl<'a> Visitor<'a> for Frontier<'a> {
         if let Some(redirect) = &node.redirect
             && let ResolvedTypeView::Interface { identity, .. } = self
                 .model
-                .resolve_type_in(redirect.type_(), &self.parameters).view()
+                .resolve_type_in(redirect.type_(), &self.parameters)
+                .view()
         {
             self.types.push(constructor_target(
                 identity.clone(),
@@ -562,9 +452,12 @@ impl<'a> Visitor<'a> for Frontier<'a> {
         }
         if let Stmt::LocalFunc(function) = node {
             self.declaration = Some(function.span());
-            if let Some(scope) = self.blocks.iter().rev().find(|scope| {
-                scope.contains(function.span())
-            }) {
+            if let Some(scope) = self
+                .blocks
+                .iter()
+                .rev()
+                .find(|scope| scope.contains(function.span()))
+            {
                 let message = deprecation(function.annotations(), self.model, self.signatures);
                 let mut parameters = Vec::new();
                 for (position, parameter) in function.params().positional().enumerate() {
@@ -686,7 +579,9 @@ impl<'a> Visitor<'a> for Frontier<'a> {
                         visitor.reads.insert(assignment.target().span());
                     }
                 }
-                Expr::Unary(unary) if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) => {
+                Expr::Unary(unary)
+                    if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) =>
+                {
                     visitor.writes.insert(unary.operand().span());
                     visitor.reads.insert(unary.operand().span());
                     visitor.increments.insert(unary.operand().span());
@@ -746,7 +641,6 @@ struct Uses<'a> {
     locals: Vec<LocalDeprecation>,
     cascade_targets: HashSet<Span>,
 }
-
 
 struct Target<'a> {
     owner: DeclarationIdentity,
@@ -925,6 +819,297 @@ fn push_deprecation(
 }
 
 impl<'ctx> Uses<'ctx> {
+    fn report_directives(&mut self, program: Program<'_>) {
+        let ctx = self.ctx;
+        let Some(package) = ctx.package() else {
+            return;
+        };
+        let uses = self;
+        for (uri, combinators, directive_span) in program
+            .imports()
+            .map(|node| (node.uri(), node.combinators(), node.span()))
+            .chain(
+                program
+                    .exports()
+                    .map(|node| (node.uri(), node.combinators(), node.span())),
+            )
+        {
+            let Some(crate::cross_file::ResolvedRef::Path(path)) =
+                crate::cross_file::resolve_directive_uri(
+                    ctx.file_path(),
+                    &uri.value(),
+                    Some(package),
+                    std::slice::from_ref(package),
+                )
+            else {
+                continue;
+            };
+            let Some(identities) = ctx.identities() else {
+                continue;
+            };
+            let Some(file) = identities.file(&path) else {
+                continue;
+            };
+            let library = identities.library(file);
+            if let Some((source, annotations)) = identities.library_source_annotations(&path)
+                && let Some(node) = annotations.first()
+                && let Some(message) = deprecation(
+                    annotations.iter().map(|node| node.cast::<Annotation>()),
+                    SemanticModel::new(&path, &node.file, identities, ctx.types()),
+                    ctx.signatures(),
+                )
+            {
+                let name = identities
+                    .library_uri(library)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| file_uri(source));
+                uses.emit_message(source, &name, directive_span, &message);
+            }
+            for combinator in combinators {
+                if let ImportCombinator::Show(combinator) = combinator {
+                    for name in combinator.names() {
+                        if let Some(owner) = identities.exported_any(library, name.name()) {
+                            uses.report(&Target {
+                                owner,
+                                selector: MemberSelector::DECLARATION.into(),
+                                name: name.name().into(),
+                                span: name.span(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn report_documentation(&mut self, program: Program<'_>, state: &SemanticState<'_>) {
+        let ctx = self.ctx;
+        let uses = self;
+        let sdk_loaded = ctx
+            .identities()
+            .is_some_and(|identities| identities.has_sdk_sources());
+        let scopes = DocScopes::new(program, &state.model, ctx.source());
+        let resolver = DocResolver::new(
+            program,
+            &state.model,
+            &state.signatures,
+            &scopes,
+            sdk_loaded,
+        );
+        for block in ctx.tree().doc_blocks(ctx.source()) {
+            let Some(scope) = scopes.scope_for(&block) else {
+                continue;
+            };
+            if uses.excluded.contains_offset(scope.span.start) {
+                continue;
+            }
+            let (links, _) = references(&block);
+            for link in links {
+                let Some(parsed) = link.parse() else {
+                    continue;
+                };
+                let lookups = resolver.resolve(&parsed, scope);
+                for (name, lookup) in parsed.names.iter().zip(lookups) {
+                    let span = Span::new(name.offset, name.offset + name.text.len());
+                    let target = match lookup {
+                        DocLookup::Found(DocElement::Declaration {
+                            identity: Some(owner),
+                            ..
+                        }) => Target {
+                            name: name.text.into(),
+                            owner,
+                            selector: MemberSelector::DECLARATION.into(),
+                            span,
+                        },
+                        DocLookup::Found(DocElement::Member { owner, selector }) => {
+                            if selector.member.kind == SelectorKind::Constructor {
+                                constructor_target(owner, selector.member.name, span)
+                            } else {
+                                Target {
+                                    owner,
+                                    selector,
+                                    name: name.text.into(),
+                                    span,
+                                }
+                            }
+                        }
+                        _ => continue,
+                    };
+                    // The documented declaration was checked against the
+                    // deprecated frontier above.
+                    uses.emit(&target);
+                }
+            }
+        }
+    }
+
+    fn report_operators(&mut self, node: Expr<'_>, state: &SemanticState<'_>) {
+        let operator = match node {
+            Expr::Binary(binary) => {
+                let op = binary.op();
+                let left = binary.left();
+                let right = binary.right();
+                if matches!(op, BinaryOp::EqEq | BinaryOp::NotEq)
+                    && (matches!(state.infer(left).view(), ResolvedTypeView::Null)
+                        || matches!(state.infer(right).view(), ResolvedTypeView::Null))
+                {
+                    None
+                } else {
+                    op.operator_name().map(|name| (left, name, 1))
+                }
+            }
+            Expr::Assign(assignment) => assignment
+                .op()
+                .operator_name()
+                .map(|name| (assignment.target(), name, 1)),
+            Expr::Unary(unary) => match unary.op() {
+                UnaryOp::Minus => Some((unary.operand(), "-", 0)),
+                UnaryOp::Tilde => Some((unary.operand(), "~", 0)),
+                UnaryOp::PlusPlus => Some((unary.operand(), "+", 1)),
+                UnaryOp::MinusMinus => Some((unary.operand(), "-", 1)),
+                UnaryOp::Bang => None,
+            },
+            Expr::PostfixIncDec(postfix) => Some((
+                postfix.operand(),
+                if postfix.op() == PostfixIncDec::Increment {
+                    "+"
+                } else {
+                    "-"
+                },
+                1,
+            )),
+            Expr::Index(index) => Some((
+                index.object(),
+                if self.writes.contains(&node.span()) {
+                    "[]="
+                } else {
+                    "[]"
+                },
+                if self.writes.contains(&node.span()) {
+                    2
+                } else {
+                    1
+                },
+            )),
+            _ => None,
+        };
+        let index_read = if let Expr::Index(index) = node
+            && self.reads.contains(&node.span())
+            && self.writes.contains(&node.span())
+        {
+            Some((index.object(), "[]", 1))
+        } else {
+            None
+        };
+        for (receiver, name, arity) in [operator, index_read].into_iter().flatten() {
+            let lookup = if name == "-" && arity == 0 {
+                "unary-"
+            } else {
+                name
+            };
+            let receiver = match node {
+                Expr::Index(index) => {
+                    state.infer_access_receiver(receiver, lookup, index.is_null_safe())
+                }
+                Expr::Assign(_) | Expr::PostfixIncDec(_) => {
+                    state.infer_access_receiver(receiver, lookup, false)
+                }
+                Expr::Unary(unary)
+                    if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) =>
+                {
+                    state.infer_access_receiver(receiver, lookup, false)
+                }
+                _ => state.infer(receiver),
+            };
+            if let Some(owner) = state
+                .signatures
+                .resolved_member_owner(&receiver, lookup, &state.model)
+                .or_else(|| {
+                    state
+                        .signatures
+                        .resolved_extension_owner(&receiver, lookup, &state.model)
+                })
+            {
+                self.report(&Target {
+                    owner,
+                    selector: MemberSelector::new(SelectorKind::Operator(arity), false, name)
+                        .into(),
+                    name: lookup.into(),
+                    span: node.span(),
+                });
+            }
+        }
+    }
+
+    fn report_call(&mut self, call: CallExpr<'_>, node: Expr<'_>, state: &SemanticState<'_>) {
+        let callee = call.callee();
+        let args = call.args();
+        if let Expr::Ident(identifier) = callee
+            && let Some(index) = self.local(identifier.name(), identifier.span(), state)
+        {
+            let mut positional = args.positional().enumerate();
+            for parameter in &self.locals[index].parameters {
+                let span = match parameter.position {
+                    Some(position) => positional
+                        .find(|(index, _)| *index == position)
+                        .map(|(_, argument)| argument.span()),
+                    None => args
+                        .named()
+                        .find(|argument| argument.name().name() == parameter.name)
+                        .map(|argument| argument.name().span()),
+                };
+                if let Some(span) = span {
+                    push_deprecation(
+                        self.ctx,
+                        &self.excluded,
+                        &mut self.reported,
+                        &mut self.diagnostics,
+                        &parameter.name,
+                        span,
+                        &parameter.message,
+                    );
+                }
+            }
+            return;
+        }
+        let mut target_callee = callee;
+        while let Expr::GenericInstantiation(instantiation) = target_callee {
+            target_callee = instantiation.target();
+        }
+        if !matches!(target_callee, Expr::Paren(_))
+            && let Some(mut target) = self.reference_target(callee, state, None)
+        {
+            if target.selector.member == MemberSelector::DECLARATION {
+                let owner = state.model.unaliased(target.owner.clone());
+                if state.signatures.constructor(&owner, "new").is_some() {
+                    target.owner = owner;
+                    target.selector =
+                        MemberSelector::new(SelectorKind::Constructor, false, "new").into();
+                    // Call type arguments live outside the callee span.
+                    let end = self
+                        .ctx
+                        .tree()
+                        .tokens_in(
+                            self.ctx.source(),
+                            Span::new(callee.span().start, args.span().start),
+                        )
+                        .rfind(|token| !token.is_trivia())
+                        .map_or(callee.span().end, |token| token.offset() + token.len());
+                    target.span = Span::new(callee.span().start, end);
+                    self.report(&target);
+                }
+            }
+            self.arguments(&target, args);
+        }
+        let receiver = state.infer(callee);
+        if !matches!(receiver.view(), ResolvedTypeView::Function { .. })
+            && let Some(mut target) = self.member(&receiver, "call", node.span(), state, false)
+        {
+            target.name = "call".into();
+            self.report(&target);
+        }
+    }
+
     fn local(&self, name: &str, span: Span, state: &SemanticState<'_>) -> Option<usize> {
         self.locals
             .iter()
@@ -938,9 +1123,7 @@ impl<'ctx> Uses<'ctx> {
                             && state
                                 .environment
                                 .binding_declaration(name)
-                                .is_none_or(|binding| {
-                                    !local.scope.contains(binding)
-                                })))
+                                .is_none_or(|binding| !local.scope.contains(binding))))
             })
             .min_by_key(|(_, local)| local.scope.end - local.scope.start)
             .map(|(index, _)| index)
@@ -1316,170 +1499,10 @@ impl<'a> SemanticRuleVisitor<'a> for Uses<'a> {
         {
             self.report(&target);
         }
-        let operator = match node {
-            Expr::Binary(binary) => {
-                let op = binary.op();
-                let left = binary.left();
-                let right = binary.right();
-                if matches!(op, BinaryOp::EqEq | BinaryOp::NotEq)
-                    && (matches!(state.infer(left).view(), ResolvedTypeView::Null)
-                        || matches!(state.infer(right).view(), ResolvedTypeView::Null))
-                {
-                    None
-                } else {
-                    op.operator_name().map(|name| (left, name, 1))
-                }
-            }
-            Expr::Assign(assignment) => assignment
-                .op()
-                .operator_name()
-                .map(|name| (assignment.target(), name, 1)),
-            Expr::Unary(unary) => match unary.op() {
-                UnaryOp::Minus => Some((unary.operand(), "-", 0)),
-                UnaryOp::Tilde => Some((unary.operand(), "~", 0)),
-                UnaryOp::PlusPlus => Some((unary.operand(), "+", 1)),
-                UnaryOp::MinusMinus => Some((unary.operand(), "-", 1)),
-                UnaryOp::Bang => None,
-            },
-            Expr::PostfixIncDec(postfix) => Some((
-                postfix.operand(),
-                if postfix.op() == PostfixIncDec::Increment {
-                    "+"
-                } else {
-                    "-"
-                },
-                1,
-            )),
-            Expr::Index(index) => Some((
-                index.object(),
-                if self.writes.contains(&node.span()) {
-                    "[]="
-                } else {
-                    "[]"
-                },
-                if self.writes.contains(&node.span()) {
-                    2
-                } else {
-                    1
-                },
-            )),
-            _ => None,
-        };
-        let index_read = if let Expr::Index(index) = node
-            && self.reads.contains(&node.span())
-            && self.writes.contains(&node.span())
-        {
-            Some((index.object(), "[]", 1))
-        } else {
-            None
-        };
-        for (receiver, name, arity) in [operator, index_read].into_iter().flatten() {
-            let lookup = if name == "-" && arity == 0 {
-                "unary-"
-            } else {
-                name
-            };
-            let receiver = match node {
-                Expr::Index(index) => {
-                    state.infer_access_receiver(receiver, lookup, index.is_null_safe())
-                }
-                Expr::Assign(_) | Expr::PostfixIncDec(_) => {
-                    state.infer_access_receiver(receiver, lookup, false)
-                }
-                Expr::Unary(unary)
-                    if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) =>
-                {
-                    state.infer_access_receiver(receiver, lookup, false)
-                }
-                _ => state.infer(receiver),
-            };
-            if let Some(owner) = state
-                .signatures
-                .resolved_member_owner(&receiver, lookup, &state.model)
-                .or_else(|| {
-                    state
-                        .signatures
-                        .resolved_extension_owner(&receiver, lookup, &state.model)
-                })
-            {
-                self.report(&Target {
-                    owner,
-                    selector: MemberSelector::new(SelectorKind::Operator(arity), false, name)
-                        .into(),
-                    name: lookup.into(),
-                    span: node.span(),
-                });
-            }
-        }
+        self.report_operators(node, state);
         match node {
             Expr::Call(call) => {
-                let callee = call.callee();
-                let args = call.args();
-                if let Expr::Ident(identifier) = callee
-                    && let Some(index) = self.local(identifier.name(), identifier.span(), state)
-                {
-                    let mut positional = args.positional().enumerate();
-                    for parameter in &self.locals[index].parameters {
-                        let span = match parameter.position {
-                            Some(position) => positional
-                                .find(|(index, _)| *index == position)
-                                .map(|(_, argument)| argument.span()),
-                            None => args
-                                .named()
-                                .find(|argument| argument.name().name() == parameter.name)
-                                .map(|argument| argument.name().span()),
-                        };
-                        if let Some(span) = span {
-                            push_deprecation(
-                                self.ctx,
-                                &self.excluded,
-                                &mut self.reported,
-                                &mut self.diagnostics,
-                                &parameter.name,
-                                span,
-                                &parameter.message,
-                            );
-                        }
-                    }
-                    return;
-                }
-                let mut target_callee = callee;
-                while let Expr::GenericInstantiation(instantiation) = target_callee {
-                    target_callee = instantiation.target();
-                }
-                if !matches!(target_callee, Expr::Paren(_))
-                    && let Some(mut target) = self.reference_target(callee, state, None)
-                {
-                    if target.selector.member == MemberSelector::DECLARATION {
-                        let owner = state.model.unaliased(target.owner.clone());
-                        if state.signatures.constructor(&owner, "new").is_some() {
-                            target.owner = owner;
-                            target.selector =
-                                MemberSelector::new(SelectorKind::Constructor, false, "new").into();
-                            // Call type arguments live outside the callee span.
-                            let end = self
-                                .ctx
-                                .tree()
-                                .tokens_in(
-                                    self.ctx.source(),
-                                    Span::new(callee.span().start, args.span().start),
-                                )
-                                .rfind(|token| !token.is_trivia())
-                                .map_or(callee.span().end, |token| token.offset() + token.len());
-                            target.span = Span::new(callee.span().start, end);
-                            self.report(&target);
-                        }
-                    }
-                    self.arguments(&target, args);
-                }
-                let receiver = state.infer(callee);
-                if !matches!(receiver.view(), ResolvedTypeView::Function { .. })
-                    && let Some(mut target) =
-                        self.member(&receiver, "call", node.span(), state, false)
-                {
-                    target.name = "call".into();
-                    self.report(&target);
-                }
+                self.report_call(call, node, state);
             }
             Expr::New(construction) => {
                 if let Some((identity, name)) = resolve_new_constructor(

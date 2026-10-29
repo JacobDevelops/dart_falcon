@@ -114,33 +114,7 @@ fn cli_and_lsp_have_full_project_diagnostic_parity() {
     let editor_diagnostics = published.into_values().flatten().collect::<Vec<_>>();
 
     for diagnostics in [&cli.diagnostics, &editor_diagnostics] {
-        assert_eq!(diagnostics.len(), 3, "{diagnostics:#?}");
-        for (file, rule, severity) in [
-            ("lib/src/reachable.dart", "avoid-dynamic", Severity::Warning),
-            ("lib/src/orphan.dart", "avoid-dynamic", Severity::Error),
-            ("lib/src/orphan.dart", "unused-files", Severity::Error),
-        ] {
-            let path = root.join(file);
-            let diagnostic = diagnostics
-                .iter()
-                .find(|diagnostic| {
-                    diagnostic.file_path == path.to_string_lossy() && diagnostic.rule == rule
-                })
-                .unwrap_or_else(|| panic!("missing {rule} in {file}: {diagnostics:#?}"));
-            assert_eq!(diagnostic.severity, severity);
-            assert!(!diagnostic.message.is_empty());
-            assert!(diagnostic.line > 0 && diagnostic.col > 0);
-            if rule == "unused-files" {
-                assert!(diagnostic.message.contains("not reachable"));
-                assert_eq!((diagnostic.line, diagnostic.col), (1, 1));
-            } else {
-                assert_eq!((diagnostic.line, diagnostic.col), (2, 1));
-            }
-        }
-        assert!(diagnostics.iter().all(|diagnostic| {
-            !diagnostic.file_path.ends_with("excluded.dart")
-                && !diagnostic.file_path.ends_with("suppressed.dart")
-        }));
+        assert_project_diagnostics(&root, diagnostics);
     }
     // Compare every serialized diagnostic field, including messages, spans,
     // severity, resolved positions and fixes; no semantic fields are normalized.
@@ -148,6 +122,39 @@ fn cli_and_lsp_have_full_project_diagnostic_parity() {
         serde_json::to_value(&cli.diagnostics).unwrap(),
         serde_json::to_value(&editor_diagnostics).unwrap()
     );
+}
+
+fn assert_project_diagnostics(
+    root: &std::path::Path,
+    diagnostics: &[falcon_diagnostics::Diagnostic],
+) {
+    assert_eq!(diagnostics.len(), 3, "{diagnostics:#?}");
+    for (file, rule, severity) in [
+        ("lib/src/reachable.dart", "avoid-dynamic", Severity::Warning),
+        ("lib/src/orphan.dart", "avoid-dynamic", Severity::Error),
+        ("lib/src/orphan.dart", "unused-files", Severity::Error),
+    ] {
+        let path = root.join(file);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.file_path == path.to_string_lossy() && diagnostic.rule == rule
+            })
+            .unwrap_or_else(|| panic!("missing {rule} in {file}: {diagnostics:#?}"));
+        assert_eq!(diagnostic.severity, severity);
+        assert!(!diagnostic.message.is_empty());
+        assert!(diagnostic.line > 0 && diagnostic.col > 0);
+        if rule == "unused-files" {
+            assert!(diagnostic.message.contains("not reachable"));
+            assert_eq!((diagnostic.line, diagnostic.col), (1, 1));
+        } else {
+            assert_eq!((diagnostic.line, diagnostic.col), (2, 1));
+        }
+    }
+    assert!(diagnostics.iter().all(|diagnostic| {
+        !diagnostic.file_path.ends_with("excluded.dart")
+            && !diagnostic.file_path.ends_with("suppressed.dart")
+    }));
 }
 
 #[test]
@@ -221,41 +228,7 @@ fn cli_and_lsp_have_sdk_resolution_parity_for_unsaved_buffers() {
     let root = workspace.join("app");
     let flutter = workspace.join("flutter");
     let sdk = flutter.join("bin/cache/dart-sdk");
-    fs::create_dir_all(root.join("lib")).unwrap();
-    fs::create_dir_all(root.join(".dart_tool")).unwrap();
-    fs::write(
-        root.join(".dart_tool/package_config.json"),
-        format!(
-            r#"{{"configVersion":2,"flutterRoot":"file://{}","packages":[
-                {{"name":"sdk_parity_fixture","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"}}
-            ]}}"#,
-            flutter.display(),
-        ),
-    )
-    .unwrap();
-    fs::create_dir_all(sdk.join("lib/core")).unwrap();
-    fs::create_dir_all(sdk.join("lib/async")).unwrap();
-    // Follow the external-library fixtures: resolve real parsed SDK declarations
-    // through libraries.json, without depending on a locally installed SDK.
-    fs::write(
-        sdk.join("lib/libraries.json"),
-        r#"{"vm":{"libraries":{
-            "core":{"uri":"core/core.dart"},
-            "async":{"uri":"async/async.dart"}
-        }}}"#,
-    )
-    .unwrap();
-    fs::write(
-        sdk.join("lib/core/core.dart"),
-        "library dart.core;\nclass Object {}\n",
-    )
-    .unwrap();
-    fs::write(
-        sdk.join("lib/async/async.dart"),
-        "library dart.async;\nabstract class Future<T> {}\n",
-    )
-    .unwrap();
-    fs::write(root.join("pubspec.yaml"), "name: sdk_parity_fixture\n").unwrap();
+    write_sdk_parity_fixture(&root, &flutter, &sdk);
     let config_path = root.join("falcon.json");
     fs::write(
         &config_path,
@@ -324,4 +297,46 @@ fn cli_and_lsp_have_sdk_resolution_parity_for_unsaved_buffers() {
         serde_json::to_value(&cli.diagnostics).unwrap(),
         serde_json::to_value(&editor_diagnostics).unwrap()
     );
+}
+
+fn write_sdk_parity_fixture(
+    root: &std::path::Path,
+    flutter: &std::path::Path,
+    sdk: &std::path::Path,
+) {
+    fs::create_dir_all(root.join("lib")).unwrap();
+    fs::create_dir_all(root.join(".dart_tool")).unwrap();
+    fs::write(
+        root.join(".dart_tool/package_config.json"),
+        format!(
+            r#"{{"configVersion":2,"flutterRoot":"file://{}","packages":[
+                {{"name":"sdk_parity_fixture","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"}}
+            ]}}"#,
+            flutter.display(),
+        ),
+    )
+    .unwrap();
+    fs::create_dir_all(sdk.join("lib/core")).unwrap();
+    fs::create_dir_all(sdk.join("lib/async")).unwrap();
+    // Follow the external-library fixtures: resolve real parsed SDK declarations
+    // through libraries.json, without depending on a locally installed SDK.
+    fs::write(
+        sdk.join("lib/libraries.json"),
+        r#"{"vm":{"libraries":{
+            "core":{"uri":"core/core.dart"},
+            "async":{"uri":"async/async.dart"}
+        }}}"#,
+    )
+    .unwrap();
+    fs::write(
+        sdk.join("lib/core/core.dart"),
+        "library dart.core;\nclass Object {}\n",
+    )
+    .unwrap();
+    fs::write(
+        sdk.join("lib/async/async.dart"),
+        "library dart.async;\nabstract class Future<T> {}\n",
+    )
+    .unwrap();
+    fs::write(root.join("pubspec.yaml"), "name: sdk_parity_fixture\n").unwrap();
 }

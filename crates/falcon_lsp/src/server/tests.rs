@@ -95,44 +95,13 @@ fn initialize_analyzes_all_folders_and_reports_secondary_configuration_errors() 
             .recv_timeout(Duration::from_secs(30))
             .unwrap()
     };
-    client
-        .sender
-        .send(
-            Request::new(
-                1.into(),
-                "initialize".to_string(),
-                json!({
-                    "capabilities": {},
-                    "rootUri": file_uri(&legacy).unwrap(),
-                    "workspaceFolders": [
-                        {"uri": file_uri(&first).unwrap(), "name": "first"},
-                        {"uri": file_uri(&second).unwrap(), "name": "second"}
-                    ]
-                }),
-            )
-            .into(),
-        )
-        .unwrap();
-    let Message::Response(response) = receive() else {
-        panic!("expected initialize response");
-    };
-    assert!(response.error.is_none());
-    client
-        .sender
-        .send(ServerNotification::new("initialized".into(), json!({})).into())
-        .unwrap();
-    loop {
-        if let Message::Notification(notification) = receive()
-            && notification.method == ShowMessage::METHOD
-        {
-            let message: lsp_types::ShowMessageParams =
-                serde_json::from_value(notification.params).unwrap();
-            if message.typ == lsp_types::MessageType::ERROR {
-                assert!(message.message.contains(secondary_config.to_str().unwrap()));
-                break;
-            }
-        }
-    }
+    initialize_and_expect_secondary_config_error(
+        &client,
+        &first,
+        &second,
+        &legacy,
+        &secondary_config,
+    );
     for (name, unused) in [("used.dart", true), ("unused.dart", true)] {
         let uri = file_uri(&first.join("lib/src").join(name)).unwrap();
         client.sender.send(ServerNotification::new(DidOpenTextDocument::METHOD.into(), json!({
@@ -176,6 +145,61 @@ fn initialize_analyzes_all_folders_and_reports_secondary_configuration_errors() 
         .send(ServerNotification::new("exit".into(), json!(null)).into())
         .unwrap();
     worker.join().unwrap();
+}
+
+fn initialize_and_expect_secondary_config_error(
+    client: &Connection,
+    first: &std::path::Path,
+    second: &std::path::Path,
+    legacy: &std::path::Path,
+    secondary_config: &std::path::Path,
+) {
+    use serde_json::json;
+
+    let receive = || {
+        client
+            .receiver
+            .recv_timeout(Duration::from_secs(30))
+            .unwrap()
+    };
+    client
+        .sender
+        .send(
+            Request::new(
+                1.into(),
+                "initialize".to_string(),
+                json!({
+                    "capabilities": {},
+                    "rootUri": file_uri(legacy).unwrap(),
+                    "workspaceFolders": [
+                        {"uri": file_uri(first).unwrap(), "name": "first"},
+                        {"uri": file_uri(second).unwrap(), "name": "second"}
+                    ]
+                }),
+            )
+            .into(),
+        )
+        .unwrap();
+    let Message::Response(response) = receive() else {
+        panic!("expected initialize response");
+    };
+    assert!(response.error.is_none());
+    client
+        .sender
+        .send(ServerNotification::new("initialized".into(), json!({})).into())
+        .unwrap();
+    loop {
+        if let Message::Notification(notification) = receive()
+            && notification.method == ShowMessage::METHOD
+        {
+            let message: lsp_types::ShowMessageParams =
+                serde_json::from_value(notification.params).unwrap();
+            if message.typ == lsp_types::MessageType::ERROR {
+                assert!(message.message.contains(secondary_config.to_str().unwrap()));
+                break;
+            }
+        }
+    }
 }
 
 #[test]
@@ -276,56 +300,71 @@ fn fallback_fix_all_commands_are_lazy_and_execute_versioned_edits() {
         assert_eq!(response.id, id);
         assert!(response.error.is_none());
 
-        // Cancellation and a changed version must not emit applyEdit.
+        assert_rejected_fix_all_commands_then_restore(
+            &server, &client, &mut state, command, &uri, source,
+        );
+    }
+}
+
+fn assert_rejected_fix_all_commands_then_restore(
+    server: &Connection,
+    client: &Connection,
+    state: &mut LspState,
+    command: &lsp_types::Command,
+    uri: &lsp_types::Uri,
+    source: &str,
+) {
+    use serde_json::json;
+
+    // Cancellation and a changed version must not emit applyEdit.
+    handle_request(
+        server,
+        state,
+        Request::new(10.into(), "workspace/executeCommand".into(), command),
+        &|| true,
+    )
+    .unwrap();
+    assert!(client.receiver.try_recv().is_err());
+    state.open(uri.as_str(), source.to_owned(), Some(8));
+    handle_request(
+        server,
+        state,
+        Request::new(11.into(), "workspace/executeCommand".into(), command),
+        &|| false,
+    )
+    .unwrap();
+    let Message::Response(response) = client.receiver.try_recv().unwrap() else {
+        panic!("stale execution must return an error, not applyEdit");
+    };
+    assert!(response.error.is_some());
+    assert!(client.receiver.try_recv().is_err());
+    for workspace in [json!({}), json!({"applyEdit": false})] {
+        state.configure_code_actions(&json!({
+            "capabilities": {"workspace": workspace}
+        }));
         handle_request(
-            &server,
-            &mut state,
-            Request::new(10.into(), "workspace/executeCommand".into(), command),
-            &|| true,
-        )
-        .unwrap();
-        assert!(client.receiver.try_recv().is_err());
-        state.open(uri.as_str(), source.to_owned(), Some(8));
-        handle_request(
-            &server,
-            &mut state,
-            Request::new(11.into(), "workspace/executeCommand".into(), command),
+            server,
+            state,
+            Request::new(12.into(), "workspace/executeCommand".into(), command),
             &|| false,
         )
         .unwrap();
         let Message::Response(response) = client.receiver.try_recv().unwrap() else {
-            panic!("stale execution must return an error, not applyEdit");
+            panic!("unsupported applyEdit must not emit a server request");
         };
-        assert!(response.error.is_some());
+        assert!(
+            response
+                .error
+                .unwrap()
+                .message
+                .contains("workspace/applyEdit")
+        );
         assert!(client.receiver.try_recv().is_err());
-        for workspace in [json!({}), json!({"applyEdit": false})] {
-            state.configure_code_actions(&json!({
-                "capabilities": {"workspace": workspace}
-            }));
-            handle_request(
-                &server,
-                &mut state,
-                Request::new(12.into(), "workspace/executeCommand".into(), command),
-                &|| false,
-            )
-            .unwrap();
-            let Message::Response(response) = client.receiver.try_recv().unwrap() else {
-                panic!("unsupported applyEdit must not emit a server request");
-            };
-            assert!(
-                response
-                    .error
-                    .unwrap()
-                    .message
-                    .contains("workspace/applyEdit")
-            );
-            assert!(client.receiver.try_recv().is_err());
-        }
-        state.configure_code_actions(&json!({
+    }
+    state.configure_code_actions(&json!({
             "capabilities": {"workspace": {"applyEdit": true, "workspaceEdit": {"documentChanges": true}}}
         }));
-        state.open(uri.as_str(), source.to_owned(), Some(7));
-    }
+    state.open(uri.as_str(), source.to_owned(), Some(7));
 }
 
 #[cfg(test)]

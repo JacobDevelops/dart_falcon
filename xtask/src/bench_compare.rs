@@ -349,6 +349,575 @@ fn comparable_counts(
     (comparable, lint_count)
 }
 
+struct BenchmarkContext<'a> {
+    root: &'a Path,
+    cache: &'a Path,
+    dart: &'a PathBuf,
+    flutter: &'a Path,
+    hyperfine: &'a Path,
+    falcon: &'a PathBuf,
+    options: &'a Options,
+    config: &'a Value,
+    names: &'a [&'static str],
+}
+
+struct CorpusInventory {
+    files: usize,
+    lines: usize,
+    locks: BTreeMap<String, String>,
+}
+
+struct Preflight {
+    peak_rss_mb: f64,
+    count: usize,
+    lint_count: usize,
+    errors: usize,
+    comparable: BTreeMap<String, usize>,
+}
+
+struct Timing {
+    raw: Value,
+    swap_before: [u64; 2],
+    swap_after: [u64; 2],
+}
+
+struct Invocation<'a, 'b> {
+    benchmark: &'a BenchmarkContext<'b>,
+    corpus: &'a Corpus,
+    project: &'a Path,
+    state: &'a Path,
+    scenario: &'a str,
+    cold: bool,
+    runs: u32,
+    tool: &'a str,
+    executable: &'a Path,
+    args: &'a [String],
+}
+
+fn restore_dependency_locks(
+    project: &Path,
+    lock_archive: &Path,
+    lock_gzip: &Path,
+    baseline: Option<&Value>,
+) -> Result<()> {
+    if baseline.is_some_and(|old| !old["dependencyLocksGzipBase64"].is_string()) {
+        return Err(
+            "previous report lacks dependency lock snapshots; cannot reproduce its resolution"
+                .into(),
+        );
+    }
+    if let Some(encoded) = baseline.and_then(|old| old["dependencyLocksGzipBase64"].as_str()) {
+        let encoded_path = lock_archive.with_extension("b64");
+        fs::write(&encoded_path, encoded)?;
+        fs::write(
+            lock_gzip,
+            output(Command::new("base64").arg("--decode").arg(&encoded_path))?.stdout,
+        )?;
+        let locks: BTreeMap<String, String> = serde_json::from_slice(
+            &output(Command::new("gzip").arg("-dc").arg(lock_gzip))?.stdout,
+        )?;
+        for entry in entries(project) {
+            let entry = entry?;
+            if entry.file_name() == "pubspec.lock"
+                && !locks.contains_key(
+                    entry
+                        .path()
+                        .strip_prefix(project)?
+                        .to_string_lossy()
+                        .as_ref(),
+                )
+            {
+                fs::remove_file(entry.path())?;
+            }
+        }
+        for (path, content) in locks {
+            if !Path::new(&path)
+                .components()
+                .all(|part| matches!(part, std::path::Component::Normal(_)))
+            {
+                return Err("unsafe dependency lock path".into());
+            }
+            fs::write(project.join(path), content)?;
+        }
+    }
+    Ok(())
+}
+
+fn resolve_dependencies(
+    project: &Path,
+    flutter: &Path,
+    baseline: Option<&Value>,
+) -> Result<(Vec<String>, Vec<Value>)> {
+    let mut excluded: Vec<_> = EXCLUDED.iter().map(|path| (*path).to_owned()).collect();
+    let mut setup_failures = baseline
+        .and_then(|old| old["setupFailures"].as_array())
+        .cloned()
+        .unwrap_or_default();
+    for failure in &setup_failures {
+        let path = failure["directory"]
+            .as_str()
+            .ok_or("invalid setup failure path")?;
+        if path.is_empty()
+            || !Path::new(path)
+                .components()
+                .all(|part| matches!(part, std::path::Component::Normal(_)))
+        {
+            return Err("unsafe setup failure path".into());
+        }
+        excluded.push(format!("{path}/**"));
+    }
+    let manifests: Vec<_> = entries(project)
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|entry| entry.file_name() == "pubspec.yaml")
+        .map(walkdir::DirEntry::into_path)
+        .collect();
+    for manifest in manifests {
+        let directory = manifest.parent().ok_or("pubspec parent")?;
+        if setup_failures.iter().any(|failure| {
+            failure["directory"]
+                .as_str()
+                .is_some_and(|path| directory.starts_with(project.join(path)))
+        }) {
+            continue;
+        }
+        let source = fs::read_to_string(&manifest)?;
+        if source.contains("resolution: workspace") {
+            continue;
+        }
+        let mut get = Command::new(flutter);
+        get.current_dir(directory).args(["pub", "get"]);
+        if directory.join("pubspec.lock").exists() {
+            get.arg("--enforce-lockfile");
+        }
+        let resolved = get.output()?;
+        if !resolved.status.success() {
+            let relative = directory
+                .strip_prefix(project)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            if relative.is_empty() || baseline.is_some() {
+                return Err(String::from_utf8_lossy(&resolved.stderr)
+                    .into_owned()
+                    .into());
+            }
+            excluded.push(format!("{relative}/**"));
+            setup_failures.push(
+                json!({"directory": relative, "error": String::from_utf8_lossy(&resolved.stderr)}),
+            );
+        }
+    }
+    Ok((excluded, setup_failures))
+}
+
+fn collect_corpus_inventory(project: &Path, setup_failures: &[Value]) -> Result<CorpusInventory> {
+    let mut files = 0usize;
+    let mut locks = BTreeMap::new();
+    let mut lines = 0usize;
+    for entry in entries(project) {
+        let entry = entry?;
+        if entry.file_type().is_file() {
+            if entry.file_name() == "pubspec.lock" {
+                locks.insert(
+                    entry
+                        .path()
+                        .strip_prefix(project)?
+                        .to_string_lossy()
+                        .into_owned(),
+                    fs::read_to_string(entry.path())?,
+                );
+            }
+            if entry.file_name() == "analysis_options.yaml" {
+                fs::remove_file(entry.path())?;
+            }
+            if entry.path().extension().is_some_and(|ext| ext == "dart")
+                && !setup_failures.iter().any(|failure| {
+                    entry.path().starts_with(
+                        project.join(failure["directory"].as_str().unwrap_or_default()),
+                    )
+                })
+            {
+                files += 1;
+                lines += fs::read_to_string(entry.path())?.lines().count();
+            }
+        }
+    }
+    Ok(CorpusInventory {
+        files,
+        lines,
+        locks,
+    })
+}
+
+fn benchmark_corpus(
+    benchmark: &BenchmarkContext<'_>,
+    corpus: &Corpus,
+    previous: Option<&Value>,
+    results: &mut Vec<Value>,
+) -> Result<Value> {
+    let BenchmarkContext {
+        root,
+        cache,
+        flutter,
+        config,
+        names,
+        ..
+    } = *benchmark;
+    let checkout = cache.join(corpus.id);
+    prepare_checkout(
+        &checkout,
+        &format!("https://github.com/{}.git", corpus.repo),
+        corpus.rev,
+    )?;
+    if !corpus.included_directories.is_empty() {
+        output(
+            Command::new("git")
+                .arg("-C")
+                .arg(&checkout)
+                .args(["sparse-checkout", "set", "--cone"])
+                .args(corpus.included_directories),
+        )?;
+    }
+    let project = checkout.join(corpus.directory);
+    let lock_archive = cache.join(format!("{}-locks.json", corpus.id));
+    let lock_gzip = lock_archive.with_extension("json.gz");
+    let baseline = previous
+        .and_then(|report| report["corpora"].as_array())
+        .and_then(|corpora| {
+            corpora
+                .iter()
+                .find(|old| old["id"] == corpus.id && old["rev"] == corpus.rev)
+        });
+    restore_dependency_locks(&project, &lock_archive, &lock_gzip, baseline)?;
+    let (excluded, setup_failures) = resolve_dependencies(&project, flutter, baseline)?;
+    let yaml = format!(
+        "analyzer:\n  exclude:\n{}linter:\n  rules:\n{}",
+        excluded
+            .iter()
+            .map(|path| format!("    - '{path}'\n"))
+            .collect::<String>(),
+        names
+            .iter()
+            .map(|name| format!("    {name}: true\n"))
+            .collect::<String>()
+    );
+    let mut project_config = config.clone();
+    project_config["files"] = json!({"includes": falcon_includes(&excluded)});
+    let CorpusInventory {
+        files,
+        lines,
+        locks,
+    } = collect_corpus_inventory(&project, &setup_failures)?;
+    if baseline.is_some_and(|old| {
+        old["files"].as_u64() != Some(files as u64) || old["lines"].as_u64() != Some(lines as u64)
+    }) {
+        return Err(format!(
+            "{}: source counts differ from the recorded corpus",
+            corpus.id
+        )
+        .into());
+    }
+    fs::write(project.join("analysis_options.yaml"), yaml)?;
+    let config_path = project.join("falcon.benchmark.json");
+    write_json(&config_path, &project_config)?;
+    let filter = serde_json::from_value(project_config["files"]["includes"].clone())?;
+    std::env::set_current_dir(&project)?;
+    let discovered = falcon_project::walk_project(&[PathBuf::from(".")], &filter, false)
+        .map(|output| output.files.len());
+    std::env::set_current_dir(root)?;
+    let discovered = discovered?;
+    if discovered != files {
+        return Err(format!(
+            "{}: falcon discovers {discovered} Dart files, corpus count is {files}",
+            corpus.id
+        )
+        .into());
+    }
+    fs::write(&lock_archive, serde_json::to_vec(&locks)?)?;
+    fs::write(
+        &lock_gzip,
+        output(Command::new("gzip").arg("-nc").arg(&lock_archive))?.stdout,
+    )?;
+    let encoded_locks = text(Command::new("base64").arg("-w0").arg(&lock_gzip))?;
+    let metadata = json!({"id": corpus.id, "name": corpus.repo, "url": format!("https://github.com/{}", corpus.repo), "rev": corpus.rev, "directory": corpus.directory, "includedDirectories": corpus.included_directories, "files": files, "lines": lines, "setupFailures": setup_failures, "dependencyLocksGzipBase64": encoded_locks});
+    measure_corpus(benchmark, corpus, &project, &config_path, results)?;
+    Ok(metadata)
+}
+
+fn measure_corpus(
+    benchmark: &BenchmarkContext<'_>,
+    corpus: &Corpus,
+    project: &Path,
+    config_path: &Path,
+    results: &mut Vec<Value>,
+) -> Result<()> {
+    let BenchmarkContext {
+        cache,
+        options,
+        falcon,
+        dart,
+        ..
+    } = *benchmark;
+    let state = cache.join(format!("{}-analyzer-state", corpus.id));
+    fs::create_dir_all(&state)?;
+    for (scenario, cold) in [("same-rules-cold", true), ("same-rules-warm", false)] {
+        let runs = if cold {
+            options.cold_runs
+        } else {
+            options.runs
+        };
+        for (tool, executable, args) in [
+            (
+                "falcon",
+                falcon,
+                vec![
+                    "check".to_owned(),
+                    ".".to_owned(),
+                    "--config".to_owned(),
+                    config_path.to_string_lossy().into_owned(),
+                    "--format".to_owned(),
+                    "json".to_owned(),
+                    "--exit-code".to_owned(),
+                    "0".to_owned(),
+                ],
+            ),
+            (
+                "dart-analyze",
+                dart,
+                vec![
+                    "--suppress-analytics".to_owned(),
+                    "analyze".to_owned(),
+                    "--format=machine".to_owned(),
+                    ".".to_owned(),
+                ],
+            ),
+        ] {
+            results.push(
+                Invocation {
+                    benchmark,
+                    corpus,
+                    project,
+                    state: &state,
+                    scenario,
+                    cold,
+                    runs,
+                    tool,
+                    executable,
+                    args: &args,
+                }
+                .measure()?,
+            );
+        }
+    }
+    Ok(())
+}
+
+impl Invocation<'_, '_> {
+    fn preflight(&self) -> Result<Preflight> {
+        let Self {
+            benchmark,
+            corpus,
+            project,
+            state,
+            scenario,
+            cold,
+            tool,
+            executable,
+            args,
+            ..
+        } = *self;
+        let BenchmarkContext {
+            cache, dart, names, ..
+        } = *benchmark;
+        if cold && state.exists() {
+            fs::remove_dir_all(state)?;
+        }
+        let capture_path = cache.join(format!("{}-{scenario}-{tool}-preflight", corpus.id));
+        let rss_path = capture_path.with_extension("rss");
+        let mut capture = Command::new("/usr/bin/time");
+        capture
+            .args(["-q", "-f", "%M", "-o"])
+            .arg(&rss_path)
+            .arg(executable)
+            .args(args)
+            .current_dir(project)
+            .env("ANALYZER_STATE_LOCATION_OVERRIDE", state)
+            .env(
+                "DART_SDK",
+                dart.parent().and_then(Path::parent).ok_or("SDK path")?,
+            );
+        let captured = guarded_output(&mut capture, &capture_path, MAX_RSS_KB)?;
+        let peak_rss_mb =
+            fs::read_to_string(&rss_path)?.trim().parse::<f64>()? * 1024.0 / 1_000_000.0;
+        if !matches!(captured.status.code(), Some(code) if if tool == "falcon" { code == 0 } else { (0..=3).contains(&code) })
+        {
+            return Err(format!(
+                "{tool} failed: {}",
+                String::from_utf8_lossy(&captured.stderr)
+            )
+            .into());
+        }
+        let mut bytes = captured.stdout;
+        if tool == "dart-analyze" {
+            bytes.extend_from_slice(&captured.stderr);
+        }
+        fs::write(
+            cache.join(format!("{}-{tool}-diagnostics.txt", corpus.id)),
+            &bytes,
+        )?;
+        let (count, by_rule) = diagnostics(tool, &bytes)?;
+        if ["undefined_lint", "removed_lint", "replaced_lint"]
+            .iter()
+            .any(|code| by_rule.contains_key(*code))
+        {
+            return Err("SDK reports an unrecognized lint; inspect saved diagnostics".into());
+        }
+        let (comparable, lint_count) = comparable_counts(tool, &by_rule, names);
+        let errors = if tool == "dart-analyze" {
+            std::str::from_utf8(&bytes)?
+                .lines()
+                .filter(|line| line.starts_with("ERROR|"))
+                .count()
+        } else {
+            *by_rule.get("syntax-error").unwrap_or(&0)
+        };
+        Ok(Preflight {
+            peak_rss_mb,
+            count,
+            lint_count,
+            errors,
+            comparable,
+        })
+    }
+
+    fn time(&self) -> Result<Timing> {
+        let Self {
+            benchmark,
+            corpus,
+            project,
+            state,
+            scenario,
+            cold,
+            runs,
+            tool,
+            executable,
+            args,
+        } = *self;
+        let BenchmarkContext {
+            cache,
+            dart,
+            hyperfine,
+            options,
+            ..
+        } = *benchmark;
+        let command = format!(
+            "{} {}",
+            quote(executable),
+            args.iter()
+                .map(|arg| quote(Path::new(arg)))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        let export = cache.join(format!("{}-{scenario}-{tool}.json", corpus.id));
+        let mut timing = Command::new(hyperfine);
+        timing
+            .current_dir(project)
+            .env("ANALYZER_STATE_LOCATION_OVERRIDE", state)
+            .env(
+                "DART_SDK",
+                dart.parent().and_then(Path::parent).ok_or("SDK path")?,
+            )
+            .args([
+                "--warmup",
+                &options.warmups.to_string(),
+                "--runs",
+                &runs.to_string(),
+                "--ignore-failure",
+                "--export-json",
+            ])
+            .arg(&export);
+        if cold {
+            timing.args(["--prepare", &format!("rm -rf -- {}", quote(state))]);
+        }
+        let swap_before = swap_counts()?;
+        let timed = guarded_output(timing.arg(&command), &export, MAX_RSS_KB)?;
+        let swap_after = swap_counts()?;
+        if !timed.status.success() {
+            return Err(format!(
+                "hyperfine failed: {}",
+                String::from_utf8_lossy(&timed.stderr)
+            )
+            .into());
+        }
+        let raw: Value = serde_json::from_slice(&fs::read(&export)?)?;
+        Ok(Timing {
+            raw,
+            swap_before,
+            swap_after,
+        })
+    }
+
+    fn measure(&self) -> Result<Value> {
+        let Self {
+            corpus,
+            project,
+            scenario,
+            runs,
+            tool,
+            executable,
+            args,
+            ..
+        } = *self;
+        let Preflight {
+            peak_rss_mb,
+            count,
+            lint_count,
+            errors,
+            comparable,
+        } = self.preflight()?;
+        let Timing {
+            raw,
+            swap_before,
+            swap_after,
+        } = self.time()?;
+        let measured = &raw["results"][0];
+        let measurements = measured["measurements"]
+            .as_array()
+            .ok_or("missing measurements (hyperfine 2 required)")?;
+        if measurements.iter().any(|sample| {
+            sample["exit_code"].as_i64().is_none_or(|code| {
+                if tool == "falcon" {
+                    code != 0
+                } else {
+                    !(0..=3).contains(&code)
+                }
+            })
+        }) {
+            return Err("timed command failed unexpectedly".into());
+        }
+        let samples = measurements
+            .iter()
+            .map(|sample| {
+                sample["time_wall_clock"]["value"]
+                    .as_f64()
+                    .map(|seconds| seconds * 1000.0)
+                    .ok_or("invalid sample")
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let summary = &measured["summary"]["time_wall_clock"];
+        Ok(
+            json!({"corpus": corpus.id, "scenario": scenario, "tool": tool,
+            "meanMs": summary["mean"].as_f64().ok_or("missing mean")? * 1000.0,
+            "stddevMs": summary["stddev"].as_f64().ok_or("missing stddev")? * 1000.0,
+            "minMs": summary["min"].as_f64().ok_or("missing min")? * 1000.0,
+            "maxMs": summary["max"].as_f64().ok_or("missing max")? * 1000.0,
+            "runs": runs, "peakRssMb": peak_rss_mb, "diagnostics": count, "lintDiagnostics": lint_count, "nonLintDiagnostics": count - lint_count, "errorDiagnostics": errors, "diagnosticsByRule": comparable,
+            "swapPagesRead": swap_after[0] - swap_before[0], "swapPagesWritten": swap_after[1] - swap_before[1],
+            "command": recorded_command(executable, args, project), "samplesMs": samples }),
+        )
+    }
+}
+
 pub fn run(options: &Options) -> Result<()> {
     if !cfg!(target_os = "linux") {
         return Err("bench-compare requires Linux /proc and GNU time".into());
@@ -406,372 +975,24 @@ pub fn run(options: &Options) -> Result<()> {
     let (config, names) = configuration();
     let mut corpora = Vec::with_capacity(CORPORA.len());
     let mut results = Vec::with_capacity(CORPORA.len() * 4);
+    let benchmark = BenchmarkContext {
+        root: &root,
+        cache: &cache,
+        dart: &dart,
+        flutter: &flutter,
+        hyperfine: &hyperfine,
+        falcon: &falcon,
+        options,
+        config: &config,
+        names: &names,
+    };
     for corpus in CORPORA {
-        let checkout = cache.join(corpus.id);
-        prepare_checkout(
-            &checkout,
-            &format!("https://github.com/{}.git", corpus.repo),
-            corpus.rev,
-        )?;
-        if !corpus.included_directories.is_empty() {
-            output(
-                Command::new("git")
-                    .arg("-C")
-                    .arg(&checkout)
-                    .args(["sparse-checkout", "set", "--cone"])
-                    .args(corpus.included_directories),
-            )?;
-        }
-        let project = checkout.join(corpus.directory);
-        let lock_archive = cache.join(format!("{}-locks.json", corpus.id));
-        let lock_gzip = lock_archive.with_extension("json.gz");
-        let baseline = previous
-            .as_ref()
-            .and_then(|report| report["corpora"].as_array())
-            .and_then(|corpora| {
-                corpora
-                    .iter()
-                    .find(|old| old["id"] == corpus.id && old["rev"] == corpus.rev)
-            });
-        if baseline.is_some_and(|old| !old["dependencyLocksGzipBase64"].is_string()) {
-            return Err(
-                "previous report lacks dependency lock snapshots; cannot reproduce its resolution"
-                    .into(),
-            );
-        }
-        if let Some(encoded) = baseline.and_then(|old| old["dependencyLocksGzipBase64"].as_str()) {
-            let encoded_path = lock_archive.with_extension("b64");
-            fs::write(&encoded_path, encoded)?;
-            fs::write(
-                &lock_gzip,
-                output(Command::new("base64").arg("--decode").arg(&encoded_path))?.stdout,
-            )?;
-            let locks: BTreeMap<String, String> = serde_json::from_slice(
-                &output(Command::new("gzip").arg("-dc").arg(&lock_gzip))?.stdout,
-            )?;
-            for entry in entries(&project) {
-                let entry = entry?;
-                if entry.file_name() == "pubspec.lock"
-                    && !locks.contains_key(
-                        entry
-                            .path()
-                            .strip_prefix(&project)?
-                            .to_string_lossy()
-                            .as_ref(),
-                    )
-                {
-                    fs::remove_file(entry.path())?;
-                }
-            }
-            for (path, content) in locks {
-                if !Path::new(&path)
-                    .components()
-                    .all(|part| matches!(part, std::path::Component::Normal(_)))
-                {
-                    return Err("unsafe dependency lock path".into());
-                }
-                fs::write(project.join(path), content)?;
-            }
-        }
-        let mut excluded: Vec<_> = EXCLUDED.iter().map(|path| (*path).to_owned()).collect();
-        let mut setup_failures = baseline
-            .and_then(|old| old["setupFailures"].as_array())
-            .cloned()
-            .unwrap_or_default();
-        for failure in &setup_failures {
-            let path = failure["directory"]
-                .as_str()
-                .ok_or("invalid setup failure path")?;
-            if path.is_empty()
-                || !Path::new(path)
-                    .components()
-                    .all(|part| matches!(part, std::path::Component::Normal(_)))
-            {
-                return Err("unsafe setup failure path".into());
-            }
-            excluded.push(format!("{path}/**"));
-        }
-        let manifests: Vec<_> = entries(&project)
-            .collect::<std::result::Result<Vec<_>, _>>()?
-            .into_iter()
-            .filter(|entry| entry.file_name() == "pubspec.yaml")
-            .map(walkdir::DirEntry::into_path)
-            .collect();
-        for manifest in manifests {
-            let directory = manifest.parent().ok_or("pubspec parent")?;
-            if setup_failures.iter().any(|failure| {
-                failure["directory"]
-                    .as_str()
-                    .is_some_and(|path| directory.starts_with(project.join(path)))
-            }) {
-                continue;
-            }
-            let source = fs::read_to_string(&manifest)?;
-            if source.contains("resolution: workspace") {
-                continue;
-            }
-            let mut get = Command::new(&flutter);
-            get.current_dir(directory).args(["pub", "get"]);
-            if directory.join("pubspec.lock").exists() {
-                get.arg("--enforce-lockfile");
-            }
-            let resolved = get.output()?;
-            if !resolved.status.success() {
-                let relative = directory
-                    .strip_prefix(&project)?
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                if relative.is_empty() || baseline.is_some() {
-                    return Err(String::from_utf8_lossy(&resolved.stderr)
-                        .into_owned()
-                        .into());
-                }
-                excluded.push(format!("{relative}/**"));
-                setup_failures.push(json!({"directory": relative, "error": String::from_utf8_lossy(&resolved.stderr)}));
-            }
-        }
-        let yaml = format!(
-            "analyzer:\n  exclude:\n{}linter:\n  rules:\n{}",
-            excluded
-                .iter()
-                .map(|path| format!("    - '{path}'\n"))
-                .collect::<String>(),
-            names
-                .iter()
-                .map(|name| format!("    {name}: true\n"))
-                .collect::<String>()
-        );
-        let mut project_config = config.clone();
-        project_config["files"] = json!({"includes": falcon_includes(&excluded)});
-        let mut files = 0usize;
-        let mut locks = BTreeMap::new();
-        let mut lines = 0usize;
-        for entry in entries(&project) {
-            let entry = entry?;
-            if entry.file_type().is_file() {
-                if entry.file_name() == "pubspec.lock" {
-                    locks.insert(
-                        entry
-                            .path()
-                            .strip_prefix(&project)?
-                            .to_string_lossy()
-                            .into_owned(),
-                        fs::read_to_string(entry.path())?,
-                    );
-                }
-                if entry.file_name() == "analysis_options.yaml" {
-                    fs::remove_file(entry.path())?;
-                }
-                if entry.path().extension().is_some_and(|ext| ext == "dart")
-                    && !setup_failures.iter().any(|failure| {
-                        entry.path().starts_with(
-                            project.join(failure["directory"].as_str().unwrap_or_default()),
-                        )
-                    })
-                {
-                    files += 1;
-                    lines += fs::read_to_string(entry.path())?.lines().count();
-                }
-            }
-        }
-        if baseline.is_some_and(|old| {
-            old["files"].as_u64() != Some(files as u64)
-                || old["lines"].as_u64() != Some(lines as u64)
-        }) {
-            return Err(format!(
-                "{}: source counts differ from the recorded corpus",
-                corpus.id
-            )
-            .into());
-        }
-        fs::write(project.join("analysis_options.yaml"), yaml)?;
-        let config_path = project.join("falcon.benchmark.json");
-        write_json(&config_path, &project_config)?;
-        let filter = serde_json::from_value(project_config["files"]["includes"].clone())?;
-        std::env::set_current_dir(&project)?;
-        let discovered = falcon_project::walk_project(&[PathBuf::from(".")], &filter, false)
-            .map(|output| output.files.len());
-        std::env::set_current_dir(&root)?;
-        let discovered = discovered?;
-        if discovered != files {
-            return Err(format!(
-                "{}: falcon discovers {discovered} Dart files, corpus count is {files}",
-                corpus.id
-            )
-            .into());
-        }
-        fs::write(&lock_archive, serde_json::to_vec(&locks)?)?;
-        fs::write(
-            &lock_gzip,
-            output(Command::new("gzip").arg("-nc").arg(&lock_archive))?.stdout,
-        )?;
-        let encoded_locks = text(Command::new("base64").arg("-w0").arg(&lock_gzip))?;
-        corpora.push(json!({"id": corpus.id, "name": corpus.repo, "url": format!("https://github.com/{}", corpus.repo), "rev": corpus.rev, "directory": corpus.directory, "includedDirectories": corpus.included_directories, "files": files, "lines": lines, "setupFailures": setup_failures, "dependencyLocksGzipBase64": encoded_locks}));
-        let state = cache.join(format!("{}-analyzer-state", corpus.id));
-        fs::create_dir_all(&state)?;
-        for (scenario, cold) in [("same-rules-cold", true), ("same-rules-warm", false)] {
-            let runs = if cold {
-                options.cold_runs
-            } else {
-                options.runs
-            };
-            for (tool, executable, args) in [
-                (
-                    "falcon",
-                    &falcon,
-                    vec![
-                        "check".to_owned(),
-                        ".".to_owned(),
-                        "--config".to_owned(),
-                        config_path.to_string_lossy().into_owned(),
-                        "--format".to_owned(),
-                        "json".to_owned(),
-                        "--exit-code".to_owned(),
-                        "0".to_owned(),
-                    ],
-                ),
-                (
-                    "dart-analyze",
-                    &dart,
-                    vec![
-                        "--suppress-analytics".to_owned(),
-                        "analyze".to_owned(),
-                        "--format=machine".to_owned(),
-                        ".".to_owned(),
-                    ],
-                ),
-            ] {
-                if cold && state.exists() {
-                    fs::remove_dir_all(&state)?;
-                }
-                let capture_path = cache.join(format!("{}-{scenario}-{tool}-preflight", corpus.id));
-                let rss_path = capture_path.with_extension("rss");
-                let mut capture = Command::new("/usr/bin/time");
-                capture
-                    .args(["-q", "-f", "%M", "-o"])
-                    .arg(&rss_path)
-                    .arg(executable)
-                    .args(&args)
-                    .current_dir(&project)
-                    .env("ANALYZER_STATE_LOCATION_OVERRIDE", &state)
-                    .env(
-                        "DART_SDK",
-                        dart.parent().and_then(Path::parent).ok_or("SDK path")?,
-                    );
-                let captured = guarded_output(&mut capture, &capture_path, MAX_RSS_KB)?;
-                let peak_rss_mb =
-                    fs::read_to_string(&rss_path)?.trim().parse::<f64>()? * 1024.0 / 1_000_000.0;
-                if !matches!(captured.status.code(), Some(code) if if tool == "falcon" { code == 0 } else { (0..=3).contains(&code) })
-                {
-                    return Err(format!(
-                        "{tool} failed: {}",
-                        String::from_utf8_lossy(&captured.stderr)
-                    )
-                    .into());
-                }
-                let mut bytes = captured.stdout;
-                if tool == "dart-analyze" {
-                    bytes.extend_from_slice(&captured.stderr);
-                }
-                fs::write(
-                    cache.join(format!("{}-{tool}-diagnostics.txt", corpus.id)),
-                    &bytes,
-                )?;
-                let (count, by_rule) = diagnostics(tool, &bytes)?;
-                if ["undefined_lint", "removed_lint", "replaced_lint"]
-                    .iter()
-                    .any(|code| by_rule.contains_key(*code))
-                {
-                    return Err(
-                        "SDK reports an unrecognized lint; inspect saved diagnostics".into(),
-                    );
-                }
-                let (comparable, lint_count) = comparable_counts(tool, &by_rule, &names);
-                let errors = if tool == "dart-analyze" {
-                    std::str::from_utf8(&bytes)?
-                        .lines()
-                        .filter(|line| line.starts_with("ERROR|"))
-                        .count()
-                } else {
-                    *by_rule.get("syntax-error").unwrap_or(&0)
-                };
-                let command = format!(
-                    "{} {}",
-                    quote(executable),
-                    args.iter()
-                        .map(|arg| quote(Path::new(arg)))
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                );
-                let export = cache.join(format!("{}-{scenario}-{tool}.json", corpus.id));
-                let mut timing = Command::new(&hyperfine);
-                timing
-                    .current_dir(&project)
-                    .env("ANALYZER_STATE_LOCATION_OVERRIDE", &state)
-                    .env(
-                        "DART_SDK",
-                        dart.parent().and_then(Path::parent).ok_or("SDK path")?,
-                    )
-                    .args([
-                        "--warmup",
-                        &options.warmups.to_string(),
-                        "--runs",
-                        &runs.to_string(),
-                        "--ignore-failure",
-                        "--export-json",
-                    ])
-                    .arg(&export);
-                if cold {
-                    timing.args(["--prepare", &format!("rm -rf -- {}", quote(&state))]);
-                }
-                let swap_before = swap_counts()?;
-                let timed = guarded_output(timing.arg(&command), &export, MAX_RSS_KB)?;
-                let swap_after = swap_counts()?;
-                if !timed.status.success() {
-                    return Err(format!(
-                        "hyperfine failed: {}",
-                        String::from_utf8_lossy(&timed.stderr)
-                    )
-                    .into());
-                }
-                let raw: Value = serde_json::from_slice(&fs::read(&export)?)?;
-                let measured = &raw["results"][0];
-                let measurements = measured["measurements"]
-                    .as_array()
-                    .ok_or("missing measurements (hyperfine 2 required)")?;
-                if measurements.iter().any(|sample| {
-                    sample["exit_code"].as_i64().is_none_or(|code| {
-                        if tool == "falcon" {
-                            code != 0
-                        } else {
-                            !(0..=3).contains(&code)
-                        }
-                    })
-                }) {
-                    return Err("timed command failed unexpectedly".into());
-                }
-                let samples = measurements
-                    .iter()
-                    .map(|sample| {
-                        sample["time_wall_clock"]["value"]
-                            .as_f64()
-                            .map(|seconds| seconds * 1000.0)
-                            .ok_or("invalid sample")
-                    })
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
-                let summary = &measured["summary"]["time_wall_clock"];
-                results.push(
-                    json!({"corpus": corpus.id, "scenario": scenario, "tool": tool,
-                    "meanMs": summary["mean"].as_f64().ok_or("missing mean")? * 1000.0,
-                    "stddevMs": summary["stddev"].as_f64().ok_or("missing stddev")? * 1000.0,
-                    "minMs": summary["min"].as_f64().ok_or("missing min")? * 1000.0,
-                    "maxMs": summary["max"].as_f64().ok_or("missing max")? * 1000.0,
-                    "runs": runs, "peakRssMb": peak_rss_mb, "diagnostics": count, "lintDiagnostics": lint_count, "nonLintDiagnostics": count - lint_count, "errorDiagnostics": errors, "diagnosticsByRule": comparable,
-                    "swapPagesRead": swap_after[0] - swap_before[0], "swapPagesWritten": swap_after[1] - swap_before[1],
-                    "command": recorded_command(executable, &args, &project), "samplesMs": samples }),
-                );
-            }
-        }
+        corpora.push(benchmark_corpus(
+            &benchmark,
+            corpus,
+            previous.as_ref(),
+            &mut results,
+        )?);
     }
     let cpuinfo = fs::read_to_string("/proc/cpuinfo")?;
     let cpu = cpuinfo

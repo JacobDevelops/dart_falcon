@@ -917,26 +917,7 @@ fn coalesced_declaration_and_directive_edits_match_fresh_semantics() {
                 format!("{:?}", fresh.analyze(uri))
             );
         }
-        let snapshot = state.semantic_snapshot.as_ref().unwrap();
-        let rebuilt = fresh.semantic_snapshot.as_ref().unwrap();
-        for file in &snapshot.files {
-            let cached = SemanticModel::new(
-                &file.path,
-                &file.parsed,
-                &snapshot.indexes.identities,
-                Some(&snapshot.indexes.types),
-            );
-            let fresh_file = &rebuilt.files[rebuilt.by_path[&file.path]];
-            let model = SemanticModel::new(
-                &file.path,
-                &fresh_file.parsed,
-                &rebuilt.indexes.identities,
-                Some(&rebuilt.indexes.types),
-            );
-            for name in ["api", "Helper", "Unrelated"] {
-                assert_eq!(cached.resolve_value(name), model.resolve_value(name));
-            }
-        }
+        assert_semantic_snapshot_values_match(&state, &fresh);
         // Exercise the independently retained cache too, rather than borrowing
         // the current semantic snapshot through cross_file_pass.
         let (files, _) = state.collect_project_files(ProjectView::CrossFile);
@@ -966,6 +947,31 @@ fn coalesced_declaration_and_directive_edits_match_fresh_semantics() {
             for name in ["api", "Helper", "Unrelated"] {
                 assert_eq!(cached.resolve_value(name), model.resolve_value(name));
             }
+        }
+    }
+}
+
+fn assert_semantic_snapshot_values_match(state: &LspState, fresh: &LspState) {
+    use falcon_analyze::SemanticModel;
+
+    let snapshot = state.semantic_snapshot.as_ref().unwrap();
+    let rebuilt = fresh.semantic_snapshot.as_ref().unwrap();
+    for file in &snapshot.files {
+        let cached = SemanticModel::new(
+            &file.path,
+            &file.parsed,
+            &snapshot.indexes.identities,
+            Some(&snapshot.indexes.types),
+        );
+        let fresh_file = &rebuilt.files[rebuilt.by_path[&file.path]];
+        let model = SemanticModel::new(
+            &file.path,
+            &fresh_file.parsed,
+            &rebuilt.indexes.identities,
+            Some(&rebuilt.indexes.types),
+        );
+        for name in ["api", "Helper", "Unrelated"] {
+            assert_eq!(cached.resolve_value(name), model.resolve_value(name));
         }
     }
 }
@@ -2557,37 +2563,7 @@ mod dependency_tests {
             std::fs::create_dir_all(dependency.parent().unwrap()).unwrap();
             let dependency_source = "int value() => 1;\n";
             std::fs::write(&dependency, dependency_source).unwrap();
-            std::fs::write(
-                sdk.join("libraries.json"),
-                r#"{"vm":{"libraries":{"core":{"uri":"core/core.dart"}}}}"#,
-            )
-            .unwrap();
-            std::fs::write(
-                sdk.join("core/core.dart"),
-                "library dart.core; class Object {} abstract final class int {}",
-            )
-            .unwrap();
-            std::fs::write(
-                app.join(".dart_tool/package_config.json"),
-                format!(
-                    r#"{{"configVersion":2,"flutterRoot":"file://{}","packages":[
-                        {{"name":"app","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"}},
-                        {{"name":"dep","rootUri":"../../dep","packageUri":"lib/","languageVersion":"3.9"}}
-                    ]}}"#,
-                    flutter.display(),
-                ),
-            )
-            .unwrap();
-            let config = app.join("falcon.json");
-            std::fs::write(
-                &config,
-                r#"{
-                    "linter":{"enabled":false},
-                    "cross-file":{"rules":{"recommended":false,
-                        "correctness":{"unnecessary-nullable":"warn"}}}
-                }"#,
-            )
-            .unwrap();
+            let config = write_nullable_dependency_config(&app, &sdk, &flutter);
             let path = app.join("lib/main.dart");
             let source = "import 'package:dep/api.dart';\nvoid _take(int? value) {}\nvoid main() { _take(value()); }\n";
             std::fs::write(&path, source).unwrap();
@@ -2660,66 +2636,110 @@ mod dependency_tests {
             assert_eq!(state.cross_file_index_build_count, index_builds);
             assert_eq!(state.semantic_snapshot_build_count, builds);
             if opened != "external" {
-                let external_loads = state.cross_file_external_load_count;
-                assert!(external_loads > 0);
-                for version in [2, 3] {
-                    assert!(state.change(
-                        &uri,
-                        format!("{source}// body edit {version}\n"),
-                        Some(version),
-                    ));
-                    state.analyze(&uri);
-                    state.cross_file_pass();
-                    assert_eq!(state.cross_file_external_load_count, external_loads);
-                    assert!(
-                        state.documents[&uri]
-                            .last_diagnostics
-                            .iter()
-                            .any(|diagnostic| diagnostic.rule == "unnecessary-nullable")
-                    );
-                }
-                let added = dir.path().join("dep/lib/added.dart");
-                std::fs::write(&added, "int addedValue() => 1;\n").unwrap();
-                let changed_imports = source
-                    .replace("package:dep/api.dart", "package:dep/added.dart")
-                    .replace("_take(value())", "_take(addedValue())");
-                assert!(state.change(&uri, changed_imports, Some(4)));
-                state.analyze(&uri);
-                state.cross_file_pass();
-                assert_eq!(state.cross_file_external_load_count, external_loads + 1);
-                assert!(
-                    state
-                        .cross_file_external_cache
-                        .as_ref()
-                        .unwrap()
-                        .libraries
-                        .libraries()
-                        .iter()
-                        .any(|library| {
-                            library
-                                .files
-                                .iter()
-                                .any(|file| file.path == canonical_or_lexical(&added))
-                        })
-                );
-                assert!(
-                    state.documents[&uri]
-                        .last_diagnostics
-                        .iter()
-                        .any(|diagnostic| diagnostic.rule == "unnecessary-nullable")
-                );
-                std::fs::write(&added, "int? addedValue() => null;\n").unwrap();
-                state.watched_files_changed(std::slice::from_ref(&added));
-                state.cross_file_pass();
-                assert_eq!(state.cross_file_external_load_count, external_loads + 2);
-                assert!(
-                    state.documents[&uri]
-                        .last_diagnostics
-                        .iter()
-                        .all(|diagnostic| diagnostic.rule != "unnecessary-nullable")
-                );
+                assert_nullable_dependency_refresh(&mut state, &uri, source, &dir);
             }
         }
+    }
+
+    fn write_nullable_dependency_config(app: &Path, sdk: &Path, flutter: &Path) -> PathBuf {
+        std::fs::write(
+            sdk.join("libraries.json"),
+            r#"{"vm":{"libraries":{"core":{"uri":"core/core.dart"}}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            sdk.join("core/core.dart"),
+            "library dart.core; class Object {} abstract final class int {}",
+        )
+        .unwrap();
+        std::fs::write(
+                app.join(".dart_tool/package_config.json"),
+                format!(
+                    r#"{{"configVersion":2,"flutterRoot":"file://{}","packages":[
+                        {{"name":"app","rootUri":"../","packageUri":"lib/","languageVersion":"3.9"}},
+                        {{"name":"dep","rootUri":"../../dep","packageUri":"lib/","languageVersion":"3.9"}}
+                    ]}}"#,
+                    flutter.display(),
+                ),
+            )
+            .unwrap();
+        let config = app.join("falcon.json");
+        std::fs::write(
+            &config,
+            r#"{
+                    "linter":{"enabled":false},
+                    "cross-file":{"rules":{"recommended":false,
+                        "correctness":{"unnecessary-nullable":"warn"}}}
+                }"#,
+        )
+        .unwrap();
+        config
+    }
+
+    fn assert_nullable_dependency_refresh(
+        state: &mut LspState,
+        uri: &str,
+        source: &str,
+        dir: &tempfile::TempDir,
+    ) {
+        let external_loads = state.cross_file_external_load_count;
+        assert!(external_loads > 0);
+        for version in [2, 3] {
+            assert!(state.change(
+                uri,
+                format!("{source}// body edit {version}\n"),
+                Some(version),
+            ));
+            state.analyze(uri);
+            state.cross_file_pass();
+            assert_eq!(state.cross_file_external_load_count, external_loads);
+            assert!(
+                state.documents[uri]
+                    .last_diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.rule == "unnecessary-nullable")
+            );
+        }
+        let added = dir.path().join("dep/lib/added.dart");
+        std::fs::write(&added, "int addedValue() => 1;\n").unwrap();
+        let changed_imports = source
+            .replace("package:dep/api.dart", "package:dep/added.dart")
+            .replace("_take(value())", "_take(addedValue())");
+        assert!(state.change(uri, changed_imports, Some(4)));
+        state.analyze(uri);
+        state.cross_file_pass();
+        assert_eq!(state.cross_file_external_load_count, external_loads + 1);
+        assert!(
+            state
+                .cross_file_external_cache
+                .as_ref()
+                .unwrap()
+                .libraries
+                .libraries()
+                .iter()
+                .any(|library| {
+                    library
+                        .files
+                        .iter()
+                        .any(|file| file.path == canonical_or_lexical(&added))
+                })
+        );
+        assert!(
+            state.documents[uri]
+                .last_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.rule == "unnecessary-nullable")
+        );
+        std::fs::write(&added, "int? addedValue() => null;\n").unwrap();
+        state.watched_files_changed(std::slice::from_ref(&added));
+        state.cross_file_pass();
+        assert_eq!(state.cross_file_external_load_count, external_loads + 2);
+        assert!(
+            state.documents[uri]
+                .last_diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.rule != "unnecessary-nullable")
+        );
     }
 
     #[test]
@@ -3031,28 +3051,12 @@ mod dependency_tests {
 
     #[test]
     fn opening_document_flushes_debounced_dependents_before_cross_file_publish() {
-        use std::time::Duration;
-
-        use lsp_server::{Connection, Message, Notification, Request};
-        use lsp_types::{NumberOrString, PublishDiagnosticsParams};
+        use lsp_server::{Notification, Request};
+        use lsp_types::NumberOrString;
         use serde_json::json;
 
         let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join("falcon.json");
-        std::fs::write(
-            &config_path,
-            r#"{
-                "linter": { "rules": {
-                    "recommended": false,
-                    "suspicious": { "avoid-ignoring-return-values": "warn" }
-                } },
-                "cross-file": { "rules": {
-                    "recommended": false,
-                    "correctness": { "unused-code": "warn" }
-                } }
-            }"#,
-        )
-        .unwrap();
+        let config_path = write_debounced_publish_config(dir.path());
         let a_uri = format!("file://{}", dir.path().join("a.dart").display());
         let b_uri = format!("file://{}", dir.path().join("b.dart").display());
         let c_uri = format!("file://{}", dir.path().join("c.dart").display());
@@ -3060,41 +3064,8 @@ mod dependency_tests {
         let b_source = "import 'a.dart';\nvoid main() { api(); }\n";
         std::fs::write(dir.path().join("a.dart"), a_source).unwrap();
         std::fs::write(dir.path().join("b.dart"), b_source).unwrap();
-        let (server, client) = Connection::memory();
-        let worker = std::thread::spawn(move || {
-            crate::server::run_with_connection(
-                server,
-                crate::server::ServerOptions {
-                    debounce: Duration::from_secs(60),
-                    config_path: Some(config_path),
-                },
-            )
-            .unwrap();
-        });
-        let receive_through = |id: i32| {
-            let mut published = Vec::new();
-            loop {
-                match client
-                    .receiver
-                    .recv_timeout(Duration::from_secs(5))
-                    .unwrap()
-                {
-                    Message::Response(response) => {
-                        assert_eq!(response.id, id.into());
-                        break;
-                    }
-                    Message::Notification(notification) => {
-                        assert_eq!(notification.method, "textDocument/publishDiagnostics");
-                        published.push(
-                            serde_json::from_value::<PublishDiagnosticsParams>(notification.params)
-                                .unwrap(),
-                        );
-                    }
-                    other => panic!("unexpected server message: {other:?}"),
-                }
-            }
-            published
-        };
+        let (client, worker) = spawn_debounced_publish_server(config_path);
+        let receive_through = |id: i32| receive_published_through(&client, id);
         let notify = |method: &str, params| {
             client
                 .sender
@@ -3176,6 +3147,77 @@ mod dependency_tests {
         receive_through(3);
         notify("exit", json!({}));
         worker.join().unwrap();
+    }
+
+    fn spawn_debounced_publish_server(
+        config_path: PathBuf,
+    ) -> (lsp_server::Connection, std::thread::JoinHandle<()>) {
+        use lsp_server::Connection;
+        use std::time::Duration;
+
+        let (server, client) = Connection::memory();
+        let worker = std::thread::spawn(move || {
+            crate::server::run_with_connection(
+                server,
+                crate::server::ServerOptions {
+                    debounce: Duration::from_secs(60),
+                    config_path: Some(config_path),
+                },
+            )
+            .unwrap();
+        });
+        (client, worker)
+    }
+
+    fn write_debounced_publish_config(root: &Path) -> PathBuf {
+        let config_path = root.join("falcon.json");
+        std::fs::write(
+            &config_path,
+            r#"{
+                "linter": { "rules": {
+                    "recommended": false,
+                    "suspicious": { "avoid-ignoring-return-values": "warn" }
+                } },
+                "cross-file": { "rules": {
+                    "recommended": false,
+                    "correctness": { "unused-code": "warn" }
+                } }
+            }"#,
+        )
+        .unwrap();
+        config_path
+    }
+
+    fn receive_published_through(
+        client: &lsp_server::Connection,
+        id: i32,
+    ) -> Vec<lsp_types::PublishDiagnosticsParams> {
+        use lsp_server::Message;
+        use lsp_types::PublishDiagnosticsParams;
+        use std::time::Duration;
+
+        let mut published = Vec::new();
+        loop {
+            match client
+                .receiver
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+            {
+                Message::Response(response) => {
+                    assert_eq!(response.id, id.into());
+                    break;
+                }
+                Message::Notification(notification) => {
+                    assert_eq!(notification.method, "textDocument/publishDiagnostics");
+                    published.push(
+                        serde_json::from_value::<PublishDiagnosticsParams>(notification.params)
+                            .unwrap(),
+                    );
+                }
+                other => panic!("unexpected server message: {other:?}"),
+            }
+        }
+        published
     }
 
     #[test]

@@ -150,30 +150,7 @@ impl<'src> Parser<'src> {
             return (self.parse_map_pattern(), false, false);
         }
         if self.at(TokenKind::Lt) {
-            let type_args = self.parse_type_args();
-            if self.at(TokenKind::LBracket) {
-                if type_args != 1 {
-                    self.error(format!(
-                        "list pattern expects exactly one type argument, got {}",
-                        type_args
-                    ));
-                }
-                return (self.parse_list_pattern(), false, false);
-            }
-            if self.at(TokenKind::LBrace) {
-                if type_args != 2 {
-                    self.error(format!(
-                        "map pattern expects exactly two type arguments, got {}",
-                        type_args
-                    ));
-                }
-                return (self.parse_map_pattern(), false, false);
-            }
-            self.error(format!(
-                "expected '[' or '{{' after type arguments in collection pattern, got {:?}",
-                self.cur().kind
-            ));
-            return (NodeKind::ErrorPattern, false, false);
+            return (self.parse_typed_collection_pattern(), false, false);
         }
         if self.eat(TokenKind::Null).is_some()
             || self.eat(TokenKind::True).is_some()
@@ -237,6 +214,33 @@ impl<'src> Parser<'src> {
         }
         self.error(format!("expected pattern, got {:?}", self.cur().kind));
         (NodeKind::ErrorPattern, false, false)
+    }
+
+    fn parse_typed_collection_pattern(&mut self) -> NodeKind {
+        let type_args = self.parse_type_args();
+        if self.at(TokenKind::LBracket) {
+            if type_args != 1 {
+                self.error(format!(
+                    "list pattern expects exactly one type argument, got {}",
+                    type_args
+                ));
+            }
+            return self.parse_list_pattern();
+        }
+        if self.at(TokenKind::LBrace) {
+            if type_args != 2 {
+                self.error(format!(
+                    "map pattern expects exactly two type arguments, got {}",
+                    type_args
+                ));
+            }
+            return self.parse_map_pattern();
+        }
+        self.error(format!(
+            "expected '[' or '{{' after type arguments in collection pattern, got {:?}",
+            self.cur().kind
+        ));
+        NodeKind::ErrorPattern
     }
 
     fn parse_string_pattern_fields(&mut self, mut target: CompletedMarker) {

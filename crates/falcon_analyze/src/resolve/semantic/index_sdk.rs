@@ -18,6 +18,24 @@ impl SignatureIndex {
                 has_subclass_in_library: false,
             });
         }
+        self.add_sdk_object_members();
+        self.add_sdk_collection_members();
+        self.add_sdk_iterable_members();
+        self.add_flutter_signatures();
+        self.add_sdk_hierarchy();
+        for (identity, name, arity) in super::identity::fallback_types() {
+            let facts = self.type_facts.entry(identity).or_default();
+            if facts.supertypes.is_none() {
+                facts.fallback_type_parameters = Some(
+                    (0..arity)
+                        .map(|ordinal| sdk_parameter(name, ordinal))
+                        .collect(),
+                );
+            }
+        }
+    }
+
+    fn add_sdk_collection_members(&mut self) {
         let add = |index: &mut Self,
                    library: &'static str,
                    type_name: &'static str,
@@ -43,60 +61,13 @@ impl SignatureIndex {
                 ..ResolvedSignature::returning(return_type)
             });
         };
-        let parameter = |type_name: &'static str, ordinal: usize| {
-            ResolvedType::from_kind(ResolvedTypeKind::TypeParameter {
-                id: sdk_parameter(type_name, ordinal),
-                bound: Arc::new(ResolvedType::DYNAMIC),
-                nullable: false,
-            })
-        };
-        let object = DeclarationIdentity::sdk("dart:core", "Object");
-        for (name, kind, parameters) in [
-            ("==", MemberKind::Operator, vec!["other".to_string()]),
-            (
-                "noSuchMethod",
-                MemberKind::Method,
-                vec!["invocation".to_string()],
-            ),
-            ("hashCode", MemberKind::Getter, Vec::new()),
-            ("runtimeType", MemberKind::Getter, Vec::new()),
-            ("toString", MemberKind::Method, Vec::new()),
-        ] {
-            self.member_entries
-                .entry(object.clone())
-                .or_default()
-                .entry(name.to_string())
-                .or_default()
-                .facts
-                .push(MemberFacts {
-                    declaring_type: object.clone(),
-                    kind,
-                    is_static: false,
-                    is_abstract: false,
-                    parameter_contracts: Some(if parameters.is_empty() {
-                        empty_parameter_contracts()
-                    } else {
-                        parameters
-                            .iter()
-                            .map(|name| ParameterContract {
-                                name: name.clone(),
-                                kind: ParamKind::Positional,
-                                is_covariant: false,
-                                default_value_code: None,
-                            })
-                            .collect()
-                    }),
-                    positional_parameter_names: parameters,
-                    annotations: Vec::new(),
-                });
-        }
         for (library, name, arity, member, positional, return_type) in [
             (
                 "dart:core",
                 "List",
                 1,
                 "add",
-                vec![parameter("List", 0)],
+                vec![sdk_parameter_type("List", 0)],
                 ResolvedType::VOID,
             ),
             (
@@ -108,7 +79,7 @@ impl SignatureIndex {
                     ResolvedType {
                         kind: ResolvedTypeKind::Dynamic,
                     },
-                    parameter("List", 0),
+                    sdk_parameter_type("List", 0),
                 ],
                 ResolvedType::VOID,
             ),
@@ -117,7 +88,7 @@ impl SignatureIndex {
                 "Set",
                 1,
                 "add",
-                vec![parameter("Set", 0)],
+                vec![sdk_parameter_type("Set", 0)],
                 ResolvedType::interface_identity(DeclarationIdentity::sdk("dart:core", "bool")),
             ),
             (
@@ -125,7 +96,7 @@ impl SignatureIndex {
                 "Queue",
                 1,
                 "add",
-                vec![parameter("Queue", 0)],
+                vec![sdk_parameter_type("Queue", 0)],
                 ResolvedType::VOID,
             ),
             (
@@ -133,7 +104,7 @@ impl SignatureIndex {
                 "Map",
                 2,
                 "[]=",
-                vec![parameter("Map", 0), parameter("Map", 1)],
+                vec![sdk_parameter_type("Map", 0), sdk_parameter_type("Map", 1)],
                 ResolvedType::VOID,
             ),
             (
@@ -147,13 +118,16 @@ impl SignatureIndex {
         ] {
             add(self, library, name, arity, member, positional, return_type);
         }
+    }
+
+    fn add_sdk_iterable_members(&mut self) {
         for (library, name) in [
             ("dart:core", "List"),
             ("dart:core", "Set"),
             ("dart:collection", "Queue"),
         ] {
             let parameter_id = sdk_parameter(name, 0);
-            let parameter = parameter(name, 0);
+            let parameter = sdk_parameter_type(name, 0);
             let identity = DeclarationIdentity::sdk(library, name);
             let supertype = ResolvedType::from_kind(ResolvedTypeKind::Interface {
                 occurrence: Default::default(),
@@ -173,7 +147,7 @@ impl SignatureIndex {
         }
         let iterable = DeclarationIdentity::sdk("dart:core", "Iterable");
         let map_parameter = sdk_parameter("Iterable.map", 0);
-        let map_type = parameter("Iterable.map", 0);
+        let map_type = sdk_parameter_type("Iterable.map", 0);
         let entry = self
             .member_entries
             .entry(iterable)
@@ -191,7 +165,7 @@ impl SignatureIndex {
                     alias: FunctionTypeAlias::default(),
                     optional_positional: 0,
                     return_type: Arc::new(map_type.clone()),
-                    positional: vec![parameter("Iterable", 0)].into(),
+                    positional: vec![sdk_parameter_type("Iterable", 0)].into(),
                     named: Vec::new().into(),
                     nullable: false,
                 },
@@ -204,7 +178,9 @@ impl SignatureIndex {
                 extension_type: false,
             }))
         });
+    }
 
+    fn add_flutter_signatures(&mut self) {
         let widget = DeclarationIdentity::flutter("Widget");
         let key = ResolvedType::interface_identity(DeclarationIdentity::flutter("Key"))
             .with_nullable(true);
@@ -259,16 +235,48 @@ impl SignatureIndex {
                     ..ResolvedSignature::returning(ResolvedType::UNKNOWN)
                 },
             );
-        self.add_sdk_hierarchy();
-        for (identity, name, arity) in super::identity::fallback_types() {
-            let facts = self.type_facts.entry(identity).or_default();
-            if facts.supertypes.is_none() {
-                facts.fallback_type_parameters = Some(
-                    (0..arity)
-                        .map(|ordinal| sdk_parameter(name, ordinal))
-                        .collect(),
-                );
-            }
+    }
+
+    fn add_sdk_object_members(&mut self) {
+        let object = DeclarationIdentity::sdk("dart:core", "Object");
+        for (name, kind, parameters) in [
+            ("==", MemberKind::Operator, vec!["other".to_string()]),
+            (
+                "noSuchMethod",
+                MemberKind::Method,
+                vec!["invocation".to_string()],
+            ),
+            ("hashCode", MemberKind::Getter, Vec::new()),
+            ("runtimeType", MemberKind::Getter, Vec::new()),
+            ("toString", MemberKind::Method, Vec::new()),
+        ] {
+            self.member_entries
+                .entry(object.clone())
+                .or_default()
+                .entry(name.to_string())
+                .or_default()
+                .facts
+                .push(MemberFacts {
+                    declaring_type: object.clone(),
+                    kind,
+                    is_static: false,
+                    is_abstract: false,
+                    parameter_contracts: Some(if parameters.is_empty() {
+                        empty_parameter_contracts()
+                    } else {
+                        parameters
+                            .iter()
+                            .map(|name| ParameterContract {
+                                name: name.clone(),
+                                kind: ParamKind::Positional,
+                                is_covariant: false,
+                                default_value_code: None,
+                            })
+                            .collect()
+                    }),
+                    positional_parameter_names: parameters,
+                    annotations: Vec::new(),
+                });
         }
     }
 
@@ -281,15 +289,6 @@ impl SignatureIndex {
                 .iter()
                 .find(|entry| entry.semantic && identity.is_sdk(entry.library, entry.name))
                 .map_or(0, |entry| entry.arity)
-        };
-        let sdk = |library: &'static str, name: &'static str, arguments: Vec<ResolvedType>| {
-            ResolvedType::from_kind(ResolvedTypeKind::Interface {
-                occurrence: Default::default(),
-                identity: DeclarationIdentity::sdk(library, name),
-                arguments: arguments.into(),
-                nullable: false,
-                extension_type: false,
-            })
         };
         for entry in SDK_HIERARCHY.iter().filter(|entry| entry.semantic) {
             let parameters: Vec<_> = (0..entry.arity)
@@ -312,7 +311,7 @@ impl SignatureIndex {
                             .collect()
                     } else if identity.is_sdk("dart:core", "Comparable") {
                         // Every listed implementer is `Comparable<Self>`.
-                        vec![sdk(entry.library, entry.name, Vec::new())]
+                        vec![sdk_interface_type(entry.library, entry.name, Vec::new())]
                     } else {
                         Vec::new()
                     };
@@ -328,7 +327,7 @@ impl SignatureIndex {
                     entry
                         .supertypes
                         .is_empty()
-                        .then(|| sdk("dart:core", "Object", Vec::new())),
+                        .then(|| sdk_interface_type("dart:core", "Object", Vec::new())),
                 )
                 .collect();
             self.type_facts
@@ -337,6 +336,10 @@ impl SignatureIndex {
                 .supertypes
                 .get_or_insert((parameters, resolved));
         }
+        self.add_sdk_resource_members();
+    }
+
+    fn add_sdk_resource_members(&mut self) {
         let element = |owner: &'static str| {
             ResolvedType::from_kind(ResolvedTypeKind::TypeParameter {
                 id: sdk_parameter(owner, 0),
@@ -366,7 +369,7 @@ impl SignatureIndex {
                     nullable: true,
                 },
             }],
-            ..ResolvedSignature::returning(sdk(
+            ..ResolvedSignature::returning(sdk_interface_type(
                 "dart:async",
                 "StreamSubscription",
                 vec![element("Stream")],
@@ -377,7 +380,7 @@ impl SignatureIndex {
             .or_default()
             .entry("stream".to_string())
             .or_default()
-            .read = Some(sdk(
+            .read = Some(sdk_interface_type(
             "dart:async",
             "Stream",
             vec![element("StreamController")],
@@ -389,12 +392,33 @@ impl SignatureIndex {
             .entry("openWrite".to_string())
             .or_default();
         open_write.is_instance_method = true;
-        open_write.signature = Some(ResolvedSignature::returning(sdk(
+        open_write.signature = Some(ResolvedSignature::returning(sdk_interface_type(
             "dart:io",
             "IOSink",
             Vec::new(),
         )));
     }
+}
+
+fn sdk_parameter_type(owner: &'static str, ordinal: usize) -> ResolvedType {
+    ResolvedType::from_kind(ResolvedTypeKind::TypeParameter {
+        id: sdk_parameter(owner, ordinal),
+        bound: Arc::new(ResolvedType::DYNAMIC),
+        nullable: false,
+    })
+}
+
+fn sdk_interface_type(
+    library: &'static str,
+    name: &'static str,
+    arguments: Vec<ResolvedType>,
+) -> ResolvedType {
+    ResolvedType::new_interface(
+        DeclarationIdentity::sdk(library, name),
+        arguments.into(),
+        false,
+        false,
+    )
 }
 
 /// `(library, name, members)`; each member is `(name, kind, positional

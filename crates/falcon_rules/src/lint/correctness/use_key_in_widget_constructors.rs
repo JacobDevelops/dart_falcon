@@ -9,9 +9,9 @@ use std::collections::HashSet;
 use rustc_hash::FxHashMap;
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedSignature, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
-    SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal, TypeParameterId,
-    TypeParameterScope, TypeRelation,
+    AnalyzeContext, DeclarationIdentity, ResolvedSignature, ResolvedType, ResolvedTypeView, Rule,
+    RulePreparation, SemanticModel, SignatureIndex, StructuralRuleVisitor, StructuralTraversal,
+    TypeParameterId, TypeParameterScope, TypeRelation,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -61,26 +61,7 @@ impl Collector<'_> {
             return;
         };
         let class_type = ResolvedType::interface_identity(identity.clone());
-        let widget = DeclarationIdentity::flutter("Widget");
-        let mut current = &class_type;
-        let mut visited = HashSet::new();
-        let extends_widget = loop {
-            let ResolvedTypeView::Interface { identity, .. } = current.view() else {
-                break false;
-            };
-            if !visited.insert(identity) {
-                break false;
-            }
-            let Some(superclass) = self.signatures.superclass(identity) else {
-                break false;
-            };
-            if matches!(superclass.view(), ResolvedTypeView::Interface { identity, .. } if identity.matches(&widget))
-            {
-                break true;
-            }
-            current = superclass;
-        };
-        if !extends_widget {
+        if !self.extends_widget(&class_type) {
             return;
         }
 
@@ -115,7 +96,10 @@ impl Collector<'_> {
         });
         let mut constructors = primary.chain(constructors).peekable();
         if constructors.peek().is_none() {
-            self.diagnostics.push(self.ctx.diagnostic("Public widgets should have a constructor with a named `key` parameter.", class.name().span()));
+            self.diagnostics.push(self.ctx.diagnostic(
+                "Public widgets should have a constructor with a named `key` parameter.",
+                class.name().span(),
+            ));
             return;
         }
 
@@ -140,57 +124,88 @@ impl Collector<'_> {
             if self.has_resolved_super_key(params, initializers.clone(), supertype.as_ref()) {
                 continue;
             }
-            let mut known_target = false;
-            let mut accepted = false;
-            for initializer in initializers.clone().into_iter().flatten() {
-                let (target, name, args) = match initializer {
-                    ConstructorInitializer::SuperCall(call) => (
-                        supertype.as_ref(),
-                        call.call_name().map_or("new", |name| name.name()),
-                        call.args(),
-                    ),
-                    ConstructorInitializer::ThisCall(call) => (
-                        Some(&class_type),
-                        call.call_name().map_or("new", |name| name.name()),
-                        call.args(),
-                    ),
-                    _ => continue,
-                };
-                let Some(target) = target else {
-                    continue;
-                };
-                let Some((signature, substitutions)) =
-                    self.signatures.resolved_constructor(target, name)
-                else {
-                    continue;
-                };
-                known_target = true;
-                if self.initializer_accepts_key(signature, &substitutions, args) {
-                    accepted = true;
-                    break;
-                }
-            }
-            if accepted {
-                continue;
-            }
-            if initializers.as_ref().is_none_or(AstChildren::is_empty) {
-                let Some(supertype) = &supertype else {
-                    continue;
-                };
-                let Some((signature, substitutions)) =
-                    self.signatures.resolved_constructor(supertype, "new")
-                else {
-                    continue;
-                };
-                known_target = true;
-                if !target_defines_key(signature, &substitutions, &self.model, self.signatures) {
-                    continue;
-                }
-            }
+            let known_target =
+                self.initializer_requires_key(initializers, &class_type, supertype.as_ref());
             if known_target {
-                self.diagnostics.push(self.ctx.diagnostic("Public widget constructors should accept and forward a named `key` parameter.", span));
+                self.diagnostics.push(self.ctx.diagnostic(
+                    "Public widget constructors should accept and forward a named `key` parameter.",
+                    span,
+                ));
             }
         }
+    }
+
+    fn extends_widget(&self, class_type: &ResolvedType) -> bool {
+        let widget = DeclarationIdentity::flutter("Widget");
+        let mut current = class_type;
+        let mut visited = HashSet::new();
+        loop {
+            let ResolvedTypeView::Interface { identity, .. } = current.view() else {
+                break false;
+            };
+            if !visited.insert(identity) {
+                break false;
+            }
+            let Some(superclass) = self.signatures.superclass(identity) else {
+                break false;
+            };
+            if matches!(superclass.view(), ResolvedTypeView::Interface { identity, .. } if identity.matches(&widget))
+            {
+                break true;
+            }
+            current = superclass;
+        }
+    }
+
+    fn initializer_requires_key(
+        &self,
+        initializers: Option<AstChildren<'_, ConstructorInitializer<'_>>>,
+        class_type: &ResolvedType,
+        supertype: Option<&ResolvedType>,
+    ) -> bool {
+        let mut known_target = false;
+        for initializer in initializers.clone().into_iter().flatten() {
+            let (target, name, args) = match initializer {
+                ConstructorInitializer::SuperCall(call) => (
+                    supertype,
+                    call.call_name().map_or("new", |name| name.name()),
+                    call.args(),
+                ),
+                ConstructorInitializer::ThisCall(call) => (
+                    Some(class_type),
+                    call.call_name().map_or("new", |name| name.name()),
+                    call.args(),
+                ),
+                _ => continue,
+            };
+            let Some(target) = target else {
+                continue;
+            };
+            let Some((signature, substitutions)) =
+                self.signatures.resolved_constructor(target, name)
+            else {
+                continue;
+            };
+            known_target = true;
+            if self.initializer_accepts_key(signature, &substitutions, args) {
+                return false;
+            }
+        }
+        if initializers.as_ref().is_none_or(AstChildren::is_empty) {
+            let Some(supertype) = supertype else {
+                return false;
+            };
+            let Some((signature, substitutions)) =
+                self.signatures.resolved_constructor(supertype, "new")
+            else {
+                return false;
+            };
+            known_target = true;
+            if !target_defines_key(signature, &substitutions, &self.model, self.signatures) {
+                return false;
+            }
+        }
+        known_target
     }
 
     fn initializer_accepts_key(
@@ -269,7 +284,6 @@ fn target_defines_key(
 #[cfg(test)]
 mod tests {
 
-
     use super::*;
 
     fn diagnostics(source: &str) -> Vec<Diagnostic> {
@@ -279,7 +293,6 @@ mod tests {
             &UseKeyInWidgetConstructors,
         )
     }
-
 
     #[test]
     fn super_formal_uses_selected_named_constructor_and_owner_substitution() {
@@ -342,6 +355,4 @@ abstract class RealConstructor extends Widget {
         let diagnostics = diagnostics(source);
         assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
     }
-
-
 }

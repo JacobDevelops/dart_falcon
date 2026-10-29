@@ -171,43 +171,7 @@ impl FileWatching {
             return Ok(());
         }
         self.dependency_generation = Some(dependency_generation);
-        let mut roots: Vec<PathBuf> = if self.relative {
-            state
-                .watched_dependency_roots()
-                .into_iter()
-                .filter(|root| {
-                    !self
-                        .workspace_roots
-                        .iter()
-                        .any(|workspace| root.starts_with(workspace))
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        roots.sort_unstable();
-        roots.dedup();
-        let mut files: Vec<PathBuf> = if self.relative {
-            state
-                .watched_dependency_files()
-                .iter()
-                .filter(|file| {
-                    !self
-                        .workspace_roots
-                        .iter()
-                        .any(|workspace| file.starts_with(workspace))
-                        && !roots.iter().any(|root| file.starts_with(root))
-                })
-                .cloned()
-                .collect()
-        } else {
-            Vec::new()
-        };
-        if self.relative {
-            files.extend(state.ancestor_manifests());
-        }
-        files.sort_unstable();
-        files.dedup();
+        let (roots, files) = self.dependency_paths(state);
         if self.registration.is_some()
             && roots == self.dependency_roots
             && files == self.dependency_files
@@ -281,6 +245,47 @@ impl FileWatching {
         self.dependency_roots = roots;
         self.dependency_files = files;
         Ok(())
+    }
+
+    fn dependency_paths(&self, state: &LspState) -> (Vec<PathBuf>, Vec<PathBuf>) {
+        let mut roots: Vec<PathBuf> = if self.relative {
+            state
+                .watched_dependency_roots()
+                .into_iter()
+                .filter(|root| {
+                    !self
+                        .workspace_roots
+                        .iter()
+                        .any(|workspace| root.starts_with(workspace))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        roots.sort_unstable();
+        roots.dedup();
+        let mut files: Vec<PathBuf> = if self.relative {
+            state
+                .watched_dependency_files()
+                .iter()
+                .filter(|file| {
+                    !self
+                        .workspace_roots
+                        .iter()
+                        .any(|workspace| file.starts_with(workspace))
+                        && !roots.iter().any(|root| file.starts_with(root))
+                })
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if self.relative {
+            files.extend(state.ancestor_manifests());
+        }
+        files.sort_unstable();
+        files.dedup();
+        (roots, files)
     }
 
     fn response(&mut self, response: Response) {
@@ -530,49 +535,14 @@ fn relay(
                 let current = round.generation == generation;
                 // Keep unpublished unrelated files when a newer edit supersedes
                 // a round. Its affected files replace these entries before flush.
-                other_messages.reserve(round.messages.len());
-                for message in round.messages {
-                    match message {
-                        Message::Notification(notification)
-                            if notification.method == PublishDiagnostics::METHOD =>
-                        {
-                            if let Some(uri) = notification.params.get("uri").and_then(serde_json::Value::as_str) {
-                                publication_order += 1;
-                                publications.insert(uri.to_string(), (publication_order, notification));
-                            }
-                        }
-                        Message::Request(request) if request.method == "workspace/applyEdit" => {
-                            // Recover the originating executeCommand id without
-                            // colliding with other server-to-client request ids.
-                            let origin = serde_json::to_value(&request.id)?
-                                .as_str()
-                                .and_then(|id| id.strip_prefix("falcon-fix-all-"))
-                                .and_then(|id| serde_json::from_str::<RequestId>(id).ok());
-                            // Never publish a side effect after cancellation or a
-                            // newer document notification overtook computation.
-                            if let Some(origin) = origin
-                                && pending_requests.contains_key(&origin)
-                            {
-                                if current {
-                                    other_messages.push(Message::Request(request));
-                                } else {
-                                    pending_requests.remove(&origin);
-                                    other_messages.push(Response::new_err(
-                                        origin,
-                                        ErrorCode::ContentModified as i32,
-                                        "Workspace changed while computing Falcon fixes".to_owned(),
-                                    ).into());
-                                }
-                            }
-                        }
-                        Message::Response(response) => {
-                            if pending_requests.remove(&response.id).is_some() {
-                                other_messages.push(Message::Response(response));
-                            }
-                        }
-                        message => other_messages.push(message),
-                    }
-                }
+                buffer_round_messages(
+                    round.messages,
+                    current,
+                    &mut pending_requests,
+                    &mut publications,
+                    &mut other_messages,
+                    &mut publication_order,
+                )?;
                 if current {
                     ready_publications.extend(publications.extract_if(|uri, _| !round.deferred.contains(uri)).map(|(_, publication)| publication));
                     ready_publications.sort_unstable_by_key(|(order, _)| *order);
@@ -586,6 +556,67 @@ fn relay(
             }
         }
     }
+}
+
+fn buffer_round_messages(
+    messages: Vec<Message>,
+    current: bool,
+    pending_requests: &mut HashMap<RequestId, Arc<AtomicBool>>,
+    publications: &mut HashMap<String, (u64, ServerNotification)>,
+    other_messages: &mut Vec<Message>,
+    publication_order: &mut u64,
+) -> Result<(), ServerError> {
+    other_messages.reserve(messages.len());
+    for message in messages {
+        match message {
+            Message::Notification(notification)
+                if notification.method == PublishDiagnostics::METHOD =>
+            {
+                if let Some(uri) = notification
+                    .params
+                    .get("uri")
+                    .and_then(serde_json::Value::as_str)
+                {
+                    *publication_order += 1;
+                    publications.insert(uri.to_string(), (*publication_order, notification));
+                }
+            }
+            Message::Request(request) if request.method == "workspace/applyEdit" => {
+                // Recover the originating executeCommand id without
+                // colliding with other server-to-client request ids.
+                let origin = serde_json::to_value(&request.id)?
+                    .as_str()
+                    .and_then(|id| id.strip_prefix("falcon-fix-all-"))
+                    .and_then(|id| serde_json::from_str::<RequestId>(id).ok());
+                // Never publish a side effect after cancellation or a
+                // newer document notification overtook computation.
+                if let Some(origin) = origin
+                    && pending_requests.contains_key(&origin)
+                {
+                    if current {
+                        other_messages.push(Message::Request(request));
+                    } else {
+                        pending_requests.remove(&origin);
+                        other_messages.push(
+                            Response::new_err(
+                                origin,
+                                ErrorCode::ContentModified as i32,
+                                "Workspace changed while computing Falcon fixes".to_owned(),
+                            )
+                            .into(),
+                        );
+                    }
+                }
+            }
+            Message::Response(response) => {
+                if pending_requests.remove(&response.id).is_some() {
+                    other_messages.push(Message::Response(response));
+                }
+            }
+            message => other_messages.push(message),
+        }
+    }
+    Ok(())
 }
 
 fn next_idle_poll_delay(current: Duration, changed: bool) -> Duration {
@@ -625,20 +656,6 @@ fn analysis_worker_with(
     let mut debounce = Debounce::default();
     let mut idle_poll_delay = Duration::from_secs(1);
     watching.refresh(&connection, &state)?;
-
-    // Deserialize a notification's params or skip the message: a single
-    // malformed notification must not tear down the session (LSP spec).
-    macro_rules! parse_params {
-        ($method:expr, $params:expr) => {
-            match serde_json::from_value($params) {
-                Ok(value) => value,
-                Err(error) => {
-                    warn!(method = %$method, %error, "ignoring notification with malformed params");
-                    continue;
-                }
-            }
-        };
-    }
 
     loop {
         let messages: Vec<_> = outbox.try_iter().collect();
@@ -684,22 +701,8 @@ fn analysis_worker_with(
         };
 
         let Some((message, token)) = message else {
-            // Revalidate only after a quiet debounce/idle interval.
-            let disk_updates = state.revalidate_disk();
-            let refreshed = !disk_updates.is_empty();
-            idle_poll_delay = next_idle_poll_delay(idle_poll_delay, refreshed);
-            for (uri, diagnostics) in disk_updates {
-                publish(&connection, &state, &uri, &diagnostics)?;
-            }
-            let uris = debounce.drain();
-            if uris.is_empty() && !refreshed {
-                continue;
-            }
-            for (affected_uri, diagnostics) in state.analyze_affected_many(&uris) {
-                publish(&connection, &state, &affected_uri, &diagnostics)?;
-            }
-            cross_file_pass_and_publish(&connection, &mut state, &mut debounce)?;
-            publish_config_messages(&connection, &mut state)?;
+            idle_poll_delay =
+                revalidate_and_publish(&connection, &mut state, &mut debounce, idle_poll_delay)?;
             continue;
         };
         idle_poll_delay = Duration::from_secs(1);
@@ -717,106 +720,18 @@ fn analysis_worker_with(
             Message::Request(request) => {
                 handle_request(&connection, &mut state, request, &cancelled)?;
             }
-            Message::Notification(ServerNotification { method, params }) => match method.as_str() {
-                DidOpenTextDocument::METHOD => {
-                    let params: DidOpenTextDocumentParams = parse_params!(&method, params);
-                    if is_environment_document(&params.text_document.uri) {
-                        continue;
-                    }
-                    let uri = params.text_document.uri.as_str().to_string();
-                    for (affected_uri, diagnostics) in state.revalidate_disk() {
-                        publish(&connection, &state, &affected_uri, &diagnostics)?;
-                    }
-                    let diagnostics = state.open(
-                        &uri,
-                        params.text_document.text,
-                        Some(params.text_document.version),
-                    );
-                    debounce.clear(&uri);
-                    publish_affected_with_current(&connection, &mut state, &uri, &diagnostics)?;
-                    cross_file_pass_and_publish(&connection, &mut state, &mut debounce)?;
+            Message::Notification(notification) => {
+                if !handle_notification(
+                    &connection,
+                    &mut state,
+                    &mut debounce,
+                    &mut watching,
+                    options.debounce,
+                    notification,
+                )? {
+                    continue;
                 }
-                DidChangeTextDocument::METHOD => {
-                    let params: DidChangeTextDocumentParams = parse_params!(&method, params);
-                    if is_environment_document(&params.text_document.uri) {
-                        continue;
-                    }
-                    let uri = params.text_document.uri.as_str().to_string();
-                    // FULL sync: the last change event carries the whole document.
-                    let Some(change) = params.content_changes.into_iter().next_back() else {
-                        continue;
-                    };
-                    if !state.change(&uri, change.text, Some(params.text_document.version)) {
-                        continue;
-                    }
-                    if options.debounce.is_zero() {
-                        analyze_affected_and_publish(&connection, &mut state, &uri)?;
-                        cross_file_pass_and_publish(&connection, &mut state, &mut debounce)?;
-                    } else {
-                        debounce.schedule(uri, options.debounce);
-                    }
-                }
-                DidSaveTextDocument::METHOD => {
-                    let params: DidSaveTextDocumentParams = parse_params!(&method, params);
-                    if is_environment_document(&params.text_document.uri) {
-                        if !watching.dynamic {
-                            watched_files_and_publish(
-                                &connection,
-                                &mut state,
-                                &mut debounce,
-                                &[crate::state::uri_to_path(params.text_document.uri.as_str())],
-                            )?;
-                            watching.refresh(&connection, &state)?;
-                        }
-                        continue;
-                    }
-                    let uri = params.text_document.uri.as_str().to_string();
-                    for (affected_uri, diagnostics) in state.revalidate_disk() {
-                        publish(&connection, &state, &affected_uri, &diagnostics)?;
-                    }
-                    let diagnostics = state.save(&uri, params.text);
-                    publish_affected_with_current(&connection, &mut state, &uri, &diagnostics)?;
-                    debounce.clear(&uri);
-                    cross_file_pass_and_publish(&connection, &mut state, &mut debounce)?;
-                }
-                DidCloseTextDocument::METHOD => {
-                    let params: DidCloseTextDocumentParams = parse_params!(&method, params);
-                    if is_environment_document(&params.text_document.uri) {
-                        continue;
-                    }
-                    let uri = params.text_document.uri.as_str().to_string();
-                    state.close(&uri);
-                    let affected = state.affected_open_uris(&uri);
-                    debounce.clear(&uri);
-                    // Clear stale squiggles before refreshing dependents against
-                    // the closed document's on-disk workspace state.
-                    publish(&connection, &state, &uri, &[])?;
-                    for affected_uri in affected {
-                        if affected_uri == uri {
-                            continue;
-                        }
-                        let diagnostics = state.analyze(&affected_uri);
-                        publish(&connection, &state, &affected_uri, &diagnostics)?;
-                    }
-                    cross_file_pass_and_publish(&connection, &mut state, &mut debounce)?;
-                }
-                DidChangeWatchedFiles::METHOD => {
-                    let params: DidChangeWatchedFilesParams = parse_params!(&method, params);
-                    let paths: Vec<_> = params
-                        .changes
-                        .into_iter()
-                        .filter(|event| {
-                            event
-                                .uri
-                                .scheme()
-                                .is_some_and(|scheme| scheme.as_str() == "file")
-                        })
-                        .map(|event| crate::state::uri_to_path(event.uri.as_str()))
-                        .collect();
-                    watched_files_and_publish(&connection, &mut state, &mut debounce, &paths)?;
-                }
-                other => debug!(method = other, "ignoring notification"),
-            },
+            }
             Message::Response(response) => {
                 watching.response(response);
                 state.set_dynamic_file_watching(watching.dynamic);
@@ -825,6 +740,172 @@ fn analysis_worker_with(
         publish_config_messages(&connection, &mut state)?;
         watching.refresh(&connection, &state)?;
     }
+}
+
+fn revalidate_and_publish(
+    connection: &Connection,
+    state: &mut LspState,
+    debounce: &mut Debounce,
+    idle_poll_delay: Duration,
+) -> Result<Duration, ServerError> {
+    // Revalidate only after a quiet debounce/idle interval.
+    let disk_updates = state.revalidate_disk();
+    let refreshed = !disk_updates.is_empty();
+    let idle_poll_delay = next_idle_poll_delay(idle_poll_delay, refreshed);
+    for (uri, diagnostics) in disk_updates {
+        publish(connection, state, &uri, &diagnostics)?;
+    }
+    let uris = debounce.drain();
+    if uris.is_empty() && !refreshed {
+        return Ok(idle_poll_delay);
+    }
+    for (affected_uri, diagnostics) in state.analyze_affected_many(&uris) {
+        publish(connection, state, &affected_uri, &diagnostics)?;
+    }
+    cross_file_pass_and_publish(connection, state, debounce)?;
+    publish_config_messages(connection, state)?;
+    Ok(idle_poll_delay)
+}
+
+fn handle_notification(
+    connection: &Connection,
+    state: &mut LspState,
+    debounce: &mut Debounce,
+    watching: &mut FileWatching,
+    delay: Duration,
+    ServerNotification { method, params }: ServerNotification,
+) -> Result<bool, ServerError> {
+    // A malformed notification skips the message, not the session (LSP spec).
+    macro_rules! parse_params {
+        () => {
+            match serde_json::from_value(params) {
+                Ok(value) => value,
+                Err(error) => {
+                    warn!(method = %method, %error, "ignoring notification with malformed params");
+                    return Ok(false);
+                }
+            }
+        };
+    }
+    match method.as_str() {
+        DidOpenTextDocument::METHOD => {
+            let params: DidOpenTextDocumentParams = parse_params!();
+            if is_environment_document(&params.text_document.uri) {
+                return Ok(false);
+            }
+            open_and_publish(connection, state, debounce, params)?;
+        }
+        DidChangeTextDocument::METHOD => {
+            let params: DidChangeTextDocumentParams = parse_params!();
+            if is_environment_document(&params.text_document.uri) {
+                return Ok(false);
+            }
+            let uri = params.text_document.uri.as_str().to_string();
+            // FULL sync: the last change event carries the whole document.
+            let Some(change) = params.content_changes.into_iter().next_back() else {
+                return Ok(false);
+            };
+            if !state.change(&uri, change.text, Some(params.text_document.version)) {
+                return Ok(false);
+            }
+            if delay.is_zero() {
+                analyze_affected_and_publish(connection, state, &uri)?;
+                cross_file_pass_and_publish(connection, state, debounce)?;
+            } else {
+                debounce.schedule(uri, delay);
+            }
+        }
+        DidSaveTextDocument::METHOD => {
+            let params: DidSaveTextDocumentParams = parse_params!();
+            if is_environment_document(&params.text_document.uri) {
+                if !watching.dynamic {
+                    watched_files_and_publish(
+                        connection,
+                        state,
+                        debounce,
+                        &[crate::state::uri_to_path(params.text_document.uri.as_str())],
+                    )?;
+                    watching.refresh(connection, state)?;
+                }
+                return Ok(false);
+            }
+            let uri = params.text_document.uri.as_str().to_string();
+            for (affected_uri, diagnostics) in state.revalidate_disk() {
+                publish(connection, state, &affected_uri, &diagnostics)?;
+            }
+            let diagnostics = state.save(&uri, params.text);
+            publish_affected_with_current(connection, state, &uri, &diagnostics)?;
+            debounce.clear(&uri);
+            cross_file_pass_and_publish(connection, state, debounce)?;
+        }
+        DidCloseTextDocument::METHOD => {
+            let params: DidCloseTextDocumentParams = parse_params!();
+            if is_environment_document(&params.text_document.uri) {
+                return Ok(false);
+            }
+            close_and_publish(connection, state, debounce, params)?;
+        }
+        DidChangeWatchedFiles::METHOD => {
+            let params: DidChangeWatchedFilesParams = parse_params!();
+            let paths: Vec<_> = params
+                .changes
+                .into_iter()
+                .filter(|event| {
+                    event
+                        .uri
+                        .scheme()
+                        .is_some_and(|scheme| scheme.as_str() == "file")
+                })
+                .map(|event| crate::state::uri_to_path(event.uri.as_str()))
+                .collect();
+            watched_files_and_publish(connection, state, debounce, &paths)?;
+        }
+        other => debug!(method = other, "ignoring notification"),
+    }
+    Ok(true)
+}
+
+fn open_and_publish(
+    connection: &Connection,
+    state: &mut LspState,
+    debounce: &mut Debounce,
+    params: DidOpenTextDocumentParams,
+) -> Result<(), ServerError> {
+    let uri = params.text_document.uri.as_str().to_string();
+    for (affected_uri, diagnostics) in state.revalidate_disk() {
+        publish(connection, state, &affected_uri, &diagnostics)?;
+    }
+    let diagnostics = state.open(
+        &uri,
+        params.text_document.text,
+        Some(params.text_document.version),
+    );
+    debounce.clear(&uri);
+    publish_affected_with_current(connection, state, &uri, &diagnostics)?;
+    cross_file_pass_and_publish(connection, state, debounce)
+}
+
+fn close_and_publish(
+    connection: &Connection,
+    state: &mut LspState,
+    debounce: &mut Debounce,
+    params: DidCloseTextDocumentParams,
+) -> Result<(), ServerError> {
+    let uri = params.text_document.uri.as_str().to_string();
+    state.close(&uri);
+    let affected = state.affected_open_uris(&uri);
+    debounce.clear(&uri);
+    // Clear stale squiggles before refreshing dependents against
+    // the closed document's on-disk workspace state.
+    publish(connection, state, &uri, &[])?;
+    for affected_uri in affected {
+        if affected_uri == uri {
+            continue;
+        }
+        let diagnostics = state.analyze(&affected_uri);
+        publish(connection, state, &affected_uri, &diagnostics)?;
+    }
+    cross_file_pass_and_publish(connection, state, debounce)
 }
 
 /// Deliver the state's deduplicated messages, batching warning lines into one popup.
@@ -922,64 +1003,7 @@ fn handle_request(
             }
         }
         "workspace/executeCommand" => {
-            let result = serde_json::from_value::<lsp_types::ExecuteCommandParams>(request.params);
-            let response = match result {
-                Ok(_) if !state.workspace_apply_edit => Response::new_err(
-                    request.id,
-                    ErrorCode::RequestFailed as i32,
-                    "Client does not support workspace/applyEdit".to_owned(),
-                ),
-                Ok(mut params)
-                    if params.command == crate::state::code_actions::FIX_ALL_COMMAND
-                        && params.arguments.len() == 1 =>
-                {
-                    let action = lsp_types::CodeAction {
-                        title: "Fix all Falcon issues".to_owned(),
-                        data: params.arguments.pop(),
-                        ..Default::default()
-                    };
-                    match state.resolve_code_action(action, cancelled) {
-                        Ok(action) => {
-                            if !cancelled()
-                                && let Some(edit) = action.edit
-                            {
-                                connection.sender.send(
-                                    Request::new(
-                                        format!(
-                                            "falcon-fix-all-{}",
-                                            serde_json::to_string(&request.id)?
-                                        )
-                                        .into(),
-                                        "workspace/applyEdit".to_owned(),
-                                        lsp_types::ApplyWorkspaceEditParams {
-                                            label: Some(action.title),
-                                            edit,
-                                        },
-                                    )
-                                    .into(),
-                                )?;
-                            }
-                            Response::new_ok(request.id, serde_json::Value::Null)
-                        }
-                        Err(error) => {
-                            Response::new_err(request.id, ErrorCode::RequestFailed as i32, error)
-                        }
-                    }
-                }
-                Ok(_) => Response::new_err(
-                    request.id,
-                    ErrorCode::InvalidParams as i32,
-                    "Expected a Falcon fix-all command with one argument".to_owned(),
-                ),
-                Err(error) => Response::new_err(
-                    request.id,
-                    ErrorCode::InvalidParams as i32,
-                    format!("invalid params: {error}"),
-                ),
-            };
-            if !cancelled() {
-                connection.sender.send(response.into())?;
-            }
+            execute_command(connection, state, request, cancelled)?;
         }
         HoverRequest::METHOD => {
             let params: HoverParams = match serde_json::from_value(request.params) {
@@ -1015,6 +1039,68 @@ fn handle_request(
                 .into(),
             )?;
         }
+    }
+    Ok(())
+}
+
+fn execute_command(
+    connection: &Connection,
+    state: &mut LspState,
+    request: Request,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<(), ServerError> {
+    let result = serde_json::from_value::<lsp_types::ExecuteCommandParams>(request.params);
+    let response = match result {
+        Ok(_) if !state.workspace_apply_edit => Response::new_err(
+            request.id,
+            ErrorCode::RequestFailed as i32,
+            "Client does not support workspace/applyEdit".to_owned(),
+        ),
+        Ok(mut params)
+            if params.command == crate::state::code_actions::FIX_ALL_COMMAND
+                && params.arguments.len() == 1 =>
+        {
+            let action = lsp_types::CodeAction {
+                title: "Fix all Falcon issues".to_owned(),
+                data: params.arguments.pop(),
+                ..Default::default()
+            };
+            match state.resolve_code_action(action, cancelled) {
+                Ok(action) => {
+                    if !cancelled()
+                        && let Some(edit) = action.edit
+                    {
+                        connection.sender.send(
+                            Request::new(
+                                format!("falcon-fix-all-{}", serde_json::to_string(&request.id)?)
+                                    .into(),
+                                "workspace/applyEdit".to_owned(),
+                                lsp_types::ApplyWorkspaceEditParams {
+                                    label: Some(action.title),
+                                    edit,
+                                },
+                            )
+                            .into(),
+                        )?;
+                    }
+                    Response::new_ok(request.id, serde_json::Value::Null)
+                }
+                Err(error) => Response::new_err(request.id, ErrorCode::RequestFailed as i32, error),
+            }
+        }
+        Ok(_) => Response::new_err(
+            request.id,
+            ErrorCode::InvalidParams as i32,
+            "Expected a Falcon fix-all command with one argument".to_owned(),
+        ),
+        Err(error) => Response::new_err(
+            request.id,
+            ErrorCode::InvalidParams as i32,
+            format!("invalid params: {error}"),
+        ),
+    };
+    if !cancelled() {
+        connection.sender.send(response.into())?;
     }
     Ok(())
 }

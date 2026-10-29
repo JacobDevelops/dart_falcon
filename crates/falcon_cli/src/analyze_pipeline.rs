@@ -231,18 +231,28 @@ fn collect_check_impl(
         .or_else(|| config.root_dir().map(Path::to_path_buf))
         .unwrap_or_else(|| cwd.clone());
     let error_on_warnings = options.error_on_warnings || config.error_on_warnings;
+    collect_selected_check(
+        options,
+        sdk_locator,
+        paths,
+        workspace.as_ref(),
+        config,
+        root,
+        error_on_warnings,
+    )
+}
 
-    let mut cli_filter;
-    let filter = if options.exclude_patterns.is_empty() {
-        &config.files.includes
-    } else {
-        cli_filter = config.files.includes.clone();
-        cli_filter.extend_excludes(&options.exclude_patterns);
-        for warning in &cli_filter.warnings()[config.files.includes.warnings().len()..] {
-            eprintln!("warning: {warning}");
-        }
-        &cli_filter
-    };
+fn collect_selected_check(
+    options: &CheckOptions,
+    sdk_locator: Option<SdkLocator>,
+    paths: &[PathBuf],
+    workspace: Option<&falcon_project::Workspace>,
+    config: falcon_config::FalconConfig,
+    root: PathBuf,
+    error_on_warnings: bool,
+) -> Result<CheckOutput, String> {
+    let cli_filter = check_path_filter(options, &config);
+    let filter = cli_filter.as_ref().unwrap_or(&config.files.includes);
     let max_errors = options.max_errors.or(config.max_errors);
     let mut analysis = ProjectAnalysis::new(&config);
     let collect_programs = analysis.collect_programs;
@@ -258,41 +268,14 @@ fn collect_check_impl(
             &[],
         )
     });
-    let mut unmatched = Vec::new();
-    if !options.no_errors_on_unmatched {
-        // Ancestor manifests support cross-file analysis but do not select an
-        // otherwise empty input directory. Only manifests within inputs count.
-        let has_selected_manifest = manifests
-            .iter()
-            .any(|(manifest, _)| paths.iter().any(|path| manifest.starts_with(path)));
-        unmatched.extend(walked.missing_paths.iter().map(|path| {
-            Diagnostic::new(
-                UNMATCHED_PATH_DIAGNOSTIC_ID,
-                Severity::Error,
-                "Input path does not exist.",
-                path.to_string_lossy(),
-                Span { start: 0, end: 0 },
-            )
-        }));
-        unmatched.extend(walked.filtered_paths.iter().map(|path| {
-            Diagnostic::new(
-                UNMATCHED_PATH_DIAGNOSTIC_ID,
-                Severity::Error,
-                "Input path is excluded by files.includes or command-line excludes.",
-                path.to_string_lossy(),
-                Span { start: 0, end: 0 },
-            )
-        }));
-        if files.is_empty() && !has_selected_manifest && unmatched.is_empty() {
-            unmatched.push(Diagnostic::new(
-                UNMATCHED_PATH_DIAGNOSTIC_ID,
-                Severity::Error,
-                "No files were processed.",
-                paths[0].to_string_lossy(),
-                Span { start: 0, end: 0 },
-            ));
-        }
-    }
+    let mut unmatched = unmatched_diagnostics(
+        options,
+        paths,
+        &files,
+        &manifests,
+        &walked.missing_paths,
+        &walked.filtered_paths,
+    );
     if files.is_empty() && manifests.is_empty() {
         crate::adoption::apply_baseline(options, &config, &root, &mut unmatched, &HashMap::new())?;
         crate::report::count_package_diagnostics(&mut packages, &unmatched);
@@ -315,83 +298,264 @@ fn collect_check_impl(
     let mut diff = String::new();
     let mut fix_reports = Vec::new();
     if options.write {
-        let (mut initial, mut fix_files, _) =
-            analyze_sources(&analysis, &files, &manifests, &config, &mut environment);
-        falcon_rules::apply_severities(&mut initial, &config);
-        falcon_project::apply_fix_policies(&config, &mut initial);
-        let fixable: HashSet<_> = initial
-            .into_iter()
-            .filter(|diagnostic| {
-                diagnostic
-                    .fix
-                    .as_ref()
-                    .is_some_and(|fix| fix.kind == FixKind::Safe || options.unsafe_fixes)
-            })
-            .map(|diagnostic| diagnostic.file_path)
-            .collect();
-        let external = (analysis.resolve && !fixable.is_empty())
-            .then(|| FixExternals::load(&environment, &mut fix_files));
-        for (path, source) in &mut files {
-            if !fixable.contains(path.to_string_lossy().as_ref()) {
-                continue;
-            }
-            let snapshot = if options.dry_run {
-                None
-            } else {
-                match WriteSnapshot::capture(path, source) {
-                    Ok(snapshot) => Some(snapshot),
-                    Err(message) => {
-                        fix_reports.push(fix_report(path, message));
-                        continue;
-                    }
-                }
-            };
-            let outcome = falcon_project::fix_file_with_context(
-                &analysis,
-                &config,
-                &mut environment,
-                path,
-                source,
-                options.unsafe_fixes,
-                falcon_project::FixContext {
-                    external: external.as_ref().map(FixExternals::indexes),
-                    external_libraries: external.as_ref().map(|external| &external.libraries),
-                    project_files: &fix_files,
-                    cancelled: &|| false,
-                },
-            );
-            if let Some(stop) = outcome.stop {
-                fix_reports.push(fix_report(path, stop.to_string()));
-                continue;
-            }
-            if outcome.source == *source {
-                continue;
-            }
-            let project_file = fix_files.iter_mut().find(|file| file.path == *path);
-            if let Err(message) = WriteSnapshot::apply_with_project_snapshot(
-                snapshot,
-                path,
-                &outcome.source,
-                project_file,
-                &environment,
-            ) {
-                fix_reports.push(fix_report(path, message));
-                continue;
-            }
-            if options.dry_run {
-                let relative = crate::baseline::relative_path(&path.to_string_lossy(), &root);
-                append_full_file_diff(&mut diff, &relative, source, &outcome.source);
-            } else {
-                *source = outcome.source;
-            }
-        }
+        apply_selected_fixes(
+            options,
+            &analysis,
+            &config,
+            &mut environment,
+            (&mut files, &manifests),
+            &root,
+            (&mut diff, &mut fix_reports),
+        );
         // Project snapshots are retained only for fixing unless cross-file rules
         // also need the final parsed files.
         analysis.collect_programs = collect_programs;
     }
-    let (mut diagnostics, mut project_files, indexes) =
-        analyze_sources(&analysis, &files, &manifests, &config, &mut environment);
     let total_files = files.len();
+    let (mut diagnostics, project_files, pipeline_failed, has_unmatched) = finish_project_analysis(
+        &analysis,
+        &mut environment,
+        &config,
+        filter,
+        &mut files,
+        &mut manifests,
+        &mut unmatched,
+    );
+
+    let fix_failed = !fix_reports.is_empty();
+    diagnostics.append(&mut fix_reports);
+    falcon_project::sort_diagnostics(&mut diagnostics);
+    apply_check_baseline(
+        options,
+        &config,
+        &root,
+        &mut diagnostics,
+        &project_files,
+        (&files, &manifests),
+        collect_programs,
+    )?;
+    crate::report::count_package_diagnostics(&mut packages, &diagnostics);
+    let exit_code = check_exit_code(
+        options,
+        error_on_warnings,
+        &diagnostics,
+        pipeline_failed || has_unmatched || fix_failed || !diff.is_empty(),
+    );
+    Ok(CheckOutput {
+        diagnostics,
+        total_files,
+        exit_code,
+        max_errors,
+        root,
+        packages,
+        diff,
+    })
+}
+
+fn check_path_filter(
+    options: &CheckOptions,
+    config: &falcon_config::FalconConfig,
+) -> Option<falcon_config::PathFilter> {
+    if options.exclude_patterns.is_empty() {
+        return None;
+    }
+    let mut filter = config.files.includes.clone();
+    filter.extend_excludes(&options.exclude_patterns);
+    for warning in &filter.warnings()[config.files.includes.warnings().len()..] {
+        eprintln!("warning: {warning}");
+    }
+    Some(filter)
+}
+
+type SourceText = (PathBuf, String);
+
+fn apply_check_baseline(
+    options: &CheckOptions,
+    config: &falcon_config::FalconConfig,
+    root: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+    project_files: &[ProjectFile],
+    sources: (&[SourceText], &[SourceText]),
+    collect_programs: bool,
+) -> Result<(), String> {
+    if options.baseline.is_some() || config.baseline.is_some() || options.write_baseline.is_some() {
+        let (files, manifests) = sources;
+        let sources = if collect_programs {
+            project_files
+                .iter()
+                .map(|file| (file.path.to_string_lossy(), file.source()))
+                .collect()
+        } else {
+            files
+                .iter()
+                .chain(manifests.iter())
+                .map(|(path, source)| (path.to_string_lossy(), source.as_str()))
+                .collect()
+        };
+        crate::adoption::apply_baseline(options, config, root, diagnostics, &sources)?;
+    }
+    Ok(())
+}
+
+fn check_exit_code(
+    options: &CheckOptions,
+    error_on_warnings: bool,
+    diagnostics: &[Diagnostic],
+    failed: bool,
+) -> i32 {
+    if failed {
+        1
+    } else if diagnostics.iter().any(|diagnostic| {
+        diagnostic.severity == Severity::Error
+            || (error_on_warnings && diagnostic.severity == Severity::Warning)
+    }) {
+        options.error_exit_code
+    } else {
+        0
+    }
+}
+
+fn unmatched_diagnostics(
+    options: &CheckOptions,
+    paths: &[PathBuf],
+    files: &[(PathBuf, String)],
+    manifests: &[(PathBuf, String)],
+    missing_paths: &[PathBuf],
+    filtered_paths: &[PathBuf],
+) -> Vec<Diagnostic> {
+    let mut unmatched = Vec::new();
+    if !options.no_errors_on_unmatched {
+        // Ancestor manifests support cross-file analysis but do not select an
+        // otherwise empty input directory. Only manifests within inputs count.
+        let has_selected_manifest = manifests
+            .iter()
+            .any(|(manifest, _)| paths.iter().any(|path| manifest.starts_with(path)));
+        unmatched.extend(missing_paths.iter().map(|path| {
+            Diagnostic::new(
+                UNMATCHED_PATH_DIAGNOSTIC_ID,
+                Severity::Error,
+                "Input path does not exist.",
+                path.to_string_lossy(),
+                Span { start: 0, end: 0 },
+            )
+        }));
+        unmatched.extend(filtered_paths.iter().map(|path| {
+            Diagnostic::new(
+                UNMATCHED_PATH_DIAGNOSTIC_ID,
+                Severity::Error,
+                "Input path is excluded by files.includes or command-line excludes.",
+                path.to_string_lossy(),
+                Span { start: 0, end: 0 },
+            )
+        }));
+        if files.is_empty() && !has_selected_manifest && unmatched.is_empty() {
+            unmatched.push(Diagnostic::new(
+                UNMATCHED_PATH_DIAGNOSTIC_ID,
+                Severity::Error,
+                "No files were processed.",
+                paths[0].to_string_lossy(),
+                Span { start: 0, end: 0 },
+            ));
+        }
+    }
+    unmatched
+}
+
+fn apply_selected_fixes(
+    options: &CheckOptions,
+    analysis: &ProjectAnalysis,
+    config: &falcon_config::FalconConfig,
+    environment: &mut AnalysisEnvironment,
+    sources: (&mut [SourceText], &[SourceText]),
+    root: &Path,
+    reports: (&mut String, &mut Vec<Diagnostic>),
+) {
+    let (diff, fix_reports) = reports;
+    let (files, manifests) = sources;
+    let (mut initial, mut fix_files, _) =
+        analyze_sources(analysis, files, manifests, config, environment);
+    falcon_rules::apply_severities(&mut initial, config);
+    falcon_project::apply_fix_policies(config, &mut initial);
+    let fixable: HashSet<_> = initial
+        .into_iter()
+        .filter(|diagnostic| {
+            diagnostic
+                .fix
+                .as_ref()
+                .is_some_and(|fix| fix.kind == FixKind::Safe || options.unsafe_fixes)
+        })
+        .map(|diagnostic| diagnostic.file_path)
+        .collect();
+    let external = (analysis.resolve && !fixable.is_empty())
+        .then(|| FixExternals::load(environment, &mut fix_files));
+    for (path, source) in files {
+        if !fixable.contains(path.to_string_lossy().as_ref()) {
+            continue;
+        }
+        let snapshot = if options.dry_run {
+            None
+        } else {
+            match WriteSnapshot::capture(path, source) {
+                Ok(snapshot) => Some(snapshot),
+                Err(message) => {
+                    fix_reports.push(fix_report(path, message));
+                    continue;
+                }
+            }
+        };
+        let outcome = falcon_project::fix_file_with_context(
+            analysis,
+            config,
+            environment,
+            path,
+            source,
+            options.unsafe_fixes,
+            falcon_project::FixContext {
+                external: external.as_ref().map(FixExternals::indexes),
+                external_libraries: external.as_ref().map(|external| &external.libraries),
+                project_files: &fix_files,
+                cancelled: &|| false,
+            },
+        );
+        if let Some(stop) = outcome.stop {
+            fix_reports.push(fix_report(path, stop.to_string()));
+            continue;
+        }
+        if outcome.source == *source {
+            continue;
+        }
+        let project_file = fix_files.iter_mut().find(|file| file.path == *path);
+        if let Err(message) = WriteSnapshot::apply_with_project_snapshot(
+            snapshot,
+            path,
+            &outcome.source,
+            project_file,
+            environment,
+        ) {
+            fix_reports.push(fix_report(path, message));
+            continue;
+        }
+        if options.dry_run {
+            let relative = crate::baseline::relative_path(&path.to_string_lossy(), root);
+            append_full_file_diff(diff, &relative, source, &outcome.source);
+        } else {
+            *source = outcome.source;
+        }
+    }
+}
+
+fn finish_project_analysis(
+    analysis: &ProjectAnalysis,
+    environment: &mut AnalysisEnvironment,
+    config: &falcon_config::FalconConfig,
+    filter: &falcon_config::PathFilter,
+    files: &mut Vec<(PathBuf, String)>,
+    manifests: &mut Vec<(PathBuf, String)>,
+    unmatched: &mut Vec<Diagnostic>,
+) -> (Vec<Diagnostic>, Vec<ProjectFile>, bool, bool) {
+    let collect_programs = analysis.collect_programs;
+    let (mut diagnostics, mut project_files, indexes) =
+        analyze_sources(analysis, files, manifests, config, environment);
     if collect_programs {
         project_files.extend(
             manifests
@@ -402,15 +566,15 @@ fn collect_check_impl(
     }
 
     let pipeline_failed = complete_analysis(
-        &environment,
+        environment,
         &analysis.cross_file_registry,
         &project_files,
-        &config,
+        config,
         indexes.as_ref(),
         &mut diagnostics,
     );
     let has_unmatched = !unmatched.is_empty();
-    diagnostics.append(&mut unmatched);
+    diagnostics.append(unmatched);
 
     for warning in environment.take_warnings() {
         eprintln!("warning: {warning}");
@@ -434,45 +598,7 @@ fn collect_check_impl(
                 .map(|(path, source)| (path.as_path(), source.as_str())),
         );
     }
-
-    let fix_failed = !fix_reports.is_empty();
-    diagnostics.append(&mut fix_reports);
-    falcon_project::sort_diagnostics(&mut diagnostics);
-    if options.baseline.is_some() || config.baseline.is_some() || options.write_baseline.is_some() {
-        let sources = if collect_programs {
-            project_files
-                .iter()
-                .map(|file| (file.path.to_string_lossy(), file.source()))
-                .collect()
-        } else {
-            files
-                .iter()
-                .chain(manifests.iter())
-                .map(|(path, source)| (path.to_string_lossy(), source.as_str()))
-                .collect()
-        };
-        crate::adoption::apply_baseline(options, &config, &root, &mut diagnostics, &sources)?;
-    }
-    crate::report::count_package_diagnostics(&mut packages, &diagnostics);
-    let exit_code = if pipeline_failed || has_unmatched || fix_failed || !diff.is_empty() {
-        1
-    } else if diagnostics.iter().any(|diagnostic| {
-        diagnostic.severity == Severity::Error
-            || (error_on_warnings && diagnostic.severity == Severity::Warning)
-    }) {
-        options.error_exit_code
-    } else {
-        0
-    };
-    Ok(CheckOutput {
-        diagnostics,
-        total_files,
-        exit_code,
-        max_errors,
-        root,
-        packages,
-        diff,
-    })
+    (diagnostics, project_files, pipeline_failed, has_unmatched)
 }
 
 fn fix_report(path: &Path, message: String) -> Diagnostic {

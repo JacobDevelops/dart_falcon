@@ -223,63 +223,7 @@ impl FlowContext<'_, '_> {
             && identity.is_sdk("dart:async", "FutureOr")
             && let Some(argument) = arguments.first()
         {
-            // A written nullable union retains its null arm independently of
-            // the argument: T? <: FutureOr<T>? follows from T <: FutureOr<T>.
-            if target.nullable() {
-                if matches!(
-                    value,
-                    ResolvedType {
-                        kind: ResolvedTypeKind::Null
-                    }
-                ) {
-                    return true;
-                }
-                if value.nullable()
-                    && !matches!(
-                        value,
-                        ResolvedType {
-                            kind: ResolvedTypeKind::Dynamic
-                        } | ResolvedType {
-                            kind: ResolvedTypeKind::Unknown
-                        }
-                    )
-                {
-                    return self.subtype(&value.with_nullable(false), &target.with_nullable(false));
-                }
-            }
-            if self.subtype(value, argument) {
-                return true;
-            }
-            if value.nullable() && !target.nullable() && !argument.nullable() {
-                return false;
-            }
-            return match value {
-                ResolvedType {
-                    kind:
-                        ResolvedTypeKind::Interface {
-                            identity,
-                            arguments,
-                            ..
-                        },
-                } if identity.is_sdk("dart:async", "FutureOr") => arguments
-                    .first()
-                    .is_some_and(|value| self.subtype(value, argument)),
-                ResolvedType {
-                    kind: ResolvedTypeKind::TypeParameter { bound, .. },
-                } => self.subtype(bound, target),
-                ResolvedType {
-                    kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
-                } => self.subtype(&bound.non_null(), target),
-                _ => self
-                    .signatures
-                    .instantiated_supertype(value, "dart:async", "Future", self.model)
-                    .is_some_and(|future| {
-                        future
-                            .arguments()
-                            .first()
-                            .is_some_and(|value| self.subtype(value, argument))
-                    }),
-            };
+            return self.compatible_future_or(value, target, argument);
         }
         if value.nullable() && !target.nullable() {
             return false;
@@ -342,6 +286,71 @@ impl FlowContext<'_, '_> {
                         .zip(arguments.iter())
                         .all(|(value, target)| value == target || self.subtype(value, target))
             })
+    }
+
+    fn compatible_future_or(
+        &self,
+        value: &ResolvedType,
+        target: &ResolvedType,
+        argument: &ResolvedType,
+    ) -> bool {
+        // A written nullable union retains its null arm independently of
+        // the argument: T? <: FutureOr<T>? follows from T <: FutureOr<T>.
+        if target.nullable() {
+            if matches!(
+                value,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Null
+                }
+            ) {
+                return true;
+            }
+            if value.nullable()
+                && !matches!(
+                    value,
+                    ResolvedType {
+                        kind: ResolvedTypeKind::Dynamic
+                    } | ResolvedType {
+                        kind: ResolvedTypeKind::Unknown
+                    }
+                )
+            {
+                return self.subtype(&value.with_nullable(false), &target.with_nullable(false));
+            }
+        }
+        if self.subtype(value, argument) {
+            return true;
+        }
+        if value.nullable() && !target.nullable() && !argument.nullable() {
+            return false;
+        }
+        match value {
+            ResolvedType {
+                kind:
+                    ResolvedTypeKind::Interface {
+                        identity,
+                        arguments,
+                        ..
+                    },
+            } if identity.is_sdk("dart:async", "FutureOr") => arguments
+                .first()
+                .is_some_and(|value| self.subtype(value, argument)),
+            ResolvedType {
+                kind: ResolvedTypeKind::TypeParameter { bound, .. },
+            } => self.subtype(bound, target),
+            ResolvedType {
+                kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+            } => self.subtype(&bound.non_null(), target),
+            _ => self
+                .signatures
+                .instantiated_supertype(value, "dart:async", "Future", self.model)
+                .is_some_and(|future| {
+                    future
+                        .arguments()
+                        .first()
+                        .is_some_and(|value| self.subtype(value, argument))
+                }),
+        }
     }
 
     /// Whether `value` is provably a subtype of `target`.
@@ -798,29 +807,7 @@ impl FlowContext<'_, '_> {
                 });
                 environment.declare(variable.name().name(), ty);
             }
-            Pattern::List(list) => {
-                let element = list
-                    .type_arg()
-                    .map(|ty| self.model.resolve_type_in(ty, self.type_parameters))
-                    .or_else(|| {
-                        self.signatures
-                            .instantiated_supertype(&matched, "dart:core", "List", self.model)
-                            .and_then(|ty| ty.type_argument(0))
-                    })
-                    .unwrap_or(ResolvedType::UNKNOWN);
-                for child in list.elements() {
-                    match child {
-                        ListPatternElement::Pattern(child) => {
-                            self.declare_pattern(environment, child, element.clone())
-                        }
-                        ListPatternElement::Rest(rest) => {
-                            if let Some(child) = rest.pattern() {
-                                self.declare_pattern(environment, child, matched.clone());
-                            }
-                        }
-                    }
-                }
-            }
+            Pattern::List(list) => self.declare_list_pattern(environment, list, matched),
             Pattern::Record(record) => {
                 let mut positional = 0;
                 for field in record.fields() {
@@ -854,28 +841,7 @@ impl FlowContext<'_, '_> {
                     self.declare_pattern(environment, entry.pattern(), value.clone());
                 }
             }
-            Pattern::Object(object) => {
-                let object_type = self.object_pattern_type(object.type_(), &matched);
-                for field in object.fields() {
-                    let ty = self
-                        .signatures
-                        .resolved_field(&object_type, field.name().name(), self.model)
-                        .or_else(|| {
-                            self.signatures.resolved_extension_getter(
-                                &object_type,
-                                field.name().name(),
-                                self.model,
-                            )
-                        })
-                        .map_or(ResolvedType::UNKNOWN, |(ty, substitutions)| {
-                            self.model.substitute(&ty, &substitutions)
-                        });
-                    match field.pattern() {
-                        Some(child) => self.declare_pattern(environment, child, ty),
-                        None => environment.declare(field.name().name(), ty),
-                    }
-                }
-            }
+            Pattern::Object(object) => self.declare_object_pattern(environment, object, matched),
             Pattern::LogicalAnd(_) | Pattern::LogicalOr(_) => {
                 let (left, right) = match pattern {
                     Pattern::LogicalAnd(logical) => (logical.left(), logical.right()),
@@ -907,6 +873,63 @@ impl FlowContext<'_, '_> {
             | Pattern::Const(_)
             | Pattern::Relational(_)
             | Pattern::Error(_) => {}
+        }
+    }
+
+    fn declare_list_pattern(
+        &self,
+        environment: &mut TypeEnvironment,
+        list: falcon_syntax::cst::ListPattern<'_>,
+        matched: ResolvedType,
+    ) {
+        let element = list
+            .type_arg()
+            .map(|ty| self.model.resolve_type_in(ty, self.type_parameters))
+            .or_else(|| {
+                self.signatures
+                    .instantiated_supertype(&matched, "dart:core", "List", self.model)
+                    .and_then(|ty| ty.type_argument(0))
+            })
+            .unwrap_or(ResolvedType::UNKNOWN);
+        for child in list.elements() {
+            match child {
+                ListPatternElement::Pattern(child) => {
+                    self.declare_pattern(environment, child, element.clone())
+                }
+                ListPatternElement::Rest(rest) => {
+                    if let Some(child) = rest.pattern() {
+                        self.declare_pattern(environment, child, matched.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    fn declare_object_pattern(
+        &self,
+        environment: &mut TypeEnvironment,
+        object: falcon_syntax::cst::ObjectPattern<'_>,
+        matched: ResolvedType,
+    ) {
+        let object_type = self.object_pattern_type(object.type_(), &matched);
+        for field in object.fields() {
+            let ty = self
+                .signatures
+                .resolved_field(&object_type, field.name().name(), self.model)
+                .or_else(|| {
+                    self.signatures.resolved_extension_getter(
+                        &object_type,
+                        field.name().name(),
+                        self.model,
+                    )
+                })
+                .map_or(ResolvedType::UNKNOWN, |(ty, substitutions)| {
+                    self.model.substitute(&ty, &substitutions)
+                });
+            match field.pattern() {
+                Some(child) => self.declare_pattern(environment, child, ty),
+                None => environment.declare(field.name().name(), ty),
+            }
         }
     }
 

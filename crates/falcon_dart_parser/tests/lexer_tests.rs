@@ -237,7 +237,7 @@ fn test_unterminated_block_comment() {
 }
 
 #[test]
-fn test_keyword_operator_punctuation_table() {
+fn test_keyword_table() {
     let cases = [
         ("test_keyword_assert", "assert", TokenKind::Assert),
         ("test_keyword_break", "break", TokenKind::Break),
@@ -307,6 +307,13 @@ fn test_keyword_operator_punctuation_table() {
         ("keyword_when", "when", TokenKind::When),
         ("keyword_on", "on", TokenKind::On),
         ("test_builtin_override", "override", TokenKind::Override),
+    ];
+    assert_token_cases(&cases);
+}
+
+#[test]
+fn test_operator_punctuation_table() {
+    let cases = [
         ("test_operator_plus", "+", TokenKind::Plus),
         ("test_operator_minus", "-", TokenKind::Minus),
         ("test_operator_star", "*", TokenKind::Star),
@@ -359,7 +366,11 @@ fn test_keyword_operator_punctuation_table() {
         ("test_punct_at", "@", TokenKind::At),
         ("test_punct_dot", ".", TokenKind::Dot),
     ];
-    for (witness, src, expected) in cases {
+    assert_token_cases(&cases);
+}
+
+fn assert_token_cases(cases: &[(&str, &str, TokenKind)]) {
+    for &(witness, src, expected) in cases {
         assert_eq!(only_kind(src), expected, "{witness}: {src:?}");
     }
 }

@@ -6,11 +6,11 @@
 //! and no intervening expression that can mutate it. Custom reduce members and
 //! unresolved receivers are excluded.
 
-use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, ConstantValue, MemberKind, QualifiedName, ResolvedType, Rule, RulePreparation,
-    ConstantContext, evaluate_constant,
+    AnalyzeContext, ConstantContext, ConstantValue, MemberKind, QualifiedName, ResolvedType, Rule,
+    RulePreparation, evaluate_constant,
 };
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -66,7 +66,14 @@ fn nonempty(receiver: Expr<'_>, state: &SemanticState<'_>) -> bool {
         }
         _ => {}
     }
-    match evaluate_constant(receiver, ConstantContext { owner: state.constant_owner.as_ref(), locals: Some(&state.visible_local_constants()), ..ConstantContext::new(&state.model, &state.signatures) }) {
+    match evaluate_constant(
+        receiver,
+        ConstantContext {
+            owner: state.constant_owner.as_ref(),
+            locals: Some(&state.visible_local_constants()),
+            ..ConstantContext::new(&state.model, &state.signatures)
+        },
+    ) {
         Some(ConstantValue::List(_, values) | ConstantValue::Set(_, values)) => !values.is_empty(),
         _ => false,
     }
@@ -175,28 +182,7 @@ fn immediately_guarded(call: CallExpr<'_>, receiver: Expr<'_>, state: &SemanticS
         return false;
     };
     let name = receiver.name();
-    let stable = if state.environment.binding_declaration(name).is_some() {
-        !state.environment.is_local_function(name)
-    } else {
-        state.enclosing_type.as_ref().is_some_and(|owner| {
-            state
-                .signatures
-                .resolved_member_facts(owner, name, &state.model)
-                .is_some_and(|facts| {
-                    !facts.is_empty()
-                        && facts.iter().all(|fact| {
-                            !fact.is_abstract
-                                && matches!(
-                                    fact.kind,
-                                    MemberKind::Field {
-                                        writable: false,
-                                        ..
-                                    }
-                                )
-                        })
-                })
-        })
-    };
+    let stable = stable_receiver(name, state);
     if !stable {
         return false;
     }
@@ -265,22 +251,7 @@ fn immediately_guarded(call: CallExpr<'_>, receiver: Expr<'_>, state: &SemanticS
                     node = parent;
                     continue;
                 };
-                let Stmt::If(guard) = previous else {
-                    return false;
-                };
-                let IfCondition::Expr(condition) = guard.condition() else {
-                    return false;
-                };
-                let branch = match guard.then_branch() {
-                    Stmt::Block(block) => block.stmts().last(),
-                    statement => Some(statement),
-                };
-                return guard.else_branch().is_none()
-                    && matches!(
-                        branch,
-                        Some(Stmt::Return(_) | Stmt::Throw(_) | Stmt::Continue(_) | Stmt::Break(_))
-                    )
-                    && nonempty_condition(condition, receiver.name(), false);
+                return exiting_empty_guard(previous, receiver.name());
             }
             Some(Stmt::If(branch)) => {
                 let IfCondition::Expr(condition) = branch.condition() else {
@@ -304,6 +275,50 @@ fn immediately_guarded(call: CallExpr<'_>, receiver: Expr<'_>, state: &SemanticS
     false
 }
 
+fn exiting_empty_guard(statement: Stmt<'_>, receiver: &str) -> bool {
+    let Stmt::If(guard) = statement else {
+        return false;
+    };
+    let IfCondition::Expr(condition) = guard.condition() else {
+        return false;
+    };
+    let branch = match guard.then_branch() {
+        Stmt::Block(block) => block.stmts().last(),
+        statement => Some(statement),
+    };
+    guard.else_branch().is_none()
+        && matches!(
+            branch,
+            Some(Stmt::Return(_) | Stmt::Throw(_) | Stmt::Continue(_) | Stmt::Break(_))
+        )
+        && nonempty_condition(condition, receiver, false)
+}
+
+fn stable_receiver(name: &str, state: &SemanticState<'_>) -> bool {
+    if state.environment.binding_declaration(name).is_some() {
+        !state.environment.is_local_function(name)
+    } else {
+        state.enclosing_type.as_ref().is_some_and(|owner| {
+            state
+                .signatures
+                .resolved_member_facts(owner, name, &state.model)
+                .is_some_and(|facts| {
+                    !facts.is_empty()
+                        && facts.iter().all(|fact| {
+                            !fact.is_abstract
+                                && matches!(
+                                    fact.kind,
+                                    MemberKind::Field {
+                                        writable: false,
+                                        ..
+                                    }
+                                )
+                        })
+                })
+        })
+    }
+}
+
 impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
         let Expr::Call(call) = node else {
@@ -317,7 +332,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && !nonempty(field.object(), state)
             && !immediately_guarded(call, field.object(), state)
         {
-            self.diagnostics.push(self.ctx.diagnostic("Reducing a possibly empty iterable can throw; use fold or check for emptiness.", field.field().span()));
+            self.diagnostics.push(self.ctx.diagnostic(
+                "Reducing a possibly empty iterable can throw; use fold or check for emptiness.",
+                field.field().span(),
+            ));
         }
     }
 
@@ -346,7 +364,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                             .is_some_and(|first| first.span() == call.span())
                 })
         {
-            self.diagnostics.push(self.ctx.diagnostic("Reducing a possibly empty iterable can throw; use fold or check for emptiness.", call.name().span()));
+            self.diagnostics.push(self.ctx.diagnostic(
+                "Reducing a possibly empty iterable can throw; use fold or check for emptiness.",
+                call.name().span(),
+            ));
         }
     }
 

@@ -1,4 +1,4 @@
-use super::LspState;
+use super::{DocumentState, LspState};
 
 use falcon_analyze::ExternalIndexParts;
 use falcon_diagnostics::{FixKind, LineIndex};
@@ -82,6 +82,104 @@ fn minimal_edit(source: &str, mut replacement: String, lines: &LineIndex) -> Tex
     }
 }
 
+struct QuickFixContext<'a> {
+    document: &'a DocumentState,
+    config: &'a falcon_config::FalconConfig,
+    lines: &'a LineIndex<'a>,
+    document_changes: bool,
+}
+
+impl QuickFixContext<'_> {
+    fn append_actions(
+        &self,
+        params: &CodeActionParams,
+        cancelled: &dyn Fn() -> bool,
+        actions: &mut Vec<CodeAction>,
+    ) -> Result<(), String> {
+        let document = self.document;
+        let config = self.config;
+        let lines = self.lines;
+        let source = document.text();
+        let uri = &params.text_document.uri;
+        for diagnostic in &document.last_diagnostics {
+            if cancelled() {
+                return Err("Falcon code actions cancelled".to_owned());
+            }
+            let Some(fix) = &diagnostic.fix else { continue };
+            let Some(kind) = effective_fix_kind(config, &document.path, diagnostic.rule, fix.kind)
+            else {
+                continue;
+            };
+            let lsp_diagnostic = diagnostic.format_lsp_in(lines);
+            let range = lsp_diagnostic.range;
+            let intersects = if range.start == range.end {
+                if params.range.start == params.range.end {
+                    range.start == params.range.start
+                } else {
+                    params.range.start <= range.start && range.start < params.range.end
+                }
+            } else if params.range.start == params.range.end {
+                range.start <= params.range.start && params.range.start <= range.end
+            } else {
+                range.start < params.range.end && params.range.start < range.end
+            };
+            if !intersects
+                || (!params.context.diagnostics.is_empty()
+                    && !params.context.diagnostics.iter().any(|context| {
+                        context.code == lsp_diagnostic.code
+                            && context.range == range
+                            && context.message == lsp_diagnostic.message
+                    }))
+            {
+                continue;
+            }
+            let title = if kind == FixKind::Unsafe {
+                format!("{} (unsafe)", fix.title)
+            } else {
+                fix.title.clone()
+            };
+            if let Err(error) = fix.validate(source) {
+                actions.push(CodeAction {
+                    title,
+                    kind: Some(CodeActionKind::QUICKFIX),
+                    diagnostics: Some(vec![lsp_diagnostic]),
+                    is_preferred: Some(false),
+                    disabled: Some(lsp_types::CodeActionDisabled {
+                        reason: format!("Invalid fix from {}: {error}", diagnostic.rule),
+                    }),
+                    ..Default::default()
+                });
+                continue;
+            }
+            let edits = fix
+                .edits()
+                .iter()
+                .map(|edit| TextEdit {
+                    range: Range::new(
+                        lines.lsp_position(edit.span.start),
+                        lines.lsp_position(edit.span.end),
+                    ),
+                    new_text: edit.replacement.clone(),
+                })
+                .collect();
+            actions.push(CodeAction {
+                title,
+                kind: Some(CodeActionKind::QUICKFIX),
+                diagnostics: Some(vec![lsp_diagnostic]),
+                is_preferred: Some(kind == FixKind::Safe),
+                edit: Some(workspace_edit(
+                    uri,
+                    document.version,
+                    edits,
+                    self.document_changes,
+                )),
+                ..Default::default()
+            });
+        }
+        Ok(())
+    }
+}
+
 impl LspState {
     pub(crate) fn configure_code_actions(&mut self, params: &serde_json::Value) {
         self.code_action_resolve = params
@@ -139,82 +237,13 @@ impl LspState {
             + usize::from(unsafe_fixes);
         let mut actions = Vec::with_capacity(capacity);
         if quickfix && !document.has_parse_errors {
-            for diagnostic in diagnostics {
-                if cancelled() {
-                    return Err("Falcon code actions cancelled".to_owned());
-                }
-                let Some(fix) = &diagnostic.fix else { continue };
-                let Some(kind) =
-                    effective_fix_kind(config, &document.path, diagnostic.rule, fix.kind)
-                else {
-                    continue;
-                };
-                let lsp_diagnostic = diagnostic.format_lsp_in(&lines);
-                let range = lsp_diagnostic.range;
-                let intersects = if range.start == range.end {
-                    if params.range.start == params.range.end {
-                        range.start == params.range.start
-                    } else {
-                        params.range.start <= range.start && range.start < params.range.end
-                    }
-                } else if params.range.start == params.range.end {
-                    range.start <= params.range.start && params.range.start <= range.end
-                } else {
-                    range.start < params.range.end && params.range.start < range.end
-                };
-                if !intersects
-                    || (!params.context.diagnostics.is_empty()
-                        && !params.context.diagnostics.iter().any(|context| {
-                            context.code == lsp_diagnostic.code
-                                && context.range == range
-                                && context.message == lsp_diagnostic.message
-                        }))
-                {
-                    continue;
-                }
-                let title = if kind == FixKind::Unsafe {
-                    format!("{} (unsafe)", fix.title)
-                } else {
-                    fix.title.clone()
-                };
-                if let Err(error) = fix.validate(source) {
-                    actions.push(CodeAction {
-                        title,
-                        kind: Some(CodeActionKind::QUICKFIX),
-                        diagnostics: Some(vec![lsp_diagnostic]),
-                        is_preferred: Some(false),
-                        disabled: Some(lsp_types::CodeActionDisabled {
-                            reason: format!("Invalid fix from {}: {error}", diagnostic.rule),
-                        }),
-                        ..Default::default()
-                    });
-                    continue;
-                }
-                let edits = fix
-                    .edits()
-                    .iter()
-                    .map(|edit| TextEdit {
-                        range: Range::new(
-                            lines.lsp_position(edit.span.start),
-                            lines.lsp_position(edit.span.end),
-                        ),
-                        new_text: edit.replacement.clone(),
-                    })
-                    .collect();
-                actions.push(CodeAction {
-                    title,
-                    kind: Some(CodeActionKind::QUICKFIX),
-                    diagnostics: Some(vec![lsp_diagnostic]),
-                    is_preferred: Some(kind == FixKind::Safe),
-                    edit: Some(workspace_edit(
-                        uri,
-                        document.version,
-                        edits,
-                        self.workspace_document_changes,
-                    )),
-                    ..Default::default()
-                });
+            QuickFixContext {
+                document,
+                config,
+                lines: &lines,
+                document_changes: self.workspace_document_changes,
             }
+            .append_actions(params, cancelled, &mut actions)?;
         }
         // Admission checks and fix suppression happen in the normal diagnostic
         // pipeline; do not run the standalone engine on an excluded document.

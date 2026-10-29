@@ -8,16 +8,16 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{SemanticRuleVisitor, SemanticState};
+use crate::lint::support::enum_like::{exact_identity, is_enum_like};
 use falcon_analyze::{
-    AnalyzeContext, ConstantValue, DeclarationFacts, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule,
-    ConstantContext, RulePreparation, SemanticModel, SignatureIndex, evaluate_constant,
-    evaluate_constant_name,
+    AnalyzeContext, ConstantContext, ConstantValue, DeclarationFacts, DeclarationIdentity,
+    ResolvedType, ResolvedTypeView, Rule, RulePreparation, SemanticModel, SignatureIndex,
+    evaluate_constant, evaluate_constant_name,
 };
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{Visitor, walk_pattern};
 use falcon_syntax::cst::*;
-use crate::lint::support::enum_like::{exact_identity, is_enum_like};
 
 #[derive(Default)]
 pub struct ExhaustiveCases;
@@ -27,7 +27,9 @@ impl Rule for ExhaustiveCases {
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diagnostics) }
+    ) -> RulePreparation<'a> {
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diagnostics)
+    }
 }
 
 struct Collector<'a> {
@@ -61,66 +63,8 @@ impl Collector<'_> {
         if values.len() < 2 {
             return;
         }
-        let locals = state.visible_local_constants();
-        let enclosing = match state.enclosing_type.as_ref().map(ResolvedType::view) {
-            Some(ResolvedTypeView::Interface { identity, .. }) => Some(identity),
-            _ => None,
-        };
-        let mut covered = HashSet::new();
-        for group in node.cases() {
-            for case in group.cases() {
-                let mut cover = |constant: CaseConstant<'_>| {
-                    let value = match constant {
-                        CaseConstant::Expr(expr) => evaluate_constant(expr, ConstantContext { owner: enclosing, locals: Some(&locals), ..ConstantContext::new(&state.model, &state.signatures) }),
-                        CaseConstant::Name(names) => evaluate_constant_name(names, ConstantContext { owner: enclosing, locals: Some(&locals), ..ConstantContext::new(&state.model, &state.signatures) }),
-                        // `.name` reads a static member of the switched type.
-                        CaseConstant::Shorthand(name) => {
-                            values.get(name.name()).cloned().or_else(|| {
-                                facts
-                                    .static_consts
-                                    .iter()
-                                    .find(|constant| constant.name == name.name())
-                                    .and_then(|constant| {
-                                        evaluate_constant(constant.initializer.expr(), ConstantContext { owner: Some(identity), ..ConstantContext::new(&state.model, &state.signatures) })
-                                    })
-                            })
-                        }
-                    };
-                    if let Some(value) = value {
-                        covered.insert(value);
-                    }
-                };
-                match case {
-                    SwitchCaseKind::Pattern(pattern) => {
-                        visit_case_constant(pattern.pattern(), &mut cover)
-                    }
-                    SwitchCaseKind::Expr(expression) => match expression.expr().unparenthesized() {
-                        Expr::DotShorthand(shorthand) => {
-                            cover(CaseConstant::Shorthand(shorthand.name()))
-                        }
-                        Expr::Ident(_) | Expr::Field(_) => {
-                            cover(CaseConstant::Expr(expression.expr()))
-                        }
-                        _ => {}
-                    },
-                    SwitchCaseKind::Default(_) => {}
-                }
-            }
-        }
-        let mut groups: HashMap<&ConstantValue, usize> = HashMap::with_capacity(values.len());
-        for (index, constant) in facts.static_consts.iter().enumerate() {
-            if let Some(value) = values.get(&constant.name) {
-                groups
-                    .entry(value)
-                    .and_modify(|preferred| {
-                        if facts.static_consts[*preferred].is_deprecated && !constant.is_deprecated
-                        {
-                            *preferred = index;
-                        }
-                    })
-                    .or_insert(index);
-            }
-        }
+        let covered = covered_constants(node, state, facts, identity, &values);
+        let mut groups = preferred_constants(facts, &values);
         // The analyzer reports from `switch` through the closing `)`.
         let end = self
             .ctx
@@ -145,9 +89,106 @@ impl Collector<'_> {
                 continue;
             }
             let preferred = &facts.static_consts[preferred];
-            self.diagnostics.push(self.ctx.diagnostic(format!("Add a case for `{}.{}`.", identity.name(), preferred.name), Span::new(node.span().start, end)));
+            self.diagnostics.push(self.ctx.diagnostic(
+                format!("Add a case for `{}.{}`.", identity.name(), preferred.name),
+                Span::new(node.span().start, end),
+            ));
         }
     }
+}
+
+fn covered_constants<'a>(
+    node: SwitchStmt<'a>,
+    state: &SemanticState<'a>,
+    facts: &DeclarationFacts,
+    identity: &DeclarationIdentity,
+    values: &HashMap<String, ConstantValue>,
+) -> HashSet<ConstantValue> {
+    let locals = state.visible_local_constants();
+    let enclosing = match state.enclosing_type.as_ref().map(ResolvedType::view) {
+        Some(ResolvedTypeView::Interface { identity, .. }) => Some(identity),
+        _ => None,
+    };
+    let mut covered = HashSet::new();
+    for group in node.cases() {
+        for case in group.cases() {
+            let mut cover = |constant: CaseConstant<'_>| {
+                let value = match constant {
+                    CaseConstant::Expr(expr) => evaluate_constant(
+                        expr,
+                        ConstantContext {
+                            owner: enclosing,
+                            locals: Some(&locals),
+                            ..ConstantContext::new(&state.model, &state.signatures)
+                        },
+                    ),
+                    CaseConstant::Name(names) => evaluate_constant_name(
+                        names,
+                        ConstantContext {
+                            owner: enclosing,
+                            locals: Some(&locals),
+                            ..ConstantContext::new(&state.model, &state.signatures)
+                        },
+                    ),
+                    // `.name` reads a static member of the switched type.
+                    CaseConstant::Shorthand(name) => {
+                        values.get(name.name()).cloned().or_else(|| {
+                            facts
+                                .static_consts
+                                .iter()
+                                .find(|constant| constant.name == name.name())
+                                .and_then(|constant| {
+                                    evaluate_constant(
+                                        constant.initializer.expr(),
+                                        ConstantContext {
+                                            owner: Some(identity),
+                                            ..ConstantContext::new(&state.model, &state.signatures)
+                                        },
+                                    )
+                                })
+                        })
+                    }
+                };
+                if let Some(value) = value {
+                    covered.insert(value);
+                }
+            };
+            match case {
+                SwitchCaseKind::Pattern(pattern) => {
+                    visit_case_constant(pattern.pattern(), &mut cover)
+                }
+                SwitchCaseKind::Expr(expression) => match expression.expr().unparenthesized() {
+                    Expr::DotShorthand(shorthand) => {
+                        cover(CaseConstant::Shorthand(shorthand.name()))
+                    }
+                    Expr::Ident(_) | Expr::Field(_) => cover(CaseConstant::Expr(expression.expr())),
+                    _ => {}
+                },
+                SwitchCaseKind::Default(_) => {}
+            }
+        }
+    }
+    covered
+}
+
+fn preferred_constants<'a>(
+    facts: &DeclarationFacts,
+    values: &'a HashMap<String, ConstantValue>,
+) -> HashMap<&'a ConstantValue, usize> {
+    let mut groups: HashMap<&ConstantValue, usize> = HashMap::with_capacity(values.len());
+    for (index, constant) in facts.static_consts.iter().enumerate() {
+        if let Some(value) = values.get(&constant.name) {
+            groups
+                .entry(value)
+                .and_modify(|preferred| {
+                    if facts.static_consts[*preferred].is_deprecated && !constant.is_deprecated {
+                        *preferred = index;
+                    }
+                })
+                .or_insert(index);
+        }
+    }
+    groups
 }
 
 impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
@@ -161,8 +202,6 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         }
     }
 }
-
-
 
 fn constant_values(
     facts: &DeclarationFacts,
@@ -180,7 +219,14 @@ fn constant_values(
         .iter()
         .filter(|constant| exact_identity(&constant.ty, identity))
         .filter_map(|constant| {
-            evaluate_constant(constant.initializer.expr(), ConstantContext { owner: Some(identity), fields: Some(&fields), ..ConstantContext::new(model, signatures) })
+            evaluate_constant(
+                constant.initializer.expr(),
+                ConstantContext {
+                    owner: Some(identity),
+                    fields: Some(&fields),
+                    ..ConstantContext::new(model, signatures)
+                },
+            )
             .map(|value| (constant.name.clone(), value))
         })
         .collect()

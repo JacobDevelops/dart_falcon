@@ -72,7 +72,6 @@ impl Collector<'_> {
         let model = &self.model;
         let signatures = self.signatures;
         let docs = &self.docs;
-        let diags = &mut self.diags;
         let state_only = self.state_only;
         let (annotations, name, name_span, span, write, body) = match member {
             ClassMember::Method(m) if !m.is_static() => (
@@ -126,24 +125,7 @@ impl Collector<'_> {
         else {
             return;
         };
-        let inherited_protected =
-            signatures
-                .declared_member_facts(&owner, name)
-                .iter()
-                .any(|fact| {
-                    let matches_accessor = match member {
-                        ClassMember::Method(_) => fact.kind == MemberKind::Method,
-                        ClassMember::Operator(_) => fact.kind == MemberKind::Operator,
-                        ClassMember::Getter(_) => fact.kind.has_getter(),
-                        ClassMember::Setter(_) => fact.kind.has_setter(),
-                        _ => false,
-                    };
-                    matches_accessor
-                        && fact
-                            .annotations
-                            .iter()
-                            .any(|annotation| annotation.is_package("meta", "protected"))
-                });
+        let inherited_protected = self.inherited_protected(member, &owner, name);
         let own_protected =
             crate::lint::declarations::has_meta_annotation(annotations.clone(), "protected", model);
         if state_only && !(inherited_protected && !own_protected) {
@@ -170,20 +152,62 @@ impl Collector<'_> {
         {
             return;
         }
-        let Some(supertype) = (if write {
-            signatures.super_receiver_for_write(&receiver, name, model)
-        } else {
-            signatures.super_receiver(&receiver, name, model)
-        }) else {
+        if !self.same_member_signature(member, &receiver, name, write) {
             return;
+        }
+        self.diags.push(ctx.diagnostic(
+            "Remove this override because it only forwards to `super` unchanged.",
+            name_span,
+        ));
+    }
+    fn inherited_protected(
+        &self,
+        member: ClassMember<'_>,
+        owner: &DeclarationIdentity,
+        name: &str,
+    ) -> bool {
+        self.signatures
+            .declared_member_facts(owner, name)
+            .iter()
+            .any(|fact| {
+                let matches_accessor = match member {
+                    ClassMember::Method(_) => fact.kind == MemberKind::Method,
+                    ClassMember::Operator(_) => fact.kind == MemberKind::Operator,
+                    ClassMember::Getter(_) => fact.kind.has_getter(),
+                    ClassMember::Setter(_) => fact.kind.has_setter(),
+                    _ => false,
+                };
+                matches_accessor
+                    && fact
+                        .annotations
+                        .iter()
+                        .any(|annotation| annotation.is_package("meta", "protected"))
+            })
+    }
+
+    fn same_member_signature(
+        &self,
+        member: ClassMember<'_>,
+        receiver: &ResolvedType,
+        name: &str,
+        write: bool,
+    ) -> bool {
+        let signatures = self.signatures;
+        let model = &self.model;
+        let Some(supertype) = (if write {
+            signatures.super_receiver_for_write(receiver, name, model)
+        } else {
+            signatures.super_receiver(receiver, name, model)
+        }) else {
+            return false;
         };
         if !matches!(member, ClassMember::Getter(_)) {
             let own_contracts =
-                signatures.effective_parameter_contracts(&receiver, name, write, model);
+                signatures.effective_parameter_contracts(receiver, name, write, model);
             let inherited_contracts =
-                signatures.super_parameter_contracts(&receiver, name, write, model);
+                signatures.super_parameter_contracts(receiver, name, write, model);
             if !same_parameters(own_contracts.as_deref(), inherited_contracts.as_deref()) {
-                return;
+                return false;
             }
         }
         if matches!(member, ClassMember::Method(_) | ClassMember::Operator(_)) {
@@ -191,11 +215,11 @@ impl Collector<'_> {
                 Some((declared, declared_substitutions)),
                 Some((inherited, inherited_substitutions)),
             ) = (
-                signatures.resolved_member(&receiver, name, model),
+                signatures.resolved_member(receiver, name, model),
                 signatures.resolved_member(&supertype, name, model),
             )
             else {
-                return;
+                return false;
             };
             if model.substitute(&declared.return_type, &declared_substitutions)
                 != model.substitute(&inherited.return_type, &inherited_substitutions)
@@ -216,30 +240,27 @@ impl Collector<'_> {
                     })
                 })
             {
-                return;
+                return false;
             }
         } else {
             let (Some((declared, own)), Some((inherited, parent))) = (if write {
                 (
-                    signatures.resolved_writable_field(&receiver, name, model),
+                    signatures.resolved_writable_field(receiver, name, model),
                     signatures.resolved_writable_field(&supertype, name, model),
                 )
             } else {
                 (
-                    signatures.resolved_field(&receiver, name, model),
+                    signatures.resolved_field(receiver, name, model),
                     signatures.resolved_field(&supertype, name, model),
                 )
             }) else {
-                return;
+                return false;
             };
             if model.substitute(&declared, &own) != model.substitute(&inherited, &parent) {
-                return;
+                return false;
             }
         }
-        diags.push(ctx.diagnostic(
-            "Remove this override because it only forwards to `super` unchanged.",
-            name_span,
-        ));
+        true
     }
 }
 

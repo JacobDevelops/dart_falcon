@@ -364,90 +364,8 @@ impl AnalysisEnvironment {
                 self.config_candidates
                     .insert(ancestor.join("pubspec_overrides.yaml"));
             }
-            let context = PackageConfig::discover(&directory).and_then(|config_path| {
-                if let Some(index) = self
-                    .contexts
-                    .iter()
-                    .position(|context| context.config.path == config_path)
-                {
-                    return Some(index);
-                }
-                let source = self.read_optional(&config_path);
-                let raw = source.as_deref().and_then(|source| {
-                    let mut reported = false;
-                    let config =
-                        PackageConfig::parse_with_report(&config_path, source, |message| {
-                            reported = true;
-                            self.warn(&config_path, message);
-                        });
-                    if config.is_none() && !reported {
-                        self.warn(
-                            &config_path,
-                            "failed to parse version-2 package configuration",
-                        );
-                    }
-                    config
-                });
-                if let Some(raw) = &raw {
-                    let lock_path = config_path
-                        .parent()
-                        .and_then(Path::parent)
-                        .map(|root| root.join("pubspec.lock"));
-                    let lock = lock_path.as_deref().and_then(|path| {
-                        let source = self.read_optional(path)?;
-                        match serde_yaml::from_str::<serde_yaml::Value>(&source) {
-                            Ok(lock) => Some(lock),
-                            Err(error) => {
-                                self.warn(path, format!("failed to parse lockfile: {error}"));
-                                None
-                            }
-                        }
-                    });
-                    let project_root = config_path.parent().and_then(Path::parent);
-                    for package in &raw.packages {
-                        let hosted = lock
-                            .as_ref()
-                            .and_then(|lock| lock.get("packages"))
-                            .and_then(|packages| packages.get(package.name.as_str()))
-                            .and_then(|package| package.get("source"))
-                            .and_then(serde_yaml::Value::as_str)
-                            == Some("hosted");
-                        let resolved = crate::resolve::canonical_or_lexical(&package.root);
-                        if !hosted
-                            && project_root.is_none_or(|root| {
-                                resolved != crate::resolve::canonical_or_lexical(root)
-                            })
-                        {
-                            self.mutable_roots.insert(resolved);
-                            self.mutable_roots.insert(package.root.clone());
-                        }
-                    }
-                    if let Some(flutter) = &raw.flutter_root {
-                        let sdk_root = flutter.join("bin/cache/dart-sdk");
-                        self.config_candidates
-                            .insert(sdk_root.join("lib/libraries.json"));
-                        self.config_candidates.insert(sdk_root.join("version"));
-                        self.root_candidates.insert(sdk_root);
-                        self.root_candidates.insert(flutter.clone());
-                    }
-                }
-                let mut config = raw?;
-                config.canonicalize_roots();
-                let mut sdk = self.locate_sdk(Some(&config));
-                if let (Some(sdk), Some(embedder)) =
-                    (&mut sdk, Embedder::from_config_with_warnings(&config, self))
-                {
-                    sdk.apply_embedder(&embedder);
-                }
-                if let Some(sdk) = &sdk {
-                    self.config_candidates
-                        .insert(sdk.root.join("lib/libraries.json"));
-                    self.config_candidates.insert(sdk.root.join("version"));
-                    self.root_candidates.insert(sdk.root.clone());
-                }
-                self.contexts.push(Context { config, sdk });
-                Some(self.contexts.len() - 1)
-            });
+            let context = PackageConfig::discover(&directory)
+                .and_then(|config_path| self.discover_context(&config_path));
             if context.is_none() && self.default_sdk.is_none() {
                 self.default_sdk = Some(self.locate_sdk(None));
                 if let Some(Some(sdk)) = &self.default_sdk {
@@ -459,6 +377,89 @@ impl AnalysisEnvironment {
             }
             self.directories.insert(directory, context);
         }
+    }
+
+    fn discover_context(&mut self, config_path: &Path) -> Option<usize> {
+        if let Some(index) = self
+            .contexts
+            .iter()
+            .position(|context| context.config.path == config_path)
+        {
+            return Some(index);
+        }
+        let source = self.read_optional(config_path);
+        let raw = source.as_deref().and_then(|source| {
+            let mut reported = false;
+            let config = PackageConfig::parse_with_report(config_path, source, |message| {
+                reported = true;
+                self.warn(config_path, message);
+            });
+            if config.is_none() && !reported {
+                self.warn(
+                    config_path,
+                    "failed to parse version-2 package configuration",
+                );
+            }
+            config
+        });
+        if let Some(raw) = &raw {
+            let lock_path = config_path
+                .parent()
+                .and_then(Path::parent)
+                .map(|root| root.join("pubspec.lock"));
+            let lock = lock_path.as_deref().and_then(|path| {
+                let source = self.read_optional(path)?;
+                match serde_yaml::from_str::<serde_yaml::Value>(&source) {
+                    Ok(lock) => Some(lock),
+                    Err(error) => {
+                        self.warn(path, format!("failed to parse lockfile: {error}"));
+                        None
+                    }
+                }
+            });
+            let project_root = config_path.parent().and_then(Path::parent);
+            for package in &raw.packages {
+                let hosted = lock
+                    .as_ref()
+                    .and_then(|lock| lock.get("packages"))
+                    .and_then(|packages| packages.get(package.name.as_str()))
+                    .and_then(|package| package.get("source"))
+                    .and_then(serde_yaml::Value::as_str)
+                    == Some("hosted");
+                let resolved = crate::resolve::canonical_or_lexical(&package.root);
+                if !hosted
+                    && project_root
+                        .is_none_or(|root| resolved != crate::resolve::canonical_or_lexical(root))
+                {
+                    self.mutable_roots.insert(resolved);
+                    self.mutable_roots.insert(package.root.clone());
+                }
+            }
+            if let Some(flutter) = &raw.flutter_root {
+                let sdk_root = flutter.join("bin/cache/dart-sdk");
+                self.config_candidates
+                    .insert(sdk_root.join("lib/libraries.json"));
+                self.config_candidates.insert(sdk_root.join("version"));
+                self.root_candidates.insert(sdk_root);
+                self.root_candidates.insert(flutter.clone());
+            }
+        }
+        let mut config = raw?;
+        config.canonicalize_roots();
+        let mut sdk = self.locate_sdk(Some(&config));
+        if let (Some(sdk), Some(embedder)) =
+            (&mut sdk, Embedder::from_config_with_warnings(&config, self))
+        {
+            sdk.apply_embedder(&embedder);
+        }
+        if let Some(sdk) = &sdk {
+            self.config_candidates
+                .insert(sdk.root.join("lib/libraries.json"));
+            self.config_candidates.insert(sdk.root.join("version"));
+            self.root_candidates.insert(sdk.root.clone());
+        }
+        self.contexts.push(Context { config, sdk });
+        Some(self.contexts.len() - 1)
     }
 
     /// Whether every path's directory has been discovered.

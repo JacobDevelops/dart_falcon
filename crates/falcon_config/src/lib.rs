@@ -1426,31 +1426,7 @@ fn validate_keys(
     warnings: &mut Vec<String>,
 ) -> Result<(), ConfigError> {
     if matches!(kind, ConfigObject::Rule) {
-        let (level, level_path) = if let Some(object) = value.as_object() {
-            let level = object.get("level").ok_or_else(|| {
-                ConfigError::at(
-                    format!(
-                        "invalid configuration `{}`: missing field `level`",
-                        format_config_path(path)
-                    ),
-                    path.to_owned(),
-                )
-            })?;
-            let mut level_path = path.to_owned();
-            level_path.push(ConfigPathSegment::Key("level".to_owned()));
-            (level, level_path)
-        } else {
-            (value, path.to_owned())
-        };
-        RulePlainConfiguration::deserialize(level).map_err(|error| {
-            ConfigError::at(
-                format!(
-                    "invalid configuration `{}`: {error}",
-                    format_config_path(&level_path)
-                ),
-                level_path,
-            )
-        })?;
+        validate_rule_level(value, path)?;
     }
     if !matches!(kind, ConfigObject::Rule) && !value.is_object() {
         return Err(ConfigError::at(
@@ -1536,6 +1512,38 @@ fn validate_keys(
             validate_keys(value, &full_path, child, warnings)?;
         }
     }
+    Ok(())
+}
+
+fn validate_rule_level(
+    value: &serde_json::Value,
+    path: &[ConfigPathSegment],
+) -> Result<(), ConfigError> {
+    let (level, level_path) = if let Some(object) = value.as_object() {
+        let level = object.get("level").ok_or_else(|| {
+            ConfigError::at(
+                format!(
+                    "invalid configuration `{}`: missing field `level`",
+                    format_config_path(path)
+                ),
+                path.to_owned(),
+            )
+        })?;
+        let mut level_path = path.to_owned();
+        level_path.push(ConfigPathSegment::Key("level".to_owned()));
+        (level, level_path)
+    } else {
+        (value, path.to_owned())
+    };
+    RulePlainConfiguration::deserialize(level).map_err(|error| {
+        ConfigError::at(
+            format!(
+                "invalid configuration `{}`: {error}",
+                format_config_path(&level_path)
+            ),
+            level_path,
+        )
+    })?;
     Ok(())
 }
 

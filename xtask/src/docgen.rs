@@ -764,142 +764,8 @@ pub(crate) fn run(check: bool, falcon_bin: Option<PathBuf>) -> Result<(), String
             .then(a.name.cmp(b.name))
     });
 
-    let mut records: Vec<Value> = Vec::with_capacity(metas.len());
-    let mut with_bad = 0usize;
-    let mut with_good = 0usize;
-    let mut with_diags = 0usize;
-
-    for meta in &metas {
-        let rule_dir = corpus_root.join(meta.name);
-
-        let source_path = rule_source_path(&root, meta);
-        let (description, docs) = extract_docs(&source_path, meta.name);
-
-        let config = docgen_config_for(&corpus_root, meta, &temp_config)?;
-
-        // Test-domain rules only inspect `_test.dart` files, so their examples come from those fixtures.
-        let fixture = |stem: &str| {
-            let test = rule_dir.join(format!("{stem}_test.dart"));
-            if test.exists() {
-                test
-            } else {
-                rule_dir.join(format!("{stem}.dart"))
-            }
-        };
-        let bad_path = fixture("bad");
-        let good_path = fixture("good");
-        let bad_source = read_fixture(&bad_path)?;
-        let cross_file_dir = project_fixture_directory(&rule_dir, bad_source.as_deref());
-        let bad_example = bad_source.as_deref().map(strip_expectations);
-        let good_example = read_fixture(&good_path)?.map(|source| strip_expectations(&source));
-        if bad_example.is_some() {
-            with_bad += 1;
-        }
-        if good_example.is_some() {
-            with_good += 1;
-        }
-
-        // Cross-file examples include nested Dart files and pubspecs. Relative
-        // paths keep identically named files from independent packages distinct.
-        let mut cross_file_sources: Vec<(String, String)> = Vec::new();
-        if cross_file_dir.is_dir() {
-            for file in recursive_files(&cross_file_dir).into_iter().filter(|path| {
-                matches!(
-                    path.extension().and_then(|extension| extension.to_str()),
-                    Some("dart" | "yaml")
-                )
-            }) {
-                let source = read_fixture(&file)?.ok_or_else(|| {
-                    format!("cannot read fixture {}: file is missing", file.display())
-                })?;
-                let relative = file
-                    .strip_prefix(&cross_file_dir)
-                    .map_err(|error| format!("invalid fixture path {}: {error}", file.display()))?;
-                cross_file_sources.push((relative.to_string_lossy().replace('\\', "/"), source));
-            }
-        }
-        let cross_file_examples: Option<Value> = if cross_file_sources.is_empty() {
-            None
-        } else {
-            Some(Value::Array(
-                cross_file_sources
-                    .iter()
-                    .map(|(path, content)| {
-                        json!({ "path": path, "content": strip_expectations(content) })
-                    })
-                    .collect(),
-            ))
-        };
-
-        let mut diagnostics: Vec<Value> = Vec::new();
-        let had_fixture;
-        if !cross_file_sources.is_empty() {
-            had_fixture = true;
-            for project in cross_file_project_roots(&cross_file_dir) {
-                for d in falcon
-                    .run(&project, Some(&config))?
-                    .into_iter()
-                    .filter(|d| d.rule == meta.name)
-                {
-                    let relative = Path::new(&d.file_path)
-                        .strip_prefix(&cross_file_dir)
-                        .map(|path| path.to_string_lossy().replace('\\', "/"))
-                        .unwrap_or_else(|_| d.file_path.clone());
-                    let source = cross_file_sources
-                        .iter()
-                        .find(|(path, _)| path == &relative)
-                        .map_or("", |(_, source)| source.as_str());
-                    let (line, col) = d.resolved_position()?;
-                    diagnostics.push(json!({
-                        "message": d.message,
-                        "line": line,
-                        "column": character_column(source, line, col),
-                        "file": relative,
-                    }));
-                }
-            }
-        } else if bad_path.exists() {
-            had_fixture = true;
-            let source = bad_source.as_deref().unwrap_or_default();
-            for d in falcon
-                .run(&bad_path, Some(&config))?
-                .into_iter()
-                .filter(|d| d.rule == meta.name)
-            {
-                let (line, col) = d.resolved_position()?;
-                diagnostics.push(json!({
-                    "message": d.message,
-                    "line": line,
-                    "column": character_column(source, line, col),
-                    "file": Value::Null,
-                }));
-            }
-        } else {
-            had_fixture = false;
-        }
-
-        validate_record(meta.name, &description, had_fixture, diagnostics.len())?;
-        if !diagnostics.is_empty() {
-            with_diags += 1;
-        }
-
-        records.push(json!({
-            "name": meta.name,
-            "group": meta.group.as_str(),
-            "domains": meta.domain_names(),
-            "recommended": meta.recommended,
-            "crossFile": meta.is_cross_file(),
-            "source": source_json(&meta.source),
-            "description": description,
-            "docs": docs,
-            "examples": {
-                "bad": bad_example,
-                "good": good_example,
-                "crossFile": cross_file_examples,
-            },
-            "diagnostics": diagnostics,
-        }));
-    }
+    let (records, with_bad, with_good, with_diags) =
+        collect_rule_records(&root, &corpus_root, &temp_config, &falcon, &metas)?;
 
     let domains: Vec<Value> = Domain::ALL
         .iter()
@@ -969,6 +835,173 @@ pub(crate) fn run(check: bool, falcon_bin: Option<PathBuf>) -> Result<(), String
     println!("  {action}: {}", configuration_path.display());
     println!("────────────────────────────────────────────────────────");
     Ok(())
+}
+
+fn collect_rule_records(
+    root: &Path,
+    corpus_root: &Path,
+    temp_config: &Path,
+    falcon: &FalconRunner,
+    metas: &[&RuleMeta],
+) -> Result<(Vec<Value>, usize, usize, usize), String> {
+    let mut records: Vec<Value> = Vec::with_capacity(metas.len());
+    let mut with_bad = 0usize;
+    let mut with_good = 0usize;
+    let mut with_diags = 0usize;
+
+    for meta in metas {
+        let rule_dir = corpus_root.join(meta.name);
+
+        let source_path = rule_source_path(root, meta);
+        let (description, docs) = extract_docs(&source_path, meta.name);
+
+        let config = docgen_config_for(corpus_root, meta, temp_config)?;
+
+        // Test-domain rules only inspect `_test.dart` files, so their examples come from those fixtures.
+        let fixture = |stem: &str| {
+            let test = rule_dir.join(format!("{stem}_test.dart"));
+            if test.exists() {
+                test
+            } else {
+                rule_dir.join(format!("{stem}.dart"))
+            }
+        };
+        let bad_path = fixture("bad");
+        let good_path = fixture("good");
+        let bad_source = read_fixture(&bad_path)?;
+        let cross_file_dir = project_fixture_directory(&rule_dir, bad_source.as_deref());
+        let bad_example = bad_source.as_deref().map(strip_expectations);
+        let good_example = read_fixture(&good_path)?.map(|source| strip_expectations(&source));
+        if bad_example.is_some() {
+            with_bad += 1;
+        }
+        if good_example.is_some() {
+            with_good += 1;
+        }
+
+        // Cross-file examples include nested Dart files and pubspecs. Relative
+        // paths keep identically named files from independent packages distinct.
+        let mut cross_file_sources: Vec<(String, String)> = Vec::new();
+        if cross_file_dir.is_dir() {
+            for file in recursive_files(&cross_file_dir).into_iter().filter(|path| {
+                matches!(
+                    path.extension().and_then(|extension| extension.to_str()),
+                    Some("dart" | "yaml")
+                )
+            }) {
+                let source = read_fixture(&file)?.ok_or_else(|| {
+                    format!("cannot read fixture {}: file is missing", file.display())
+                })?;
+                let relative = file
+                    .strip_prefix(&cross_file_dir)
+                    .map_err(|error| format!("invalid fixture path {}: {error}", file.display()))?;
+                cross_file_sources.push((relative.to_string_lossy().replace('\\', "/"), source));
+            }
+        }
+        let cross_file_examples: Option<Value> = if cross_file_sources.is_empty() {
+            None
+        } else {
+            Some(Value::Array(
+                cross_file_sources
+                    .iter()
+                    .map(|(path, content)| {
+                        json!({ "path": path, "content": strip_expectations(content) })
+                    })
+                    .collect(),
+            ))
+        };
+
+        let (diagnostics, had_fixture) = fixture_diagnostics(
+            meta,
+            falcon,
+            &config,
+            &cross_file_dir,
+            &cross_file_sources,
+            &bad_path,
+            bad_source.as_deref(),
+        )?;
+
+        validate_record(meta.name, &description, had_fixture, diagnostics.len())?;
+        if !diagnostics.is_empty() {
+            with_diags += 1;
+        }
+
+        records.push(json!({
+            "name": meta.name,
+            "group": meta.group.as_str(),
+            "domains": meta.domain_names(),
+            "recommended": meta.recommended,
+            "crossFile": meta.is_cross_file(),
+            "source": source_json(&meta.source),
+            "description": description,
+            "docs": docs,
+            "examples": {
+                "bad": bad_example,
+                "good": good_example,
+                "crossFile": cross_file_examples,
+            },
+            "diagnostics": diagnostics,
+        }));
+    }
+    Ok((records, with_bad, with_good, with_diags))
+}
+
+fn fixture_diagnostics(
+    meta: &RuleMeta,
+    falcon: &FalconRunner,
+    config: &Path,
+    cross_file_dir: &Path,
+    cross_file_sources: &[(String, String)],
+    bad_path: &Path,
+    bad_source: Option<&str>,
+) -> Result<(Vec<Value>, bool), String> {
+    let mut diagnostics: Vec<Value> = Vec::new();
+    let had_fixture;
+    if !cross_file_sources.is_empty() {
+        had_fixture = true;
+        for project in cross_file_project_roots(cross_file_dir) {
+            for d in falcon
+                .run(&project, Some(config))?
+                .into_iter()
+                .filter(|d| d.rule == meta.name)
+            {
+                let relative = Path::new(&d.file_path)
+                    .strip_prefix(cross_file_dir)
+                    .map(|path| path.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_else(|_| d.file_path.clone());
+                let source = cross_file_sources
+                    .iter()
+                    .find(|(path, _)| path == &relative)
+                    .map_or("", |(_, source)| source.as_str());
+                let (line, col) = d.resolved_position()?;
+                diagnostics.push(json!({
+                    "message": d.message,
+                    "line": line,
+                    "column": character_column(source, line, col),
+                    "file": relative,
+                }));
+            }
+        }
+    } else if bad_path.exists() {
+        had_fixture = true;
+        let source = bad_source.unwrap_or_default();
+        for d in falcon
+            .run(bad_path, Some(config))?
+            .into_iter()
+            .filter(|d| d.rule == meta.name)
+        {
+            let (line, col) = d.resolved_position()?;
+            diagnostics.push(json!({
+                "message": d.message,
+                "line": line,
+                "column": character_column(source, line, col),
+                "file": Value::Null,
+            }));
+        }
+    } else {
+        had_fixture = false;
+    }
+    Ok((diagnostics, had_fixture))
 }
 
 fn validate_record(

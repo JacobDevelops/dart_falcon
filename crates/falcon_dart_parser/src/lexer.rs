@@ -320,6 +320,42 @@ impl<'src> Lexer<'src> {
             ':' => TokenKind::Colon,
             '#' => TokenKind::Hash,
 
+            '+' | '-' | '*' | '%' | '~' => self.lex_arithmetic_punct(c),
+            '=' | '!' | '<' | '>' => self.lex_comparison_punct(c),
+            '&' => {
+                if self.eat_if('&') {
+                    TokenKind::AmpAmp
+                } else if self.eat_if('=') {
+                    TokenKind::AmpEq
+                } else {
+                    TokenKind::Amp
+                }
+            }
+            '|' => {
+                if self.eat_if('|') {
+                    TokenKind::PipePipe
+                } else if self.eat_if('=') {
+                    TokenKind::PipeEq
+                } else {
+                    TokenKind::Pipe
+                }
+            }
+            '^' => {
+                if self.eat_if('=') {
+                    TokenKind::CaretEq
+                } else {
+                    TokenKind::Caret
+                }
+            }
+            '?' | '.' => self.lex_access_punct(c),
+            _ => TokenKind::Error,
+        };
+
+        self.make(kind, start)
+    }
+
+    fn lex_arithmetic_punct(&mut self, c: char) -> TokenKind {
+        match c {
             '+' => {
                 if self.eat_if('+') {
                     TokenKind::PlusPlus
@@ -363,6 +399,12 @@ impl<'src> Lexer<'src> {
                     TokenKind::Tilde
                 }
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn lex_comparison_punct(&mut self, c: char) -> TokenKind {
+        match c {
             '=' => {
                 if self.eat_if('=') {
                     TokenKind::EqEq
@@ -413,31 +455,12 @@ impl<'src> Lexer<'src> {
                     TokenKind::Gt
                 }
             }
-            '&' => {
-                if self.eat_if('&') {
-                    TokenKind::AmpAmp
-                } else if self.eat_if('=') {
-                    TokenKind::AmpEq
-                } else {
-                    TokenKind::Amp
-                }
-            }
-            '|' => {
-                if self.eat_if('|') {
-                    TokenKind::PipePipe
-                } else if self.eat_if('=') {
-                    TokenKind::PipeEq
-                } else {
-                    TokenKind::Pipe
-                }
-            }
-            '^' => {
-                if self.eat_if('=') {
-                    TokenKind::CaretEq
-                } else {
-                    TokenKind::Caret
-                }
-            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn lex_access_punct(&mut self, c: char) -> TokenKind {
+        match c {
             '?' => {
                 if self.eat_if('?') {
                     if self.eat_if('=') {
@@ -471,15 +494,13 @@ impl<'src> Lexer<'src> {
                 } else if matches!(self.cur(), Some('0'..='9')) {
                     self.skip_digits();
                     self.lex_exponent();
-                    return self.make(TokenKind::DoubleLit, start);
+                    TokenKind::DoubleLit
                 } else {
                     TokenKind::Dot
                 }
             }
-            _ => TokenKind::Error,
-        };
-
-        self.make(kind, start)
+            _ => unreachable!(),
+        }
     }
 }
 

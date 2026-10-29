@@ -1003,6 +1003,31 @@ enum Work<'a> {
     Cascade(CascadeExpr<'a>),
 }
 
+struct WorkStack<'a> {
+    inline: [Option<Work<'a>>; 4],
+    len: usize,
+    spill: Vec<Work<'a>>,
+}
+
+impl<'a> WorkStack<'a> {
+    fn push(&mut self, work: Work<'a>) {
+        if self.len < self.inline.len() {
+            self.inline[self.len] = Some(work);
+            self.len += 1;
+        } else {
+            self.spill.push(work);
+        }
+    }
+
+    fn pop(&mut self) -> Option<Work<'a>> {
+        if let Some(work) = self.spill.pop() {
+            return Some(work);
+        }
+        self.len = self.len.checked_sub(1)?;
+        self.inline[self.len].take()
+    }
+}
+
 /// Walks expression chains iteratively, calling `enter` before each expression.
 /// Returning `false` prunes that expression's children; scoped overrides can
 /// instead visit those children synchronously before returning `false`.
@@ -1041,31 +1066,6 @@ fn walk_chain<'a, V: Visitor<'a>, E, X, const EXITS: bool>(
     E: FnMut(&mut V, Expr<'a>) -> bool,
     X: FnMut(&mut V, Expr<'a>),
 {
-    struct WorkStack<'a> {
-        inline: [Option<Work<'a>>; 4],
-        len: usize,
-        spill: Vec<Work<'a>>,
-    }
-
-    impl<'a> WorkStack<'a> {
-        fn push(&mut self, work: Work<'a>) {
-            if self.len < self.inline.len() {
-                self.inline[self.len] = Some(work);
-                self.len += 1;
-            } else {
-                self.spill.push(work);
-            }
-        }
-
-        fn pop(&mut self) -> Option<Work<'a>> {
-            if let Some(work) = self.spill.pop() {
-                return Some(work);
-            }
-            self.len = self.len.checked_sub(1)?;
-            self.inline[self.len].take()
-        }
-    }
-
     let mut pending = WorkStack {
         inline: [None; 4],
         len: 0,
@@ -1077,55 +1077,7 @@ fn walk_chain<'a, V: Visitor<'a>, E, X, const EXITS: bool>(
                 if EXITS {
                     pending.push(Work::ExitExpr(node));
                 }
-                let child = match node {
-                    Expr::Binary(n) => {
-                        pending.push(Work::Expr(n.right()));
-                        Some(n.left())
-                    }
-                    Expr::Assign(n) => {
-                        pending.push(Work::Expr(n.value()));
-                        Some(n.target())
-                    }
-                    Expr::Conditional(n) => {
-                        pending.push(Work::Expr(n.else_expr()));
-                        pending.push(Work::Expr(n.then_expr()));
-                        Some(n.condition())
-                    }
-                    Expr::PostfixIncDec(n) => Some(n.operand()),
-                    Expr::NullAssert(n) => Some(n.operand()),
-                    Expr::Is(n) => {
-                        pending.push(Work::Type(n.dart_type()));
-                        Some(n.expr())
-                    }
-                    Expr::As(n) => {
-                        pending.push(Work::Type(n.dart_type()));
-                        Some(n.expr())
-                    }
-                    Expr::Field(n) => {
-                        pending.push(Work::Name(n.field()));
-                        Some(n.object())
-                    }
-                    Expr::Index(n) => {
-                        pending.push(Work::Expr(n.index()));
-                        Some(n.object())
-                    }
-                    Expr::Call(n) => {
-                        pending.push(Work::Call(n));
-                        Some(n.callee())
-                    }
-                    Expr::GenericInstantiation(n) => {
-                        pending.push(Work::TypeArgs(n));
-                        Some(n.target())
-                    }
-                    Expr::Cascade(n) => {
-                        pending.push(Work::Cascade(n));
-                        Some(n.object())
-                    }
-                    _ => {
-                        walk_expr(v, node);
-                        None
-                    }
-                };
+                let child = schedule_expr_children(v, node, &mut pending);
                 if let Some(child) = child {
                     work = Work::Expr(child);
                     continue;
@@ -1189,6 +1141,63 @@ fn walk_chain<'a, V: Visitor<'a>, E, X, const EXITS: bool>(
     }
 }
 
+#[inline(always)]
+fn schedule_expr_children<'a, V: Visitor<'a>>(
+    v: &mut V,
+    node: Expr<'a>,
+    pending: &mut WorkStack<'a>,
+) -> Option<Expr<'a>> {
+    match node {
+        Expr::Binary(n) => {
+            pending.push(Work::Expr(n.right()));
+            Some(n.left())
+        }
+        Expr::Assign(n) => {
+            pending.push(Work::Expr(n.value()));
+            Some(n.target())
+        }
+        Expr::Conditional(n) => {
+            pending.push(Work::Expr(n.else_expr()));
+            pending.push(Work::Expr(n.then_expr()));
+            Some(n.condition())
+        }
+        Expr::PostfixIncDec(n) => Some(n.operand()),
+        Expr::NullAssert(n) => Some(n.operand()),
+        Expr::Is(n) => {
+            pending.push(Work::Type(n.dart_type()));
+            Some(n.expr())
+        }
+        Expr::As(n) => {
+            pending.push(Work::Type(n.dart_type()));
+            Some(n.expr())
+        }
+        Expr::Field(n) => {
+            pending.push(Work::Name(n.field()));
+            Some(n.object())
+        }
+        Expr::Index(n) => {
+            pending.push(Work::Expr(n.index()));
+            Some(n.object())
+        }
+        Expr::Call(n) => {
+            pending.push(Work::Call(n));
+            Some(n.callee())
+        }
+        Expr::GenericInstantiation(n) => {
+            pending.push(Work::TypeArgs(n));
+            Some(n.target())
+        }
+        Expr::Cascade(n) => {
+            pending.push(Work::Cascade(n));
+            Some(n.object())
+        }
+        _ => {
+            walk_expr(v, node);
+            None
+        }
+    }
+}
+
 pub fn walk_expr<'a, V: Visitor<'a>>(v: &mut V, node: Expr<'a>) {
     match node {
         Expr::Paren(n) => v.visit_expr(n.expr()),
@@ -1249,30 +1258,9 @@ pub fn walk_expr<'a, V: Visitor<'a>>(v: &mut V, node: Expr<'a>) {
                 v.visit_cascade_section(section);
             }
         }
-        Expr::List(n) => {
-            if let Some(t) = n.type_arg() {
-                v.visit_dart_type(t);
-            }
-            for elem in n.elements() {
-                v.visit_element(elem);
-            }
-        }
-        Expr::Set(n) => {
-            if let Some(t) = n.type_arg() {
-                v.visit_dart_type(t);
-            }
-            for elem in n.elements() {
-                v.visit_element(elem);
-            }
-        }
-        Expr::Map(n) => {
-            for t in n.type_args() {
-                v.visit_dart_type(t);
-            }
-            for element in n.elements() {
-                v.visit_element(element);
-            }
-        }
+        Expr::List(n) => walk_list_expr(v, n),
+        Expr::Set(n) => walk_set_expr(v, n),
+        Expr::Map(n) => walk_map_expr(v, n),
         Expr::Record(n) => {
             for field in n.fields() {
                 v.visit_record_field(field);
@@ -1305,6 +1293,33 @@ pub fn walk_expr<'a, V: Visitor<'a>>(v: &mut V, node: Expr<'a>) {
                 v.visit_switch_expr_arm(arm);
             }
         }
+    }
+}
+
+fn walk_list_expr<'a, V: Visitor<'a>>(v: &mut V, node: ListExpr<'a>) {
+    if let Some(t) = node.type_arg() {
+        v.visit_dart_type(t);
+    }
+    for elem in node.elements() {
+        v.visit_element(elem);
+    }
+}
+
+fn walk_set_expr<'a, V: Visitor<'a>>(v: &mut V, node: SetExpr<'a>) {
+    if let Some(t) = node.type_arg() {
+        v.visit_dart_type(t);
+    }
+    for elem in node.elements() {
+        v.visit_element(elem);
+    }
+}
+
+fn walk_map_expr<'a, V: Visitor<'a>>(v: &mut V, node: MapExpr<'a>) {
+    for t in node.type_args() {
+        v.visit_dart_type(t);
+    }
+    for element in node.elements() {
+        v.visit_element(element);
     }
 }
 

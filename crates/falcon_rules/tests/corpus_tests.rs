@@ -522,41 +522,7 @@ fn registered_rules_have_real_corpus_coverage() {
                 failures.push(format!("MISSING `{rule_name}` cross-file project fixture"));
                 continue;
             }
-            let projects = cross_file_project_roots(&project_dir);
-            let mut has_positive_project = false;
-            let mut has_clean_project = false;
-            for project in projects {
-                let project_name = project
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or_default();
-                let sources: Vec<String> = support::files(&project, usize::MAX, None)
-                    .iter()
-                    .filter_map(|path| fs::read_to_string(path).ok())
-                    .collect();
-                if project_name.starts_with("bad")
-                    && sources
-                        .iter()
-                        .any(|source| has_rule_expectation(source, rule_name))
-                {
-                    has_positive_project = true;
-                }
-                if project_name.starts_with("good")
-                    && sources
-                        .iter()
-                        .all(|source| parse_expectations(source).is_empty())
-                {
-                    has_clean_project = true;
-                }
-            }
-            if !has_positive_project {
-                failures.push(format!(
-                    "NO POSITIVE `{rule_name}` bad cross-file project has an expected diagnostic"
-                ));
-            }
-            if !has_clean_project {
-                failures.push(format!("NO CLEAN `{rule_name}` good cross-file project"));
-            }
+            check_cross_file_projects(&project_dir, rule_name, &mut failures);
         } else {
             let files = support::files(&rule_dir, usize::MAX, Some("dart"));
             let sources: Vec<(PathBuf, String)> = files
@@ -869,21 +835,7 @@ fn cross_file_corpus_matches_expectations() {
                     environment: Some(&environment),
                 },
             );
-            files.extend(
-                fixture_sources
-                    .iter()
-                    .filter(|(path, _)| {
-                        path.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml")
-                    })
-                    .map(|(path, source)| ProjectFile {
-                        path: path.clone(),
-                        parsed: Arc::new(ParsedFile {
-                            source: source.clone().into_boxed_str(),
-                            tree: falcon_dart_parser::lex_tree(source),
-                        }),
-                        has_parse_errors: false,
-                    }),
-            );
+            append_pubspec_files(&fixture_sources, &mut files);
 
             let diagnostics = registry
                 .run_all(&environment, &files, &config, indexes.as_ref())
@@ -935,6 +887,24 @@ fn cross_file_corpus_matches_expectations() {
     );
 }
 
+fn append_pubspec_files(fixture_sources: &[(PathBuf, String)], files: &mut Vec<ProjectFile>) {
+    files.extend(
+        fixture_sources
+            .iter()
+            .filter(|(path, _)| {
+                path.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml")
+            })
+            .map(|(path, source)| ProjectFile {
+                path: path.clone(),
+                parsed: Arc::new(ParsedFile {
+                    source: source.clone().into_boxed_str(),
+                    tree: falcon_dart_parser::lex_tree(source),
+                }),
+                has_parse_errors: false,
+            }),
+    );
+}
+
 /// Resolver-dependent *per-file* rules validated against multi-file
 /// `corpus/<rule>/project/` fixtures: run per file with the real library
 /// grouping attached (part siblings + unresolved flag), mirroring the
@@ -959,40 +929,12 @@ fn resolver_dependent_per_file_project_corpus() {
         }
         let config = corpus_config(&corpus.join(rule_name));
 
-        let paths = support::files(&dir, usize::MAX, Some("dart"));
-        let source_paths = paths.clone();
-        let sdk_project = paths
-            .iter()
-            .any(|path| inference::requires_sdk(path))
-            .then(|| inference::sdk_fixture::stage_project(&dir));
-        let paths: Vec<PathBuf> = paths
-            .into_iter()
-            .map(|path| {
-                sdk_project.as_ref().map_or_else(
-                    || path.clone(),
-                    |project| inference::sdk_fixture::staged_file(project.path(), &dir, &path),
-                )
-            })
-            .collect();
+        let (paths, source_paths, _sdk_project) = resolver_project_paths(&dir);
         let sources: Vec<String> = paths
             .iter()
             .map(|p| fs::read_to_string(p).unwrap())
             .collect();
-        let results: Vec<_> = sources.iter().map(|source| parse(source)).collect();
-        let has_parse_errors: Vec<_> = results
-            .iter()
-            .map(|result| !result.errors.is_empty())
-            .collect();
-        let parsed: Vec<_> = results
-            .into_iter()
-            .zip(&sources)
-            .map(|(result, source)| {
-                Arc::new(ParsedFile {
-                    source: source.clone().into_boxed_str(),
-                    tree: result.tree,
-                })
-            })
-            .collect();
+        let (has_parse_errors, parsed) = parse_project_sources(&sources);
         let programs: Vec<Program<'_>> = parsed.iter().map(|parsed| parsed.program()).collect();
         let parsed_refs: Vec<_> = parsed.iter().collect();
         let identity_sources: Vec<_> = paths
@@ -1006,13 +948,7 @@ fn resolver_dependent_per_file_project_corpus() {
             })
             .collect();
         let source_refs: Vec<&str> = sources.iter().map(String::as_str).collect();
-        let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
-            paths.iter().map(PathBuf::as_path),
-            |config| {
-                let root = config?.flutter_root.as_ref()?;
-                falcon_analyze::DartSdk::load(&root.join("bin/cache/dart-sdk"))
-            },
-        );
+        let environment = resolver_project_environment(&paths);
         let external_inputs: Vec<_> = paths
             .iter()
             .zip(&programs)
@@ -1076,4 +1012,90 @@ fn resolver_dependent_per_file_project_corpus() {
         "resolver-dependent per-file project corpus failed:\n{}",
         failures.join("\n")
     );
+}
+
+fn check_cross_file_projects(project_dir: &Path, rule_name: &str, failures: &mut Vec<String>) {
+    let projects = cross_file_project_roots(project_dir);
+    let mut has_positive_project = false;
+    let mut has_clean_project = false;
+    for project in projects {
+        let project_name = project
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let sources: Vec<String> = support::files(&project, usize::MAX, None)
+            .iter()
+            .filter_map(|path| fs::read_to_string(path).ok())
+            .collect();
+        if project_name.starts_with("bad")
+            && sources
+                .iter()
+                .any(|source| has_rule_expectation(source, rule_name))
+        {
+            has_positive_project = true;
+        }
+        if project_name.starts_with("good")
+            && sources
+                .iter()
+                .all(|source| parse_expectations(source).is_empty())
+        {
+            has_clean_project = true;
+        }
+    }
+    if !has_positive_project {
+        failures.push(format!(
+            "NO POSITIVE `{rule_name}` bad cross-file project has an expected diagnostic"
+        ));
+    }
+    if !has_clean_project {
+        failures.push(format!("NO CLEAN `{rule_name}` good cross-file project"));
+    }
+}
+
+fn resolver_project_paths(dir: &Path) -> (Vec<PathBuf>, Vec<PathBuf>, Option<tempfile::TempDir>) {
+    let paths = support::files(dir, usize::MAX, Some("dart"));
+    let source_paths = paths.clone();
+    let sdk_project = paths
+        .iter()
+        .any(|path| inference::requires_sdk(path))
+        .then(|| inference::sdk_fixture::stage_project(dir));
+    let paths: Vec<PathBuf> = paths
+        .into_iter()
+        .map(|path| {
+            sdk_project.as_ref().map_or_else(
+                || path.clone(),
+                |project| inference::sdk_fixture::staged_file(project.path(), dir, &path),
+            )
+        })
+        .collect();
+    (paths, source_paths, sdk_project)
+}
+
+fn parse_project_sources(sources: &[String]) -> (Vec<bool>, Vec<Arc<ParsedFile>>) {
+    let results: Vec<_> = sources.iter().map(|source| parse(source)).collect();
+    let has_parse_errors: Vec<_> = results
+        .iter()
+        .map(|result| !result.errors.is_empty())
+        .collect();
+    let parsed: Vec<_> = results
+        .into_iter()
+        .zip(sources)
+        .map(|(result, source)| {
+            Arc::new(ParsedFile {
+                source: source.clone().into_boxed_str(),
+                tree: result.tree,
+            })
+        })
+        .collect();
+    (has_parse_errors, parsed)
+}
+
+fn resolver_project_environment(paths: &[PathBuf]) -> falcon_analyze::AnalysisEnvironment {
+    falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+        paths.iter().map(PathBuf::as_path),
+        |config| {
+            let root = config?.flutter_root.as_ref()?;
+            falcon_analyze::DartSdk::load(&root.join("bin/cache/dart-sdk"))
+        },
+    )
 }

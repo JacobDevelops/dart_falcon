@@ -173,6 +173,11 @@ fn generate(root: &Path, group: &str, rule_id: &str, cross_file: bool) -> Result
         println!("  {}", fixture.display());
     }
     println!();
+    print_next_steps(group, rule_id, &module, &struct_name, cross_file);
+    Ok(())
+}
+
+fn print_next_steps(group: &str, rule_id: &str, module: &str, struct_name: &str, cross_file: bool) {
     println!("next steps:");
     let declaration_file = if cross_file {
         "crates/falcon_rules/src/cross_file.rs".to_owned()
@@ -219,7 +224,6 @@ fn generate(root: &Path, group: &str, rule_id: &str, cross_file: bool) -> Result
     println!(
         "  6. add a user-facing changeset with `makers changeset`, then run the CONTRIBUTING gates"
     );
-    Ok(())
 }
 
 #[cfg(test)]

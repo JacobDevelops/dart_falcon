@@ -180,46 +180,51 @@ fn exact_function_shapes_support_alpha_binders_and_named_variance() {
                 ),
                 Truth::No
             );
-            let known = resolve("Plain");
-            let empty = FunctionTypeShape::empty();
-            assert!(Arc::ptr_eq(
-                &empty,
-                &FunctionTypeShape::new(Vec::new(), Vec::new())
-            ));
-            let mut unknown = known.clone();
-            let ResolvedType {
-                kind: ResolvedTypeKind::Function { shape, .. },
-            } = &mut unknown
-            else {
-                panic!("missing function")
-            };
-            *shape = None;
-            assert_ne!(known, unknown);
-            assert_ne!(
-                known.structural_hash(&mut FxHashMap::default()),
-                unknown.structural_hash(&mut FxHashMap::default())
-            );
-            assert_eq!(
-                signatures.relation(&unknown, crate::TypeRelation::SubtypeOf(&unknown), model),
-                Truth::Unknown
-            );
-            let mut unknown_slot = resolve("Plain");
-            let ResolvedType {
-                kind: ResolvedTypeKind::Function { return_type, .. },
-            } = &mut unknown_slot
-            else {
-                panic!("missing function")
-            };
-            *return_type = Arc::new(ResolvedType::UNKNOWN);
-            assert_eq!(
-                signatures.relation(
-                    &unknown_slot,
-                    crate::TypeRelation::SubtypeOf(&unknown_slot),
-                    model
-                ),
-                Truth::Unknown
-            );
+            assert_unknown_function_shapes(model, &signatures);
         },
+    );
+}
+
+fn assert_unknown_function_shapes(model: &SemanticModel<'_>, signatures: &SignatureIndex) {
+    let resolve = |name| model.resolve_type_name(&[name]).unwrap();
+    let known = resolve("Plain");
+    let empty = FunctionTypeShape::empty();
+    assert!(Arc::ptr_eq(
+        &empty,
+        &FunctionTypeShape::new(Vec::new(), Vec::new())
+    ));
+    let mut unknown = known.clone();
+    let ResolvedType {
+        kind: ResolvedTypeKind::Function { shape, .. },
+    } = &mut unknown
+    else {
+        panic!("missing function")
+    };
+    *shape = None;
+    assert_ne!(known, unknown);
+    assert_ne!(
+        known.structural_hash(&mut FxHashMap::default()),
+        unknown.structural_hash(&mut FxHashMap::default())
+    );
+    assert_eq!(
+        signatures.relation(&unknown, crate::TypeRelation::SubtypeOf(&unknown), model),
+        Truth::Unknown
+    );
+    let mut unknown_slot = resolve("Plain");
+    let ResolvedType {
+        kind: ResolvedTypeKind::Function { return_type, .. },
+    } = &mut unknown_slot
+    else {
+        panic!("missing function")
+    };
+    *return_type = Arc::new(ResolvedType::UNKNOWN);
+    assert_eq!(
+        signatures.relation(
+            &unknown_slot,
+            crate::TypeRelation::SubtypeOf(&unknown_slot),
+            model
+        ),
+        Truth::Unknown
     );
 }
 
@@ -883,42 +888,46 @@ fn generic_function_alias_fanout_preserves_origins_and_shared_descendants() {
         };
         assert!(Arc::ptr_eq(left, right));
 
-        let mut visited = FxHashSet::default();
-        let mut pending = vec![&ty];
-        while let Some(node) = pending.pop() {
-            let ResolvedType {
-                kind:
-                    ResolvedTypeKind::Function {
-                        return_type,
-                        positional,
-                        named,
-                        ..
-                    },
-            } = node
-            else {
-                assert!(node.interface("dart:core", "int"));
-                continue;
-            };
-            if !visited.insert(SubstitutionSourceKey::of(node).unwrap()) {
-                continue;
-            }
-            pending.push(return_type);
-            pending.extend(positional.iter());
-            pending.extend(named.iter().map(|(_, ty)| ty));
-        }
-        assert!(visited.len() <= 3 * 24);
-        let mut leaf = &ty;
-        for _ in 0..24 {
-            let ResolvedType {
-                kind: ResolvedTypeKind::Function { return_type, .. },
-            } = leaf
-            else {
-                panic!("lost generic function depth")
-            };
-            leaf = return_type;
-        }
-        assert!(leaf.interface("dart:core", "int"));
+        assert_generic_function_fanout(&ty);
     });
+}
+
+fn assert_generic_function_fanout(ty: &ResolvedType) {
+    let mut visited = FxHashSet::default();
+    let mut pending = vec![ty];
+    while let Some(node) = pending.pop() {
+        let ResolvedType {
+            kind:
+                ResolvedTypeKind::Function {
+                    return_type,
+                    positional,
+                    named,
+                    ..
+                },
+        } = node
+        else {
+            assert!(node.interface("dart:core", "int"));
+            continue;
+        };
+        if !visited.insert(SubstitutionSourceKey::of(node).unwrap()) {
+            continue;
+        }
+        pending.push(return_type);
+        pending.extend(positional.iter());
+        pending.extend(named.iter().map(|(_, ty)| ty));
+    }
+    assert!(visited.len() <= 3 * 24);
+    let mut leaf = ty;
+    for _ in 0..24 {
+        let ResolvedType {
+            kind: ResolvedTypeKind::Function { return_type, .. },
+        } = leaf
+        else {
+            panic!("lost generic function depth")
+        };
+        leaf = return_type;
+    }
+    assert!(leaf.interface("dart:core", "int"));
 }
 
 #[test]
