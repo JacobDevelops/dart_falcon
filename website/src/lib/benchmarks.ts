@@ -14,6 +14,10 @@ export interface BenchCorpus {
   rev: string
   files: number
   lines: number
+  /** Source subset used by the DCL-family scenarios; absent in older reports. */
+  dclFiles?: number
+  dclLines?: number
+  notMeasured?: { tool: string; reason: string }[]
   /** Plugin directories measured when only part of the repository is in scope. */
   scope: string[]
 }
@@ -108,6 +112,13 @@ export function corpusLabel(corpus: BenchCorpus): string {
   const n = corpus.scope.length
   return n > 0 ? `${['one', 'two', 'three', 'four', 'five'][n - 1] ?? n} ${corpus.name} plugin families` : corpus.name
 }
+/** Explicit omissions apply to the DCL family, not the official-lint scenarios. */
+export function unmeasuredTools(run: BenchRun) {
+  return run.scenario.comparator === 'dcl'
+    ? (run.corpus.notMeasured ?? []).filter((entry) => !run.rows.some((row) => row.tool === entry.tool))
+    : []
+}
+
 
 export interface ScenarioSummary {
   scenario: BenchScenario

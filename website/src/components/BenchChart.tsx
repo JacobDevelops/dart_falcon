@@ -5,6 +5,7 @@ import {
   formatMs,
   formatRange,
   speedup,
+  unmeasuredTools,
   type BenchRun,
   type ScenarioSummary,
 } from '../lib/benchmarks'
@@ -33,6 +34,9 @@ export function BenchChart({
     run.rows.some((r) => r.tool === 'falcon') && speedup(run).versus.tool !== 'falcon'
       ? compareText(run)
       : null
+  const dcl = run.scenario.comparator === 'dcl'
+  const files = dcl ? run.corpus.dclFiles : run.corpus.files
+  const lines = dcl ? run.corpus.dclLines : run.corpus.lines
   return (
     <figure className="bench">
       <figcaption className="bench-cap">
@@ -45,8 +49,8 @@ export function BenchChart({
             ? ` (${run.corpus.scope.map((d) => d.split('/').pop()).join(', ')} only)`
             : ''}
           {' · '}
-          {run.corpus.files.toLocaleString('en-US')} files ·{' '}
-          {run.corpus.lines.toLocaleString('en-US')} lines
+          {files?.toLocaleString('en-US') ?? 'unknown'} files ·{' '}
+          {lines?.toLocaleString('en-US') ?? 'unknown'} lines
         </span>
         {detailed ? <span className="bench-desc">{run.scenario.description}</span> : null}
       </figcaption>
@@ -86,6 +90,11 @@ export function BenchChart({
           </span>
         ))}
       </div>
+      {unmeasuredTools(run).map(({ tool, reason }) => (
+        <p key={tool} className="bench-desc">
+          {tool.toUpperCase()}: not measured — {reason}.
+        </p>
+      ))}
     </figure>
   )
 }
@@ -153,6 +162,11 @@ export function BenchSummaryChart({ summary }: { summary: ScenarioSummary }) {
                   </span>
                 ) : null
               })}
+              {unmeasuredTools(run).map(({ tool, reason }) => (
+                <span key={tool} className="bench-desc">
+                  {tool.toUpperCase()}: not measured — {reason}.
+                </span>
+              ))}
             </li>
           )
         })}

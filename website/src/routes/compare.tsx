@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { DocsLayout } from '../components/DocsLayout'
-import { formatSpeedup, headlineSummary, scenarioSummaries, speedup, summaryBody, type ScenarioSummary } from '../lib/benchmarks'
+import { corpusLabel, formatSpeedup, headlineSummary, scenarioSummaries, unmeasuredTools, type ScenarioSummary } from '../lib/benchmarks'
 import { getCompareData } from '../lib/server'
 import { breadcrumbs, seo } from '../lib/seo'
 
@@ -74,24 +74,27 @@ function Compare() {
   const summaries = scenarioSummaries(bench)
   const notMeasured = <span className="na">not measured</span>
   const rssRange = (s: ScenarioSummary, tool: string): ReactNode => {
-    const values = s.runs.flatMap((run) => run.rows.flatMap((r) =>
-      r.tool === tool && r.peakRssMb !== undefined ? [r.peakRssMb] : [],
-    ))
-    return values.length > 0
-      ? `${Math.round(Math.min(...values))}–${Math.round(Math.max(...values))} MB`
-      : notMeasured
+    const rss = s.runs.flatMap((run) => run.rows.flatMap((r) => (r.tool === tool && r.peakRssMb !== undefined ? [r.peakRssMb] : [])))
+    return rss.length > 0 ? `${Math.round(Math.min(...rss))}–${Math.round(Math.max(...rss))} MB` : notMeasured
   }
-  const dcmSpeed = (s: ScenarioSummary): ReactNode => {
+  const benchmarkTools = [
+    { id: 'falcon', name: 'falcon' },
+    { id: 'dart-analyze', name: 'dart analyze' },
+    { id: 'dcl', name: 'Dart Code Linter' },
+    { id: 'dcm', name: 'DCM' },
+  ]
+  const relativeSpeed = (s: ScenarioSummary, tool: string): ReactNode => {
     const ratios = s.runs.flatMap((run) => {
       const falcon = run.rows.find((r) => r.tool === 'falcon')
-      const dcm = run.rows.find((r) => r.tool === 'dcm')
-      return falcon && dcm ? [dcm.meanMs / falcon.meanMs] : []
+      const other = run.rows.find((r) => r.tool === tool)
+      return falcon && other ? [other.meanMs / falcon.meanMs] : []
     })
     if (ratios.length === 0) return notMeasured
+    if (tool === 'falcon') return 'Baseline'
     const factor = Math.exp(ratios.reduce((sum, ratio) => sum + Math.log(ratio), 0) / ratios.length)
     return `${formatSpeedup(factor >= 1 ? factor : 1 / factor)} ${
       factor >= 1 ? 'slower' : 'faster'
-    } than falcon (geometric mean across ${ratios.length} matched ${ratios.length === 1 ? 'corpus' : 'corpora'})`
+    } than falcon (${ratios.length} matched ${ratios.length === 1 ? 'corpus' : 'corpora'})`
   }
   const rows: [string, ...ReactNode[]][] = [
     [
@@ -130,31 +133,6 @@ function Compare() {
       <>Repository archived; the README recommends <a href={SOURCES.serverPlugin}>analysis_server_plugin</a> instead<Cite href={SOURCES.customLint} n={6} /></>,
     ],
   ]
-  rows.splice(
-    1,
-    0,
-    ...summaries.flatMap((s): [string, ...ReactNode[]][] => {
-      const comparator = speedup(s.runs[0]).versus
-      return [
-        [
-          `Speed, ${s.scenario.title} (vs ${comparator.name})`,
-          <>
-            {summaryBody(s)} <Link to="/benchmarks">Per-corpus times</Link>
-          </>,
-          comparator.tool === 'dart-analyze' ? 'Baseline' : notMeasured,
-          dcmSpeed(s),
-          notMeasured,
-        ],
-        [
-          `Largest-process peak RSS across ${s.runs.length} corpora, ${s.scenario.title}`,
-          rssRange(s, 'falcon'),
-          rssRange(s, 'dart-analyze'),
-          rssRange(s, 'dcm'),
-          notMeasured,
-        ],
-      ]
-    }),
-  )
 
   return (
     <DocsLayout>
@@ -168,6 +146,45 @@ function Compare() {
           {` ${headlineSummary(bench)}`}
         </p>
       </header>
+
+      {summaries.length > 0 ? (
+        <div className="table-scroll">
+          <table className="compare">
+            <caption>Measured performance; geometric-mean time ratios relative to falcon</caption>
+            <thead>
+              <tr>
+                <th scope="col">Measurement</th>
+                {benchmarkTools.map((tool) => <th key={tool.id} scope="col">{tool.name}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {summaries.flatMap((s) => [
+                <tr key={`${s.scenario.id}-speed`}>
+                  <th scope="row">Speed, {s.scenario.title}</th>
+                  {benchmarkTools.map((tool) => (
+                    <td key={tool.id}>
+                      {relativeSpeed(s, tool.id)}
+                      {s.runs.flatMap((run) =>
+                        unmeasuredTools(run).filter((entry) => entry.tool === tool.id).map((entry) => (
+                          <small key={run.corpus.id} className="scope">
+                            {corpusLabel(run.corpus)}: not measured — {entry.reason}.
+                          </small>
+                        )),
+                      )}
+                    </td>
+                  ))}
+                </tr>,
+                <tr key={`${s.scenario.id}-rss`}>
+                  <th scope="row">Largest-process peak RSS range, {s.scenario.title}</th>
+                  {benchmarkTools.map((tool) => (
+                    <td key={tool.id}>{rssRange(s, tool.id)}</td>
+                  ))}
+                </tr>,
+              ])}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
 
       <div className="table-scroll">
         <table className="compare">
@@ -199,8 +216,12 @@ function Compare() {
       </div>
       {summaries.length > 0 ? (
         <p className="note">
-          Timings are means of repeated runs; see <Link to="/benchmarks">methodology</Link> for
-          the machine, versions, and commands.
+          Each timing is a mean of repeated runs. Speed cells use the geometric
+          mean of per-corpus time ratios against falcon on the matched corpora
+          shown; RSS cells show the range across measured corpora only. DCL is
+          the DCL-family speedup baseline in the{' '}
+          <Link to="/benchmarks">per-corpus charts and methodology</Link>, which
+          also list the machine, versions, and commands.
         </p>
       ) : null}
 

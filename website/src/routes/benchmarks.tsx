@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { BenchChart, BenchSummaryChart } from '../components/BenchChart'
 import { DocsLayout } from '../components/DocsLayout'
 import { markdown } from '../components/DocsPage'
-import { corpusLabel, formatMs, scenarioSummaries, summaryText, type BenchView } from '../lib/benchmarks'
+import { corpusLabel, formatMs, scenarioSummaries, summaryText, unmeasuredTools, type BenchView } from '../lib/benchmarks'
 import { getBenchmarks } from '../lib/server'
 import { breadcrumbs, seo } from '../lib/seo'
 import methodology from '../content/benchmarks.md?raw'
@@ -58,7 +58,8 @@ function Benchmarks() {
             <>
               The Dart Code Linter (DCL) scenarios compare falcon, DCL and DCM with
               the selected DCL rule names enabled; their speedup baseline is DCL,
-              not dart analyze.{' '}
+              not dart analyze. DCM is not measured where the source subset exceeds
+              the DCM Free 50k-line limit; those omissions are labeled, not timed.{' '}
             </>
           ) : null}
           Matching rule names do not imply identical work or output. The{' '}
@@ -100,7 +101,7 @@ function Benchmarks() {
             </thead>
             <tbody>
               {runs.flatMap((run) =>
-                run.rows.map((r) => (
+                [...run.rows.map((r) => (
                   <tr key={`${run.corpus.id}-${run.scenario.id}-${r.tool}`}>
                     <th scope="row">{corpusLabel(run.corpus)}</th>
                     <td>{run.scenario.title}</td>
@@ -112,7 +113,14 @@ function Benchmarks() {
                     <td className="num">{r.runs}</td>
                     <td className="num">{r.peakRssMb === undefined ? '–' : `${Math.round(r.peakRssMb)} MB`}</td>
                   </tr>
-                )),
+                )), ...unmeasuredTools(run).map(({ tool, reason }) => (
+                  <tr key={`${run.corpus.id}-${run.scenario.id}-${tool}`}>
+                    <th scope="row">{corpusLabel(run.corpus)}</th>
+                    <td>{run.scenario.title}</td>
+                    <td>{tool.toUpperCase()}</td>
+                    <td colSpan={6}>Not measured — {reason}</td>
+                  </tr>
+                ))],
               )}
             </tbody>
           </table>
@@ -126,17 +134,18 @@ function Benchmarks() {
           use the same rule configuration.{' '}
           {hasAnalyzer ? (
             <>
-              For <code>dart analyze</code>, “Other” and “Errors” include its
-              type checking, which falcon does not do.{' '}
+              For <code>dart analyze</code>, “Other” and “Error severity” include
+              compilation and type errors.{' '}
             </>
           ) : null}
           {hasDcl ? (
             <>
-              DCL scenarios report the selected DCL rules for falcon, DCL and DCM.{' '}
-              Error-severity counts can overlap lint counts for DCL and DCM.{' '}
+              DCL scenarios report the selected DCL rules for falcon, DCL and DCM
+              where measured. “Error severity” counts rule issues marked as errors
+              for DCL and DCM, so these can overlap “Lint”.{' '}
             </>
           ) : null}
-          Analyzer errors include compilation and type errors; falcon reports syntax errors.{' '}
+          For falcon, “Error severity” counts syntax errors, not lint severity.{' '}
           Matching rule names are not evidence of diagnostic parity; the{' '}
           <a href="#methodology">methodology</a> explains differences in output.
         </p>
@@ -156,7 +165,7 @@ function Benchmarks() {
             </thead>
             <tbody>
               {outputs.flatMap((run) =>
-                run.rows.map((r) => (
+                [...run.rows.map((r) => (
                   <tr key={`${run.corpus.id}-${run.scenario.id}-${r.tool}`}>
                     <th scope="row">{corpusLabel(run.corpus)}</th>
                     <td>{run.scenario.comparator === 'dcl' ? 'DCL rules' : 'Official Dart lints'}</td>
@@ -166,7 +175,14 @@ function Benchmarks() {
                     <td className="num">{count(r.errorDiagnostics)}</td>
                     <td className="num">{count(r.diagnostics)}</td>
                   </tr>
-                )),
+                )), ...unmeasuredTools(run).map(({ tool, reason }) => (
+                  <tr key={`${run.corpus.id}-${run.scenario.id}-${tool}`}>
+                    <th scope="row">{corpusLabel(run.corpus)}</th>
+                    <td>DCL rules</td>
+                    <td>{tool.toUpperCase()}</td>
+                    <td colSpan={4}>Not measured — {reason}</td>
+                  </tr>
+                ))],
               )}
             </tbody>
           </table>
@@ -201,13 +217,18 @@ function Benchmarks() {
         </dl>
         <div className="table-scroll">
           <table>
-            <caption>Corpora, pinned to exact commits</caption>
+            <caption>
+              Corpora, pinned to exact commits
+              {hasDcl ? '; DCL-family counts exclude generated files' : ''}
+            </caption>
             <thead>
               <tr>
                 <th scope="col">Corpus</th>
                 <th scope="col">Commit</th>
-                <th scope="col" className="num">Dart files</th>
-                <th scope="col" className="num">Lines</th>
+                <th scope="col" className="num">Scoped Dart files</th>
+                <th scope="col" className="num">Scoped lines</th>
+                {hasDcl ? <th scope="col" className="num">DCL-family files</th> : null}
+                {hasDcl ? <th scope="col" className="num">DCL-family lines</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -226,6 +247,8 @@ function Benchmarks() {
                   </td>
                   <td className="num">{c.files.toLocaleString('en-US')}</td>
                   <td className="num">{c.lines.toLocaleString('en-US')}</td>
+                  {hasDcl ? <td className="num">{count(c.dclFiles)}</td> : null}
+                  {hasDcl ? <td className="num">{count(c.dclLines)}</td> : null}
                 </tr>
               ))}
             </tbody>

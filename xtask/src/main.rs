@@ -34,7 +34,7 @@ enum Task {
     ValidateRules(validate_rules::Options),
     /// Enforce the performance budget on the jfit mobile library.
     PerfLock(perf_lock::Options),
-    /// Compare release falcon with dart analyze on pinned public projects.
+    /// Compare release falcon, dart analyze, DCM, and DCL on pinned public projects.
     BenchCompare(bench_compare::Options),
     /// Generate a Homebrew formula from release archive checksums.
     Homebrew(homebrew::Options),

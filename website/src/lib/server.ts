@@ -14,13 +14,16 @@ interface RawCorpus extends Omit<BenchCorpus, 'scope'> {
 // Written by the benchmark harness from real runs; typed so a renamed field fails the type check.
 const raw: Omit<Benchmarks, 'corpora'> & { corpora: RawCorpus[] } = benchmarksJson
 
-const corpusView = ({ id, name, url, rev, files, lines, includedDirectories }: RawCorpus): BenchCorpus => ({
+const corpusView = ({ id, name, url, rev, files, lines, dclFiles, dclLines, notMeasured, includedDirectories }: RawCorpus): BenchCorpus => ({
   id,
   name,
   url,
   rev,
   files,
   lines,
+  dclFiles,
+  dclLines,
+  notMeasured,
   scope: includedDirectories,
 })
 
