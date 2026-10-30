@@ -24,7 +24,7 @@ Configure rules, severities, options, and per-path overrides in `falcon.json`. C
 
 ## Performance
 
-With cold analyzer state, falcon runs **3.9–6.0× faster than `dart analyze` across all four measured corpora**; with warm state, `dart analyze` is faster on three. Cold state is relevant to fresh CI runs, not CI systems retaining analyzer caches. Dart also performs full type checking, and diagnostic counts differ. See the [results, limitations, and reproduction instructions](https://dart-falcon.jacobdevelops.com/benchmarks).
+With cold analyzer state, falcon runs **4.4–5.5× faster than `dart analyze` across all four measured corpora**; with warm state, `dart analyze` is faster on three. Cold state is relevant to fresh CI runs, not CI systems retaining analyzer caches. Dart also performs full type checking, and diagnostic counts differ. On 31 shared `dart_code_linter` rules, falcon runs 4.3–41× faster than DCL and 3.3–11× faster than DCM across the corpora each could measure. See the [results, limitations, and reproduction instructions](https://dart-falcon.jacobdevelops.com/benchmarks).
 
 ## Installation
 
