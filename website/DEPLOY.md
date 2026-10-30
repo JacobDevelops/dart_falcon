@@ -59,7 +59,17 @@ agent.**
    `website/.dev.vars` (gitignored). There are none today — the site is static
    SSR with no backend bindings.
 
-## Routine deploy (after one-time setup, run by the owner)
+## Routine deploy
+
+Every published release deploys the site: `release.yml` dispatches `publish.yml`
+at the release tag, and its `website` job runs `bun run deploy` (build +
+`wrangler deploy`). Prereleases and re-released older tags are skipped so the
+site always matches the latest release. It needs two repository secrets:
+`CLOUDFLARE_API_TOKEN` (*Workers Scripts: Edit* + *Account: Read*) and
+`CLOUDFLARE_ACCOUNT_ID`. To redeploy without a new release, dispatch
+`publish.yml` at the latest tag; pub.dev publishing skips an existing version.
+
+A manual deploy from an authenticated machine still works:
 
 ```sh
 cd website

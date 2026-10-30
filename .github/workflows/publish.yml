@@ -1,6 +1,6 @@
 name: Publish
 
-# Dispatched by release.yml at the release tag; package registries publish from here.
+# Dispatched by release.yml at the release tag; package registries and the website publish from here.
 on:
   workflow_dispatch:
 
@@ -39,3 +39,42 @@ jobs:
         if: steps.published.outputs.exists == 'false'
       - run: dart pub publish --force
         if: steps.published.outputs.exists == 'false'
+
+  website:
+    name: Deploy website
+    runs-on: ubuntu-latest
+    concurrency:
+      group: website-deploy
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Re-releasing an old tag or a prerelease must not roll the site back.
+      - name: Check latest release
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_TYPE" = tag
+          case "$GITHUB_REF_NAME" in
+            *-*|*+*) echo "deploy=false" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          latest="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          echo "deploy=$([ "$latest" = "$GITHUB_REF_NAME" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+        if: steps.latest.outputs.deploy == 'true'
+        with:
+          install_args: bun
+          cache: true
+      - run: bun install --frozen-lockfile
+        if: steps.latest.outputs.deploy == 'true'
+      - run: bun run deploy
+        if: steps.latest.outputs.deploy == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
