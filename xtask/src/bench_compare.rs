@@ -27,6 +27,18 @@ pub struct Options {
     dart: Option<PathBuf>,
     #[arg(long)]
     hyperfine: Option<PathBuf>,
+    /// Direct DCM executable (defaults to the activated local installation).
+    #[arg(long)]
+    dcm: Option<PathBuf>,
+    /// Direct DCL executable or Dart snapshot.
+    #[arg(long)]
+    dcl: Option<PathBuf>,
+    /// Benchmark only these corpus ids; requires an explicit output path.
+    #[arg(long, value_delimiter = ',', requires = "output")]
+    corpus: Vec<String>,
+    /// Report destination (defaults to the published website data).
+    #[arg(long)]
+    output: Option<PathBuf>,
     /// Reuse an already built target/release/falcon.
     #[arg(long)]
     skip_build: bool,
@@ -263,35 +275,153 @@ fn falcon_includes(excluded: &[String]) -> Vec<String> {
     excluded.iter().map(|path| format!("!./{path}")).collect()
 }
 
-fn configuration() -> (Value, Vec<&'static str>) {
+fn configuration_for(dcl: bool) -> (Value, Vec<&'static str>) {
     let mut config = json!({
         "linter": {"rules": {"recommended": false}},
         "cross-file": {"rules": {"recommended": false}}
     });
     let mut names = Vec::with_capacity(RULE_METADATA.len());
     for rule in RULE_METADATA {
-        if let RuleSource::Lints(name) = rule.source {
-            names.push(name);
-            let section = if matches!(rule.kind, RuleKind::CrossFile { .. }) {
-                "cross-file"
-            } else {
-                "linter"
-            };
-            let rules = config[section]["rules"]
-                .as_object_mut()
-                .expect("rules object");
-            rules
-                .entry(rule.group.as_str())
-                .or_insert_with(|| json!({}))[rule.name] = json!("warn");
-        }
+        let name = match rule.source {
+            RuleSource::Lints(name) if !dcl => name,
+            RuleSource::DartCodeLinter(name)
+                if dcl
+                    && !DCL_COMMANDS.contains(&name)
+                    && !DCM_EXCLUSIONS.iter().any(|(id, _)| *id == name) =>
+            {
+                name
+            }
+            _ => continue,
+        };
+        names.push(name);
+        let section = if matches!(rule.kind, RuleKind::CrossFile { .. }) {
+            "cross-file"
+        } else {
+            "linter"
+        };
+        let rules = config[section]["rules"]
+            .as_object_mut()
+            .expect("rules object");
+        rules
+            .entry(rule.group.as_str())
+            .or_insert_with(|| json!({}))[rule.name] = json!("warn");
     }
     names.sort_unstable();
+    names.dedup();
     (config, names)
+}
+
+const DCL_COMMANDS: &[&str] = &[
+    "check-unused-code",
+    "check-unused-files",
+    "check-unnecessary-nullable",
+];
+
+// Fixed eligibility policy observed with DCM 1.40.0 Free against the pinned bloc corpus.
+// Exclude these upstream ids from all three tools, never just from DCM.
+const DCM_EXCLUSIONS: &[(&str, &str)] = &[
+    (
+        "avoid-ignoring-return-values",
+        "Unavailable with DCM 1.40.0 Free license",
+    ),
+    ("format-comment", "Unavailable with DCM 1.40.0 Free license"),
+    (
+        "no-equal-arguments",
+        "Unavailable with DCM 1.40.0 Free license",
+    ),
+    (
+        "no-object-declaration",
+        "Unavailable with DCM 1.40.0 Free license",
+    ),
+    (
+        "prefer-correct-identifier-length",
+        "Unavailable with DCM 1.40.0 Free license",
+    ),
+    (
+        "prefer-correct-type-name",
+        "Unavailable with DCM 1.40.0 Free license",
+    ),
+    (
+        "prefer-trailing-comma",
+        "Unavailable with DCM 1.40.0 Free license",
+    ),
+    (
+        "use-design-system-item",
+        "Unknown rule and unavailable with DCM 1.40.0 Free license",
+    ),
+];
+
+fn excluded_dcl_rules() -> Value {
+    Value::Array(DCM_EXCLUSIONS.iter().map(|(id, reason)| {
+        json!({"id": id, "reason": reason, "source": "dcm", "appliesTo": ["falcon", "dcl", "dcm"]})
+    }).collect())
+}
+
+fn configuration() -> (Value, Vec<&'static str>) {
+    configuration_for(false)
 }
 
 fn write_json(path: &Path, value: &Value) -> Result<()> {
     fs::write(path, format!("{}\n", serde_json::to_string_pretty(value)?))?;
     Ok(())
+}
+
+fn metrics_report(bytes: &[u8]) -> Result<Value> {
+    let start = bytes
+        .iter()
+        .position(|byte| *byte == b'{')
+        .ok_or("missing DCL JSON report")?;
+    let report: Value = serde_json::from_slice(&bytes[start..])?;
+    if !report["formatVersion"].is_number() || !report["records"].is_array() {
+        return Err("expected versioned DCL JSON report with records array".into());
+    }
+    Ok(report)
+}
+
+fn linter_diagnostics(bytes: &[u8]) -> Result<(usize, BTreeMap<String, usize>)> {
+    let mut counts = BTreeMap::new();
+    let report = metrics_report(bytes)?;
+    for record in report["records"].as_array().ok_or("missing records")? {
+        for issue in record["issues"].as_array().ok_or("missing record issues")? {
+            let code = issue["ruleId"].as_str().ok_or("missing issue ruleId")?;
+            *counts.entry(code.to_lowercase()).or_default() += 1;
+        }
+    }
+    Ok((counts.values().sum(), counts))
+}
+
+fn metrics_diagnostics(bytes: &[u8]) -> Result<(usize, BTreeMap<String, usize>)> {
+    let content = std::str::from_utf8(bytes)?;
+    if content.contains("Config errors:")
+        || content.contains("unknown-rule :")
+        || content.contains("not-available-rule :")
+    {
+        return Err("DCM reports unsupported rules or subscription restrictions; refusing to publish unequal rule sets".into());
+    }
+    let mut counts = BTreeMap::new();
+    for line in content.lines() {
+        if let Some((code, _)) = line.trim().split_once(" : https://dcm.dev/docs/rules/") {
+            *counts.entry(code.to_owned()).or_default() += 1;
+        }
+    }
+    let total: usize = counts.values().sum();
+    let reported = if content.contains("no issues found!") {
+        0
+    } else {
+        content
+            .lines()
+            .find_map(|line| {
+                line.split_once("total lint issues - ")
+                    .map(|(_, summary)| summary)
+            })
+            .and_then(|summary| summary.split_whitespace().next())
+            .ok_or("missing DCM console issue summary")?
+            .parse::<usize>()?
+    };
+    if total != reported {
+        return Err(format!("DCM console parser counted {total} issues but summary reports {reported}; refusing incomplete diagnostics").into());
+    }
+    Ok((total, counts))
 }
 
 fn diagnostics(tool: &str, bytes: &[u8]) -> Result<(usize, BTreeMap<String, usize>)> {
@@ -309,6 +439,10 @@ fn diagnostics(tool: &str, bytes: &[u8]) -> Result<(usize, BTreeMap<String, usiz
             *counts.entry(code.to_owned()).or_default() += 1;
         }
         Ok((items.len(), counts))
+    } else if tool == "dcl" {
+        linter_diagnostics(bytes)
+    } else if tool == "dcm" {
+        metrics_diagnostics(bytes)
     } else {
         let content = std::str::from_utf8(bytes)?;
         for line in content.lines() {
@@ -334,6 +468,9 @@ fn comparable_counts(
                 .find(|rule| rule.name == code)
                 .and_then(|rule| match rule.source {
                     RuleSource::Lints(name) => Some(name.to_lowercase()),
+                    RuleSource::DartCodeLinter(name) if names.contains(&name) => {
+                        Some(name.to_lowercase())
+                    }
                     _ => None,
                 })
                 .unwrap_or_else(|| code.clone())
@@ -360,6 +497,10 @@ struct BenchmarkContext<'a> {
     options: &'a Options,
     config: &'a Value,
     names: &'a [&'static str],
+    dcl_config: &'a Value,
+    dcl_names: &'a [&'static str],
+    dcl: &'a Path,
+    dcm: &'a Path,
 }
 
 struct CorpusInventory {
@@ -393,6 +534,7 @@ struct Invocation<'a, 'b> {
     tool: &'a str,
     executable: &'a Path,
     args: &'a [String],
+    names: &'a [&'static str],
 }
 
 fn restore_dependency_locks(
@@ -561,7 +703,6 @@ fn benchmark_corpus(
         cache,
         flutter,
         config,
-        names,
         ..
     } = *benchmark;
     let checkout = cache.join(corpus.id);
@@ -591,15 +732,6 @@ fn benchmark_corpus(
         });
     restore_dependency_locks(&project, &lock_archive, &lock_gzip, baseline)?;
     let (excluded, setup_failures) = resolve_dependencies(&project, flutter, baseline)?;
-    let mut excluded_yaml = String::new();
-    for path in &excluded {
-        writeln!(excluded_yaml, "    - '{path}'").expect("writing to a string cannot fail");
-    }
-    let mut names_yaml = String::new();
-    for name in names {
-        writeln!(names_yaml, "    {name}: true").expect("writing to a string cannot fail");
-    }
-    let yaml = format!("analyzer:\n  exclude:\n{excluded_yaml}linter:\n  rules:\n{names_yaml}");
     let mut project_config = config.clone();
     project_config["files"] = json!({"includes": falcon_includes(&excluded)});
     let CorpusInventory {
@@ -616,7 +748,6 @@ fn benchmark_corpus(
         )
         .into());
     }
-    fs::write(project.join("analysis_options.yaml"), yaml)?;
     let config_path = project.join("falcon.benchmark.json");
     write_json(&config_path, &project_config)?;
     let filter = serde_json::from_value(project_config["files"]["includes"].clone())?;
@@ -639,36 +770,93 @@ fn benchmark_corpus(
     )?;
     let encoded_locks = text(Command::new("base64").arg("-w0").arg(&lock_gzip))?;
     let metadata = json!({"id": corpus.id, "name": corpus.repo, "url": format!("https://github.com/{}", corpus.repo), "rev": corpus.rev, "directory": corpus.directory, "includedDirectories": corpus.included_directories, "files": files, "lines": lines, "setupFailures": setup_failures, "dependencyLocksGzipBase64": encoded_locks});
-    measure_corpus(benchmark, corpus, &project, &config_path, results)?;
+    measure_corpus(
+        benchmark,
+        corpus,
+        &project,
+        &config_path,
+        &excluded,
+        results,
+    )?;
     Ok(metadata)
 }
 
-fn measure_corpus(
-    benchmark: &BenchmarkContext<'_>,
-    corpus: &Corpus,
+const DCL_FILE_EXCLUSIONS: &[&str] = &["**/*.g.dart", "**/*.freezed.dart", "**/*.mapper.dart"];
+const DCL_EXCLUDE_GLOB: &str = "{**/*.g.dart,**/*.freezed.dart,**/*.mapper.dart}";
+
+fn write_configurations(
+    family: &str,
+    names: &[&str],
+    config: &Value,
     project: &Path,
     config_path: &Path,
-    results: &mut Vec<Value>,
+    excluded: &[String],
 ) -> Result<()> {
-    let BenchmarkContext {
-        cache,
-        options,
-        falcon,
-        dart,
-        ..
-    } = *benchmark;
-    let state = cache.join(format!("{}-analyzer-state", corpus.id));
-    fs::create_dir_all(&state)?;
-    for (scenario, cold) in [("same-rules-cold", true), ("same-rules-warm", false)] {
-        let runs = if cold {
-            options.cold_runs
-        } else {
-            options.runs
-        };
-        for (tool, executable, args) in [
-            (
-                "falcon",
-                falcon,
+    let generated = if family == "dcl-rules" {
+        DCL_FILE_EXCLUSIONS
+    } else {
+        &[]
+    };
+    let mut yaml = String::from("analyzer:\n  exclude:\n");
+    for path in excluded
+        .iter()
+        .map(String::as_str)
+        .chain(generated.iter().copied())
+    {
+        writeln!(yaml, "    - '{path}'")?;
+    }
+    if family == "same-rules" {
+        yaml.push_str("linter:\n  rules:\n");
+        for name in names {
+            writeln!(yaml, "    {name}: true")?;
+        }
+    } else {
+        for section in ["dart_code_linter", "dcm"] {
+            writeln!(yaml, "{section}:\n  rules:")?;
+            for name in names {
+                writeln!(yaml, "    - {name}")?;
+            }
+        }
+    }
+    fs::write(project.join("analysis_options.yaml"), yaml)?;
+    let mut project_config = config.clone();
+    let mut includes = falcon_includes(excluded);
+    includes.extend(generated.iter().map(|path| format!("!./{path}")));
+    project_config["files"] = json!({"includes": includes});
+    write_json(config_path, &project_config)
+}
+
+fn error_count(tool: &str, bytes: &[u8], by_rule: &BTreeMap<String, usize>) -> Result<usize> {
+    Ok(match tool {
+        "dart-analyze" => std::str::from_utf8(bytes)?
+            .lines()
+            .filter(|line| line.starts_with("ERROR|"))
+            .count(),
+        "dcl" => metrics_report(bytes)?["records"]
+            .as_array()
+            .ok_or("missing records")?
+            .iter()
+            .filter_map(|record| record["issues"].as_array())
+            .flatten()
+            .filter(|issue| {
+                issue["severity"]
+                    .as_str()
+                    .is_some_and(|severity| severity.eq_ignore_ascii_case("error"))
+            })
+            .count(),
+        "dcm" => std::str::from_utf8(bytes)?
+            .lines()
+            .filter(|line| line.trim_start().starts_with("ERROR "))
+            .count(),
+        _ => *by_rule.get("syntax-error").unwrap_or(&0),
+    })
+}
+
+impl BenchmarkContext<'_> {
+    fn tool_command(&self, tool: &str, config_path: &Path) -> Result<(&Path, Vec<String>)> {
+        Ok(match tool {
+            "falcon" => (
+                self.falcon.as_path(),
                 vec![
                     "check".to_owned(),
                     ".".to_owned(),
@@ -680,9 +868,8 @@ fn measure_corpus(
                     "0".to_owned(),
                 ],
             ),
-            (
-                "dart-analyze",
-                dart,
+            "dart-analyze" => (
+                self.dart.as_path(),
                 vec![
                     "--suppress-analytics".to_owned(),
                     "analyze".to_owned(),
@@ -690,22 +877,98 @@ fn measure_corpus(
                     ".".to_owned(),
                 ],
             ),
-        ] {
-            results.push(
-                Invocation {
-                    benchmark,
-                    corpus,
-                    project,
-                    state: &state,
-                    scenario,
-                    cold,
-                    runs,
-                    tool,
-                    executable,
-                    args: &args,
-                }
-                .measure()?,
-            );
+            "dcl" => {
+                let mut args = Vec::new();
+                let executable = if self.dcl.extension().is_some_and(|ext| ext == "snapshot") {
+                    args.push(self.dcl.to_string_lossy().into_owned());
+                    self.dart.as_path()
+                } else {
+                    self.dcl
+                };
+                args.extend([
+                    "analyze".to_owned(),
+                    "--reporter=json".to_owned(),
+                    "--no-verbose".to_owned(),
+                    "--exclude".to_owned(),
+                    DCL_EXCLUDE_GLOB.to_owned(),
+                    ".".to_owned(),
+                ]);
+                (executable, args)
+            }
+            "dcm" => (
+                self.dcm,
+                vec![
+                    "analyze".to_owned(),
+                    "--sdk-path".to_owned(),
+                    self.dart
+                        .parent()
+                        .and_then(Path::parent)
+                        .ok_or("SDK path")?
+                        .to_string_lossy()
+                        .into_owned(),
+                    "--no-analytics".to_owned(),
+                    "--no-global-version".to_owned(),
+                    "--exclude".to_owned(),
+                    DCL_EXCLUDE_GLOB.to_owned(),
+                    ".".to_owned(),
+                ],
+            ),
+            _ => unreachable!("fixed benchmark tool"),
+        })
+    }
+}
+
+fn measure_corpus(
+    benchmark: &BenchmarkContext<'_>,
+    corpus: &Corpus,
+    project: &Path,
+    config_path: &Path,
+    excluded: &[String],
+    results: &mut Vec<Value>,
+) -> Result<()> {
+    let BenchmarkContext { cache, options, .. } = *benchmark;
+    for (family, names, config, tools) in [
+        (
+            "same-rules",
+            benchmark.names,
+            benchmark.config,
+            &["falcon", "dart-analyze"][..],
+        ),
+        (
+            "dcl-rules",
+            benchmark.dcl_names,
+            benchmark.dcl_config,
+            &["falcon", "dcl", "dcm"][..],
+        ),
+    ] {
+        write_configurations(family, names, config, project, config_path, excluded)?;
+        for cold in [true, false] {
+            let scenario = format!("{family}-{}", if cold { "cold" } else { "warm" });
+            let runs = if cold {
+                options.cold_runs
+            } else {
+                options.runs
+            };
+            for &tool in tools {
+                let state = cache.join(format!("{}-{family}-{tool}-analyzer-state", corpus.id));
+                let (executable, args) = benchmark.tool_command(tool, config_path)?;
+                results.push(
+                    Invocation {
+                        benchmark,
+                        corpus,
+                        project,
+                        state: &state,
+                        scenario: &scenario,
+                        cold,
+                        runs,
+                        tool,
+                        executable,
+                        args: &args,
+                        names,
+                    }
+                    .measure()?,
+                );
+            }
         }
     }
     Ok(())
@@ -723,11 +986,10 @@ impl Invocation<'_, '_> {
             tool,
             executable,
             args,
+            names,
             ..
         } = *self;
-        let BenchmarkContext {
-            cache, dart, names, ..
-        } = *benchmark;
+        let BenchmarkContext { cache, dart, .. } = *benchmark;
         if cold && state.exists() {
             fs::remove_dir_all(state)?;
         }
@@ -745,41 +1007,53 @@ impl Invocation<'_, '_> {
                 "DART_SDK",
                 dart.parent().and_then(Path::parent).ok_or("SDK path")?,
             );
+        if tool == "dcm" {
+            capture.env_remove("CI");
+        }
         let captured = guarded_output(&mut capture, &capture_path, u64::from(MAX_RSS_KB))?;
         let peak_rss_mb =
             fs::read_to_string(&rss_path)?.trim().parse::<f64>()? * 1024.0 / 1_000_000.0;
         if !matches!(captured.status.code(), Some(code) if if tool == "falcon" { code == 0 } else { (0..=3).contains(&code) })
         {
             return Err(format!(
-                "{tool} failed: {}",
+                "{tool} failed ({}): {}\n{}",
+                captured.status,
+                String::from_utf8_lossy(&captured.stdout),
                 String::from_utf8_lossy(&captured.stderr)
             )
             .into());
         }
+        fs::write(
+            cache.join(format!("{}-{scenario}-{tool}-stderr.txt", corpus.id)),
+            &captured.stderr,
+        )?;
         let mut bytes = captured.stdout;
         if tool == "dart-analyze" {
             bytes.extend_from_slice(&captured.stderr);
         }
         fs::write(
-            cache.join(format!("{}-{tool}-diagnostics.txt", corpus.id)),
+            cache.join(format!("{}-{scenario}-{tool}-diagnostics.txt", corpus.id)),
             &bytes,
         )?;
-        let (count, by_rule) = diagnostics(tool, &bytes)?;
-        if ["undefined_lint", "removed_lint", "replaced_lint"]
-            .iter()
-            .any(|code| by_rule.contains_key(*code))
+        let (count, by_rule) = diagnostics(tool, &bytes).map_err(|error| {
+            format!(
+                "{tool} preflight: {error}; {}",
+                String::from_utf8_lossy(&captured.stderr)
+            )
+        })?;
+        if [
+            "undefined_lint",
+            "removed_lint",
+            "replaced_lint",
+            "unknown-config",
+        ]
+        .iter()
+        .any(|code| by_rule.contains_key(*code))
         {
-            return Err("SDK reports an unrecognized lint; inspect saved diagnostics".into());
+            return Err(format!("{tool} reports an unsupported rule or invalid configuration; inspect saved diagnostics").into());
         }
         let (comparable, lint_count) = comparable_counts(tool, &by_rule, names);
-        let errors = if tool == "dart-analyze" {
-            std::str::from_utf8(&bytes)?
-                .lines()
-                .filter(|line| line.starts_with("ERROR|"))
-                .count()
-        } else {
-            *by_rule.get("syntax-error").unwrap_or(&0)
-        };
+        let errors = error_count(tool, &bytes, &by_rule)?;
         Ok(Preflight {
             peak_rss_mb,
             count,
@@ -801,6 +1075,7 @@ impl Invocation<'_, '_> {
             tool,
             executable,
             args,
+            ..
         } = *self;
         let BenchmarkContext {
             cache,
@@ -835,6 +1110,9 @@ impl Invocation<'_, '_> {
                 "--export-json",
             ])
             .arg(&export);
+        if tool == "dcm" {
+            timing.env_remove("CI");
+        }
         if cold {
             timing.args(["--prepare", &format!("rm -rf -- {}", quote(state))]);
         }
@@ -917,7 +1195,139 @@ impl Invocation<'_, '_> {
     }
 }
 
+fn dart_executable(options: &Options) -> Result<PathBuf> {
+    if let Some(path) = &options.dart {
+        return Ok(fs::canonicalize(path)?);
+    }
+    let wrapper = PathBuf::from(text(Command::new("mise").args([
+        "x",
+        "flutter@3.47.7-stable",
+        "--",
+        "which",
+        "dart",
+    ]))?);
+    Ok(fs::canonicalize(
+        wrapper
+            .parent()
+            .ok_or("Dart wrapper parent")?
+            .join("cache/dart-sdk/bin/dart"),
+    )?)
+}
+
+fn require_tool_version(tool: &str, actual: &str, expected: &str) -> Result<()> {
+    if !actual
+        .split(|ch: char| !ch.is_ascii_digit() && ch != '.')
+        .any(|part| part == expected)
+    {
+        return Err(format!(
+            "expected {tool} {expected} for the pinned shared-rule eligibility policy, got {actual}",
+        ).into());
+    }
+    Ok(())
+}
+
+fn competitor_tools(options: &Options, dart: &Path) -> Result<(PathBuf, PathBuf, String, String)> {
+    let home = PathBuf::from(std::env::var_os("HOME").ok_or("HOME is not set")?);
+    let metrics_path = options
+        .dcm
+        .clone()
+        .unwrap_or_else(|| home.join(".local/share/dcm/1.40.0/dcm"));
+    let dcm = fs::canonicalize(&metrics_path).map_err(|error| {
+        format!(
+            "DCM executable not available at {}: {error}; install DCM or pass --dcm PATH",
+            metrics_path.display(),
+        )
+    })?;
+    let pub_cache = std::env::var_os("PUB_CACHE").map_or_else(
+        || {
+            let isolated = home.join(".local/share/falcon-bench-pub");
+            if isolated
+                .join("global_packages/dart_code_linter/bin/metrics.dart-3.13.5.snapshot")
+                .is_file()
+            {
+                isolated
+            } else {
+                home.join(".pub-cache")
+            }
+        },
+        PathBuf::from,
+    );
+    let linter_path = options.dcl.clone().unwrap_or_else(|| {
+        pub_cache.join("global_packages/dart_code_linter/bin/metrics.dart-3.13.5.snapshot")
+    });
+    let dcl = fs::canonicalize(&linter_path).map_err(|error| format!(
+        "DCL executable or snapshot not available at {}: {error}; activate dart_code_linter with Dart 3.13.5 or pass --dcl PATH",
+        linter_path.display(),
+    ))?;
+    let mut command = if dcl.extension().is_some_and(|ext| ext == "snapshot") {
+        let mut command = Command::new(dart);
+        command.arg(&dcl);
+        command
+    } else {
+        Command::new(&dcl)
+    };
+    let linter_release = text(command.arg("--version"))?;
+    let metrics_release = text(Command::new(&dcm).env_remove("CI").arg("--version"))?;
+    require_tool_version("DCL", &linter_release, "4.4.4")?;
+    require_tool_version("DCM", &metrics_release, "1.40.0")?;
+    Ok((dcl, dcm, linter_release, metrics_release))
+}
+
+fn report_paths(options: &Options, root: &Path) -> Result<(PathBuf, PathBuf)> {
+    let published = root.join("website/src/data/benchmarks.json");
+    let report = options
+        .output
+        .as_ref()
+        .map_or_else(|| published.clone(), |path| root.join(path));
+    if !options.corpus.is_empty()
+        && (report == published
+            || fs::canonicalize(&report)
+                .ok()
+                .zip(fs::canonicalize(&published).ok())
+                .is_some_and(|(output, published)| output == published))
+    {
+        return Err("filtered runs must not overwrite the published benchmark report".into());
+    }
+    Ok((published, report))
+}
+
+fn machine_metadata() -> Result<Value> {
+    let cpuinfo = fs::read_to_string("/proc/cpuinfo")?;
+    let cpu = cpuinfo
+        .lines()
+        .find_map(|line| line.strip_prefix("model name\t: "))
+        .ok_or("CPU model missing")?;
+    let memory = fs::read_to_string("/proc/meminfo")?;
+    let memory_kb: f64 = memory
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .ok_or("memory missing")?
+        .parse()?;
+    Ok(
+        json!({"cpu": cpu, "cores": std::thread::available_parallelism()?.get(),
+        "memoryGb": memory_kb * 1024.0 / 1_000_000_000.0,
+        "os": text(Command::new("uname").args(["-srm"]))?}),
+    )
+}
+
+fn provenance(path: &Path) -> Result<Value> {
+    let hash = text(Command::new("sha256sum").arg(path))?;
+    Ok(json!({
+        "path": path,
+        "sha256": hash.split_whitespace().next().ok_or("binary hash")?,
+    }))
+}
+
 pub fn run(options: &Options) -> Result<()> {
+    if !options.corpus.is_empty() && options.output.is_none() {
+        return Err("--corpus requires --output to protect the published benchmark report".into());
+    }
+    for id in &options.corpus {
+        if !CORPORA.iter().any(|corpus| corpus.id == id) {
+            return Err(format!("unknown corpus id: {id}").into());
+        }
+    }
     if !cfg!(target_os = "linux") {
         return Err("bench-compare requires Linux /proc and GNU time".into());
     }
@@ -925,23 +1335,7 @@ pub fn run(options: &Options) -> Result<()> {
     let root = std::env::current_dir()?;
     let cache = root.join("target/bench-corpora");
     fs::create_dir_all(&cache)?;
-    let dart = if let Some(path) = &options.dart {
-        fs::canonicalize(path)?
-    } else {
-        let wrapper = PathBuf::from(text(Command::new("mise").args([
-            "x",
-            "flutter@3.47.7-stable",
-            "--",
-            "which",
-            "dart",
-        ]))?);
-        fs::canonicalize(
-            wrapper
-                .parent()
-                .ok_or("Dart wrapper parent")?
-                .join("cache/dart-sdk/bin/dart"),
-        )?
-    };
+    let dart = dart_executable(options)?;
     let flutter = dart
         .ancestors()
         .nth(5)
@@ -951,6 +1345,7 @@ pub fn run(options: &Options) -> Result<()> {
         Some(path) => fs::canonicalize(path)?,
         None => PathBuf::from(text(Command::new("mise").args(["which", "hyperfine"]))?),
     };
+    let (dcl, dcm, linter_release, metrics_release) = competitor_tools(options, &dart)?;
     if !options.skip_build {
         output(Command::new("cargo").args(["build", "--locked", "--release", "--bin", "falcon"]))?;
     }
@@ -965,14 +1360,15 @@ pub fn run(options: &Options) -> Result<()> {
         .next()
         .ok_or("binary hash")?
         .to_owned();
-    let report_path = root.join("website/src/data/benchmarks.json");
-    let previous: Option<Value> = fs::read(&report_path)
+    let (published_path, report_path) = report_paths(options, &root)?;
+    let previous: Option<Value> = fs::read(&published_path)
         .ok()
         .map(|bytes| serde_json::from_slice(&bytes))
         .transpose()?;
     let (config, names) = configuration();
+    let (dcl_config, dcl_names) = configuration_for(true);
     let mut corpora = Vec::with_capacity(CORPORA.len());
-    let mut results = Vec::with_capacity(CORPORA.len() * 4);
+    let mut results = Vec::with_capacity(CORPORA.len() * 10);
     let benchmark = BenchmarkContext {
         root: &root,
         cache: &cache,
@@ -983,8 +1379,15 @@ pub fn run(options: &Options) -> Result<()> {
         options,
         config: &config,
         names: &names,
+        dcl_config: &dcl_config,
+        dcl_names: &dcl_names,
+        dcl: &dcl,
+        dcm: &dcm,
     };
     for corpus in CORPORA {
+        if !options.corpus.is_empty() && !options.corpus.iter().any(|id| id == corpus.id) {
+            continue;
+        }
         corpora.push(benchmark_corpus(
             &benchmark,
             corpus,
@@ -992,24 +1395,23 @@ pub fn run(options: &Options) -> Result<()> {
             &mut results,
         )?);
     }
-    let cpuinfo = fs::read_to_string("/proc/cpuinfo")?;
-    let cpu = cpuinfo
-        .lines()
-        .find_map(|line| line.strip_prefix("model name\t: "))
-        .ok_or("CPU model missing")?;
-    let memory = fs::read_to_string("/proc/meminfo")?;
-    let memory_kb: f64 = memory
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .ok_or("memory missing")?
-        .parse()?;
     let report = json!({"generatedAt": text(Command::new("date").args(["-u", "+%Y-%m-%dT%H:%M:%SZ"]))?,
-        "machine": {"cpu": cpu, "cores": std::thread::available_parallelism()?.get(), "memoryGb": memory_kb * 1024.0 / 1_000_000_000.0, "os": text(Command::new("uname").args(["-srm"]))?},
-        "tools": [{"id": "falcon", "name": "falcon", "version": falcon_version, "binarySha256": binary_hash}, {"id": "dart-analyze", "name": "dart analyze", "version": "3.13.5"}],
-        "harness": {"hyperfine": text(Command::new(&hyperfine).arg("--version"))?, "warmups": options.warmups, "coldRuns": options.cold_runs, "warmRuns": options.runs, "rssLimitMb": f64::from(MAX_RSS_KB) * 1024.0 / 1_000_000.0, "rules": names},
+        "machine": machine_metadata()?,
+        "tools": [
+            {"id": "falcon", "name": "falcon", "version": falcon_version, "binarySha256": binary_hash, "provenance": provenance(&falcon)?},
+            {"id": "dart-analyze", "name": "dart analyze", "version": "3.13.5", "provenance": provenance(&dart)?},
+            {"id": "dcl", "name": "Dart Code Linter", "version": linter_release, "package": "dart_code_linter", "homepage": "https://pub.dev/packages/dart_code_linter", "provenance": provenance(&dcl)?},
+            {"id": "dcm", "name": "DCM", "version": metrics_release, "homepage": "https://dcm.dev", "provenance": provenance(&dcm)?, "reporter": "console", "licenseRequirement": "activated local license; machine reporters are not required"}
+        ],
+        "harness": {"hyperfine": text(Command::new(&hyperfine).arg("--version"))?, "warmups": options.warmups, "coldRuns": options.cold_runs, "warmRuns": options.runs, "rssLimitMb": f64::from(MAX_RSS_KB) * 1024.0 / 1_000_000.0, "rules": names, "dclRules": dcl_names, "excludedDclCommands": DCL_COMMANDS, "excludedDclRules": excluded_dcl_rules(), "dclEligibilityPolicy": "Pinned DCM 1.40.0 Free eligibility; exclusions apply equally to all three tools; remaining ids strictly validated in preflight", "corpusFilter": options.corpus, "analyzerState": "ANALYZER_STATE_LOCATION_OVERRIDE isolated per corpus, rule family and tool; removed before cold invocations", "dcmEnvironment": "CI unset to use the activated local license; activation state retained"},
+        "dclFileExclusions": {"patterns": DCL_FILE_EXCLUSIONS, "appliesTo": ["falcon", "dcl", "dcm"], "scenarios": ["dcl-rules-cold", "dcl-rules-warm"], "reason": "Common generated-file exclusion union; DCM intrinsically suppresses generated-file diagnostics", "corpusCounts": "Published corpus file and line counts describe the full same-rules corpus; DCL scenarios use the subset excluding these generated files"},
         "corpora": corpora,
-        "scenarios": [{"id": "same-rules-cold", "title": "Same rules, cold analyzer cache", "description": "Identical enabled lint names; isolated analyzer state removed before each invocation; OS file cache remains warm."}, {"id": "same-rules-warm", "title": "Same rules, warm analyzer cache", "description": "Identical enabled lint names; analyzer state retained after warmups; each sample starts a new process."}],
+        "scenarios": [
+            {"id": "same-rules-cold", "title": "Same rules, cold analyzer cache", "description": "Identical enabled lint names; isolated analyzer state removed before each invocation; OS file cache remains warm.", "comparator": "dart-analyze", "tools": ["falcon", "dart-analyze"]},
+            {"id": "same-rules-warm", "title": "Same rules, warm analyzer cache", "description": "Identical enabled lint names; analyzer state retained after warmups; each sample starts a new process.", "comparator": "dart-analyze", "tools": ["falcon", "dart-analyze"]},
+            {"id": "dcl-rules-cold", "title": "DCL rules, cold analyzer cache", "description": "Identical upstream DCL lint ids enabled in falcon, DCL and DCM; analyzer state removed before each invocation; OS file cache remains warm.", "comparator": "dcl", "tools": ["falcon", "dcl", "dcm"]},
+            {"id": "dcl-rules-warm", "title": "DCL rules, warm analyzer cache", "description": "Identical upstream DCL lint ids enabled in falcon, DCL and DCM; analyzer state retained after warmups; each sample starts a new process.", "comparator": "dcl", "tools": ["falcon", "dcl", "dcm"]}
+        ],
         "results": results});
     write_json(&report_path, &report)?;
     Ok(())
@@ -1018,6 +1420,254 @@ pub fn run(options: &Options) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Complete console capture from DCM 1.40.0 against the pinned bloc corpus.
+    const DCM_CONSOLE_SAMPLE: &str = r"⠙ Analyzing...⠹ Analyzing 8 files... 3ms⠸ Analyzing 8 files... 0.1s✔ Analysis is completed. Preparing the results: 0.1s
+
+packages/bloc/lib/src/bloc.dart (9 issues):
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc.dart:61:27
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc.dart:64:20
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc.dart:64:61
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc.dart:68:46
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc.dart:70:31
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc.dart:191:39
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc.dart:197:8
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc.dart:326:23
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc.dart:342:49
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+
+packages/bloc/lib/src/bloc_observer.dart (26 issues):
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:17:26
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:23:21
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:23:30
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:30:26
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:30:48
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:40:10
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:40:19
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:41:16
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:41:25
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:49:25
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:57:10
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:57:19
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:69:25
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:98:26
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:105:21
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:105:30
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:112:26
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:112:48
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:120:10
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:120:19
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:121:16
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:121:25
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:129:25
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:137:10
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:137:19
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+WARNING   Avoid 'dynamic' types. Try replacing it with a different type.
+          at packages/bloc/lib/src/bloc_observer.dart:148:25
+          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic
+
+
+Scanned files: 8
+✖ total lint issues - 35 (warning issues: 35)
+
+To get a single-line per-violation format, pass the '--concise' flag (or just '-c')
+";
+
+    #[test]
+    fn parses_dcm_console_rule_links_and_checks_summary() {
+        let issue = "WARNING   Avoid 'dynamic' types. Try replacing it with a different type.\n          at packages/bloc/lib/src/bloc.dart:61:27\n          avoid-dynamic : https://dcm.dev/docs/rules/common/avoid-dynamic\n";
+        let sample = DCM_CONSOLE_SAMPLE;
+        let (total, counts) = diagnostics("dcm", sample.as_bytes()).unwrap();
+        assert_eq!(total, 35);
+        assert_eq!(counts["avoid-dynamic"], 35);
+        assert!(
+            diagnostics(
+                "dcm",
+                sample.replace("issues - 35", "issues - 36").as_bytes()
+            )
+            .is_err()
+        );
+        assert!(diagnostics("dcm", issue.as_bytes()).is_err());
+        assert_eq!(
+            diagnostics("dcm", "✔ no issues found!".as_bytes())
+                .unwrap()
+                .0,
+            0
+        );
+        assert!(diagnostics("dcm", "✔ no issues found!\nConfig errors:\nanalysis_options.yaml (2 issues):\nWARNING   'fictional-rule' is not recognized as a valid rule name.\n          unknown-rule : https://dcm.dev/docs/rules/\n".as_bytes()).is_err());
+        assert!(diagnostics("dcm", b"Activation required").is_err());
+    }
+
+    #[test]
+    fn parses_dcl_versioned_reports_and_configuration_issues() {
+        let (count, rules) = diagnostics("dcl", br#"progress
+{"formatVersion":2,"records":[{"path":"lib/a.dart","issues":[{"ruleId":"avoid-dynamic","severity":"warning"},{"ruleId":"unknown-config","severity":"warning"}],"antiPatternCases":[]}]}"#).unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(rules["avoid-dynamic"], 1);
+        assert_eq!(rules["unknown-config"], 1);
+        assert!(diagnostics("dcl", b"{}").is_err());
+        assert!(diagnostics("dcl", br#"{"formatVersion":2,"records":[{}]}"#).is_err());
+        assert!(diagnostics("dcl", br#"{"formatVersion":2,"records":[{"issues":[{}]}]}"#).is_err());
+    }
+
+    #[test]
+    fn filtered_runs_require_explicit_output() {
+        #[derive(clap::Parser)]
+        struct Cli {
+            #[command(flatten)]
+            options: Options,
+        }
+        use clap::Parser;
+        assert!(Cli::try_parse_from(["bench", "--corpus", "flutter"]).is_err());
+        let cli = Cli::try_parse_from([
+            "bench",
+            "--corpus",
+            "flutter,dart-sdk",
+            "--output",
+            "/tmp/benchmark.json",
+            "--dcl",
+            "/tmp/dcl.snapshot",
+            "--dcm",
+            "/tmp/dcm",
+        ])
+        .unwrap();
+        assert_eq!(cli.options.corpus, ["flutter", "dart-sdk"]);
+        assert_eq!(
+            cli.options.output,
+            Some(PathBuf::from("/tmp/benchmark.json"))
+        );
+        assert_eq!(cli.options.dcl, Some(PathBuf::from("/tmp/dcl.snapshot")));
+        assert_eq!(cli.options.dcm, Some(PathBuf::from("/tmp/dcm")));
+    }
+
+    #[test]
+    fn dcl_config_enables_only_matching_lints_and_maps_upstream_ids() {
+        let (config, names) = configuration_for(true);
+        assert_eq!(names.len(), 31);
+        assert!(DCL_COMMANDS.iter().all(|name| !names.contains(name)));
+        assert!(DCM_EXCLUSIONS.iter().all(|(id, _)| !names.contains(id)));
+        for rule in RULE_METADATA {
+            let section = if matches!(rule.kind, RuleKind::CrossFile { .. }) {
+                "cross-file"
+            } else {
+                "linter"
+            };
+            let enabled = config[section]["rules"][rule.group.as_str()][rule.name] == "warn";
+            let expected = matches!(rule.source, RuleSource::DartCodeLinter(name)
+                if !DCL_COMMANDS.contains(&name)
+                    && !DCM_EXCLUSIONS.iter().any(|(id, _)| *id == name));
+            assert_eq!(enabled, expected, "{}", rule.name);
+            if let RuleSource::DartCodeLinter(name) = rule.source
+                && expected
+            {
+                let counts = BTreeMap::from([(rule.name.to_owned(), 1)]);
+                let (mapped, total) = comparable_counts("falcon", &counts, &names);
+                assert_eq!(mapped[name], 1);
+                assert_eq!(total, 1);
+            }
+        }
+    }
 
     #[test]
     fn config_enables_only_official_sources() {

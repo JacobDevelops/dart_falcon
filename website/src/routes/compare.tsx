@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { DocsLayout } from '../components/DocsLayout'
-import { headlineSummary, scenarioSummaries, summaryBody, type ScenarioSummary } from '../lib/benchmarks'
+import { formatSpeedup, headlineSummary, scenarioSummaries, speedup, summaryBody, type ScenarioSummary } from '../lib/benchmarks'
 import { getCompareData } from '../lib/server'
 import { breadcrumbs, seo } from '../lib/seo'
 
@@ -74,8 +74,24 @@ function Compare() {
   const summaries = scenarioSummaries(bench)
   const notMeasured = <span className="na">not measured</span>
   const rssRange = (s: ScenarioSummary, tool: string): ReactNode => {
-    const rss = s.runs.flatMap((run) => run.rows.flatMap((r) => (r.tool === tool && r.peakRssMb !== undefined ? [r.peakRssMb] : [])))
-    return rss.length > 0 ? `${Math.round(Math.min(...rss))}–${Math.round(Math.max(...rss))} MB` : notMeasured
+    const values = s.runs.flatMap((run) => run.rows.flatMap((r) =>
+      r.tool === tool && r.peakRssMb !== undefined ? [r.peakRssMb] : [],
+    ))
+    return values.length > 0
+      ? `${Math.round(Math.min(...values))}–${Math.round(Math.max(...values))} MB`
+      : notMeasured
+  }
+  const dcmSpeed = (s: ScenarioSummary): ReactNode => {
+    const ratios = s.runs.flatMap((run) => {
+      const falcon = run.rows.find((r) => r.tool === 'falcon')
+      const dcm = run.rows.find((r) => r.tool === 'dcm')
+      return falcon && dcm ? [dcm.meanMs / falcon.meanMs] : []
+    })
+    if (ratios.length === 0) return notMeasured
+    const factor = Math.exp(ratios.reduce((sum, ratio) => sum + Math.log(ratio), 0) / ratios.length)
+    return `${formatSpeedup(factor >= 1 ? factor : 1 / factor)} ${
+      factor >= 1 ? 'slower' : 'faster'
+    } than falcon (geometric mean across ${ratios.length} matched ${ratios.length === 1 ? 'corpus' : 'corpora'})`
   }
   const rows: [string, ...ReactNode[]][] = [
     [
@@ -117,25 +133,28 @@ function Compare() {
   rows.splice(
     1,
     0,
-    ...summaries.map((s): [string, ...ReactNode[]] => [
-      `Speed, ${s.scenario.title.toLowerCase()}`,
-      <>
-        {summaryBody(s)} <Link to="/benchmarks">Per-corpus times</Link>
-      </>,
-      'Baseline',
-      notMeasured,
-      notMeasured,
-    ]),
+    ...summaries.flatMap((s): [string, ...ReactNode[]][] => {
+      const comparator = speedup(s.runs[0]).versus
+      return [
+        [
+          `Speed, ${s.scenario.title} (vs ${comparator.name})`,
+          <>
+            {summaryBody(s)} <Link to="/benchmarks">Per-corpus times</Link>
+          </>,
+          comparator.tool === 'dart-analyze' ? 'Baseline' : notMeasured,
+          dcmSpeed(s),
+          notMeasured,
+        ],
+        [
+          `Largest-process peak RSS across ${s.runs.length} corpora, ${s.scenario.title}`,
+          rssRange(s, 'falcon'),
+          rssRange(s, 'dart-analyze'),
+          rssRange(s, 'dcm'),
+          notMeasured,
+        ],
+      ]
+    }),
   )
-  if (summaries[0]) {
-    rows.splice(1 + summaries.length, 0, [
-      `Largest-process peak RSS across ${summaries[0].runs.length} corpora, ${summaries[0].scenario.title.toLowerCase()}`,
-      rssRange(summaries[0], 'falcon'),
-      rssRange(summaries[0], 'dart-analyze'),
-      notMeasured,
-      notMeasured,
-    ])
-  }
 
   return (
     <DocsLayout>

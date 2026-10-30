@@ -22,6 +22,8 @@ export interface BenchScenario {
   id: string
   title: string
   description: string
+  /** Tool used as the speedup baseline; older snapshots compare with dart analyze. */
+  comparator?: string
 }
 
 export interface BenchResult {
@@ -73,11 +75,13 @@ export interface BenchView {
 }
 
 
-/** falcon's speedup over `dart analyze` (or the slowest tool when it is absent). */
+/** falcon's speedup over the scenario's comparator, never an unrelated tool. */
 export function speedup(run: BenchRun) {
   const falcon = run.rows.find((r) => r.tool === 'falcon')
   const versus =
-    run.rows.find((r) => r.tool === 'dart-analyze') ?? run.rows[run.rows.length - 1]
+    run.rows.find((r) => r.tool === (run.scenario.comparator ?? 'dart-analyze')) ??
+    falcon ??
+    run.rows[0]
   return { factor: falcon ? versus.meanMs / falcon.meanMs : 1, versus }
 }
 
@@ -107,7 +111,7 @@ export function corpusLabel(corpus: BenchCorpus): string {
 
 export interface ScenarioSummary {
   scenario: BenchScenario
-  /** Runs comparing falcon with dart analyze, one per corpus. */
+  /** Runs comparing falcon with the scenario's comparator, one per corpus. */
   runs: BenchRun[]
   /** Lowest and highest falcon speedup across corpora. */
   min: number

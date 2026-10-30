@@ -83,8 +83,10 @@ function Home() {
                     <li key={s.scenario.id}>{summaryText(s)}</li>
                   ))}
                   <li>
-                    Same official lint names enabled in both; <code>dart analyze</code>{' '}
-                    also type-checks, so the work and output are not identical
+                    Each scenario enables matching rule names within its rule family.
+                    Matching names do not imply identical work or diagnostic output.
+                    {' '}When measured, <code>dart analyze</code> also type-checks;
+                    falcon does not.
                   </li>
                 </ul>
                 <Link to="/benchmarks" className="more-link">

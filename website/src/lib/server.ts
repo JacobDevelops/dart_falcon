@@ -56,7 +56,7 @@ const benchView: BenchView = {
         })
         .sort((a, b) => a.meanMs - b.meanMs)
       return rows.length > 0
-        ? [{ corpus: corpusView(corpus), scenario: { id: scenario.id, title: scenario.title, description: scenario.description }, rows }]
+        ? [{ corpus: corpusView(corpus), scenario: { id: scenario.id, title: scenario.title, description: scenario.description, comparator: scenario.comparator }, rows }]
         : []
     }),
   ),

@@ -639,7 +639,7 @@ html {
 
 .bench-group {
   display: grid;
-  grid-template-columns: var(--label) 1fr;
+  grid-template-columns: minmax(0, 1fr);
   column-gap: var(--gap);
   row-gap: 3px;
   align-items: center;
@@ -647,14 +647,10 @@ html {
   border-bottom: 1px solid var(--rule);
 }
 
-.bench-group .bench-tool {
-  grid-row: span 2;
-}
-
 .bench-pair {
-  grid-column: 2;
+  grid-column: 1;
   display: grid;
-  grid-template-columns: 1fr var(--time);
+  grid-template-columns: minmax(0, var(--label)) minmax(0, 1fr) var(--time);
   gap: var(--gap);
   align-items: center;
 }
@@ -674,6 +670,16 @@ html {
 
 .key-falcon {
   background: var(--cere);
+}
+
+.is-dcl .bench-bar,
+.key-dcl {
+  background: var(--ink-3);
+}
+
+.is-dcm .bench-bar,
+.key-dcm {
+  background: repeating-linear-gradient(135deg, var(--slate-2) 0 3px, var(--slate) 3px 5px);
 }
 
 .bench-notes {
@@ -724,21 +730,6 @@ html {
 }
 
 @media (max-width: 560px) {
-  .bench-group {
-    grid-template-columns: 1fr;
-  }
-
-  .bench-group .bench-tool {
-    grid-row: auto;
-    display: flex;
-    justify-content: space-between;
-    gap: var(--space-3);
-  }
-
-  .bench-pair {
-    grid-column: 1;
-  }
-
   .bench {
     --label: 5.5rem;
     --time: 4.5rem;

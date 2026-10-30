@@ -19,7 +19,7 @@ function ticks(max: number): number[] {
 
 /**
  * Horizontal wall-clock bars for one corpus × scenario, fastest first, with
- * falcon's ratio against dart analyze pinned above the bars. `detailed` adds spread and run counts.
+ * falcon's ratio against the scenario comparator above the bars. `detailed` adds spread and run counts.
  */
 export function BenchChart({
   run,
@@ -59,7 +59,7 @@ export function BenchChart({
         {run.rows.map((r, i) => (
           <li
             key={r.tool}
-            className={`bench-row${r.tool === 'falcon' ? ' is-falcon' : ''}`}
+            className={`bench-row is-${r.tool}`}
             style={{ '--w': `${(r.meanMs / max) * 100}%`, '--i': i } as CSSProperties}
           >
             <span className="bench-tool">
@@ -91,24 +91,28 @@ export function BenchChart({
 }
 
 /**
- * One scenario across every corpus: per corpus, falcon and dart analyze bars
- * scaled to that corpus's slower tool, with the speedup range as the callout.
+ * One scenario across every corpus: all measured tools scaled to that corpus's
+ * slowest tool, with falcon's speedup over the scenario comparator as the callout.
  */
 export function BenchSummaryChart({ summary }: { summary: ScenarioSummary }) {
   const { scenario, runs, min, max, slower } = summary
   const versus = speedup(runs[0]).versus
-  const falcon = runs[0].rows.find((r) => r.tool === 'falcon')
+  const tools = [...new Map(runs.flatMap((run) => run.rows.map((row) => [row.tool, row] as const))).values()]
+    .sort((a, b) => Number(b.tool === 'falcon') - Number(a.tool === 'falcon'))
   return (
     <figure className="bench">
       <figcaption className="bench-cap">
         <h2 className="bench-title">
-          falcon vs {versus.name} <span>{scenario.title.toLowerCase()}</span>
+          {tools.map((tool) => tool.name).join(' vs ')} <span>{scenario.title}</span>
         </h2>
         <span className="bench-desc">
-          <span className="key key-falcon" aria-hidden="true" /> falcon {falcon?.version}
-          {'  '}
-          <span className="key" aria-hidden="true" /> {versus.name} {versus.version} · mean
-          wall-clock time per corpus
+          {tools.map((tool) => (
+            <span key={tool.tool}>
+              <span className={`key key-${tool.tool}`} aria-hidden="true" />{' '}
+              {tool.name} {tool.version}{' · '}
+            </span>
+          ))}
+          mean wall-clock time per corpus; speedups vs {versus.name}
         </span>
       </figcaption>
       {slower.length === 0 ? (
@@ -121,29 +125,29 @@ export function BenchSummaryChart({ summary }: { summary: ScenarioSummary }) {
       ) : null}
       <ol className="bench-rows">
         {runs.map((run, i) => {
-          const pair = run.rows.filter((r) => r.tool === 'falcon' || r.tool === versus.tool)
-          const top = Math.max(...pair.map((r) => r.meanMs))
+          const top = Math.max(...run.rows.map((r) => r.meanMs))
+          const comparison = compareText(run)
           return (
             <li key={run.corpus.id} className="bench-group">
               <span className="bench-tool">
                 {corpusLabel(run.corpus)}
                 <small>
-                  {compareText(run).ratio} {compareText(run).text.split(' ')[0]}
+                  {comparison.ratio} {comparison.text.split(' ')[0]}
                 </small>
               </span>
-              {['falcon', versus.tool].map((tool) => {
-                const r = pair.find((x) => x.tool === tool)
+              {tools.map((tool) => {
+                const r = run.rows.find((x) => x.tool === tool.tool)
                 return r ? (
                   <span
-                    key={tool}
-                    className={`bench-pair${tool === 'falcon' ? ' is-falcon' : ''}`}
+                    key={tool.tool}
+                    className={`bench-pair is-${tool.tool}`}
                     style={{ '--w': `${(r.meanMs / top) * 100}%`, '--i': i } as CSSProperties}
                   >
+                    <span className="bench-tool">{r.name}</span>
                     <span className="bench-track" aria-hidden="true">
                       <span className="bench-bar" />
                     </span>
                     <span className="bench-time">
-                      <span className="visually-hidden">{r.name}: </span>
                       {formatMs(r.meanMs)}
                     </span>
                   </span>

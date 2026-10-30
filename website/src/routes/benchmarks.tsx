@@ -18,7 +18,7 @@ export const Route = createFileRoute('/benchmarks')({
   loader: () => getBenchmarks(),
   head: ({ loaderData }) =>
     seo({
-      title: 'Dart linter benchmarks: falcon vs dart analyze | falcon',
+      title: 'Dart and Flutter linter benchmarks | falcon',
       description: `${summarize(loaderData)} Wall-clock benchmarks of Dart and Flutter linters on real open-source codebases, with machine, versions, and commit SHAs.`,
       path: '/benchmarks',
       type: 'article',
@@ -32,8 +32,13 @@ function Benchmarks() {
   const { machine, tools, corpora, generatedAt, runs } = view
   const summaries = scenarioSummaries(view)
   const measured = new Date(generatedAt).toLocaleDateString('en-US', { dateStyle: 'long', timeZone: 'UTC' })
-  // Diagnostic counts come from a separate untimed capture, so one scenario per corpus suffices.
-  const outputs = corpora.flatMap((c) => runs.find((r) => r.corpus.id === c.id) ?? [])
+  const hasAnalyzer = runs.some((run) => (run.scenario.comparator ?? 'dart-analyze') === 'dart-analyze')
+  const hasDcl = runs.some((run) => run.scenario.comparator === 'dcl')
+  // Diagnostic captures differ by rule family, but cold and warm share the same output.
+  const outputs = runs.filter((run, i) => runs.findIndex((other) =>
+    other.corpus.id === run.corpus.id &&
+    other.scenario.comparator === run.scenario.comparator,
+  ) === i)
 
   return (
     <DocsLayout>
@@ -41,10 +46,22 @@ function Benchmarks() {
         <h1>Dart linter benchmarks</h1>
         <p className="lede">
           {summaries.map(summaryText).join(' ')} Each bar is the mean of
-          repeated fresh-process runs on one machine, measured {measured}. Both
-          tools enable the same official lint names, but that is not identical
-          work or identical output: <code>dart analyze</code> also type-checks
-          the code and honors Dart's own suppressions. The{' '}
+          repeated fresh-process runs on one machine, measured {measured}.{' '}
+          {hasAnalyzer ? (
+            <>
+              The dart analyze scenarios enable the same official lint names,
+              but <code>dart analyze</code> also type-checks the code and honors
+              Dart's own suppressions.{' '}
+            </>
+          ) : null}
+          {hasDcl ? (
+            <>
+              The Dart Code Linter (DCL) scenarios compare falcon, DCL and DCM with
+              the selected DCL rule names enabled; their speedup baseline is DCL,
+              not dart analyze.{' '}
+            </>
+          ) : null}
+          Matching rule names do not imply identical work or output. The{' '}
           <a href="#methodology">methodology</a> says exactly what is timed.
         </p>
       </header>
@@ -71,7 +88,7 @@ function Benchmarks() {
             <thead>
               <tr>
                 <th scope="col">Corpus</th>
-                <th scope="col">Cache</th>
+                <th scope="col">Scenario</th>
                 <th scope="col">Tool</th>
                 <th scope="col" className="num">Mean</th>
                 <th scope="col" className="num">± σ</th>
@@ -86,7 +103,7 @@ function Benchmarks() {
                 run.rows.map((r) => (
                   <tr key={`${run.corpus.id}-${run.scenario.id}-${r.tool}`}>
                     <th scope="row">{corpusLabel(run.corpus)}</th>
-                    <td>{run.scenario.id.endsWith('cold') ? 'cold' : run.scenario.id.endsWith('warm') ? 'warm' : run.scenario.title}</td>
+                    <td>{run.scenario.title}</td>
                     <td>{r.name}</td>
                     <td className="num">{formatMs(r.meanMs)}</td>
                     <td className="num">{formatMs(r.stddevMs)}</td>
@@ -105,31 +122,44 @@ function Benchmarks() {
       <section className="rule-section" aria-labelledby="output-h">
         <h2 id="output-h">What each tool reported</h2>
         <p>
-          Both tools enable the same set of official Dart lint names. For{' '}
-          <code>dart analyze</code>, “Other” and “Errors” include its type
-          checking, which falcon does not do. Lint counts also differ, for
-          example on generated files that opt out of lints; the{' '}
-          <a href="#methodology">methodology</a> explains why, so these counts
-          are not evidence of diagnostic parity.
+          Diagnostics are grouped by corpus and rule family; cold and warm runs
+          use the same rule configuration.{' '}
+          {hasAnalyzer ? (
+            <>
+              For <code>dart analyze</code>, “Other” and “Errors” include its
+              type checking, which falcon does not do.{' '}
+            </>
+          ) : null}
+          {hasDcl ? (
+            <>
+              DCL scenarios report the selected DCL rules for falcon, DCL and DCM.{' '}
+              Error-severity counts can overlap lint counts for DCL and DCM.{' '}
+            </>
+          ) : null}
+          Analyzer errors include compilation and type errors; falcon reports syntax errors.{' '}
+          Matching rule names are not evidence of diagnostic parity; the{' '}
+          <a href="#methodology">methodology</a> explains differences in output.
         </p>
         <div className="table-scroll">
           <table>
-            <caption>Diagnostics per corpus</caption>
+            <caption>Diagnostics per corpus and rule family</caption>
             <thead>
               <tr>
                 <th scope="col">Corpus</th>
+                <th scope="col">Rule family</th>
                 <th scope="col">Tool</th>
                 <th scope="col" className="num">Lint</th>
                 <th scope="col" className="num">Other</th>
-                <th scope="col" className="num">Errors</th>
+                <th scope="col" className="num">Error severity</th>
                 <th scope="col" className="num">Total</th>
               </tr>
             </thead>
             <tbody>
               {outputs.flatMap((run) =>
                 run.rows.map((r) => (
-                  <tr key={`${run.corpus.id}-${r.tool}`}>
+                  <tr key={`${run.corpus.id}-${run.scenario.id}-${r.tool}`}>
                     <th scope="row">{corpusLabel(run.corpus)}</th>
+                    <td>{run.scenario.comparator === 'dcl' ? 'DCL rules' : 'Official Dart lints'}</td>
                     <td>{r.name}</td>
                     <td className="num">{count(r.lintDiagnostics)}</td>
                     <td className="num">{count(r.nonLintDiagnostics)}</td>
