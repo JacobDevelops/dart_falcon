@@ -940,7 +940,7 @@ impl Tool {
         Ok(metadata)
     }
     fn environment(&self, command: &mut Command, sdk: &Path) {
-        command.env("DART_SDK", sdk);
+        command.env("DART_SDK", sdk).env("RUST_LOG", "info");
         if self.remove_ci {
             command.env_remove("CI");
         }
