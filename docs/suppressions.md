@@ -95,6 +95,11 @@ Cross-file rules are suppressed the same way, with the `cross-file` section:
 // falcon-ignore-all cross-file/correctness/unused-code: public API surface
 ```
 
+Suppression comments only apply to Dart files. Diagnostics reported in
+`pubspec.yaml` (`package-names`, `secure-pubspec-urls`,
+`sort-pub-dependencies` and `unused-dependencies`) can't be suppressed this way;
+turn the rule off in `falcon.json` instead.
+
 ## The reason is required
 
 Every directive must end with a non-empty reason after the colon. A directive
