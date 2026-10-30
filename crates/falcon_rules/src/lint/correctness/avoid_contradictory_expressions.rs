@@ -7,12 +7,12 @@
 //! user-defined operators are excluded. Integer bounds use exact arithmetic;
 //! floating-point bounds are excluded because NaN invalidates total ordering.
 
-use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::expressions::equivalent;
+use crate::lint::expressions::{equivalent, integer_literal, interval, reverse, stable_local};
 
 #[derive(Default)]
 pub struct AvoidContradictoryExpressions;
@@ -52,11 +52,14 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        self.diags.push(self.ctx.diagnostic(if binary.op() == BinaryOp::And {
-            "These conditions are always false together. Correct the contradictory comparison."
-        } else {
-            "These conditions are always true together. Correct the contradictory comparison."
-        }, binary.span()));
+        self.diags.push(self.ctx.diagnostic(
+            if binary.op() == BinaryOp::And {
+                "These conditions are always false together. Correct the contradictory comparison."
+            } else {
+                "These conditions are always true together. Correct the contradictory comparison."
+            },
+            binary.span(),
+        ));
     }
 }
 
@@ -77,12 +80,6 @@ fn stable_primitive(expression: Expr<'_>, state: &SemanticState<'_>) -> bool {
             && ["bool", "int", "double", "num", "String"]
                 .iter()
                 .any(|name| ty.interface("dart:core", name)))
-}
-
-fn stable_local(name: &str, state: &SemanticState<'_>) -> bool {
-    state.environment.binding_declaration(name).is_some()
-        && !state.is_own_field(name)
-        && state.is_variable_read(name)
 }
 
 fn opposite_booleans(
@@ -167,34 +164,6 @@ fn integer_comparison<'a>(
     Some(IntegerComparison { value, op, bound })
 }
 
-fn integer_literal(expression: Expr<'_>) -> Option<i128> {
-    match expression.unparenthesized() {
-        Expr::IntLit(literal) => literal.value().parse::<i64>().ok().map(i128::from),
-        Expr::Unary(unary) if unary.op() == UnaryOp::Minus => {
-            let Expr::IntLit(literal) = unary.operand().unparenthesized() else {
-                return None;
-            };
-            literal
-                .value()
-                .parse::<i64>()
-                .ok()
-                .map(|value| -i128::from(value))
-        }
-        _ => None,
-    }
-}
-
-fn reverse(op: BinaryOp) -> Option<BinaryOp> {
-    Some(match op {
-        BinaryOp::EqEq | BinaryOp::NotEq => op,
-        BinaryOp::Lt => BinaryOp::Gt,
-        BinaryOp::LtEq => BinaryOp::GtEq,
-        BinaryOp::Gt => BinaryOp::Lt,
-        BinaryOp::GtEq => BinaryOp::LtEq,
-        _ => return None,
-    })
-}
-
 fn negate(op: BinaryOp) -> BinaryOp {
     match op {
         BinaryOp::EqEq => BinaryOp::NotEq,
@@ -205,18 +174,6 @@ fn negate(op: BinaryOp) -> BinaryOp {
         BinaryOp::GtEq => BinaryOp::Lt,
         _ => op,
     }
-}
-
-fn interval(op: BinaryOp, bound: i128) -> Option<(i128, i128, Option<i128>)> {
-    Some(match op {
-        BinaryOp::EqEq => (bound, bound, None),
-        BinaryOp::NotEq => (i128::MIN, i128::MAX, Some(bound)),
-        BinaryOp::Lt => (i128::MIN, bound - 1, None),
-        BinaryOp::LtEq => (i128::MIN, bound, None),
-        BinaryOp::Gt => (bound + 1, i128::MAX, None),
-        BinaryOp::GtEq => (bound, i128::MAX, None),
-        _ => return None,
-    })
 }
 
 fn incompatible_integers<'a>(

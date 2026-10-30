@@ -1,0 +1,8 @@
+name: format_test_name_fixture
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+dependencies:
+  test:
+    path: packages/test
+  flutter_test:
+    path: packages/flutter_test

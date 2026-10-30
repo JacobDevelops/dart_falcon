@@ -344,6 +344,9 @@ impl<'a> SemanticState<'a> {
             if self.signatures.constructor(&owner, name).is_some() {
                 return target(owner, MemberSelector::new(Kind::Constructor, false, name));
             }
+            if let Some(selector) = self.static_reference_selector(&owner, name, write) {
+                return target(owner, selector);
+            }
         }
         if matches!(object, Expr::Super(_)) {
             let owner = self.signatures.resolved_super_member_owner(
@@ -387,10 +390,8 @@ impl<'a> SemanticState<'a> {
                     ),
                 );
             }
-            if let Some(owner) = self.model.resolve_name(prefix.name()) {
-                let owner = self.model.unaliased(owner);
-                let selector = self.static_reference_selector(&owner, name, write)?;
-                return target(owner, selector);
+            if self.model.resolve_name(prefix.name()).is_some() {
+                return None;
             }
         }
         let receiver = self.infer_access_receiver(access.object(), name, access.is_null_safe());

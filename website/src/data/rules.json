@@ -1352,6 +1352,88 @@
     ]
   },
   {
+    "name": "avoid-excessive-expressions",
+    "group": "complexity",
+    "domains": [],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Reports redundant predicates in directly paired logical conditions.",
+    "docs": "Reports redundant predicates in directly paired logical conditions.\n\nInteger comparisons against literals are checked for implication, including\nreversed operands and inclusive bounds. Null checks paired with non-nullable\ntype tests are also checked. Only local variables and parameters are compared;\ngetters, calls, dynamic operators and floating-point comparisons are excluded.\nThis rule measures redundancy, not expression-chain length, and has no options.",
+    "examples": {
+      "bad": "void check(int value, Object? item) {\n  if (value == 3 &&\n      value != 4) {}\n  if (5 < value &&\n      value > 4) {}\n  if (value <= 3 ||\n      value < 2) {}\n  if (value >= -2 &&\n      -3 <= value) {}\n  if (item != null &&\n      item is int) {}\n  if (item == null ||\n      item is! int) {}\n  if (item is String &&\n      null != item) {}\n  if (value > 4 &&\n      value > 5) {}\n  if (value < 2 ||\n      value <= 3) {}\n  if (value > -(-3) &&\n      value > 4) {}\n}",
+      "good": "import 'dart:async';\n\nvoid check(int value, int other, Object? item, double decimal, dynamic unknown) {\n  if (value != 3 && value != 4) {}\n  if (2 < value && value < 4) {}\n  if (value > 2 && other > 1) {}\n  if (value == 3 || value == 4) {}\n  if (item != null && item is int?) {}\n  if (item == null || item is! int?) {}\n  if (decimal > 5 && decimal > 4) {}\n  if (unknown == 3 && unknown != 4) {}\n  if (value < 1 && value > 2) {}\n  if (item != null && item is FutureOr<int?>) {}\n  if (item == null || item is! FutureOr<dynamic>) {}\n  if (item != null && item is NullableId) {}\n  if (item == null || item is! NullableId) {}\n}\nclass Example {\n  int get value => 1;\n  void check() { if (value > 5 && value > 4) {} }\n}\nextension type NullableId(int? raw) {}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "This condition is redundant. Remove it or replace it with a different condition.",
+        "line": 3,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "This condition is redundant. Remove it or replace it with a different condition.",
+        "line": 5,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "This condition is redundant. Remove it or replace it with a different condition.",
+        "line": 7,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "This condition is redundant. Remove it or replace it with a different condition.",
+        "line": 9,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "This condition is redundant. Remove it or replace it with a different condition.",
+        "line": 10,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "This condition is redundant. Remove it or replace it with a different condition.",
+        "line": 12,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "This condition is redundant. Remove it or replace it with a different condition.",
+        "line": 15,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "This condition is redundant. Remove it or replace it with a different condition.",
+        "line": 16,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "This condition is redundant. Remove it or replace it with a different condition.",
+        "line": 18,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "This condition is redundant. Remove it or replace it with a different condition.",
+        "line": 20,
+        "column": 7,
+        "file": null
+      }
+    ]
+  },
+  {
     "name": "avoid-function-literals-in-foreach-calls",
     "group": "complexity",
     "domains": [],
@@ -1539,6 +1621,58 @@
         "message": "Avoid inverted boolean expressions. Simplify the double negation.",
         "line": 57,
         "column": 9,
+        "file": null
+      }
+    ]
+  },
+  {
+    "name": "avoid-local-functions",
+    "group": "complexity",
+    "domains": [],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Disallows named local function declarations inside functions, methods and closures.",
+    "docs": "Disallows named local function declarations inside functions, methods and closures.\n\nMove helpers to a method or a top-level function instead. Anonymous callbacks\nand function-valued local variables are not declarations and are not reported.\n\nIncompatible with `prefer-function-declarations-over-variables`.",
+    "examples": {
+      "bad": "void outer() {\n  void first() {}\n  int second() => 2;\n  if (true) {\n    void third() {}\n  }\n  final callback = () {\n    void fourth() {}\n  };\n}\nclass Example {\n  void method() {\n    T identity<T>(T value) => value;\n  }\n}",
+      "good": "void topLevel() {}\nint anotherTopLevel() => 1;\nclass Example {\n  void method() {}\n  int get value => 1;\n  set value(int value) {}\n  void callbacks() {\n    final callback = () {};\n    final int Function(int) identity = (value) => value;\n    [1, 2].forEach((value) {});\n  }\n}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Avoid local functions. Move this declaration to a method or a top-level function.",
+        "line": 2,
+        "column": 8,
+        "file": null
+      },
+      {
+        "message": "Avoid local functions. Move this declaration to a method or a top-level function.",
+        "line": 3,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Avoid local functions. Move this declaration to a method or a top-level function.",
+        "line": 5,
+        "column": 10,
+        "file": null
+      },
+      {
+        "message": "Avoid local functions. Move this declaration to a method or a top-level function.",
+        "line": 8,
+        "column": 10,
+        "file": null
+      },
+      {
+        "message": "Avoid local functions. Move this declaration to a method or a top-level function.",
+        "line": 13,
+        "column": 7,
         "file": null
       }
     ]
@@ -6371,6 +6505,84 @@
     ]
   },
   {
+    "name": "avoid-empty-build-when",
+    "group": "correctness",
+    "domains": [
+      "bloc"
+    ],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Require an explicit `buildWhen` argument on Bloc builders and consumers.",
+    "docs": "Require an explicit `buildWhen` argument on Bloc builders and consumers.\n\nChecks resolved `BlocBuilder` and `BlocConsumer` constructor invocations\nfrom the Bloc packages. Specifying the argument, even as `null`, satisfies\nthis rule; `BlocSelector` and unrelated or shadowed names are not builders.",
+    "examples": {
+      "bad": "import 'package:flutter_bloc/flutter_bloc.dart';\nimport 'package:flutter_bloc/flutter_bloc.dart' as fb;\n\ntypedef BuilderAlias = fb.BlocBuilder<Object, int>;\n\nvoid examples() {\n  BlocBuilder(builder: (context, state) => state);\n  new BlocBuilder(builder: (context, state) => state);\n  const BlocBuilder();\n  BlocBuilder<Object, int>(builder: (context, state) => state);\n  fb.BlocBuilder<Object, int>();\n  BlocConsumer(listener: (context, state) {}, builder: (context, state) => state);\n  new fb.BlocConsumer<Object, int>();\n  const fb.BlocConsumer<Object, int>();\n  BuilderAlias();\n}",
+      "good": "import 'package:flutter_bloc/flutter_bloc.dart';\nimport 'package:flutter_bloc/flutter_bloc.dart' as fb;\n\nvoid examples() {\n  BlocBuilder(buildWhen: (previous, current) => previous != current);\n  new BlocBuilder<Object, int>(buildWhen: null);\n  const BlocBuilder(buildWhen: null);\n  fb.BlocConsumer(buildWhen: (previous, current) => true);\n  const fb.BlocConsumer<Object, int>(buildWhen: null);\n  BlocSelector(selector: (state) => state);\n  new fb.BlocSelector<Object, int, int>();\n}\nvoid shadowed(dynamic BlocBuilder, dynamic BlocConsumer) {\n  BlocBuilder();\n  BlocConsumer();\n}\nvoid shadowedPrefix(dynamic fb) {\n  fb.BlocBuilder();\n  fb.BlocConsumer();\n}\nclass MemberShadow {\n  dynamic BlocBuilder;\n  void build() { BlocBuilder(); }\n}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Specify `buildWhen` to control when the builder rebuilds.",
+        "line": 7,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Specify `buildWhen` to control when the builder rebuilds.",
+        "line": 8,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Specify `buildWhen` to control when the builder rebuilds.",
+        "line": 9,
+        "column": 9,
+        "file": null
+      },
+      {
+        "message": "Specify `buildWhen` to control when the builder rebuilds.",
+        "line": 10,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Specify `buildWhen` to control when the builder rebuilds.",
+        "line": 11,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Specify `buildWhen` to control when the builder rebuilds.",
+        "line": 12,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Specify `buildWhen` to control when the builder rebuilds.",
+        "line": 13,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Specify `buildWhen` to control when the builder rebuilds.",
+        "line": 14,
+        "column": 9,
+        "file": null
+      },
+      {
+        "message": "Specify `buildWhen` to control when the builder rebuilds.",
+        "line": 15,
+        "column": 3,
+        "file": null
+      }
+    ]
+  },
+  {
     "name": "avoid-empty-setstate",
     "group": "correctness",
     "domains": [
@@ -7158,6 +7370,177 @@
     ]
   },
   {
+    "name": "avoid-missing-test-files",
+    "group": "correctness",
+    "domains": [],
+    "recommended": false,
+    "crossFile": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Requires configured source files to have a corresponding test file.",
+    "docs": "Requires configured source files to have a corresponding test file.\n\n`patterns` is an empty-by-default list of regular expressions matched against\npackage-relative paths (including `lib/`, with `/` separators). Tests mirror the\nsource path: `lib/src/value.dart` requires `test/src/value_test.dart`. A\nconfigured file is reported even when the package has no test directory.",
+    "examples": {
+      "bad": null,
+      "good": null,
+      "crossFile": [
+        {
+          "path": "bad/lib/src/alpha.dart",
+          "content": "\nclass Source {}"
+        },
+        {
+          "path": "bad/lib/src/beta.dart",
+          "content": "\nclass Source {}"
+        },
+        {
+          "path": "bad/lib/src/delta.dart",
+          "content": "\nclass Source {}"
+        },
+        {
+          "path": "bad/lib/src/gamma.dart",
+          "content": "\nclass Source {}"
+        },
+        {
+          "path": "bad/lib/src/nested/epsilon.dart",
+          "content": "\nclass Source {}"
+        },
+        {
+          "path": "bad/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "bad/pubspec.yaml",
+          "content": "name: test_sample"
+        },
+        {
+          "path": "bad/support.dart",
+          "content": "class Support {}"
+        },
+        {
+          "path": "bad/test/alpha_test.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "bad/test/unrelated_test.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "bad_no_tests/lib/root.dart",
+          "content": "\nclass Root {}"
+        },
+        {
+          "path": "bad_no_tests/pubspec.yaml",
+          "content": "name: test_sample"
+        },
+        {
+          "path": "good/lib/src/alpha.dart",
+          "content": "class Source {}"
+        },
+        {
+          "path": "good/lib/src/beta.dart",
+          "content": "class Source {}"
+        },
+        {
+          "path": "good/lib/src/gamma.dart",
+          "content": "class Source {}"
+        },
+        {
+          "path": "good/lib/src/nested/delta.dart",
+          "content": "class Source {}"
+        },
+        {
+          "path": "good/lib/src/other/epsilon.dart",
+          "content": "class Source {}"
+        },
+        {
+          "path": "good/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good/pubspec.yaml",
+          "content": "name: test_sample"
+        },
+        {
+          "path": "good/test/src/alpha_test.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good/test/src/beta_test.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good/test/src/gamma_test.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good/test/src/nested/delta_test.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good/test/src/other/epsilon_test.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good_defaults/lib/src/value.dart",
+          "content": "class Value {}"
+        },
+        {
+          "path": "good_defaults/pubspec.yaml",
+          "content": "name: defaults_sample"
+        },
+        {
+          "path": "good_unselected/lib/unselected.dart",
+          "content": "class Unselected {}"
+        },
+        {
+          "path": "good_unselected/pubspec.yaml",
+          "content": "name: test_sample"
+        }
+      ]
+    },
+    "diagnostics": [
+      {
+        "message": "This file does not have a corresponding test file; add `test/src/alpha_test.dart`.",
+        "line": 1,
+        "column": 1,
+        "file": "bad/lib/src/alpha.dart"
+      },
+      {
+        "message": "This file does not have a corresponding test file; add `test/src/beta_test.dart`.",
+        "line": 1,
+        "column": 1,
+        "file": "bad/lib/src/beta.dart"
+      },
+      {
+        "message": "This file does not have a corresponding test file; add `test/src/delta_test.dart`.",
+        "line": 1,
+        "column": 1,
+        "file": "bad/lib/src/delta.dart"
+      },
+      {
+        "message": "This file does not have a corresponding test file; add `test/src/gamma_test.dart`.",
+        "line": 1,
+        "column": 1,
+        "file": "bad/lib/src/gamma.dart"
+      },
+      {
+        "message": "This file does not have a corresponding test file; add `test/src/nested/epsilon_test.dart`.",
+        "line": 1,
+        "column": 1,
+        "file": "bad/lib/src/nested/epsilon.dart"
+      },
+      {
+        "message": "This file does not have a corresponding test file; add `test/root_test.dart`.",
+        "line": 1,
+        "column": 1,
+        "file": "bad_no_tests/lib/root.dart"
+      }
+    ]
+  },
+  {
     "name": "avoid-misused-hooks",
     "group": "correctness",
     "domains": [
@@ -7213,6 +7596,150 @@
         "message": "Hooks require a `HookWidget`, `HookConsumerWidget`, or `HookBuilder`; replace this non-hook widget.",
         "line": 27,
         "column": 5,
+        "file": null
+      }
+    ]
+  },
+  {
+    "name": "avoid-misused-test-matchers",
+    "group": "correctness",
+    "domains": [
+      "test"
+    ],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Warns when a test matcher cannot apply to the actual value's known static type.",
+    "docs": "Warns when a test matcher cannot apply to the actual value's known static type.\n\nChecks collection, string, numeric, boolean, asynchronous and function matchers,\nincluding composed matchers and `isIn` membership checks. Known sets are\ndistinguished from lists, while an unknown Iterable implementation may be a\nlist. Unknown types and unresolved matcher identities are left alone.",
+    "examples": {
+      "bad": "import 'package:test/test.dart';\nvoid main() {\n  expect(1, isEmpty);\n  expect(1, hasLength(1));\n  expect(1, isNull);\n  expect(1, isNotNull);\n  expect('yes', isTrue);\n  expect(false, isPositive);\n  expect(1, contains('x'));\n  expect('text', isList);\n  expect([1], isMap);\n  expect(1, startsWith('x'));\n  expect('text', everyElement(isTrue));\n  expect(1, returnsNormally);\n  expect(1, completes);\n  expect(1, emitsDone);\n  expect(1, throwsException);\n  expect('text', equals(1));\n  expect(1, allOf(isPositive, isTrue));\n  expect(1, anyOf(isTrue, isList));\n  expect(1, isNot(isTrue));\n  expect(1, false);\n}",
+      "good": "import 'package:test/test.dart';\nvoid examples(dynamic unknown, Object object, int? maybe) {\n  expect('', isEmpty);\n  expect([1], hasLength(1));\n  expect(1, isPositive);\n  expect(true, isTrue);\n  expect([1], contains(1));\n  expect({'a': 1}, isMap);\n  expect([1], isList);\n  expect('text', startsWith('t'));\n  expect([true], everyElement(isTrue));\n  expect(() {}, returnsNormally);\n  expect(Future.value(1), completes);\n  expect(Stream.empty(), emitsDone);\n  expect(() { throw 'error'; }, throwsException);\n  expect(maybe, isNull);\n  expect(maybe, isNotNull);\n  expect(unknown, isEmpty);\n  expect(object, isTrue);\n  expect(1, anyOf(isTrue, isPositive));\n  expect('text', equals('text'));\n  final isEmpty = true;\n  expect(1, isEmpty);\n}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 3,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 4,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 5,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 6,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 7,
+        "column": 17,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 8,
+        "column": 17,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 9,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 10,
+        "column": 18,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 11,
+        "column": 15,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 12,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 13,
+        "column": 18,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 14,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 15,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 16,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 17,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 18,
+        "column": 18,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 19,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 20,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 21,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "Use a matcher compatible with the actual value's static type.",
+        "line": 22,
+        "column": 13,
         "file": null
       }
     ]
@@ -7495,6 +8022,130 @@
         "message": "Remove the nested stream/future wrapper; expose a single asynchronous sequence.",
         "line": 9,
         "column": 14,
+        "file": null
+      }
+    ]
+  },
+  {
+    "name": "avoid-not-encodable-in-to-json",
+    "group": "correctness",
+    "domains": [],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Reports non-JSON-encodable values returned by `toJson` methods.",
+    "docs": "Reports non-JSON-encodable values returned by `toJson` methods.\n\nChecks returned maps and lists recursively, including collection branches, and\ndirect returns. Primitive values, null, and objects with an inherited or\ndeclared instance `toJson` method are accepted. Unknown types, incomplete\nsupertype graphs, and broad object types are left alone because their runtime\nvalues may be encodable.\n\n# Options\n\n`methods` adds serialization method names to check (default: empty).",
+    "examples": {
+      "bad": "class Plain { const Plain(); }\nclass Example {\n  Object toJson(Set<String> values, DateTime date, Duration delay) => {\n    'set': values,\n    'date': date,\n    'duration': delay,\n    'callback': () => null,\n    'plain': Plain(),\n    'new': new Plain(),\n    'const': const Plain(),\n    'nested': [\n      Plain(),\n      if (true) Plain(),\n      for (final item in values) Plain(),\n    ],\n    42: 'key',\n  };\n}\nclass Direct {\n  Object toJson() { return Plain(); }\n}\nclass Custom {\n  Object customToJson() => Plain();\n}\nclass Typed {\n  Object toJson(List<Plain> values) => values;\n}\nclass Spreads {\n  Object toJson(List<Plain> values) => [\n    ...values,\n  ];\n}\nclass Conditional {\n  Object toJson(bool condition) => condition\n      ? Plain()\n      : Plain();\n}",
+      "good": "class Serializable {\n  Object toJson() => {'name': 'value'};\n}\nclass Inherited extends Serializable {}\nclass Example {\n  Object toJson(dynamic unknown, Object broad) => {\n    'string': 'value',\n    'number': 1,\n    'double': 1.5,\n    'boolean': true,\n    'null': null,\n    'list': [1, 'value', false, null],\n    'map': {'nested': [true]},\n    'object': Serializable(),\n    'inherited': Inherited(),\n    'unknown': unknown,\n    'broad': broad,\n  };\n}\nclass OtherMethods {\n  Object unrelated() => <int>{1};\n  Object toJson() {\n    Object helper() => <int>{1};\n    final callback = () => <int>{2};\n    return {'ok': true};\n  }\n}\nclass Direct {\n  Object toJson() => 'value';\n  Object customToJson() => [1, 2];\n}\nclass Spread {\n  Object toJson(Set<String> values) => [...values];\n}\nclass Optional {\n  Object toJson([int value = 1]) => value;\n}\nclass OptionalHolder {\n  Object toJson() => {'value': Optional()};\n}\n\nclass MissingParent extends MissingBase {}\nclass MissingContract implements MissingInterface {}\nclass IndirectMissing extends MissingParent {}\nclass IncompleteModels {\n  Object toJson() => {\n    'parent': MissingParent(),\n    'contract': MissingContract(),\n    'indirect': IndirectMissing(),\n  };\n}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "This expression is not JSON-encodable; convert it or provide an instance `toJson` method.",
+        "line": 4,
+        "column": 12,
+        "file": null
+      },
+      {
+        "message": "This expression is not JSON-encodable; convert it or provide an instance `toJson` method.",
+        "line": 5,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "This expression is not JSON-encodable; convert it or provide an instance `toJson` method.",
+        "line": 6,
+        "column": 17,
+        "file": null
+      },
+      {
+        "message": "This expression is not JSON-encodable; convert it or provide an instance `toJson` method.",
+        "line": 7,
+        "column": 17,
+        "file": null
+      },
+      {
+        "message": "This expression is not JSON-encodable; convert it or provide an instance `toJson` method.",
+        "line": 8,
+        "column": 14,
+        "file": null
+      },
+      {
+        "message": "This expression is not JSON-encodable; convert it or provide an instance `toJson` method.",
+        "line": 9,
+        "column": 12,
+        "file": null
+      },
+      {
+        "message": "This expression is not JSON-encodable; convert it or provide an instance `toJson` method.",
+        "line": 10,
+        "column": 14,
+        "file": null
+      },
+      {
+        "message": "This expression is not JSON-encodable; convert it or provide an instance `toJson` method.",
+        "line": 12,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "This expression is not JSON-encodable; convert it or provide an instance `toJson` method.",
+        "line": 13,
+        "column": 17,
+        "file": null
+      },
+      {
+        "message": "This expression is not JSON-encodable; convert it or provide an instance `toJson` method.",
+        "line": 14,
+        "column": 34,
+        "file": null
+      },
+      {
+        "message": "JSON map keys must be strings.",
+        "line": 16,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This expression is not JSON-encodable; convert it or provide an instance `toJson` method.",
+        "line": 20,
+        "column": 28,
+        "file": null
+      },
+      {
+        "message": "This expression is not JSON-encodable; convert it or provide an instance `toJson` method.",
+        "line": 23,
+        "column": 28,
+        "file": null
+      },
+      {
+        "message": "This expression is not JSON-encodable; convert it or provide an instance `toJson` method.",
+        "line": 26,
+        "column": 40,
+        "file": null
+      },
+      {
+        "message": "This expression is not JSON-encodable; convert it or provide an instance `toJson` method.",
+        "line": 30,
+        "column": 8,
+        "file": null
+      },
+      {
+        "message": "This expression is not JSON-encodable; convert it or provide an instance `toJson` method.",
+        "line": 35,
+        "column": 9,
+        "file": null
+      },
+      {
+        "message": "This expression is not JSON-encodable; convert it or provide an instance `toJson` method.",
+        "line": 36,
+        "column": 9,
         "file": null
       }
     ]
@@ -11434,6 +12085,286 @@
     ]
   },
   {
+    "name": "handle-throwing-invocations",
+    "group": "correctness",
+    "domains": [],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Requires handling invocations whose declarations carry `@Throws` metadata.",
+    "docs": "Requires handling invocations whose declarations carry `@Throws` metadata.\n\nA call is handled by an enclosing `try` body with matching catches, or by\n`@Throws` on its own enclosing executable. Typed contracts require coverage\nof every declared type; an empty contract requires a catch-all or an empty\nenclosing contract. Catch and finally bodies do not use their sibling catches,\nand deferred nested functions do not inherit their declaration site's handlers.\n\n`Throws` from `dart_code_metrics_annotations` applies to imported declarations,\nmethods, constructors, callback parameters and annotated local tear-offs.\nConstant exception sets and generic type literals retain their resolved types.\nUnknown invocation targets are not guessed, and no implicit SDK contracts\nor configuration options are introduced.",
+    "examples": {
+      "bad": "import 'package:dart_code_metrics_annotations/annotations.dart';\nimport 'package:unavailable/contracts.dart' show unknownErrors;\n\nclass FirstFailure {}\nclass SecondFailure {}\n@Throws({FirstFailure})\nvoid first() {}\n@Throws({FirstFailure, SecondFailure})\nvoid both() {}\n@Throws()\nvoid arbitrary() {}\n@Throws({IndexError})\nvoid indexFailure() {}\n\nvoid missing() {\n  first();\n}\nvoid wrongCatch() {\n  try {\n    first();\n  } on SecondFailure {}\n}\nvoid partialCatch() {\n  try {\n    both();\n  } on FirstFailure {}\n}\nvoid exceptionDoesNotCatchErrors() {\n  try {\n    indexFailure();\n  } on Exception {}\n}\nvoid unrestrictedIsNotTyped() {\n  try {\n    arbitrary();\n  } on FirstFailure {}\n}\n@Throws({SecondFailure})\nvoid wrongDeclaration() {\n  first();\n}\n@Throws({FirstFailure})\nvoid partialDeclaration() {\n  both();\n}\n@Throws({FirstFailure})\nvoid unrestrictedDeclaration() {\n  arbitrary();\n}\nvoid catchBody() {\n  try {} catch (_) {\n    first();\n  }\n}\nvoid finallyBody() {\n  try {} catch (_) {} finally {\n    first();\n  }\n}\nvoid deferredClosure() {\n  try {\n    final action = () {\n      first();\n    };\n  } catch (_) {}\n}\n@Throws()\nvoid nestedFunctionDoesNotInheritAnnotation() {\n  void action() {\n    first();\n  }\n}\nvoid callbacks(@Throws() void Function() action) {\n  action();\n}\nvoid typedCallback(@Throws({FirstFailure}) void Function() action) {\n  try {\n    action();\n  } on SecondFailure {}\n}\nvoid localTearOff() {\n  @Throws({FirstFailure})\n  final action = first;\n  action();\n}\nvoid localFunction() {\n  @Throws({FirstFailure})\n  void action() {}\n  action();\n}\nclass Service {\n  @Throws({FirstFailure})\n  Service();\n  @Throws({SecondFailure})\n  Service.named();\n  @Throws({FirstFailure})\n  void run() {}\n  @Throws({FirstFailure})\n  static void start() {}\n}\nvoid methodsAndConstructors(Service service) {\n  service.run();\n  Service.start();\n  Service();\n  new Service.named();\n  service..run();\n}\n\nvoid genericCallback(@Throws() void Function<T>() action) {\n  action<int>();\n}\n\nconst exceptionTypes = {FirstFailure};\n@Throws(exceptionTypes)\nvoid constantContract() {}\nvoid constantContractWrongCatch() {\n  try {\n    constantContract();\n  } on SecondFailure {}\n}\n@Throws({SecondFailure})\nvoid wrongEnclosingDoesNotProveCoverage() {\n  first();\n}\n\nvoid optionalCallbacks(@Throws() void Function()? callback) {\n  callback?.call();\n  callback!();\n  callback!.call();\n}\nclass CallbackHolder {\n  @Throws({FirstFailure})\n  void Function()? callback;\n}\nvoid fieldCallbacks(CallbackHolder holder) {\n  holder.callback?.call();\n  holder.callback!();\n}\nclass ExplicitSuper extends Service {\n  ExplicitSuper() : super();\n  ExplicitSuper.named() : super.named();\n}\nclass ImplicitSuper extends Service {\n  ImplicitSuper();\n}\nclass Redirecting {\n  @Throws({FirstFailure})\n  Redirecting.target();\n  Redirecting() : this.target();\n}\nabstract class RedirectFactory {\n  factory RedirectFactory() = FactoryTarget;\n}\nclass FactoryTarget implements RedirectFactory {\n  @Throws({FirstFailure})\n  FactoryTarget();\n}\nvoid shorthandConstructors() {\n  Service service = .named();\n}\nclass Primary() {\n  @Throws({FirstFailure})\n  this { first(); }\n}\nvoid primaryConstructor() {\n  Primary();\n}\nclass UncoveredPrimary() {\n  this { first();  }\n}\nclass OperatorBoundary {\n  @Throws({SecondFailure})\n  OperatorBoundary operator +(OperatorBoundary other) {\n    first();\n    return other;\n  }\n}\n\nclass GenericFailure<T> {}\n@Throws({GenericFailure<int>})\nvoid genericFailure() {}\nvoid wrongGenericCatch() {\n  try {\n    genericFailure();\n  } on GenericFailure<String> {}\n}\n\nclass ThrowingCallable {\n  @Throws({FirstFailure})\n  void call() {}\n}\nvoid explicitCallableMethod(ThrowingCallable callable) {\n  callable.call();\n}\n\nvoid directCallbackMissing(List<String> items) {\n  items.map((s) => first() ).toList();\n}\nvoid directCallbackWrongCatch(List<String> items) {\n  try {\n    items.map((s) => first() ).toList();\n  } on SecondFailure {}\n}\n@Throws(unknownErrors)\nvoid unknownContract() {}\nvoid unknownContractTypedCatch() {\n  try {\n    unknownContract();\n  } on FirstFailure {}\n}",
+      "good": "import 'package:dart_code_metrics_annotations/annotations.dart' as metadata;\nimport 'package:unavailable/contracts.dart' show unknownErrors;\n\nclass BaseFailure {}\nclass ChildFailure extends BaseFailure {}\nclass OtherFailure {}\n@metadata.Throws({ChildFailure})\nvoid child() {}\n@metadata.Throws({ChildFailure, OtherFailure})\nvoid both() {}\n@metadata.Throws()\nvoid arbitrary() {}\nvoid ordinary() {}\n\nvoid exactCatch() {\n  try { child(); } on ChildFailure {}\n}\nvoid subtypeCatch() {\n  try { child(); } on BaseFailure {}\n}\nvoid multipleCatches() {\n  try { both(); } on ChildFailure {} on OtherFailure {}\n}\nvoid nestedCoverage() {\n  try {\n    try { both(); } on ChildFailure {}\n  } on OtherFailure {}\n}\nvoid catchAll() {\n  try { arbitrary(); } catch (_) {}\n}\nvoid objectCatch() {\n  try { arbitrary(); } on Object {}\n}\n@metadata.Throws({ChildFailure})\nvoid exactDeclaration() { child(); }\n@metadata.Throws({BaseFailure})\nvoid coveringDeclaration() { child(); }\n@metadata.Throws()\nvoid unrestrictedDeclaration() { arbitrary(); both(); }\n@metadata.Throws({OtherFailure})\nvoid combinedDeclarationAndCatch() {\n  try { both(); } on BaseFailure {}\n}\nvoid nestedCatchBodyCoveredOutside() {\n  try {\n    try {} catch (_) { child(); }\n  } on BaseFailure {}\n}\nvoid nestedFinallyCoveredOutside() {\n  try {\n    try {} finally { child(); }\n  } on BaseFailure {}\n}\nvoid nestedFunctionHandlesItself() {\n  try {\n    void action() {\n      try { child(); } on BaseFailure {}\n    }\n  } catch (_) {}\n}\nvoid callbackHandled(@metadata.Throws() void Function() action) {\n  try { action(); } catch (_) {}\n}\n@metadata.Throws({BaseFailure})\nvoid callbackPropagated(@metadata.Throws({ChildFailure}) void Function() action) {\n  action();\n}\nvoid localTearOffHandled() {\n  @metadata.Throws({ChildFailure})\n  final action = child;\n  try { action(); } on BaseFailure {}\n}\nvoid localFunctionHandled() {\n  @metadata.Throws({ChildFailure})\n  void action() {}\n  try { action(); } on BaseFailure {}\n}\nvoid noContract(void Function() action) { ordinary(); action(); }\nvoid shadowing() {\n  final child = ordinary;\n  child();\n}\nvoid unknown(dynamic receiver) { receiver.invoke(); }\nclass Service {\n  @metadata.Throws({ChildFailure})\n  Service();\n  @metadata.Throws({ChildFailure})\n  Service.named();\n  @metadata.Throws({ChildFailure})\n  void run() {}\n}\nvoid constructorsAndCascades(Service service) {\n  try {\n    Service();\n    new Service.named();\n    service.run();\n    service..run();\n  } on BaseFailure {}\n}\n\nvoid genericCallback(@metadata.Throws() void Function<T>() action) {\n  try { action<int>(); } catch (_) {}\n}\n\nconst exceptionTypes = {ChildFailure};\n@metadata.Throws(exceptionTypes)\nvoid constantContract() {}\nvoid constantContractCaught() {\n  try { constantContract(); } catch (_) {}\n}\n@metadata.Throws()\nvoid constantContractPropagated() { constantContract(); }\n\nvoid optionalCallbacks(@metadata.Throws() void Function()? callback) {\n  try {\n    callback?.call();\n    callback!();\n    callback!.call();\n  } catch (_) {}\n}\nclass CallbackHolder {\n  @metadata.Throws({ChildFailure})\n  void Function()? callback;\n}\nvoid fieldCallbacks(CallbackHolder holder) {\n  try {\n    holder.callback?.call();\n    holder.callback!();\n  } on BaseFailure {}\n}\nvoid iterationBindings(List<void Function()> callbacks) {\n  @metadata.Throws()\n  final runAll = () {\n    for (final callback in callbacks) { callback(); }\n    final [callback] = callbacks;\n    callback();\n    try { ordinary(); } catch (caught) { caught(); }\n  };\n}\nvoid nestedIterationBindings(List<void Function()> callbacks) {\n  @metadata.Throws()\n  void runAll() {\n    callbacks.forEach((ignored) {\n      for (final callback in callbacks) { callback(); }\n    });\n  }\n}\nclass ExplicitSuper extends Service {\n  @metadata.Throws({BaseFailure})\n  ExplicitSuper() : super();\n  @metadata.Throws({BaseFailure})\n  ExplicitSuper.named() : super.named();\n}\nclass ImplicitSuper extends Service {\n  @metadata.Throws({BaseFailure})\n  ImplicitSuper();\n}\nclass Redirecting {\n  @metadata.Throws({ChildFailure})\n  Redirecting.target();\n  @metadata.Throws({BaseFailure})\n  Redirecting() : this.target();\n}\nabstract class RedirectFactory {\n  @metadata.Throws({BaseFailure})\n  factory RedirectFactory() = FactoryTarget;\n}\nclass FactoryTarget implements RedirectFactory {\n  @metadata.Throws({ChildFailure})\n  FactoryTarget();\n}\nvoid shorthandConstructors() {\n  try {\n    Service service = .named();\n  } on BaseFailure {}\n}\nclass Primary() {\n  @metadata.Throws({BaseFailure})\n  this { child(); }\n}\nvoid primaryConstructor() {\n  try { Primary(); } on BaseFailure {}\n}\nclass OperatorBoundary {\n  @metadata.Throws({BaseFailure})\n  OperatorBoundary operator +(OperatorBoundary other) {\n    child();\n    return other;\n  }\n}\n\nclass StaticCallName {\n  @metadata.Throws()\n  StaticCallName();\n  static void call() {}\n}\nvoid ordinaryStaticCall() {\n  StaticCallName.call();\n}\nclass ThrowingParent {\n  @metadata.Throws()\n  ThrowingParent();\n}\nclass ExternalChild extends ThrowingParent {\n  external ExternalChild();\n}\n\nvoid constantTypedCatch() {\n  try { constantContract(); } on ChildFailure {}\n}\n@metadata.Throws(exceptionTypes)\nvoid constantTypedDeclaration() { child(); }\nclass GenericFailure<T> {}\n@metadata.Throws({GenericFailure<int>})\nvoid genericFailure() {}\nvoid genericTypedCatch() {\n  try { genericFailure(); } on GenericFailure<int> {}\n}\nvoid directCallback(List<String> items) {\n  try { items.map((s) => child()).toList(); } on ChildFailure {}\n}\n\nclass StaticContracts {\n  static const errors = {ChildFailure};\n  @metadata.Throws(errors)\n  void parse() {}\n  @metadata.Throws(errors)\n  void load() { parse(); }\n  void callback(@metadata.Throws(errors) void Function() action) {\n    try { action(); } on ChildFailure {}\n  }\n}\n@metadata.Throws(unknownErrors)\nvoid unknownContract() {}\nvoid unknownContractCaught() {\n  try { unknownContract(); } catch (_) {}\n}\n@metadata.Throws()\nvoid unknownContractPropagated() { unknownContract(); }",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 16,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 20,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 25,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 30,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 35,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 40,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 44,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 48,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 52,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 57,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 63,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 70,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 74,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 78,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 84,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 89,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 102,
+        "column": 11,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 103,
+        "column": 11,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 104,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 105,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 106,
+        "column": 12,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 110,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 118,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 123,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 127,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 128,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 129,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 136,
+        "column": 20,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 137,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 140,
+        "column": 21,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 141,
+        "column": 33,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 144,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 149,
+        "column": 24,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 152,
+        "column": 31,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 159,
+        "column": 21,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 166,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 169,
+        "column": 10,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 174,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 184,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 193,
+        "column": 12,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 197,
+        "column": 20,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 201,
+        "column": 22,
+        "file": null
+      },
+      {
+        "message": "Handle this throwing invocation or declare its thrown types with `@Throws`.",
+        "line": 208,
+        "column": 5,
+        "file": null
+      }
+    ]
+  },
+  {
     "name": "hash-and-equals",
     "group": "correctness",
     "domains": [],
@@ -13042,6 +13973,154 @@
     ]
   },
   {
+    "name": "pass-correct-accepted-type",
+    "group": "correctness",
+    "domains": [],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Checks invocation arguments against `@AcceptedTypes({String, bool})` metadata.",
+    "docs": "Checks invocation arguments against `@AcceptedTypes({String, bool})` metadata.\n\nParameters may declare a union of accepted nominal types even when their Dart\ntype is `Object`. Exact types, subclasses and implementations are accepted.\nInitializing and super formals inherit annotations from their fields or super parameters.\nCalls, explicit construction, constructor forwarding and cascade calls use the\nshared semantic declaration resolver. Missing types or declarations are skipped\nrather than treating incomplete semantic information as a mismatch.\n\nFor example, `accept(1)` is reported for\n`void accept(@AcceptedTypes({String, bool}) Object value) {}`;\n`accept('text')` and `accept(true)` are valid.",
+    "examples": {
+      "bad": "import 'package:dart_code_metrics_annotations/annotations.dart';\n\nvoid accept(@AcceptedTypes({String, bool}) Object value) {}\nvoid named({@AcceptedTypes({String, bool}) required Object value}) {}\nvoid optional([@AcceptedTypes({String, bool}) Object value = '']) {}\n\nclass Box {\n  @AcceptedTypes({String, int})\n  final Object value;\n  const Box(this.value);\n  const Box.named(this.value);\n  void accept(@AcceptedTypes({String, bool}) Object value) {}\n  static void send(@AcceptedTypes({String, bool}) Object value) {}\n}\n\nvoid example() {\n  accept(1);\n  named(value: 2);\n  optional(3);\n  Box(false);\n  new Box(false);\n  const Box.named(false);\n  Box(1).accept(4);\n  Box.send(5);\n  Box(1)..accept(6);\n}\n\nclass Tag {\n  const Tag(@AcceptedTypes({String, bool}) Object value);\n}\n@Tag(1)\nclass Tagged {}\nenum Choice {\n  first(1);\n  const Choice(@AcceptedTypes({String, bool}) Object value);\n}\nvoid never(@AcceptedTypes({}) Object value) {}\nvoid impossible() {\n  never(1);\n}\n\nclass Child extends Box {\n  Child(super.value);\n  Child.p(super.value) : super.named();\n}\nclass Grandchild extends Child {\n  Grandchild(super.value);\n}\nclass NamedBox {\n  NamedBox({@AcceptedTypes({String}) required Object value});\n}\nclass NamedChild extends NamedBox {\n  NamedChild({required super.value});\n}\nvoid inheritedFormals() {\n  Child(false);\n  Child.p(false);\n  Grandchild(false);\n  NamedChild(value: false);\n  Box b = .new(false);\n  Box c = .named(false);\n}\n\nclass Parent {\n  Parent(@AcceptedTypes({String}) Object value);\n  Parent.named(@AcceptedTypes({int}) Object value);\n}\nclass Selected extends Parent {\n  Selected(super.value);\n  Selected.named(super.value) : super.named();\n}\nclass Offset extends Parent {\n  Offset(int extra, super.value);\n}\nvoid additionalInheritance() {\n  Selected(1);\n  Selected.named('text');\n  Offset(1, false);\n}",
+      "good": "import 'package:dart_code_metrics_annotations/annotations.dart';\n\nclass Animal {}\nclass Cat extends Animal {}\nclass Pet implements Animal {}\nvoid accept(@AcceptedTypes({String, bool}) Object value) {}\nvoid animal(@AcceptedTypes({Animal}) Object value) {}\nvoid named({@AcceptedTypes({String, bool}) required Object value}) {}\nvoid optional([@AcceptedTypes({String, bool}) Object value = '']) {}\nvoid unrestricted(Object value) {}\n\nclass Box {\n  @AcceptedTypes({String, int})\n  final Object value;\n  const Box(this.value);\n  const Box.named(this.value);\n  void accept(@AcceptedTypes({String, bool}) Object value) {}\n}\n\nvoid example(dynamic unknown) {\n  accept('text');\n  accept(true);\n  animal(Animal());\n  animal(Cat());\n  animal(Pet());\n  named(value: false);\n  optional();\n  optional('text');\n  Box(1);\n  new Box('text');\n  const Box.named(2);\n  Box(1)..accept(false);\n  unrestricted(1);\n  accept(unknown);\n}\n\nclass Tag {\n  const Tag(@AcceptedTypes({String, bool}) Object value);\n}\n@Tag('text')\nclass Tagged {}\nenum Choice {\n  first(false);\n  const Choice(@AcceptedTypes({String, bool}) Object value);\n}\ntypedef Accept = AcceptedTypes;\nvoid aliased(@Accept({String}) Object value) {}\nvoid aliasExample() {\n  aliased('text');\n}\n\nvoid contextualDouble(@AcceptedTypes({double}) double value) {}\n\nclass ContextualDouble {\n  @AcceptedTypes({double})\n  final double value;\n  ContextualDouble(this.value);\n  void accept(@AcceptedTypes({double}) double value) {}\n}\n\nvoid contextualExamples() {\n  contextualDouble(1);\n  contextualDouble(1.5);\n  ContextualDouble(1).accept(1);\n}\n\nclass Child extends Box {\n  Child(super.value);\n  Child.p(super.value) : super.named();\n}\nvoid inheritedFormals() {\n  Child('text');\n  Child.p(1);\n  Box b = .new(1);\n  Box c = .named('text');\n}\n\nclass GenericParent<T> {\n  GenericParent(@AcceptedTypes({List<int>}) T value);\n}\nclass IntListChild extends GenericParent<List<int>> {\n  IntListChild(super.value);\n}\nvoid genericInheritance() {\n  IntListChild([]);\n}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 17,
+        "column": 10,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 18,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 19,
+        "column": 12,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 20,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 21,
+        "column": 11,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 22,
+        "column": 19,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 23,
+        "column": 17,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 24,
+        "column": 12,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 25,
+        "column": 18,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 31,
+        "column": 6,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 34,
+        "column": 9,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 39,
+        "column": 9,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 56,
+        "column": 9,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 57,
+        "column": 11,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 58,
+        "column": 14,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 59,
+        "column": 21,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 60,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 61,
+        "column": 18,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 76,
+        "column": 12,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 77,
+        "column": 18,
+        "file": null
+      },
+      {
+        "message": "This type does not match any of the `@AcceptedTypes` types.",
+        "line": 78,
+        "column": 13,
+        "file": null
+      }
+    ]
+  },
+  {
     "name": "prefer-correct-json-casts",
     "group": "correctness",
     "domains": [],
@@ -14027,6 +15106,114 @@
     ]
   },
   {
+    "name": "proper-super-calls",
+    "group": "correctness",
+    "domains": [
+      "flutter"
+    ],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Order existing superclass calls in resolved Flutter `State` lifecycle methods, including mixins whose `on` constraints are `State` or its subtypes.",
+    "docs": "Order existing superclass calls in resolved Flutter `State` lifecycle methods,\nincluding mixins whose `on` constraints are `State` or its subtypes.\n\nCalls to `super.initState()`, `super.didUpdateWidget()`, and `super.activate()`\nbelong in the first direct statement. `didChangeDependencies` is not checked.\nCalls to `super.deactivate()` and `super.dispose()` belong in the last direct\nstatement, also allowing the final statement of a terminal `finally` block.\nNested conditional calls do not satisfy this ordering; callbacks and local\nfunctions are excluded.\n\nMissing calls are not reported for any lifecycle method. The existing\n`proper-super-init-state` and `require-super-dispose` rules require presence\nonly for `initState` and `dispose`, respectively.",
+    "examples": {
+      "bad": "import 'package:flutter/material.dart' as f;\n\nclass WrongBoundaries extends f.State<f.StatefulWidget> {\n  void work() {}\n\n  @override\n  void initState() {\n    work();\n    super.initState();\n  }\n\n  @override\n  void didUpdateWidget(f.StatefulWidget oldWidget) {\n    work();\n    super.didUpdateWidget(oldWidget);\n  }\n\n  @override\n  void activate() {\n    work();\n    super.activate();\n  }\n\n  @override\n  void didChangeDependencies() {\n    work();\n    super.didChangeDependencies();\n  }\n\n  @override\n  void deactivate() {\n    super.deactivate();\n    work();\n  }\n\n  @override\n  void dispose() {\n    super.dispose();\n    work();\n  }\n}\n\nclass ConditionalCalls extends f.State<f.StatefulWidget> {\n  bool ready = true;\n\n  @override\n  void initState() {\n    if (ready) {\n      super.initState();\n    }\n  }\n\n  @override\n  void dispose() {\n    if (ready) {\n      super.dispose();\n    }\n  }\n\n  @override\n  void activate() {\n    {\n      super.activate();\n    }\n  }\n\n  @override\n  void deactivate() {\n    try {\n      ready = false;\n    } finally {\n      super.deactivate();\n    }\n    ready = true;\n  }\n}\n\nmixin WrongCleanup<T extends f.StatefulWidget> on f.State<T> {\n  void work() {}\n\n  @override\n  void initState() {\n    work();\n    super.initState();\n  }\n\n  @override\n  void didUpdateWidget(T oldWidget) {\n    work();\n    super.didUpdateWidget(oldWidget);\n  }\n\n  @override\n  void activate() {\n    work();\n    super.activate();\n  }\n\n  @override\n  void deactivate() {\n    super.deactivate();\n    work();\n  }\n\n  @override\n  void dispose() {\n    super.dispose();\n    work();\n  }\n}",
+      "good": "import 'package:flutter/material.dart' as f;\n\nclass CorrectBoundaries extends f.State<f.StatefulWidget> {\n  void work() {}\n\n  @override\n  void initState() {\n    super.initState();\n    work();\n  }\n\n  @override\n  void didUpdateWidget(f.StatefulWidget oldWidget) {\n    super.didUpdateWidget(oldWidget);\n    work();\n  }\n\n  @override\n  void activate() {\n    (super.activate());\n    work();\n  }\n\n  @override\n  void didChangeDependencies() {\n    super.didChangeDependencies();\n    work();\n  }\n\n  @override\n  void deactivate() {\n    work();\n    super.deactivate();\n  }\n\n  @override\n  void dispose() {\n    work();\n    super.dispose();\n  }\n}\n\n// Missing calls are the responsibility of the existing presence rules.\nclass MissingCalls extends f.State<f.StatefulWidget> {\n  @override\n  void initState() {}\n  @override\n  void didUpdateWidget(f.StatefulWidget oldWidget) {}\n  @override\n  void activate() {}\n  @override\n  void didChangeDependencies() {}\n  @override\n  void deactivate() {}\n  @override\n  void dispose() {}\n}\n\nclass DeferredCalls extends f.State<f.StatefulWidget> {\n  void defer(void Function() callback) {}\n\n  @override\n  void initState() {\n    defer(() {\n      super.initState();\n    });\n    void later() {\n      super.initState();\n    }\n    defer(later);\n  }\n\n  @override\n  void dispose() {\n    void later() => super.dispose();\n    defer(later);\n    defer(() => super.dispose());\n  }\n\n  // A call in a non-lifecycle method is outside the rule's scope.\n  void custom() {\n    defer(() {});\n    super.activate();\n  }\n}\n\nclass FinallyCleanup extends f.State<f.StatefulWidget> {\n  bool ready = true;\n\n  @override\n  void deactivate() {\n    try {\n      ready = false;\n    } finally {\n      super.deactivate();\n    }\n  }\n\n  @override\n  void dispose() {\n    try {\n      ready = false;\n    } finally {\n      print('cleanup');\n      super.dispose();\n    }\n  }\n}\n\nmixin Cleanup<T extends f.StatefulWidget> on f.State<T> {\n  void work() {}\n\n  @override\n  void initState() {\n    super.initState();\n    work();\n  }\n\n  @override\n  void didUpdateWidget(T oldWidget) {\n    super.didUpdateWidget(oldWidget);\n    work();\n  }\n\n  @override\n  void activate() {\n    super.activate();\n    work();\n  }\n\n  @override\n  void deactivate() {\n    work();\n    super.deactivate();\n  }\n\n  @override\n  void dispose() {\n    work();\n    super.dispose();\n  }\n\n  @override\n  void didChangeDependencies() {\n    work();\n    super.didChangeDependencies();\n    work();\n  }\n}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Place `super.initState()` as the first statement in `initState()`.",
+        "line": 9,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Place `super.didUpdateWidget()` as the first statement in `didUpdateWidget()`.",
+        "line": 15,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Place `super.activate()` as the first statement in `activate()`.",
+        "line": 21,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Place `super.deactivate()` as the last statement in `deactivate()`.",
+        "line": 32,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Place `super.dispose()` as the last statement in `dispose()`.",
+        "line": 38,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Place `super.initState()` as the first statement in `initState()`.",
+        "line": 49,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Place `super.dispose()` as the last statement in `dispose()`.",
+        "line": 56,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Place `super.activate()` as the first statement in `activate()`.",
+        "line": 63,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Place `super.deactivate()` as the last statement in `deactivate()`.",
+        "line": 72,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Place `super.initState()` as the first statement in `initState()`.",
+        "line": 84,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Place `super.didUpdateWidget()` as the first statement in `didUpdateWidget()`.",
+        "line": 90,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Place `super.activate()` as the first statement in `activate()`.",
+        "line": 96,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Place `super.deactivate()` as the last statement in `deactivate()`.",
+        "line": 101,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Place `super.dispose()` as the last statement in `dispose()`.",
+        "line": 107,
+        "column": 5,
+        "file": null
+      }
+    ]
+  },
+  {
     "name": "proper-super-init-state",
     "group": "correctness",
     "domains": [
@@ -14069,6 +15256,382 @@
       {
         "message": "Call `super.initState()` first in `initState()`.",
         "line": 38,
+        "column": 5,
+        "file": null
+      }
+    ]
+  },
+  {
+    "name": "require-atomic-async-updates",
+    "group": "correctness",
+    "domains": [],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Warns when an assignment reads its target before an `await` and writes it afterwards.",
+    "docs": "Warns when an assignment reads its target before an `await` and writes it afterwards.\n\nUncaptured local variables and parameters are excluded. Shared targets,\nincluding lazy initialization with `??=`, should be read after awaiting.",
+    "examples": {
+      "bad": "int count = 0;\nclass Counter {\n  int value = 0;\n  int? cached;\n  final items = <int>[0];\n  late Counter child;\n  Future<void> update(Future<int> amount) async {\n    value += await amount;\n    this.value *= await amount;\n    this.value = this.value + await amount;\n    value = this.value + await amount;\n    this.value = value + await amount;\n    this.items[0] = this.items[0] + await amount;\n    items[0] = this.items[0] + await amount;\n    this.items[0] = items[0] + await amount;\n    this.child.value = this.child.value + await amount;\n    child.value = this.child.value + await amount;\n    this.child.value = child.value + await amount;\n    cached ??= await amount;\n    this.cached = cached ?? await amount;\n  }\n}\nFuture<void> update(Future<int> amount) async {\n  count += await amount;\n  count = count + await amount;\n  count = (count * 2) - await amount;\n  count = await Future.value(count);\n  var local = 0;\n  local -= await amount;\n  count = true ? count + await amount : 0;\n  final values = <int>[0];\n  values[0] += await amount;\n  values[0] = values[0] + await amount;\n}\n\nFuture<void> branches(\n  Future<int> amount,\n  Object subject,\n  bool condition,\n) async {\n  count = switch (subject) { 0 => count + await amount, _ => 0 };\n  count = switch (subject) { int n => count + n + await amount, _ => 0 };\n  count = switch (subject) { int n when count > 0 => n + await amount, _ => 0 };\n  count = switch (subject) { int n when count < 0 => n, _ => await amount };\n  count = count + switch (subject) { int count => count + await amount, _ => 0 };\n  count = switch (count) { 0 => await amount, _ => 0 };\n  count = switch (subject) { int count => count, _ => count + await amount };\n  count = [if (condition) count + await amount else 0].first;\n  count = [if (subject case int n) count + n + await amount else 0].first;\n  count = [if (subject case int n when count > 0) n + await amount else 0].first;\n  count = [if (condition) count, await amount].first;\n  count = {if (condition) 0: count + await amount else 1: 0}.values.first;\n  count = {if (condition) count + await amount else 0}.first;\n  count = count + [if (subject case int count) count + await amount else 0].first;\n  count = [if (subject case int count) count else count + await amount].first;\n  count = [for (final n in [0, 1]) count + n + await amount].first;\n  count = [for (var n = 0; n < 2; n++) count + n + await amount].first;\n  count = [for (final (n,) in [(0,), (1,)]) count + n + await amount].first;\n  count = [for (final n in [0, 1]) if (n == 0) count else await amount].first;\n  count = [for (final n in [count]) await amount].first;\n  count = count + [for (final count in [0]) count + await amount].first;\n  count = [for (final count in [0]) count, count + await amount].first;\n  count = {for (final n in [0, 1]) n: count + await amount}.values.first;\n  count = {count: await amount}.values.first;\n}\n\nFuture<void> identities(Future<int> amount, dynamic receiver) async {\n  receiver.x.count = receiver.x.count + await amount;\n  receiver.x[0] = receiver.x[0] + await amount;\n  final values = <int>[0, 1];\n  var index = 0;\n  values[index] = values[index] + await amount;\n  count = (values[count] = await amount);\n  dynamic object = Counter();\n  object = (object.value = await amount);\n}\n\nFuture<void> lazyInitialization(Future<int> amount) async {\n  int? cached;\n  cached ??= await amount;\n  cached = cached ?? await amount;\n  int? local;\n  local = local ?? await amount;\n}\n\nFuture<void> asynchronousLoop(Stream<int> amounts) async {\n  count = [await for (final amount in amounts) count + amount].first;\n}\n\nFuture<void> closures(Future<int> amount) async {\n  final update = () async {\n    count = count + await amount;\n  };\n  await update();\n}\n\nStream<int> generator(Future<int> amount) async* {\n  count += await amount;\n  yield count;\n}\n\nFuture<void> capturedLocal(Future<int> amount, int parameter) async {\n  var local = 0;\n  final read = () => local;\n  final readParameter = () => parameter;\n  local += await amount;\n  parameter += await amount;\n}\nFuture<void> capturedByLocalFunction(Future<int> amount) async {\n  var local = 0;\n  int read() => local;\n  local += await amount;\n}\nclass StaticCounter {\n  static int value = 0;\n  static Future<void> update(Future<int> amount) async {\n    value += await amount;\n  }\n}\n\nFuture<void> capturedByWrites(Future<int> amount) async {\n  var local = 0;\n  void reset() { (local, _) = (0, 0); }\n  local += await amount;\n}\nFuture<void> capturedByLoop(Future<int> amount, List<int> values) async {\n  var local = 0;\n  void reset() { for (local in values) {} }\n  local += await amount;\n}\nFuture<void> capturedByAssignment(Future<int> amount) async {\n  var local = 0;\n  void reset() { local = 0; }\n  local += await amount;\n}\nvoid asyncClosureAssignment(Future<int> amount) {\n  var local = 0;\n  final update = () async {\n    local += await amount;\n  };\n}",
+      "good": "int count = 0;\nint other = 0;\nclass Counter {\n  int value = 0;\n  Future<void> update(Counter other, Future<int> amount) async {\n    value = other.value + await amount;\n    this.value = other.value + await amount;\n    this.value = await amount + this.value;\n    final local = await amount;\n    value += local;\n  }\n  Future<void> patterns(Object subject, Future<int> amount) async {\n    value = switch (subject) {\n      Counter(:final value) => value + await amount,\n      _ => 0,\n    };\n    value = [if (subject case Counter(:final value)) value + await amount else 0].first;\n    value = [for (final value in [0]) value + await amount].first;\n    value = [for (var value = 0; value < 1; value++) value + await amount].first;\n    // Conservative fallback: a target-name binding suppresses new reads in\n    // that scope, even when an explicitly qualified target is still visible.\n    this.value = switch (subject) {\n      Counter(:final value) => this.value + await amount,\n      _ => 0,\n    };\n    this.value = [if (subject case Counter(:final value)) this.value + await amount else 0].first;\n    this.value = [for (final value in [0]) this.value + await amount].first;\n  }\n}\nFuture<void> update(Future<int> amount, bool condition) async {\n  final local = await amount;\n  count += local;\n  count = await amount;\n  count = await amount + count;\n  count = other + await amount;\n  count = condition ? count : await amount;\n  count = (() { return count + 1; })();\n  Future<int> later() async => count + await amount;\n  count = await later();\n  final values = <int>[0, 1];\n  values[0] = values[1] + await amount;\n  values[0] = await amount + values[0];\n  {\n    var count = 0;\n    count = await amount;\n  }\n}\n\nFuture<void> branches(\n  Future<int> amount,\n  Object subject,\n  bool condition,\n) async {\n  count = switch (subject) { 0 => count, _ => await amount };\n  count = switch (subject) { 0 => await amount, _ => count };\n  count = switch (subject) { int count => count + await amount, _ => 0 };\n  count = switch (subject) { int count when count > await amount => count, _ => 0 };\n  count = [if (condition) count else await amount].first;\n  count = [if (condition) await amount else count].first;\n  count = [if (subject case int count) count + await amount else 0].first;\n  count = [if (subject case int count when count > await amount) count else 0].first;\n  count = {if (condition) 0: count else 1: await amount}.values.first;\n  count = {if (condition) count else await amount}.first;\n  count = {if (subject case int count) 0: count + await amount else 1: 0}.values.first;\n  count = [for (final count in [0, 1]) count + await amount].first;\n  count = [for (var count = 0; count < 2; count++) count + await amount].first;\n  count = [for (final (count,) in [(0,), (1,)]) count + await amount].first;\n  count = {for (final count in [0, 1]) count: count + await amount}.values.first;\n  count = switch (subject) { int count => count, _ => 0 } + await amount;\n  count = [if (subject case int count) count else 0].first + await amount;\n  count = [for (final count in [0]) count].first + await amount;\n}\n\nFuture<void> identities(Future<int> amount, dynamic receiver) async {\n  receiver.x.count = receiver.y.count + await amount;\n  receiver.x.count = receiver.x.other + await amount;\n  receiver.x[0] = receiver.y[0] + await amount;\n  receiver.x.count = await amount + receiver.x.count;\n  final values = <int>[0, 1];\n  final otherValues = <int>[0, 1];\n  var index = 0;\n  var otherIndex = 1;\n  values[index] = otherValues[index] + await amount;\n  values[index] = values[otherIndex] + await amount;\n  values[index] = switch (other) { int index => values[index] + await amount, _ => 0 };\n  values[index] = [if (other case int index) values[index] + await amount else 0].first;\n  values[index] = [for (final index in [0]) values[index] + await amount].first;\n  values[index] = [for (final values in [otherValues]) values[index] + await amount].first;\n  count = (count = await amount);\n  count = (values[0] = await amount);\n  count = (Counter().value = await amount);\n}\n\nFuture<void> lazyInitialization(Future<int> amount) async {\n  final value = await amount;\n  int? cached;\n  cached ??= value;\n  cached = cached ?? value;\n  cached = await amount;\n}\n\nvoid synchronous() {\n  count = count + 1;\n  final update = () => count = count + 1;\n  update();\n}\n\nFuture<void> closureBoundary(Future<int> amount) async {\n  // Merely constructing an asynchronous closure does not execute its reads.\n  dynamic callback;\n  callback = () async => callback + await amount;\n  final synchronous = () {\n    count = count + 1;\n  };\n  synchronous();\n}\n\nFuture<void> localLoop(List<Future<int>> futures, int parameter) async {\n  var total = 0;\n  for (final f in futures) {\n    total += await f;\n    parameter += await f;\n  }\n}\nFuture<void> shadowedCapture(Future<int> amount) async {\n  var local = 0;\n  final read = (int local) => local;\n  local += await amount;\n}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 8,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 9,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 10,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 11,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 12,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 13,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 14,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 15,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 16,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 17,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 18,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 19,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 20,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 24,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 25,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 26,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 27,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 30,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 32,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 33,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 41,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 42,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 43,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 44,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 45,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 46,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 47,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 48,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 49,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 50,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 51,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 52,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 53,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 54,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 55,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 56,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 57,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 58,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 59,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 60,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 61,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 62,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 63,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 64,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 68,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 69,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 72,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 73,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 87,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 92,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 98,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 106,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 107,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 112,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 117,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 124,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 129,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 134,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "This reassignment may use an outdated value after `await`.",
+        "line": 139,
         "column": 5,
         "file": null
       }
@@ -17053,6 +18616,208 @@
     ]
   },
   {
+    "name": "prefer-bytes-builder",
+    "group": "performance",
+    "domains": [],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Prefer `BytesBuilder` over repeated concatenation, mutation, or spreading of byte lists.",
+    "docs": "Prefer `BytesBuilder` over repeated concatenation, mutation, or spreading of\nbyte lists. This rule treats SDK `List<int>` and `Uint8List` values as bytes,\nincluding operations outside loops, and ignores constant collection spreads.\nReport each concatenation chain once, or only its enclosing byte spread.\n\nScope this rule to byte-processing files when integer lists represent other data.",
+    "examples": {
+      "bad": "import 'dart:typed_data';\n\nvoid compose(List<int> bytes, List<int> chunk, Uint8List typed) {\n  bytes = bytes + chunk;\n  bytes += chunk;\n  bytes.addAll(chunk);\n  bytes..addAll(chunk);\n  final copied = [...bytes];\n  final nested = [if (true) ...chunk];\n  final loop = [for (final value in <List<int>>[chunk]) ...value];\n  final literals = [...<int>[1, 2]];\n  typed + chunk;\n  final typedCopy = [...typed];\n  for (var i = 0; i < 3; i++) {\n    bytes += typed;\n  }\n}\n\nclass Holder {\n  List<int> bytes = <int>[];\n}\n\nvoid cascades(Holder holder, List<int> chunk, List<int>? maybe) {\n  holder..bytes.addAll(chunk);\n  holder..bytes += chunk;\n  maybe?.addAll(chunk);\n  final optional = [...?maybe];\n}\n\nvoid chains(List<int> a, List<int> b, List<int> c, List<int> d) {\n  // Each whole chain has exactly one diagnostic, including grouped operands.\n  final linear = a + b + c;\n  final grouped = (a + b) + (c + d);\n  final rightGrouped = a + (b + (c + d));\n  final multiline =\n      a +\n      b +\n      c;\n  final multilineGrouped = (\n    a + b\n  ) + (\n    c + d\n  );\n\n  // Only the spread is reported, not its parenthesized concatenation.\n  final spread = [...(a + b)];\n  final nestedParens = [...(((a + b) + c))];\n  final multilineSpread = [\n    ...(\n      a + b + c\n    ),\n  ];\n  final directSpread = [...a + b + c];\n\n  // Separate compositions must retain separate diagnostics.\n  final separate = [a + b, c + d];\n  final siblingSpreads = [...(a + b), ...(c + d)];\n  final argument = a + identity(b + c);\n}\n\nList<int> identity(List<int> bytes) => bytes;",
+      "good": "import 'dart:typed_data';\n\nvoid compose(List<int> bytes, List<String> words, List<num> numbers,\n    List<dynamic> unknown, Uint16List wide) {\n  words + words;\n  words += words;\n  words.addAll(words);\n  final copy = [...words];\n  numbers.addAll(numbers);\n  final dynamicCopy = [...unknown];\n  final wideCopy = [...wide];\n  bytes.add(1);\n  bytes[0] += 1;\n  const constants = [...<int>[1, 2]];\n  final explicitConstants = const [...<int>[1, 2]];\n  final builder = BytesBuilder();\n  builder.add(bytes);\n  builder.toBytes();\n}\n\nclass Custom {\n  void addAll(List<int> bytes) {}\n  Custom operator +(List<int> bytes) => this;\n}\nvoid unrelated(Custom custom, List<int> bytes) {\n  custom.addAll(bytes);\n  custom + bytes;\n}\n\nvoid unrelatedChains(List<String> words, List<num> numbers) {\n  final wordChain = words + words + words;\n  final groupedWords = (words + words) + (words + words);\n  final wordSpread = [...(words + words)];\n  final numberChain = numbers + (numbers + numbers);\n  final numberSpread = [...((numbers + numbers) + numbers)];\n  const nestedConstants = [...<int>[1, 2], ...<int>[3, 4]];\n  final explicitNestedConstants = const [...<int>[1], ...<int>[2]];\n}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 4,
+        "column": 11,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 5,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 6,
+        "column": 9,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 7,
+        "column": 10,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 8,
+        "column": 22,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 9,
+        "column": 32,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 10,
+        "column": 60,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 11,
+        "column": 24,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 12,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 13,
+        "column": 25,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 15,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 24,
+        "column": 17,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 25,
+        "column": 11,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 26,
+        "column": 10,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 27,
+        "column": 25,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 32,
+        "column": 18,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 33,
+        "column": 19,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 34,
+        "column": 24,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 36,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 39,
+        "column": 28,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 46,
+        "column": 23,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 47,
+        "column": 30,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 50,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 53,
+        "column": 28,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 56,
+        "column": 21,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 56,
+        "column": 28,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 57,
+        "column": 31,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 57,
+        "column": 43,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 58,
+        "column": 20,
+        "file": null
+      },
+      {
+        "message": "Prefer `BytesBuilder` to compose bytes instead of expensive list operations.",
+        "line": 58,
+        "column": 33,
+        "file": null
+      }
+    ]
+  },
+  {
     "name": "prefer-const-border-radius",
     "group": "performance",
     "domains": [
@@ -19778,6 +21543,84 @@
     ]
   },
   {
+    "name": "avoid-cubits",
+    "group": "style",
+    "domains": [
+      "bloc"
+    ],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Prefer event-driven `Bloc` classes over `Cubit` subclasses.",
+    "docs": "Prefer event-driven `Bloc` classes over `Cubit` subclasses.\n\nReports classes whose superclass chain reaches the Bloc package's `Cubit`,\nincluding indirect subclasses and unresolved-package import fallbacks, but\nnot event-driven `Bloc` classes or unrelated classes with the same name.",
+    "examples": {
+      "bad": "import 'package:bloc/bloc.dart';\nimport 'package:bloc/bloc.dart' as b;\nimport 'package:flutter_bloc/flutter_bloc.dart' as flutter;\n\nclass Counter extends Cubit<int> {\n  Counter() : super(0);\n}\nclass Prefixed extends b.Cubit<int> {\n  Prefixed() : super(0);\n}\nabstract class Generic<T> extends Cubit<T> {\n  Generic(T state) : super(state);\n}\nclass Indirect extends Counter {}\nclass Deep extends Indirect {}\nclass Reexported extends flutter.Cubit<int> {\n  Reexported() : super(0);\n}\nmixin Logging {}\nclass Named = Cubit<int> with Logging;\nclass PrefixedNamed = b.Cubit<int> with Logging;\nclass ExternalIndirect extends b.Counter {}",
+      "good": "import 'package:bloc/bloc.dart';\nimport 'package:bloc/bloc.dart' as b;\n\nclass Events extends Bloc<int, int> {\n  Events() : super(0);\n}\nclass InheritedEvents extends Events {}\nclass PrefixedEvents extends b.Bloc<String, int> {\n  PrefixedEvents() : super(0);\n}\nclass StateOnly extends BlocBase<int> {\n  StateOnly() : super(0);\n}\nclass Unrelated {}\nclass CubitFactory {\n  Cubit<int> create() => Cubit<int>(0);\n}\nabstract class FakeCubit implements Cubit<int> {}\nabstract class MockCounter implements b.Counter {}\nabstract class IndirectMock extends MockCounter {}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Prefer extending `Bloc` instead of `Cubit`.",
+        "line": 5,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Prefer extending `Bloc` instead of `Cubit`.",
+        "line": 8,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Prefer extending `Bloc` instead of `Cubit`.",
+        "line": 11,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer extending `Bloc` instead of `Cubit`.",
+        "line": 14,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Prefer extending `Bloc` instead of `Cubit`.",
+        "line": 15,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Prefer extending `Bloc` instead of `Cubit`.",
+        "line": 16,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Prefer extending `Bloc` instead of `Cubit`.",
+        "line": 20,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Prefer extending `Bloc` instead of `Cubit`.",
+        "line": 21,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Prefer extending `Bloc` instead of `Cubit`.",
+        "line": 22,
+        "column": 7,
+        "file": null
+      }
+    ]
+  },
+  {
     "name": "avoid-double-and-int-checks",
     "group": "style",
     "domains": [],
@@ -20639,6 +22482,42 @@
         "message": "Avoid using the null assertion operator `!`.",
         "line": 70,
         "column": 18,
+        "file": null
+      }
+    ]
+  },
+  {
+    "name": "avoid-notifier-constructors",
+    "group": "style",
+    "domains": [
+      "riverpod"
+    ],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Keeps Riverpod notifier initialization in `build`, rather than constructors.",
+    "docs": "Keeps Riverpod notifier initialization in `build`, rather than constructors.\n\nNon-empty constructor bodies, initializing formals, field initializers,\nassertions, and constructor calls with arguments are reported. Empty bodies\n(including comments), argument-free delegation, and redirecting factories\ncontain no initialization logic of their own and are allowed. Factory bodies\nare checked just like generative constructor bodies.\n\nThe check follows resolved Riverpod inheritance, including asynchronous,\nstream, auto-dispose, family, and generated notifier bases. Unrelated classes\nwith the same names and legacy `StateNotifier` classes are not checked.\n\n```dart\nclass Counter extends Notifier<int> {\n  Counter() { state = 1; } // Move this logic into build.\n  int build() => 0;\n}\nclass CleanCounter extends Notifier<int> {\n  CleanCounter(); // An empty constructor is allowed.\n  int build() => 1;\n}\n```",
+    "examples": {
+      "bad": "import 'package:riverpod/riverpod.dart';\n\nclass Counter extends Notifier<int> {\n  Counter() { state = 1; }\n  int build() => 0;\n}\n\nclass InitializedCounter extends Notifier<int> {\n  final int initial;\n  InitializedCounter() : initial = 1;\n  int build() => initial;\n}",
+      "good": "import 'package:riverpod/riverpod.dart';\n\nclass Counter extends Notifier<int> {\n  Counter();\n  int build() => 1;\n}\n\nclass EmptyBody extends AsyncNotifier<int> {\n  EmptyBody() { /* No initialization logic. */ }\n}\n\nclass NoConstructor extends StreamNotifier<int> {}\n\nclass EmptyNamed extends AutoDisposeNotifier<int> {\n  EmptyNamed.create() {}\n}\n\nclass OrdinaryClass {\n  OrdinaryClass() { initialize(); }\n  void initialize() {}\n}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Avoid initialization logic in notifier constructors; move it to `build`.",
+        "line": 4,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Avoid initialization logic in notifier constructors; move it to `build`.",
+        "line": 10,
+        "column": 3,
         "file": null
       }
     ]
@@ -21668,6 +23547,90 @@
         "message": "Don't return `this` from a method.",
         "line": 93,
         "column": 12,
+        "file": null
+      }
+    ]
+  },
+  {
+    "name": "avoid-returning-value-from-cubit-methods",
+    "group": "style",
+    "domains": [
+      "bloc"
+    ],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Warns when a public Cubit instance method returns a value.",
+    "docs": "Warns when a public Cubit instance method returns a value.\n\nCubit commands should expose their results through observable state rather than\nreturn values. Methods returning `void`, `Never`, `Future<void>`, or\n`FutureOr<void>` are allowed, as are private methods, static utilities, getters,\nand overrides of inherited API methods.",
+    "examples": {
+      "bad": "import 'dart:async';\nimport 'package:bloc/bloc.dart';\n\nclass Counter extends Cubit<int> {\n  Counter() : super(0);\n  int count() => state;\n  String label() => 'counter';\n  Future<int> load() async => 1;\n  dynamic result() => state;\n  inferred() => 1;\n  inferredBlock() { return 'value'; }\n  FutureOr<int> later() => 1;\n  values() sync* { yield 1; }\n  events() async* { yield 1; }\n}\nclass Child extends Counter {\n  int another() => 1;\n  int count() => 2;\n}",
+      "good": "import 'dart:async';\nimport 'package:bloc/bloc.dart';\n\nclass Counter extends Cubit<int> {\n  Counter() : super(0);\n  void increment() => emit(state + 1);\n  Future<void> save() async {}\n  FutureOr<void> finish() {}\n  int _internal() => state;\n  static int utility() => 1;\n  int get count => state;\n  @override\n  String toString() => 'counter';\n  inferredVoid() => emit(1);\n  inferredEmpty() {}\n  outer() { int inner() => 1; inner(); }\n  closureBoundary() { [1].map((value) { return value; }); }\n  Never fail() => throw StateError('failure');\n}\nclass EventBloc extends Bloc<int, int> {\n  EventBloc() : super(0);\n  int count() => state;\n}\nclass Ordinary {\n  int count() => 1;\n}\nabstract class ExternalApi {\n  String describe();\n}\nclass Implementation extends Cubit<int> implements ExternalApi {\n  Implementation() : super(0);\n  String describe() => 'implementation';\n}\nclass FakeCubit implements Cubit<int> {\n  int count() => 1;\n}\nclass FakeCounter implements Counter {\n  int extra() => 1;\n}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Avoid returning values from `Cubit` methods; expose results through state instead.",
+        "line": 6,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Avoid returning values from `Cubit` methods; expose results through state instead.",
+        "line": 7,
+        "column": 10,
+        "file": null
+      },
+      {
+        "message": "Avoid returning values from `Cubit` methods; expose results through state instead.",
+        "line": 8,
+        "column": 15,
+        "file": null
+      },
+      {
+        "message": "Avoid returning values from `Cubit` methods; expose results through state instead.",
+        "line": 9,
+        "column": 11,
+        "file": null
+      },
+      {
+        "message": "Avoid returning values from `Cubit` methods; expose results through state instead.",
+        "line": 10,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Avoid returning values from `Cubit` methods; expose results through state instead.",
+        "line": 11,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Avoid returning values from `Cubit` methods; expose results through state instead.",
+        "line": 12,
+        "column": 17,
+        "file": null
+      },
+      {
+        "message": "Avoid returning values from `Cubit` methods; expose results through state instead.",
+        "line": 13,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Avoid returning values from `Cubit` methods; expose results through state instead.",
+        "line": 14,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Avoid returning values from `Cubit` methods; expose results through state instead.",
+        "line": 17,
+        "column": 7,
         "file": null
       }
     ]
@@ -24626,6 +26589,78 @@
     ]
   },
   {
+    "name": "format-test-name",
+    "group": "style",
+    "domains": [
+      "test"
+    ],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Enforce configured regular expressions for test descriptions.",
+    "docs": "Enforce configured regular expressions for test descriptions.\n\n`test-name-pattern` and `test-widgets-name-pattern` independently constrain\ndescriptions passed to the test framework's `test` and `testWidgets` functions.\nBoth default to absent, so the rule reports nothing until configured. Groups,\nunrelated same-named functions, and descriptions that cannot be evaluated as\nconstant strings are ignored. Patterns use regular-expression search semantics;\nadd `^` and `$` to require a full-string match.\nDiagnostics include the pattern that the description failed to match.\n\nSee <https://dcm.dev/docs/rules/common/format-test-name/>.",
+    "examples": {
+      "bad": "import 'package:flutter_test/flutter_test.dart';\nimport 'package:test/test.dart' as tests;\n\nconst badName = 'broken';\nvoid main() {\n  test('broken', () {});\n  test('', () {});\n  tests.test('does not start correctly', () {});\n  test(badName, () {});\n  test('should ' 'work', () {});\n  testWidgets('broken', (tester) {});\n  testWidgets('should render.', (tester) {});\n  group('not constrained', () {\n    test('nested broken', () {});\n  });\n}",
+      "good": "import 'package:flutter_test/flutter_test.dart';\nimport 'package:test/test.dart' as tests;\n\nconst action = 'work';\nString runtimeName() => 'unformatted';\nclass Helpers {\n  void test(String name, dynamic callback) {}\n  void testWidgets(String name, dynamic callback) {}\n}\nvoid main() {\n  test('should work.', () {});\n  tests.test('should also work.', () {});\n  test('should $action.', () {});\n  test(r'should preserve $literal.', () {});\n  testWidgets('renders correctly.', (tester) {});\n  group('any group description', () {});\n  test(runtimeName(), () {});\n  final helpers = Helpers();\n  helpers.test('unformatted', () {});\n  helpers.testWidgets('unformatted', () {});\n  {\n    void test(String name, dynamic callback) {}\n    test('shadowed', () {});\n  }\n}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "The `test` description must match `^should .+\\.$`.",
+        "line": 6,
+        "column": 8,
+        "file": null
+      },
+      {
+        "message": "The `test` description must match `^should .+\\.$`.",
+        "line": 7,
+        "column": 8,
+        "file": null
+      },
+      {
+        "message": "The `test` description must match `^should .+\\.$`.",
+        "line": 8,
+        "column": 14,
+        "file": null
+      },
+      {
+        "message": "The `test` description must match `^should .+\\.$`.",
+        "line": 9,
+        "column": 8,
+        "file": null
+      },
+      {
+        "message": "The `test` description must match `^should .+\\.$`.",
+        "line": 10,
+        "column": 8,
+        "file": null
+      },
+      {
+        "message": "The `testWidgets` description must match `^renders .+\\.$`.",
+        "line": 11,
+        "column": 15,
+        "file": null
+      },
+      {
+        "message": "The `testWidgets` description must match `^renders .+\\.$`.",
+        "line": 12,
+        "column": 15,
+        "file": null
+      },
+      {
+        "message": "The `test` description must match `^should .+\\.$`.",
+        "line": 14,
+        "column": 10,
+        "file": null
+      }
+    ]
+  },
+  {
     "name": "implicit-call-tearoffs",
     "group": "style",
     "domains": [],
@@ -25373,6 +27408,70 @@
         "message": "Reorder literal string map keys to follow the configured order.",
         "line": 5,
         "column": 39,
+        "file": null
+      }
+    ]
+  },
+  {
+    "name": "match-class-name-pattern",
+    "group": "style",
+    "domains": [],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Requires class names in matching file paths to match configured regular expressions.",
+    "docs": "Requires class names in matching file paths to match configured regular expressions.\n\n`entries` defaults to an empty list, disabling the rule. Each entry requires a\n`path` regex and a `pattern` regex. Paths are relative to the package root,\nincluding `lib/`, with `/` separators; without a package, the invoked path is\nused. `ignore-private` defaults to false. Use Falcon's per-path configuration\noverrides to customize severity.",
+    "examples": {
+      "bad": "class First {}\nabstract class Second {}\nfinal class Third {}\nsealed class Fourth {}\nclass Fifth<T> {}\nclass ValidState {}\nclass _Private {}\nmixin class _Mixin {}\nclass Alias = Object with _Mixin;\nmixin class Reusable {}",
+      "good": "class FirstState {}\nabstract class SecondState {}\nfinal class ThirdState {}\nsealed class FourthState {}\nclass FifthState<T> {}\nclass _Private {}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Class name must match the configured pattern `State$`.",
+        "line": 1,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Class name must match the configured pattern `State$`.",
+        "line": 2,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Class name must match the configured pattern `State$`.",
+        "line": 3,
+        "column": 13,
+        "file": null
+      },
+      {
+        "message": "Class name must match the configured pattern `State$`.",
+        "line": 4,
+        "column": 14,
+        "file": null
+      },
+      {
+        "message": "Class name must match the configured pattern `State$`.",
+        "line": 5,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Class name must match the configured pattern `State$`.",
+        "line": 9,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Class name must match the configured pattern `State$`.",
+        "line": 10,
+        "column": 13,
         "file": null
       }
     ]
@@ -31850,6 +33949,58 @@
     ]
   },
   {
+    "name": "prefer-prefixed-global-constants",
+    "group": "style",
+    "domains": [],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Require configured prefixes on top-level `const` variables.",
+    "docs": "Require configured prefixes on top-level `const` variables.\n\n`allowed-prefixes` defaults to `[\"k\"]`; an empty list disables the rule.\nLeading underscores are ignored when matching. Set `ignore-private` (default\nfalse) to exempt private constants. Final and mutable globals, fields and\nlocals do not count.",
+    "examples": {
+      "bad": "const value = 1;\nconst _private = 2;\nconst int first = 1, second = 2;\nconst another = 3;",
+      "good": "const kValue = 1;\nconst _kPrivate = 2;\nfinal kAnswer = 3;\nfinal _kAnswer = 4;\nvar mutable = 1;\nint anotherMutable = 2;\nclass Holder { static const value = 1; final field = 2; }\nvoid function() { const local = 1; final another = 2; }\nfinal answer = 3;\nfinal _answer = 4;\nlate final logger = Object();\nfinal provider = Object();",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Prefix global constants with one of: `k`.",
+        "line": 1,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Prefix global constants with one of: `k`.",
+        "line": 2,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Prefix global constants with one of: `k`.",
+        "line": 3,
+        "column": 11,
+        "file": null
+      },
+      {
+        "message": "Prefix global constants with one of: `k`.",
+        "line": 3,
+        "column": 22,
+        "file": null
+      },
+      {
+        "message": "Prefix global constants with one of: `k`.",
+        "line": 4,
+        "column": 7,
+        "file": null
+      }
+    ]
+  },
+  {
     "name": "prefer-provider-extensions",
     "group": "style",
     "domains": [
@@ -31984,8 +34135,8 @@
     "description": "Requires a `Notifier` suffix on classes extending resolved Riverpod notifiers.",
     "docs": "Requires a `Notifier` suffix on classes extending resolved Riverpod notifiers.\nPackage identities, including inherited identities and re-exports, distinguish\nRiverpod notifiers from lookalikes. Generated Dart files are ignored.",
     "examples": {
-      "bad": "import 'package:riverpod/riverpod.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart' as flutter;\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nimport 'package:state_notifier/state_notifier.dart';\nclass Counter extends Notifier<int> {}\nclass AsyncCounter extends AsyncNotifier<int> {}\nclass StreamCounter extends StreamNotifier<int> {}\nclass AutoCounter extends AutoDisposeNotifier<int> {}\nclass FlutterCounter extends flutter.Notifier<int> {}\nclass HookCounter extends hooks.Notifier<int> {}\nclass LegacyCounter extends StateNotifier<int> {}\nclass BaseNotifier extends Notifier<int> {}\nclass Child extends BaseNotifier {}",
-      "good": "import 'package:riverpod/riverpod.dart' as rp;\nclass CounterNotifier extends rp.Notifier<int> {}\nclass AsyncCounterNotifier extends rp.AsyncNotifier<int> {}\nclass StreamCounterNotifier extends rp.StreamNotifier<int> {}\nclass AutoCounterNotifier extends rp.AutoDisposeNotifier<int> {}\nclass ChildNotifier extends CounterNotifier {}\nclass _PrivateNotifier extends rp.Notifier<int> {}\nclass Notifier<T> {}\nclass Unrelated extends Notifier<int> {}\nclass AsyncNotifier<T> {}\nclass UnrelatedAsync extends AsyncNotifier<int> {}\nclass Ordinary {}\nclass Missing extends UnknownNotifier<int> {}",
+      "bad": "import 'package:riverpod/riverpod.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart' as flutter;\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\nimport 'package:state_notifier/state_notifier.dart';\nclass Counter extends Notifier<int> {}\nclass AsyncCounter extends AsyncNotifier<int> {}\nclass StreamCounter extends StreamNotifier<int> {}\nclass AutoCounter extends AutoDisposeNotifier<int> {}\nclass FlutterCounter extends flutter.Notifier<int> {}\nclass HookCounter extends hooks.Notifier<int> {}\nclass LegacyCounter extends StateNotifier<int> {}\nclass BaseNotifier extends Notifier<int> {}\nclass Child extends BaseNotifier {}\nclass FamilyCounter extends FamilyNotifier<int, String> {}\nclass AsyncFamilyCounter extends FamilyAsyncNotifier<int, String> {}\nclass StreamFamilyCounter extends FamilyStreamNotifier<int, String> {}\nclass AutoFamilyCounter extends AutoDisposeFamilyNotifier<int, String> {}\nclass AutoAsyncFamilyCounter extends AutoDisposeFamilyAsyncNotifier<int, String> {}\nclass AutoStreamFamilyCounter extends AutoDisposeFamilyStreamNotifier<int, String> {}\nclass BuildlessStreamCounter extends BuildlessStreamNotifier<int> {}\nclass AnyCounter extends AnyNotifier<int, int> {}",
+      "good": "import 'package:riverpod/riverpod.dart' as rp;\nclass CounterNotifier extends rp.Notifier<int> {}\nclass AsyncCounterNotifier extends rp.AsyncNotifier<int> {}\nclass StreamCounterNotifier extends rp.StreamNotifier<int> {}\nclass AutoCounterNotifier extends rp.AutoDisposeNotifier<int> {}\nclass ChildNotifier extends CounterNotifier {}\nclass _PrivateNotifier extends rp.Notifier<int> {}\nclass Notifier<T> {}\nclass Unrelated extends Notifier<int> {}\nclass AsyncNotifier<T> {}\nclass UnrelatedAsync extends AsyncNotifier<int> {}\nclass Ordinary {}\nclass Missing extends UnknownNotifier<int> {}\nclass FamilyCounterNotifier extends rp.FamilyNotifier<int, String> {}\nclass AsyncFamilyCounterNotifier extends rp.FamilyAsyncNotifier<int, String> {}\nclass StreamFamilyCounterNotifier extends rp.FamilyStreamNotifier<int, String> {}\nclass AutoFamilyCounterNotifier extends rp.AutoDisposeFamilyNotifier<int, String> {}\nclass AutoAsyncFamilyCounterNotifier extends rp.AutoDisposeFamilyAsyncNotifier<int, String> {}\nclass AutoStreamFamilyCounterNotifier extends rp.AutoDisposeFamilyStreamNotifier<int, String> {}\nclass BuildlessStreamCounterNotifier extends rp.BuildlessStreamNotifier<int> {}\nclass AnyCounterNotifier extends rp.AnyNotifier<int, int> {}\nclass FamilyNotifier<T, Arg> {}\nclass UnrelatedFamily extends FamilyNotifier<int, String> {}\nclass BuildlessStreamNotifier<T> {}\nclass UnrelatedBuildless extends BuildlessStreamNotifier<int> {}\nclass AnyNotifier<StateT, ValueT> {}\nclass UnrelatedAny extends AnyNotifier<int, int> {}",
       "crossFile": null
     },
     "diagnostics": [
@@ -32034,6 +34185,54 @@
       {
         "message": "Name Riverpod notifiers with a `Notifier` suffix.",
         "line": 13,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Name Riverpod notifiers with a `Notifier` suffix.",
+        "line": 14,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Name Riverpod notifiers with a `Notifier` suffix.",
+        "line": 15,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Name Riverpod notifiers with a `Notifier` suffix.",
+        "line": 16,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Name Riverpod notifiers with a `Notifier` suffix.",
+        "line": 17,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Name Riverpod notifiers with a `Notifier` suffix.",
+        "line": 18,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Name Riverpod notifiers with a `Notifier` suffix.",
+        "line": 19,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Name Riverpod notifiers with a `Notifier` suffix.",
+        "line": 20,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Name Riverpod notifiers with a `Notifier` suffix.",
+        "line": 21,
         "column": 7,
         "file": null
       }
@@ -32118,6 +34317,178 @@
     ]
   },
   {
+    "name": "prefer-single-declaration-per-file",
+    "group": "style",
+    "domains": [],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Prefer one top-level type declaration per file.",
+    "docs": "Prefer one top-level type declaration per file.\n\nClasses, class aliases, mixin classes, mixins, enums, named extensions and\nextension types count toward the limit; functions, variables and typedefs do not. Private\ndeclarations are ignored by default. `ignore-enums` and `ignore-visible-for-\ntesting` optionally exclude additional declarations.",
+    "examples": {
+      "bad": "class First {}\nclass Second {}\nmixin Third {}\nenum Fourth { value }\nextension Fifth on String {}\nextension type Sixth(int value) {}\nmixin class Seventh {}",
+      "good": "class Public {}\nclass _Private {}\nmixin _Mixin {}\nenum _Enum { value }\nextension _Extension on String {}\nextension on int {}\nextension type _Wrapper(int value) {}\ntypedef Callback = void Function();\nvoid function() {}\nconst value = 1;",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Prefer only one top-level type declaration per file.",
+        "line": 2,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Prefer only one top-level type declaration per file.",
+        "line": 3,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Prefer only one top-level type declaration per file.",
+        "line": 4,
+        "column": 6,
+        "file": null
+      },
+      {
+        "message": "Prefer only one top-level type declaration per file.",
+        "line": 5,
+        "column": 11,
+        "file": null
+      },
+      {
+        "message": "Prefer only one top-level type declaration per file.",
+        "line": 6,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one top-level type declaration per file.",
+        "line": 7,
+        "column": 13,
+        "file": null
+      }
+    ]
+  },
+  {
+    "name": "prefer-single-notifier-per-file",
+    "group": "style",
+    "domains": [
+      "riverpod"
+    ],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Prefer one resolved Riverpod notifier class per file.",
+    "docs": "Prefer one resolved Riverpod notifier class per file.\n\nIncludes synchronous, asynchronous, stream, auto-dispose, family and state\nnotifiers, as well as indirect subclasses and private notifier classes.\nUnrelated classes with notifier-like names do not count.",
+    "examples": {
+      "bad": "import 'package:riverpod/riverpod.dart' as r;\nabstract class First extends r.Notifier<int> {}\nabstract class Second extends r.AsyncNotifier<int> {}\nabstract class Third extends r.StreamNotifier<int> {}\nabstract class Fourth extends r.AutoDisposeNotifier<int> {}\nabstract class _Private extends r.StateNotifier<int> {}\nabstract class Indirect extends First {}\nabstract class Family extends r.FamilyNotifier<int, String> {}\nabstract class AsyncFamily extends r.FamilyAsyncNotifier<int, String> {}\nabstract class StreamFamily extends r.FamilyStreamNotifier<int, String> {}\nabstract class AutoFamily extends r.AutoDisposeFamilyNotifier<int, String> {}\nabstract class AutoAsyncFamily extends r.AutoDisposeFamilyAsyncNotifier<int, String> {}\nabstract class AutoStreamFamily extends r.AutoDisposeFamilyStreamNotifier<int, String> {}\nabstract class Buildless extends r.BuildlessNotifier<int> {}\nabstract class BuildlessAsync extends r.BuildlessAsyncNotifier<int> {}\nabstract class BuildlessStream extends r.BuildlessStreamNotifier<int> {}\nabstract class Any extends r.AnyNotifier<int, int> {}",
+      "good": "import 'package:riverpod/riverpod.dart' as r;\nabstract class Only extends r.Notifier<int> {}\nclass Notifier<T> {}\nclass Lookalike extends Notifier<int> {}\nclass AsyncNotifier<T> {}\nclass OtherLookalike extends AsyncNotifier<int> {}\nclass Plain {}\nmixin Behavior {}\nclass FamilyNotifier<T, Arg> {}\nclass FamilyLookalike extends FamilyNotifier<int, String> {}\nclass BuildlessStreamNotifier<T> {}\nclass BuildlessLookalike extends BuildlessStreamNotifier<int> {}\nclass AnyNotifier<StateT, ValueT> {}\nclass AnyLookalike extends AnyNotifier<int, int> {}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Prefer only one notifier per file.",
+        "line": 3,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one notifier per file.",
+        "line": 4,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one notifier per file.",
+        "line": 5,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one notifier per file.",
+        "line": 6,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one notifier per file.",
+        "line": 7,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one notifier per file.",
+        "line": 8,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one notifier per file.",
+        "line": 9,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one notifier per file.",
+        "line": 10,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one notifier per file.",
+        "line": 11,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one notifier per file.",
+        "line": 12,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one notifier per file.",
+        "line": 13,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one notifier per file.",
+        "line": 14,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one notifier per file.",
+        "line": 15,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one notifier per file.",
+        "line": 16,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one notifier per file.",
+        "line": 17,
+        "column": 16,
+        "file": null
+      }
+    ]
+  },
+  {
     "name": "prefer-single-quotes",
     "group": "style",
     "domains": [],
@@ -32171,6 +34542,60 @@
         "message": "Unnecessary use of double quotes.",
         "line": 10,
         "column": 7,
+        "file": null
+      }
+    ]
+  },
+  {
+    "name": "prefer-single-widget-per-file",
+    "group": "style",
+    "domains": [
+      "flutter"
+    ],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Prefer one Flutter widget class per file.",
+    "docs": "Prefer one Flutter widget class per file.\n\nResolved subclasses of Flutter's `Widget` count, including indirect subclasses;\n`State` classes and unrelated classes do not. Private widgets count by default.\nUse `ignore-private-widgets` or `ignore-visible-for-testing` to exclude them.",
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart' as f;\nabstract class First extends f.StatelessWidget {}\nabstract class Second extends f.StatefulWidget {}\nabstract class _Private extends f.StatelessWidget {}\nabstract class Indirect extends First {}\nabstract class Render extends f.RenderObjectWidget {}\nabstract class Direct extends f.Widget {}",
+      "good": "import 'package:flutter/widgets.dart' as f;\nabstract class Only extends f.StatefulWidget {}\nabstract class WidgetState extends f.State<Only> {}\nclass StatelessWidget {}\nclass Lookalike extends StatelessWidget {}\nclass Plain {}\nmixin Behavior {}\nenum Choice { one }",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Prefer only one widget per file.",
+        "line": 3,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one widget per file.",
+        "line": 4,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one widget per file.",
+        "line": 5,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one widget per file.",
+        "line": 6,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Prefer only one widget per file.",
+        "line": 7,
+        "column": 16,
         "file": null
       }
     ]
@@ -32419,6 +34844,192 @@
         "message": "Use `isFalse` instead of the literal `false` matcher.",
         "line": 8,
         "column": 30,
+        "file": null
+      }
+    ]
+  },
+  {
+    "name": "prefer-test-structure",
+    "group": "style",
+    "domains": [
+      "test"
+    ],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Requires explicit arrange, act, and assert sections in test callbacks.",
+    "docs": "Requires explicit arrange, act, and assert sections in test callbacks.\n\nChecks inline `test` and `testWidgets` callbacks in `_test.dart` files when\nthe registration resolves to a test-framework package. Section markers are\nstandalone line or block comments, matched case-insensitively, immediately\nbefore a top-level callback statement. Comments inside nested statements or\nlocal functions do not structure the enclosing test. Each act section needs\nan immediately preceding arrange section, and each assert section needs an\nimmediately preceding act section. Missing sections and repeated rounds are\nreported; test groups and callback tear-offs are not inspected.\n\n## Options\n\n`use-alternative-comments` (default: `false`) replaces `arrange`, `act`, and\n`assert` with `given`, `when`, and `then`.",
+    "examples": {
+      "bad": "import 'package:flutter_test/flutter_test.dart';\nimport 'package:test/test.dart' as framework;\n\nvoid main() {\n  test('unstructured', () {\n    expect(1, 1);\n  });\n  test('DCM out of order', () {\n    // act\n    final a = 1;\n    final b = 2;\n    // arrange\n    final c = a + 1;\n    // assert\n    expect(b, c);\n  });\n  test('missing act', () {\n    // arrange\n    final a = 1;\n    // assert\n    expect(a, 1);\n  });\n  test('missing assert', () {\n    // arrange\n    final a = 1;\n    // act\n    final b = a + 1;\n  });\n  test('only arrange', () {\n    // arrange\n    final a = 1;\n  });\n  test('empty', () {});\n  framework.test('expression body', () => expect(1, 1));\n  testWidgets('widget missing sections', (tester) async {\n    expect(1, 1);\n  });\n  test('repeated round', () {\n    // arrange\n    final a = 1;\n    // act\n    final b = a + 1;\n    // assert\n    expect(b, 2);\n    // arrange\n    final c = 3;\n    // act\n    final d = c + 1;\n    // assert\n    expect(d, 4);\n  });\n  test('nested comments do not count', () {\n    void helper() {\n      // arrange\n      final a = 1;\n      // act\n      final b = a + 1;\n      // assert\n      expect(b, 2);\n    }\n    helper();\n  });\n}",
+      "good": "import 'package:flutter_test/flutter_test.dart';\nimport 'package:test/test.dart' as framework;\n\nvoid callback() {}\n\nvoid main() {\n  test('unit test', () {\n    // arrange\n    final a = 1;\n    final b = 2;\n    // act\n    final c = a + 1;\n    // assert\n    expect(b, c);\n    expect(c, 2);\n  });\n  framework.test('prefixed and parenthesized', (() {\n    // Arrange\n    final a = 1;\n    // Act\n    final b = a + 1;\n    // Assert\n    expect(b, 2);\n  }));\n  testWidgets('widget test', (tester) async {\n    // arrange\n    final a = 1;\n    // act\n    final b = a + 1;\n    // assert\n    expect(b, 2);\n  });\n  test('block markers', () {\n    /* arrange */\n    final a = 1;\n    /* act */\n    final b = a + 1;\n    /* assert */\n    expect(b, 2);\n  });\n  test('nested code', () {\n    // arrange\n    void helper() {\n      // assert\n      expect(1, 1);\n    }\n    // act\n    helper();\n    // assert\n    expect(1, 1);\n  });\n  group('groups are not tests', () {\n    setUp(() {});\n    test('nested test', () {\n      // arrange\n      final a = 1;\n      // act\n      final b = a + 1;\n      // assert\n      expect(b, 2);\n    });\n  });\n  test('tear-off', callback);\n  final receiver = LocalApi();\n  receiver.test('receiver method', () {});\n}\n\nclass LocalApi {\n  void test(String description, dynamic body) {}\n  void method() { test('implicit receiver', () {}); }\n}\n\nvoid shadowed() {\n  void test(String description, dynamic body) {}\n  test('local function', () {});\n}\n\nvoid shadowedPrefix() {\n  final framework = LocalApi();\n  framework.test('local receiver', () {});\n}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Separate this test into `arrange`, `act`, and `assert` sections with comments.",
+        "line": 5,
+        "column": 24,
+        "file": null
+      },
+      {
+        "message": "This test is missing the `arrange` section before this `act` section. Try refactoring this test.",
+        "line": 10,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This test is missing the `act` section before this `assert` section. Try refactoring this test.",
+        "line": 15,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This test is missing the `act` section before this `assert` section. Try refactoring this test.",
+        "line": 21,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "This test is missing the `assert` section after its `act` section. Try refactoring this test.",
+        "line": 23,
+        "column": 26,
+        "file": null
+      },
+      {
+        "message": "This test is missing the `act` section after its `arrange` section. Try refactoring this test.",
+        "line": 29,
+        "column": 24,
+        "file": null
+      },
+      {
+        "message": "Separate this test into `arrange`, `act`, and `assert` sections with comments.",
+        "line": 33,
+        "column": 17,
+        "file": null
+      },
+      {
+        "message": "Separate this test into `arrange`, `act`, and `assert` sections with comments.",
+        "line": 34,
+        "column": 37,
+        "file": null
+      },
+      {
+        "message": "Separate this test into `arrange`, `act`, and `assert` sections with comments.",
+        "line": 35,
+        "column": 42,
+        "file": null
+      },
+      {
+        "message": "Avoid multiple rounds of test sections. Try splitting this test.",
+        "line": 46,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Separate this test into `arrange`, `act`, and `assert` sections with comments.",
+        "line": 52,
+        "column": 40,
+        "file": null
+      }
+    ]
+  },
+  {
+    "name": "prefer-text-rich",
+    "group": "style",
+    "domains": [
+      "flutter"
+    ],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Prefer `Text.rich` over Flutter's `RichText` for accessible text scaling and inherited default text styles.",
+    "docs": "Prefer `Text.rich` over Flutter's `RichText` for accessible text scaling and\ninherited default text styles. Constructor identity is resolved through import\nprefixes and type aliases; dot-shorthand invocations use their expected type.\nUnrelated declarations, shadowed names, and constructor tear-offs are ignored.",
+    "examples": {
+      "bad": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/material.dart' as f;\n\ntypedef RichTextAlias = RichText;\n\nvoid example() {\n  RichText(text: const TextSpan(text: 'plain'));\n  new RichText(text: const TextSpan(text: 'new'));\n  const RichText(text: TextSpan(text: 'const'));\n  f.RichText(text: const f.TextSpan(text: 'prefixed'));\n  new f.RichText(text: const f.TextSpan(text: 'prefixed new'));\n  const f.RichText(text: f.TextSpan(text: 'prefixed const'));\n  RichTextAlias(text: const TextSpan(text: 'alias'));\n  RichText.new(text: const TextSpan(text: 'explicit unnamed'));\n  f.RichText.new(text: const f.TextSpan(text: 'prefixed explicit unnamed'));\n  RichText shorthand = .new(text: const TextSpan(text: 'shorthand'));\n  RichTextAlias aliasShorthand = .new(text: const TextSpan(text: 'alias shorthand'));\n  const RichText constantShorthand = .new(text: TextSpan(text: 'const shorthand'));\n}",
+      "good": "import 'package:flutter/widgets.dart';\nimport 'package:flutter/widgets.dart' as f;\n\nvoid example() {\n  Text.rich(const TextSpan(text: 'plain'));\n  new Text.rich(const TextSpan(text: 'new'));\n  const Text.rich(TextSpan(text: 'const'));\n  f.Text.rich(const f.TextSpan(text: 'prefixed'));\n  new f.Text.rich(const f.TextSpan(text: 'prefixed new'));\n  const f.Text.rich(f.TextSpan(text: 'prefixed const'));\n  const Text('simple');\n  final constructor = RichText.new;\n}\n\nvoid shadowedConstructor(dynamic RichText) {\n  RichText(text: const TextSpan(text: 'not a Flutter constructor'));\n}\n\nvoid shadowedPrefix(dynamic f) {\n  f.RichText(text: const TextSpan(text: 'not an import prefix'));\n}\n\nvoid lexicalShadow() {\n  final RichText = ({dynamic text}) => text;\n  RichText(text: const TextSpan(text: 'local closure shadows Flutter'));\n}\n\nclass MemberShadow {\n  RichText({dynamic text}) => text;\n\n  void example() {\n    RichText(text: const TextSpan(text: 'member shadows Flutter'));\n  }\n}\n\nvoid preferredShorthand() {\n  Text text = .rich(const TextSpan(text: 'shorthand'));\n}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Use `Text.rich` instead of `RichText`.",
+        "line": 7,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Use `Text.rich` instead of `RichText`.",
+        "line": 8,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Use `Text.rich` instead of `RichText`.",
+        "line": 9,
+        "column": 9,
+        "file": null
+      },
+      {
+        "message": "Use `Text.rich` instead of `RichText`.",
+        "line": 10,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Use `Text.rich` instead of `RichText`.",
+        "line": 11,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Use `Text.rich` instead of `RichText`.",
+        "line": 12,
+        "column": 9,
+        "file": null
+      },
+      {
+        "message": "Use `Text.rich` instead of `RichText`.",
+        "line": 13,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Use `Text.rich` instead of `RichText`.",
+        "line": 14,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Use `Text.rich` instead of `RichText`.",
+        "line": 15,
+        "column": 3,
+        "file": null
+      },
+      {
+        "message": "Use `Text.rich` instead of `RichText`.",
+        "line": 16,
+        "column": 24,
+        "file": null
+      },
+      {
+        "message": "Use `Text.rich` instead of `RichText`.",
+        "line": 17,
+        "column": 34,
+        "file": null
+      },
+      {
+        "message": "Use `Text.rich` instead of `RichText`.",
+        "line": 18,
+        "column": 38,
         "file": null
       }
     ]
@@ -37952,6 +40563,149 @@
     ]
   },
   {
+    "name": "avoid-importing-entrypoint-exports",
+    "group": "suspicious",
+    "domains": [],
+    "recommended": false,
+    "crossFile": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Warns when package implementation files import their own public entrypoint exports.",
+    "docs": "Warns when package implementation files import their own public entrypoint exports.\n\nImport the implementation directly instead of depending on a public barrel that\ncan introduce import cycles. Only files under `lib/src/` are checked by default;\nset `only-in-src` to false to check other files in the same package as well.\nAn entrypoint is a file under `lib/`, outside `lib/src/`, with at least one\nexport directive, including when the entrypoint is outside the analyzed set.",
+    "examples": {
+      "bad": null,
+      "good": null,
+      "crossFile": [
+        {
+          "path": "bad/lib/api.dart",
+          "content": "export 'src/value.dart';"
+        },
+        {
+          "path": "bad/lib/src/consumer.dart",
+          "content": "import 'package:entrypoint_sample/api.dart';\nimport '../api.dart' as api;\nimport '../api.dart' show Value;\nimport '../api.dart' deferred as later;\nimport 'value.dart' if (dart.library.io) '../api.dart';"
+        },
+        {
+          "path": "bad/lib/src/value.dart",
+          "content": "class Value {}"
+        },
+        {
+          "path": "bad/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "bad/pubspec.yaml",
+          "content": "name: entrypoint_sample"
+        },
+        {
+          "path": "bad/support.dart",
+          "content": "class Support {}"
+        },
+        {
+          "path": "bad_option/lib/api.dart",
+          "content": "export 'src/value.dart';"
+        },
+        {
+          "path": "bad_option/lib/src/value.dart",
+          "content": "class Value {}"
+        },
+        {
+          "path": "bad_option/pubspec.yaml",
+          "content": "name: entrypoint_sample"
+        },
+        {
+          "path": "bad_option/test/api_test.dart",
+          "content": "import '../lib/api.dart';"
+        },
+        {
+          "path": "good/lib/api.dart",
+          "content": "export 'src/value.dart';"
+        },
+        {
+          "path": "good/lib/plain.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good/lib/src/consumer.dart",
+          "content": "import 'value.dart';\nimport 'package:entrypoint_sample/src/value.dart';\nimport 'dart:async';\nimport 'package:other/api.dart';\nimport '../plain.dart';"
+        },
+        {
+          "path": "good/lib/src/value.dart",
+          "content": "class Value {}"
+        },
+        {
+          "path": "good/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good/pubspec.yaml",
+          "content": "name: entrypoint_sample"
+        },
+        {
+          "path": "good/test/api_test.dart",
+          "content": "import '../lib/api.dart';"
+        },
+        {
+          "path": "good_option/lib/api.dart",
+          "content": "export 'src/value.dart';"
+        },
+        {
+          "path": "good_option/lib/src/value.dart",
+          "content": "class Value {}"
+        },
+        {
+          "path": "good_option/pubspec.yaml",
+          "content": "name: entrypoint_sample"
+        },
+        {
+          "path": "good_option/test/api_test.dart",
+          "content": "import '../lib/src/value.dart';"
+        }
+      ]
+    },
+    "diagnostics": [
+      {
+        "message": "Avoid importing entrypoint exports; import the source file directly instead.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/src/consumer.dart"
+      },
+      {
+        "message": "Avoid importing entrypoint exports; import the source file directly instead.",
+        "line": 2,
+        "column": 8,
+        "file": "bad/lib/src/consumer.dart"
+      },
+      {
+        "message": "Avoid importing entrypoint exports; import the source file directly instead.",
+        "line": 3,
+        "column": 8,
+        "file": "bad/lib/src/consumer.dart"
+      },
+      {
+        "message": "Avoid importing entrypoint exports; import the source file directly instead.",
+        "line": 4,
+        "column": 8,
+        "file": "bad/lib/src/consumer.dart"
+      },
+      {
+        "message": "Avoid importing entrypoint exports; import the source file directly instead.",
+        "line": 5,
+        "column": 42,
+        "file": "bad/lib/src/consumer.dart"
+      },
+      {
+        "message": "Avoid importing entrypoint exports; import the source file directly instead.",
+        "line": 1,
+        "column": 8,
+        "file": "bad_option/test/api_test.dart"
+      }
+    ]
+  },
+  {
     "name": "avoid-incorrect-uri",
     "group": "suspicious",
     "domains": [],
@@ -39307,6 +42061,88 @@
         "message": "The type parameter `T` shadows a type parameter from the enclosing method.",
         "line": 37,
         "column": 16,
+        "file": null
+      }
+    ]
+  },
+  {
+    "name": "avoid-similar-names",
+    "group": "suspicious",
+    "domains": [],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Reports confusingly similar declaration names at the same declaration level.",
+    "docs": "Reports confusingly similar declaration names at the same declaration level.\n\nParameters and locals are compared across overlapping local scopes, class\nmembers with members, and top-level declarations with top-level declarations.\nMembers and top-level names are not compared against parameters or locals.\nSibling blocks, functions, classes, loop scopes, and catch clauses remain\nindependent. Enclosing locals must precede nested declarations. If-case\nbindings are confined to the condition and then branch, not the else branch.\nReferences, identical names, function-type documentation parameters, and\nconventional pairs differing only by a leading `_` or initial case are not\nreported. Initializing and super formals refer to existing members.\n\nSimilarity is case-sensitive normalized Levenshtein similarity over Unicode\ncharacters: `1 - distance / max(lengths)`. A score at or above\n`similarity-threshold` (default `0.8`) is reported on the later name, once,\nusing its closest counterpart. `show-similarity` includes the score in the\nmessage. Exact `ignored-names` are excluded from both sides of comparisons.\nOnly declarations in the current file are considered; inherited and imported\nnames are not reconstructed by this structural rule.",
+    "examples": {
+      "bad": "void alpha(int customer, int customers) {}\n\nvoid bravo() {\n  final customer = 1;\n  final customers = 2;\n}\n\nvoid charlie(int customer) {\n  {\n    final customers = 2;\n  }\n}\n\nvoid delta(int customer) {\n  final callback = (int customers) => customers;\n}\n\nvoid echo(int customer) {\n  for (final customers in <int>[1]) {\n    print(customers);\n  }\n}\n\nvoid foxtrot() {\n  try {\n    throw 1;\n  } catch (failure, failures) {\n    print(failure);\n  }\n}\n\nvoid golf() {\n  final (customer, customers) = (1, 2);\n}\n\nclass Basket {\n  int customer = 1;\n  int customers = 2;\n}\n\nvoid india() {\n  final customer = 2;\n  {\n    final customers = 1;\n  }\n}\n\nfinal planet = 1;\nfinal planets = 2;",
+      "good": "// Distinct names in one scope; uses are not declarations.\nvoid alpha(int width, int height) {\n  print(width);\n  print(width);\n  print(height);\n}\n\n// Sibling functions do not share their parameters or local declarations.\nvoid bravo(int customer) {}\nvoid charlie(int customers) {}\n\n// Sibling blocks do not leak bindings into each other or their parent.\nvoid delta() {\n  { final customer = 1; }\n  { final customers = 2; }\n}\n\n// Independent closure parameters are siblings.\nvoid echo() {\n  final first = (int customer) => customer;\n  final second = (int customers) => customers;\n}\n\n// Loop declarations do not survive the loop.\nvoid foxtrot() {\n  for (final customer in <int>[1]) { print(customer); }\n  final customers = 2;\n}\n\n// Catch declarations do not survive their catch clause.\nvoid golf() {\n  try { throw 1; } catch (customer) { print(customer); }\n  final customers = 2;\n}\n\n// Members in unrelated types are not in overlapping scopes.\nclass Box { int customer = 1; }\nclass Jar { int customers = 2; }\n\n// Exact shadowing is not a similarity warning.\nvoid hotel(int customer) {\n  { final customer = 1; print(customer); }\n}\n\n// Initializing formals refer to fields, rather than adding comparison names.\nclass Vessel {\n  final int customer;\n  Vessel(this.customer);\n}\n\n// Pattern assignment uses existing names, rather than declaring new names.\nvoid india() {\n  int width = 0;\n  int height = 0;\n  (width, height) = (1, 2);\n}\n\n// An inner binding is gone before the enclosing local is introduced.\nvoid juliet() {\n  { final customer = 1; }\n  final customers = 2;\n}\n\nclass Cart {\n  final List<int> items = [];\n  void add(int item) {}\n}\n\nfinal users = <int>[];\nvoid iterate() {\n  for (final user in users) { print(user); }\n}\n\nclass Basket {\n  final customers = <int>[];\n  void add(int customer) {}\n}\n\nfinal planet = 1;\nclass Solar { int planets = 0; }\nclass Customer { int customers = 0; }",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "The name `customers` is too similar to `customer`.",
+        "line": 1,
+        "column": 30,
+        "file": null
+      },
+      {
+        "message": "The name `customers` is too similar to `customer`.",
+        "line": 5,
+        "column": 9,
+        "file": null
+      },
+      {
+        "message": "The name `customers` is too similar to `customer`.",
+        "line": 10,
+        "column": 11,
+        "file": null
+      },
+      {
+        "message": "The name `customers` is too similar to `customer`.",
+        "line": 15,
+        "column": 25,
+        "file": null
+      },
+      {
+        "message": "The name `customers` is too similar to `customer`.",
+        "line": 19,
+        "column": 14,
+        "file": null
+      },
+      {
+        "message": "The name `failures` is too similar to `failure`.",
+        "line": 27,
+        "column": 21,
+        "file": null
+      },
+      {
+        "message": "The name `customers` is too similar to `customer`.",
+        "line": 33,
+        "column": 20,
+        "file": null
+      },
+      {
+        "message": "The name `customers` is too similar to `customer`.",
+        "line": 38,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "The name `customers` is too similar to `customer`.",
+        "line": 44,
+        "column": 11,
+        "file": null
+      },
+      {
+        "message": "The name `planets` is too similar to `planet`.",
+        "line": 49,
+        "column": 7,
         "file": null
       }
     ]

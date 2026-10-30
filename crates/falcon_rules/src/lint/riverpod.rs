@@ -9,22 +9,56 @@ use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::{CascadeOp, ClassMember, Expr, Program, Span, TopLevelDecl};
 
-const NOTIFIERS: &[&str] = &[
+pub(crate) const NOTIFIERS: &[&str] = &[
     "Notifier",
     "NotifierBase",
     "BuildlessNotifier",
     "AutoDisposeNotifier",
+    "FamilyNotifier",
+    "AutoDisposeFamilyNotifier",
     "AsyncNotifier",
     "AsyncNotifierBase",
     "BuildlessAsyncNotifier",
     "AutoDisposeAsyncNotifier",
+    "FamilyAsyncNotifier",
+    "AutoDisposeFamilyAsyncNotifier",
     "StreamNotifier",
     "StreamNotifierBase",
+    "BuildlessStreamNotifier",
     "AutoDisposeStreamNotifier",
+    "FamilyStreamNotifier",
+    "AutoDisposeFamilyStreamNotifier",
+    "AnyNotifier",
     "$Notifier",
     "$AsyncNotifier",
     "$StreamNotifier",
     "StateNotifier",
+];
+
+// Legacy state notifiers initialize in constructors, unlike the build-based bases.
+pub(crate) const NOTIFIER_BASES: &[&str] = &[
+    "Notifier",
+    "NotifierBase",
+    "BuildlessNotifier",
+    "AutoDisposeNotifier",
+    "FamilyNotifier",
+    "AutoDisposeFamilyNotifier",
+    "AsyncNotifier",
+    "AsyncNotifierBase",
+    "BuildlessAsyncNotifier",
+    "AutoDisposeAsyncNotifier",
+    "FamilyAsyncNotifier",
+    "AutoDisposeFamilyAsyncNotifier",
+    "StreamNotifier",
+    "StreamNotifierBase",
+    "BuildlessStreamNotifier",
+    "AutoDisposeStreamNotifier",
+    "FamilyStreamNotifier",
+    "AutoDisposeFamilyStreamNotifier",
+    "AnyNotifier",
+    "$Notifier",
+    "$AsyncNotifier",
+    "$StreamNotifier",
 ];
 
 pub(crate) fn is_type(

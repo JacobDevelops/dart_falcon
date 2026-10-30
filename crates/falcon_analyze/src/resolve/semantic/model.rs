@@ -673,6 +673,25 @@ impl<'a> SemanticModel<'a> {
         })
     }
 
+    /// Instantiates a resolved type-literal declaration with explicit arguments.
+    pub(crate) fn instantiated_type_literal(
+        &self,
+        identity: &DeclarationIdentity,
+        arguments: Vec<ResolvedType>,
+    ) -> ResolvedType {
+        if let Some(alias) = self.identities.type_alias(identity) {
+            return self.expand_alias(identity, alias, &arguments, false, None);
+        }
+        let mut ty = self.declared_type(identity);
+        if let ResolvedTypeKind::Interface {
+            arguments: slots, ..
+        } = &mut ty.kind
+        {
+            *slots = arguments.into();
+        }
+        ty
+    }
+
     #[must_use]
     pub fn resolve_type_in(
         &self,

@@ -1,0 +1,1 @@
+{"configVersion": 2, "packages": [{"name": "flutter", "rootUri": "../packages/flutter", "packageUri": "lib/", "languageVersion": "3.0"}, {"name": "meta", "rootUri": "../packages/meta", "packageUri": "lib/", "languageVersion": "3.0"}]}

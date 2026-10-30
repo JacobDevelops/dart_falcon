@@ -7,7 +7,7 @@ falcon reads `falcon.json`. Discovery order (first match wins):
 3. `~/.falcon.json`
 
 If no config is found, falcon enables its own recommended set: 215 recommended
-rules out of 512 shipped rules, at their default severity (warning), chosen independently of upstream presets.
+rules out of 536 shipped rules, at their default severity (warning), chosen independently of upstream presets.
 
 A config that **is** found but fails to load is a hard **error**: falcon prints
 a message and exits non-zero rather than silently falling back to defaults. This
@@ -385,13 +385,19 @@ The table below is generated from the typed rule options by `cargo xtask docgen`
 | `avoid-complex-loop-conditions` | `threshold` | integer | `1` | Maximum number of logical operands in a loop condition. |  |
 | `avoid-empty-test-groups` | `include-methods` | string[] | `[]` | Additional method names recognized as test registrations inside a group. |  |
 | `avoid-if-with-many-branches` | `max-branches` | integer | `3` | Maximum number of branches in an &#96;if&#96;/&#96;else if&#96; chain. |  |
+| `avoid-importing-entrypoint-exports` | `only-in-src` | boolean | `true` | Restrict importing files to the package's &#96;lib/src/&#96; directory. |  |
 | `avoid-long-records` | `max-fields` | integer | `6` | Maximum number of fields in a record. |  |
+| `avoid-missing-test-files` | `patterns` | string[] | `[]` | Regular expressions selecting package-relative source paths requiring tests. |  |
 | `avoid-negated-conditions` | `ignore-null-checks` | boolean | `false` | Exempt null comparisons from the negated-condition diagnostic. |  |
 | `avoid-nested-assignments` | `ignore-null-aware-assignments` | boolean | `false` | Exempt null-aware assignments (&#96;??=&#96;) from the nested-assignment diagnostic. |  |
 | `avoid-nested-switch-expressions` | `max-nesting` | integer | `1` | Maximum number of nested switch expressions. |  |
 | `avoid-nested-switches` | `max-nesting` | integer | `1` | Maximum number of nested switch statements. |  |
 | `avoid-nested-try-statements` | `max-nesting` | integer | `2` | Maximum number of nested &#96;try&#96; statements. |  |
+| `avoid-not-encodable-in-to-json` | `methods` | string[] | `[]` | Additional serialization methods to check alongside &#96;toJson&#96;. |  |
 | `avoid-referencing-subclasses` | `ignored-annotations` | string[] | `["freezed","Freezed","unfreezed"]` | Annotation names that exempt a class from subclass-reference checks. |  |
+| `avoid-similar-names` | `ignored-names` | string[] | `[]` | Exact declaration names excluded from both sides of comparisons. |  |
+| `avoid-similar-names` | `show-similarity` | boolean | `false` | Include the normalized similarity score in diagnostic messages. |  |
+| `avoid-similar-names` | `similarity-threshold` | number | `0.8` | Minimum normalized edit similarity, inclusive, between zero and one. |  |
 | `avoid-unnecessary-getter` | `ignore-upcast` | boolean | `true` | Ignore getters whose value is explicitly upcast to a broader type. |  |
 | `banned-imports` | `rules` | object[] | `[]` | Package-relative import boundaries applied to matching source files. |  |
 | `banned-imports` | `rules[].deny` | string[] | required | Import URI or package-relative target globs prohibited within &#96;files&#96;. |  |
@@ -409,8 +415,14 @@ The table below is generated from the typed rule options by `cargo xtask docgen`
 | `extend-equatable` | `file-name-pattern` | string &#124; null | `null` | Regex selecting file names whose classes must use Equatable semantics. |  |
 | `format-comment` | `ignored-patterns` | string[] | `[]` | Regex patterns that exclude matching comments from formatting checks. |  |
 | `format-comment` | `only-doc-comments` | boolean | `false` | When true, checks only documentation comments (&#96;///&#96;). |  |
+| `format-test-name` | `test-name-pattern` | string &#124; null | `null` | Regular expression required for &#96;test&#96; descriptions; absent means unrestricted. |  |
+| `format-test-name` | `test-widgets-name-pattern` | string &#124; null | `null` | Regular expression required for &#96;testWidgets&#96; descriptions; absent means unrestricted. |  |
 | `initializers-ordering` | `order` | string &#124; null | `null` | Alphabetical initializer order; unset follows field declaration order. | `"ascending"`, `"descending"`, `null` |
 | `map-keys-ordering` | `order` | string &#124; null | `null` | Alphabetical key order; unset leaves this rule inactive. | `"ascending"`, `"descending"`, `null` |
+| `match-class-name-pattern` | `entries` | object[] | `[]` | Path-specific class naming requirements. Empty entries disable the rule. |  |
+| `match-class-name-pattern` | `entries[].ignore-private` | boolean | `false` | Whether private class names are exempt. |  |
+| `match-class-name-pattern` | `entries[].path` | string | required | Regular expression selecting file paths. |  |
+| `match-class-name-pattern` | `entries[].pattern` | string | required | Regular expression that class names must match. |  |
 | `max-lines-for-file` | `max-lines` | integer | `200` | Maximum number of source lines allowed in a file. |  |
 | `max-lines-for-function` | `max-lines` | integer | `100` | Maximum number of source lines allowed in a function. |  |
 | `max-parameters-for-function` | `max-parameters` | integer | `5` | Maximum number of parameters allowed in a function. |  |
@@ -441,6 +453,14 @@ The table below is generated from the typed rule options by `cargo xtask docgen`
 | `prefer-extracting-callbacks` | `ignored-named-arguments` | string[] | `[]` | Named widget-constructor arguments whose callbacks are ignored. |  |
 | `prefer-moving-to-variable` | `allowed-duplicated-chains` | integer | `2` | Minimum repeated expression-chain count for extraction (clamped to at least two). |  |
 | `prefer-named-parameters` | `max-number` | integer | `1` | Maximum number of positional parameters allowed before named parameters are preferred. |  |
+| `prefer-prefixed-global-constants` | `allowed-prefixes` | string[] | `["k"]` | Accepted prefixes after leading underscores; an empty list disables the rule. |  |
+| `prefer-prefixed-global-constants` | `ignore-private` | boolean | `false` | Ignore private top-level constants instead of checking their prefixes. |  |
+| `prefer-single-declaration-per-file` | `ignore-enums` | boolean | `false` | Ignore enum declarations. |  |
+| `prefer-single-declaration-per-file` | `ignore-private` | boolean | `true` | Ignore declarations whose names start with an underscore. |  |
+| `prefer-single-declaration-per-file` | `ignore-visible-for-testing` | boolean | `false` | Ignore declarations annotated with &#96;visibleForTesting&#96; from &#96;package:meta&#96;. |  |
+| `prefer-single-widget-per-file` | `ignore-private-widgets` | boolean | `false` | Ignore widgets whose names start with an underscore. |  |
+| `prefer-single-widget-per-file` | `ignore-visible-for-testing` | boolean | `false` | Ignore widgets annotated with &#96;visibleForTesting&#96;. |  |
+| `prefer-test-structure` | `use-alternative-comments` | boolean | `false` | Use &#96;given&#96;, &#96;when&#96;, and &#96;then&#96; section comments instead of arrange, act, and assert. |  |
 | `prefer-unique-test-names` | `include-methods` | string[] | `[]` | Additional method names recognized as test registrations inside a group. |  |
 | `record-fields-ordering` | `order` | string &#124; null | `null` | Lexicographic direction in which named fields in each record type must be ordered. | `"ascending"`, `"descending"`, `null` |
 | `use-design-system-item` | `items` | object[] | `[]` | Class names whose construction should be replaced with a design-system equivalent. |  |

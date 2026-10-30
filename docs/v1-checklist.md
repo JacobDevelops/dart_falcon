@@ -18,107 +18,13 @@ style | suspicious`.
 
 | Source | remaining |
 |---|---:|
-| DCM-inspired | 24 |
 | Cross-file additions | 8 |
 | Additional rules | 3 |
-| **Total** | **35** |
+| **Total** | **11** |
 
-Counts reflect remaining checklist rows. Every DCM must-have and nice-to-have row has shipped and was removed.
+Counts reflect remaining checklist rows.
 
 Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
-
-## Remaining DCM-inspired rules (24)
-
-These rules are from the [DCM catalog](https://dcm.dev/docs/rules/). Paywall labels reflect the original survey, not a current pricing check; `paid?` means the per-rule badge was not verified.
-
-Analysis legend: **S** syntax-only, **LT** needs-local-type-inference, **FT**
-needs-full-type-resolution, **X** needs-cross-file/project.
-
-### 2a. core: correctness
-
-| DCM rule | falcon group | analysis | paywall | description |
-|---|---|---|---|---|
-| `avoid-not-encodable-in-to-json` | correctness | FT | paid | `toJson` returns a non-encodable value. |
-| `require-atomic-async-updates` | correctness | FT | paid | Read-modify-write across an await race. |
-| `pass-correct-accepted-type` | correctness | FT | paid | Argument type mismatch (DCM-style). |
-| `handle-throwing-invocations` | correctness | FT | paid | Call to throwing API without try/catch. |
-
-### 2b. core: suspicious
-
-| DCM rule | falcon group | analysis | paywall | description |
-|---|---|---|---|---|
-| `avoid-importing-entrypoint-exports` | suspicious | X | paid | Importing from an app entrypoint. |
-| `avoid-similar-names` | suspicious | S | paid | Confusingly similar identifiers in scope. |
-
-### 2c. core: style
-
-| DCM rule | falcon group | analysis | paywall | description |
-|---|---|---|---|---|
-| `prefer-single-declaration-per-file` | style | S | paid | One public type per file. |
-| `prefer-single-widget-per-file` | style | S | paid | One widget per file. |
-| `prefer-prefixed-global-constants` | style | S | paid | Global const naming convention. |
-| `match-class-name-pattern` | style | S | paid | Class names must match a configured regex. |
-
-### 2d. core: complexity
-
-| DCM rule | falcon group | analysis | paywall | description |
-|---|---|---|---|---|
-| `avoid-local-functions` | complexity | S | paid | Overuse of local functions. |
-| `avoid-excessive-expressions` | complexity | S | paid | Expression-length metric. |
-
-### 2e. core: performance
-
-| DCM rule | falcon group | analysis | paywall | description |
-|---|---|---|---|---|
-| `prefer-bytes-builder` | performance | FT | paid | Building byte lists without BytesBuilder. |
-
-### 2f. flutter domain
-
-| DCM rule | falcon group | analysis | paywall | description |
-|---|---|---|---|---|
-| `prefer-text-rich` | style | LT | paid | `Text.rich`/RichText guidance. |
-| `proper-super-calls` | correctness | FT | paid | initState/dispose super-call ordering (verify vs proper-super-init-state). |
-
-### 2g. test domain
-
-Activated for `*_test.dart`.
-
-| DCM rule | falcon group | analysis | paywall | description |
-|---|---|---|---|---|
-| `avoid-missing-test-files` | correctness | X | paid | Source file without a matching test. |
-| `avoid-misused-test-matchers` | correctness | FT | paid | Matcher applied to the wrong type. |
-| `format-test-name` | style | S | paid | Test description formatting. |
-| `prefer-test-structure` | style | S | paid | Arrange/act/assert structure. |
-
-### 2h. bloc domain
-
-| DCM rule | falcon group | analysis | paywall | description |
-|---|---|---|---|---|
-| `avoid-empty-build-when` | correctness | S | paid | Empty `buildWhen` callback. |
-| `avoid-cubits` | style | LT | paid | Opinionated: prefer Bloc over Cubit. |
-| `avoid-returning-value-from-cubit-methods` | style | LT | paid | Cubit methods should be void. |
-
-### 2i. riverpod domain
-
-| DCM rule | falcon group | analysis | paywall | description |
-|---|---|---|---|---|
-| `avoid-notifier-constructors` | style | LT | paid | Notifiers shouldn't declare constructors. |
-| `prefer-single-notifier-per-file` | style | S | paid | One notifier per file. |
-
-### Deduplication notes
-
-These eight DCM names are covered by shipped rules and are not counted in the DCM totals:
-
-| DCM rule | listed instead as |
-|---|---|
-| `avoid-collection-methods-with-unrelated-types` | `collection-methods-unrelated-type` |
-| `prefer-contains` | `prefer-contains` |
-| `avoid-self-assignment` | `no-self-assignments` |
-| `avoid-unnecessary-parentheses` | `unnecessary-parenthesis` |
-| `avoid-unnecessary-statements` | `unnecessary-statements` |
-| `avoid-banned-imports` | `banned-imports` |
-| `avoid-self-compare` | `no-self-comparisons` |
-| `prefer-boolean-prefixes` | `boolean-prefixes` |
 
 ## Remaining additional rules (3)
 
@@ -133,14 +39,10 @@ These rules come from outside the DCM catalog.
 ## Planned cross-file rules (8)
 
 Whole-project / app-wide rules live in the `cross-file` config section.
-The current shipped set is defined by the cross-file entries in `RULE_METADATA`;
-the rows below record the planned additions. Difficulty reflects existing
-infrastructure: **A** reuses the resolved directive graph / lexical name index;
-**B** needs a new pubspec index
+Difficulty reflects existing infrastructure: **A** reuses the resolved directive
+graph / lexical name index; **B** needs a new pubspec index
 (`dependencies`/`dev_dependencies`/`flutter.assets`); **C** needs a new
 asset/l10n index (filesystem walk and/or `.arb` parsing).
-
-**Shipped rules:** `unused-code`, `unused-files`, `unnecessary-nullable`, `depend-on-referenced-packages`, `package-names`, `secure-pubspec-urls`, `sort-pub-dependencies`, `unused-dependencies`, `undeclared-dependencies`, `no-import-cycles`, and `banned-imports`. The four shipped official lints are not counted in the 8 planned additions below.
 
 | rule | falcon group | analysis | difficulty | description |
 |---|---|---|---|---|

@@ -1,0 +1,84 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "format-test-name": {
+          "level": "warn",
+          "options": {
+            "test-name-pattern": "^should .+\\.$",
+            "test-widgets-name-pattern": "^renders .+\\.$"
+          }
+        }
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "**/good_defaults_test.dart"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "format-test-name": {
+              "level": "warn",
+              "options": {}
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/bad_test_only_test.dart"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "format-test-name": {
+              "level": "warn",
+              "options": {
+                "test-name-pattern": "^should "
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/bad_widgets_only_test.dart"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "format-test-name": {
+              "level": "warn",
+              "options": {
+                "test-widgets-name-pattern": "^renders "
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/good_empty_pattern_test.dart"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "format-test-name": {
+              "level": "warn",
+              "options": {
+                "test-name-pattern": "",
+                "test-widgets-name-pattern": ""
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

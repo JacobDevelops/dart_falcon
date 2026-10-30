@@ -23,6 +23,8 @@ crate::declare_rules! {
     no_import_cycles::NoImportCycles => ("no-import-cycles", cross_file, Correctness, false, RuleSource::Falcon);
     banned_imports::BannedImports => ("banned-imports", cross_file, Correctness, false, RuleSource::Falcon, options = banned_imports::Options);
     sort_pub_dependencies::SortPubDependencies => ("sort-pub-dependencies", cross_file, Correctness, false, RuleSource::Lints("sort_pub_dependencies"));
+    avoid_importing_entrypoint_exports::AvoidImportingEntrypointExports => ("avoid-importing-entrypoint-exports", cross_file, Suspicious, false, RuleSource::Falcon, options = avoid_importing_entrypoint_exports::Options);
+    avoid_missing_test_files::AvoidMissingTestFiles => ("avoid-missing-test-files", cross_file, Correctness, false, RuleSource::Falcon, options = avoid_missing_test_files::Options);
 }
 
 use std::collections::{HashMap, HashSet};

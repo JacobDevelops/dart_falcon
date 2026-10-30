@@ -1741,6 +1741,47 @@ impl IdentityIndex {
         }
         self.file_library[file.0 & !EXTERNAL_ID]
     }
+    /// Retrieves the indexed source declaration behind a canonical identity.
+    ///
+    /// The returned syntax and file context allow consumers to inspect metadata
+    /// without resolving names again. Unloaded or ambiguous declarations have
+    /// no source result.
+    pub fn source_declaration(
+        &self,
+        identity: &DeclarationIdentity,
+    ) -> Option<(&Path, &Arc<ParsedFile>, TopLevelDecl<'_>)> {
+        let library = self.declaration_library(identity)?;
+        if library.0 & EXTERNAL_ID != 0
+            && let Some(external) = &self.external
+        {
+            return external.source_declaration(identity);
+        }
+        if self.get(library).extensions.contains(identity.name()) {
+            return self
+                .file_library
+                .iter()
+                .enumerate()
+                .filter(|(_, owner)| owner.0 & !EXTERNAL_ID == library.0 & !EXTERNAL_ID)
+                .find_map(|(ordinal, _)| {
+                    let file = FileId(ordinal);
+                    let parsed = self.parsed_file(file);
+                    let declaration = parsed.program().declarations().find(|declaration| {
+                        matches!(declaration, TopLevelDecl::Extension(extension)
+                            if extension.name().is_some_and(|name| name.name() == identity.name()))
+                    })?;
+                    Some((self.source_path(file)?, parsed, declaration))
+                });
+        }
+        let file = self.declaration_file(library, identity.name())?;
+        let parsed = self.parsed_file(file);
+        let declaration = parsed.program().declarations().find(|declaration| {
+            let mut matches = false;
+            declaration_identities(*declaration, |name, _| matches |= name == identity.name());
+            matches
+        })?;
+        Some((self.source_path(file)?, parsed, declaration))
+    }
+
     /// Possible deprecation metadata, including constructor annotations whose
     /// types may alias `dart:core`'s `Deprecated`, for a proven declaration.
     pub fn source_annotations(
@@ -5426,6 +5467,9 @@ mod tests {
             )
             .expect("loaded dependency extension");
         assert!(identity.is_package("dep", "Ex"));
+        let (found_path, _, declaration) = index.source_declaration(&identity).unwrap();
+        assert_eq!(found_path, extension_path);
+        assert!(matches!(declaration, TopLevelDecl::Extension(_)));
         assert_eq!(
             index.declaration_library(&identity),
             Some(library(&index, extension_path.to_str().unwrap()))
@@ -5484,6 +5528,18 @@ mod tests {
             assert_eq!(overlay.file(extension_path), Some(external_file));
             assert_eq!(overlay.library(external_file), external_library);
             assert_eq!(overlay.source_path(external_file), Some(extension_path));
+            for index in [base.as_ref(), &overlay] {
+                let (found_path, _, declaration) = index.source_declaration(identity).unwrap();
+                assert_eq!(found_path, extension_path);
+                assert!(matches!(declaration, TopLevelDecl::Extension(_)));
+                let constant = DeclarationIdentity::Library {
+                    library: external_library,
+                    name: "_limit".into(),
+                };
+                let (found_path, _, declaration) = index.source_declaration(&constant).unwrap();
+                assert_eq!(found_path, extension_path);
+                assert!(matches!(declaration, TopLevelDecl::Variable(_)));
+            }
             assert_eq!(
                 overlay.resolve_extension_declaration(
                     library(&overlay, project[0].path.to_str().unwrap()),
@@ -5790,6 +5846,49 @@ mod tests {
                     .is_some()
             );
         }
+    }
+
+    #[test]
+    fn source_declarations_preserve_required_parameter_and_field_metadata() {
+        let file = "/project/lib/main.dart";
+        let index = index(
+            &[(
+                file,
+                "class AcceptedTypes { const AcceptedTypes(Set<Type> types); } \
+                class C { @AcceptedTypes({String}) final Object value; C(this.value); } \
+                void accept(@AcceptedTypes({bool}) Object value) {}",
+            )],
+            &[],
+        );
+        let owner = declaration(&index, file, "C").unwrap();
+        let (path, parsed, node) = index.source_declaration(&owner).unwrap();
+        assert_eq!(path, Path::new(file));
+        assert!(!parsed.source.is_empty());
+        let TopLevelDecl::Class(class) = node else {
+            panic!("expected class")
+        };
+        let ClassMember::Field(field) = class.members().next().unwrap() else {
+            panic!("expected field")
+        };
+        assert_eq!(field.annotations().count(), 1);
+        let owner = index
+            .resolve_value_declaration(library(&index, file), "accept".into())
+            .unwrap();
+        let (_, _, node) = index.source_declaration(&owner).unwrap();
+        let TopLevelDecl::Function(function) = node else {
+            panic!("expected function")
+        };
+        assert_eq!(
+            function
+                .params()
+                .unwrap()
+                .params()
+                .next()
+                .unwrap()
+                .annotations()
+                .count(),
+            1
+        );
     }
 
     #[test]

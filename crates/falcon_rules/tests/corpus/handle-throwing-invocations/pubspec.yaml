@@ -1,0 +1,6 @@
+name: throws_fixture
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  dart_code_metrics_annotations:
+    path: packages/dart_code_metrics_annotations

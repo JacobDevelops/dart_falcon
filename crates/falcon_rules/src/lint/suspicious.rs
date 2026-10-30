@@ -57,4 +57,5 @@ crate::declare_rules! {
     avoid_passing_bloc_to_bloc::AvoidPassingBlocToBloc => ("avoid-passing-bloc-to-bloc", resolved, Some(Domain::Bloc), false, RuleSource::Falcon);
     avoid_passing_build_context_to_blocs::AvoidPassingBuildContextToBlocs => ("avoid-passing-build-context-to-blocs", resolved, Some(Domain::Bloc), false, RuleSource::Falcon);
     avoid_passing_bloc_to_widget::AvoidPassingBlocToWidget => ("avoid-passing-bloc-to-widget", resolved, Some(Domain::Bloc), false, RuleSource::Falcon);
+    avoid_similar_names::AvoidSimilarNames => ("avoid-similar-names", file, None, false, RuleSource::Falcon, options = avoid_similar_names::Options);
 }

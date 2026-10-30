@@ -1,0 +1,12 @@
+name: notifier_constructor_fixture
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+dependencies:
+  riverpod:
+    path: packages/riverpod
+  flutter_riverpod:
+    path: packages/flutter_riverpod
+  hooks_riverpod:
+    path: packages/hooks_riverpod
+  unrelated:
+    path: packages/unrelated

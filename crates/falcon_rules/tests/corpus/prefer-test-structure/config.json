@@ -1,0 +1,45 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "prefer-test-structure": "warn"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "**/*alternative_test.dart"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "prefer-test-structure": {
+              "level": "warn",
+              "options": {
+                "use-alternative-comments": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/*explicit_default_test.dart"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "prefer-test-structure": {
+              "level": "warn",
+              "options": {
+                "use-alternative-comments": false
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

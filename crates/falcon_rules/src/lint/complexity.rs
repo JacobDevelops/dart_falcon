@@ -51,4 +51,6 @@ crate::declare_rules! {
     cascade_invocations::CascadeInvocations => ("cascade-invocations", resolved, None, false, RuleSource::Lints("cascade_invocations"));
     prefer_if_elements_to_conditional_expressions::PreferIfElementsToConditionalExpressions => ("prefer-if-elements-to-conditional-expressions", file, None, false, RuleSource::Lints("prefer_if_elements_to_conditional_expressions"));
     unnecessary_lambdas::UnnecessaryLambdas => ("unnecessary-lambdas", resolved, None, true, RuleSource::Lints("unnecessary_lambdas"));
+    avoid_local_functions::AvoidLocalFunctions => ("avoid-local-functions", file, None, false, RuleSource::Falcon);
+    avoid_excessive_expressions::AvoidExcessiveExpressions => ("avoid-excessive-expressions", resolved, None, false, RuleSource::Falcon);
 }

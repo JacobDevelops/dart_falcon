@@ -1,0 +1,4 @@
+name: matcher_fixture
+dev_dependencies:
+  test:
+    path: packages/test

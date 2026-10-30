@@ -1,0 +1,44 @@
+{
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "avoid-similar-names": "warn"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/bad_fraction.dart"],
+      "linter": { "rules": { "suspicious": {
+        "avoid-similar-names": { "level": "warn", "options": {
+          "similarity-threshold": 0.45
+        } }
+      } } }
+    },
+    {
+      "includes": ["**/bad_options.dart"],
+      "linter": { "rules": { "suspicious": {
+        "avoid-similar-names": { "level": "warn", "options": {
+          "similarity-threshold": 0.5,
+          "show-similarity": true
+        } }
+      } } }
+    },
+    {
+      "includes": ["**/good_ignored.dart"],
+      "linter": { "rules": { "suspicious": {
+        "avoid-similar-names": { "level": "warn", "options": {
+          "ignored-names": ["customer"]
+        } }
+      } } }
+    },
+    {
+      "includes": ["**/good_strict.dart"],
+      "linter": { "rules": { "suspicious": {
+        "avoid-similar-names": { "level": "warn", "options": {
+          "similarity-threshold": 0.95
+        } }
+      } } }
+    }
+  ]
+}

@@ -60,7 +60,9 @@
         "unnecessary-lambdas": "off",
         "avoid-complex-conditions": "warn",
         "avoid-complex-loop-conditions": "warn",
-        "avoid-collapsible-if": "warn"
+        "avoid-collapsible-if": "warn",
+        "avoid-local-functions": "off",
+        "avoid-excessive-expressions": "warn"
       },
       "correctness": {
         "avoid-empty-test-groups": "warn",
@@ -79,6 +81,13 @@
         "avoid-missing-completer-stack-trace": "warn",
         "avoid-assigning-to-static-field": "warn",
         "match-getter-setter-field-names": "warn",
+        "avoid-not-encodable-in-to-json": "warn",
+        "require-atomic-async-updates": "warn",
+        "pass-correct-accepted-type": "warn",
+        "handle-throwing-invocations": "warn",
+        "proper-super-calls": "warn",
+        "avoid-misused-test-matchers": "warn",
+        "avoid-empty-build-when": "warn",
         "prefer-correct-json-casts": "warn",
         "avoid-recursive-calls": "warn",
         "avoid-constant-conditions": "warn",
@@ -210,6 +219,7 @@
         "move-variable-closer-to-its-usage": "warn",
         "avoid-unnecessary-futures": "warn",
         "prefer-return-await": "warn",
+        "prefer-bytes-builder": "warn",
         "sized-box-for-whitespace": "warn",
         "unnecessary-to-list-in-spreads": "warn",
         "prefer-const-border-radius": "warn",
@@ -266,6 +276,24 @@
         "prefer-correct-error-name": "warn",
         "prefer-correct-handler-name": "warn",
         "prefer-correct-callback-field-name": "warn",
+        "prefer-single-declaration-per-file": "warn",
+        "prefer-single-widget-per-file": "warn",
+        "prefer-prefixed-global-constants": "warn",
+        "match-class-name-pattern": {
+          "level": "warn",
+          "options": {
+            "entries": [
+              { "path": ".*state\\.dart$", "pattern": "State$", "ignore-private": true }
+            ]
+          }
+        },
+        "prefer-text-rich": "warn",
+        "format-test-name": "warn",
+        "prefer-test-structure": "warn",
+        "avoid-cubits": "off",
+        "avoid-returning-value-from-cubit-methods": "warn",
+        "avoid-notifier-constructors": "warn",
+        "prefer-single-notifier-per-file": "warn",
         "prefer-match-file-name": "warn",
         "prefer-commenting-analyzer-ignores": "warn",
         "sort-child-properties-last": "warn",
@@ -485,6 +513,7 @@
         "avoid-passing-bloc-to-bloc": "warn",
         "avoid-passing-build-context-to-blocs": "warn",
         "avoid-passing-bloc-to-widget": "warn",
+        "avoid-similar-names": "warn",
         "avoid-print": "warn",
         "avoid-empty-else": "warn",
         "avoid-shadowing-type-parameters": "warn",
@@ -542,7 +571,11 @@
         "unused-dependencies": "warn",
         "undeclared-dependencies": "warn",
         "no-import-cycles": "warn",
-        "banned-imports": "warn"
+        "banned-imports": "warn",
+        "avoid-missing-test-files": "warn"
+      },
+      "suspicious": {
+        "avoid-importing-entrypoint-exports": "warn"
       },
       "security": {
         "secure-pubspec-urls": "off"

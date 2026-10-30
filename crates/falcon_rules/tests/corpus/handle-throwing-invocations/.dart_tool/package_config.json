@@ -1,0 +1,1 @@
+{"configVersion": 2, "packages": [{"name": "throws_fixture", "rootUri": "../", "packageUri": "lib/"}, {"name": "dart_code_metrics_annotations", "rootUri": "../packages/dart_code_metrics_annotations", "packageUri": "lib/"}]}

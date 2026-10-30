@@ -1,0 +1,2 @@
+class Unrestricted {}
+class AnyName {}

@@ -139,4 +139,11 @@ crate::declare_rules! {
     prefer_correct_json_casts::PreferCorrectJsonCasts => ("prefer-correct-json-casts", resolved, None, false, RuleSource::Falcon);
     avoid_assigning_to_static_field::AvoidAssigningToStaticField => ("avoid-assigning-to-static-field", resolved, None, false, RuleSource::Falcon);
     match_getter_setter_field_names::MatchGetterSetterFieldNames => ("match-getter-setter-field-names", file, None, false, RuleSource::Falcon);
+    avoid_not_encodable_in_to_json::AvoidNotEncodableInToJson => ("avoid-not-encodable-in-to-json", resolved, None, false, RuleSource::Falcon, options = avoid_not_encodable_in_to_json::Options);
+    require_atomic_async_updates::RequireAtomicAsyncUpdates => ("require-atomic-async-updates", resolved, None, false, RuleSource::Falcon);
+    pass_correct_accepted_type::PassCorrectAcceptedType => ("pass-correct-accepted-type", resolved, None, false, RuleSource::Falcon);
+    handle_throwing_invocations::HandleThrowingInvocations => ("handle-throwing-invocations", resolved, None, false, RuleSource::Falcon);
+    proper_super_calls::ProperSuperCalls => ("proper-super-calls", resolved, Some(Domain::Flutter), false, RuleSource::Falcon);
+    avoid_misused_test_matchers::AvoidMisusedTestMatchers => ("avoid-misused-test-matchers", resolved, Some(Domain::Test), false, RuleSource::Falcon);
+    avoid_empty_build_when::AvoidEmptyBuildWhen => ("avoid-empty-build-when", resolved, Some(Domain::Bloc), false, RuleSource::Falcon);
 }

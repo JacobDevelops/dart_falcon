@@ -1,0 +1,1 @@
+{"cross-file":{"rules":{"suspicious":{"avoid-importing-entrypoint-exports":{"level":"warn","options":{}}}}},"overrides":[{"includes":["**/bad_option/**","**/good_option/**"],"cross-file":{"rules":{"suspicious":{"avoid-importing-entrypoint-exports":{"level":"warn","options":{"only-in-src":false}}}}}}]}

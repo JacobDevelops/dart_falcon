@@ -1139,6 +1139,10 @@ fn collector_probe_config() -> falcon_config::FalconConfig {
                     "prefer-correct-callback-field-name": {
                         "level": "warn",
                         "options": { "name-pattern": "^on[A-Z]" }
+                    },
+                    "match-class-name-pattern": {
+                        "level": "warn",
+                        "options": { "entries": [{ "path": ".*", "pattern": "Probe$" }] }
                     }
                 },
                 "suspicious": {
@@ -1200,10 +1204,18 @@ const WHOLE_FILE_CHECKS: &[(&str, &str)] = &[
         "Test filename and framework import eligibility before semantic collection.",
     ),
     (
+        "avoid-misused-test-matchers",
+        "Test filename and framework import eligibility before semantic collection.",
+    ),
+    (
         "avoid-top-level-members-in-tests",
         "Test filename eligibility before structural collection.",
     ),
     ("avoid-relative-lib-imports", "Import URI path segments."),
+    (
+        "avoid-returning-value-from-cubit-methods",
+        "Cubit class declarations and declared return types before semantic collection.",
+    ),
     (
         "avoid-web-libraries-in-flutter",
         "Import URIs under Flutter package conditions.",
@@ -1225,6 +1237,10 @@ const WHOLE_FILE_CHECKS: &[(&str, &str)] = &[
     (
         "format-comment",
         "Source comment grouping and sentence formatting.",
+    ),
+    (
+        "format-test-name",
+        "Test filename and framework import eligibility before semantic collection.",
     ),
     ("implementation-imports", "Import URIs and package layout."),
     ("library-names", "Library directive name."),
@@ -1252,6 +1268,10 @@ const WHOLE_FILE_CHECKS: &[(&str, &str)] = &[
     ),
     (
         "prefer-unique-test-names",
+        "Test filename and framework import eligibility before semantic collection.",
+    ),
+    (
+        "prefer-test-structure",
         "Test filename and framework import eligibility before semantic collection.",
     ),
     (
@@ -1292,6 +1312,7 @@ class Probe {
   static const Probe first = Probe._();
   static const Probe second = Probe._();
   const Probe._();
+  Map<String, Object?> toJson() => {};
 }
 class InitializingFormalProbe {
   final int? value;

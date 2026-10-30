@@ -469,3 +469,11 @@ prefer-correct-provider-file-name/good_annotation_shadow.dart
 prefer-correct-provider-file-name/good_missing_manual_part.dart
 prefer-riverpod-notifier-suffix/counter.dart
 prefer-riverpod-notifier-suffix/counter.g.dart
+pass-correct-accepted-type/bad.dart
+pass-correct-accepted-type/good.dart
+pass-correct-accepted-type/bad_primary.dart
+pass-correct-accepted-type/project/lib/main.dart
+pass-correct-accepted-type/project/lib/review.dart
+prefer-bytes-builder/bad.dart
+prefer-bytes-builder/good.dart
+avoid-not-encodable-in-to-json/project/main.dart

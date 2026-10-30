@@ -1,0 +1,30 @@
+{
+  "configVersion": 2,
+  "packages": [
+    {
+      "name": "notifier_constructor_fixture",
+      "rootUri": "../",
+      "packageUri": "lib/"
+    },
+    {
+      "name": "riverpod",
+      "rootUri": "../packages/riverpod",
+      "packageUri": "lib/"
+    },
+    {
+      "name": "flutter_riverpod",
+      "rootUri": "../packages/flutter_riverpod",
+      "packageUri": "lib/"
+    },
+    {
+      "name": "hooks_riverpod",
+      "rootUri": "../packages/hooks_riverpod",
+      "packageUri": "lib/"
+    },
+    {
+      "name": "unrelated",
+      "rootUri": "../packages/unrelated",
+      "packageUri": "lib/"
+    }
+  ]
+}

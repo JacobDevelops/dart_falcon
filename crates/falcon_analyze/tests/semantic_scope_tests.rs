@@ -1020,6 +1020,7 @@ impl<'a> SemanticRuleVisitor<'a> for DeclarationReferences<'_> {
             }
             "Base.shared" => ("Base", MemberSelectorKind::Field, true, "shared"),
             "Base.named" => ("Base", MemberSelectorKind::Constructor, false, "named"),
+            "p.Base.method" => ("Base", MemberSelectorKind::Read, true, "method"),
             "base.extra" => ("Extra", MemberSelectorKind::Read, false, "extra"),
             "libraryValue" if matches!(node, Expr::Ident(_)) => {
                 if state.constant_owner.is_none() && state.enclosing_type.is_some() {
@@ -1064,6 +1065,21 @@ impl<'a> SemanticRuleVisitor<'a> for DeclarationReferences<'_> {
         }
         self.observed += 1;
     }
+}
+
+#[test]
+fn prefixed_static_calls_preserve_member_source_selectors() {
+    let source = "import 'main.dart' as p; class Base { static void method(Object value) {} } void example() { p.Base.method(1); }";
+    let mut visitor = DeclarationReferences {
+        source,
+        observed: 0,
+    };
+    visit_with_signatures(
+        source,
+        std::path::Path::new("/project/main.dart"),
+        &mut visitor,
+    );
+    assert_eq!(visitor.observed, 1);
 }
 
 #[test]

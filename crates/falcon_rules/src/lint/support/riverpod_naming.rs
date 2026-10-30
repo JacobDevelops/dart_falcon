@@ -1,4 +1,4 @@
-use crate::lint::riverpod::is_type;
+use crate::lint::riverpod::{NOTIFIERS, is_type};
 use falcon_analyze::{AnalyzeContext, RulePreparation};
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
@@ -190,24 +190,6 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         self.diagnostics
     }
 }
-const NOTIFIERS: &[&str] = &[
-    "Notifier",
-    "NotifierBase",
-    "BuildlessNotifier",
-    "AutoDisposeNotifier",
-    "AsyncNotifier",
-    "AsyncNotifierBase",
-    "BuildlessAsyncNotifier",
-    "AutoDisposeAsyncNotifier",
-    "StreamNotifier",
-    "StreamNotifierBase",
-    "AutoDisposeStreamNotifier",
-    "AnyNotifier",
-    "$Notifier",
-    "$AsyncNotifier",
-    "$StreamNotifier",
-    "StateNotifier",
-];
 
 const PROVIDERS: &[&str] = &[
     "ProviderBase",

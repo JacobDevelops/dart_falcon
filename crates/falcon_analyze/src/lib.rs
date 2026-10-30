@@ -23,10 +23,10 @@ mod suppressions;
 
 pub use const_contexts::ConstContexts;
 pub use constant_value::{
-    ConstantCache, ConstantContext, ConstantValue, LocalConstants, Number,
+    ConstantCache, ConstantContext, ConstantType, ConstantValue, LocalConstants, Number,
     class_has_primitive_equality, constant_cast_validity, constant_operands_all, contextual_number,
     evaluate_constant, evaluate_constant_name, evaluate_construction, evaluate_pattern_constant,
-    invocation_type_args, parse_int,
+    invocation_type_args, parse_int, resolved_constant_type,
 };
 pub use context::AnalyzeContext;
 pub use cross_file::{

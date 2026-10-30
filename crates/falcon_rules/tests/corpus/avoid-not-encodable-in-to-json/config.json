@@ -1,0 +1,13 @@
+{
+  "files": { "includes": ["**", "!**/dependency/**"] },
+  "linter": {
+    "rules": {
+      "correctness": {
+        "avoid-not-encodable-in-to-json": {
+          "level": "warn",
+          "options": { "methods": ["customToJson"] }
+        }
+      }
+    }
+  }
+}

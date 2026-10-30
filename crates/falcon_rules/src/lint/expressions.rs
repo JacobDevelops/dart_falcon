@@ -2,6 +2,73 @@
 
 use falcon_syntax::cst::{BinaryOp, Expr, Span};
 
+pub(crate) fn stable_local(name: &str, state: &falcon_analyze::SemanticState<'_>) -> bool {
+    state.environment.binding_declaration(name).is_some()
+        && !state.is_own_field(name)
+        && state.is_variable_read(name)
+}
+
+pub(crate) fn local_name<'a>(
+    expression: Expr<'a>,
+    state: &falcon_analyze::SemanticState<'a>,
+) -> Option<&'a str> {
+    let Expr::Ident(identifier) = expression.unparenthesized() else {
+        return None;
+    };
+    stable_local(identifier.name(), state).then_some(identifier.name())
+}
+
+pub(crate) fn integer_literal(expression: Expr<'_>) -> Option<i128> {
+    let (literal, negative) = match expression.unparenthesized() {
+        Expr::IntLit(literal) => (literal, false),
+        Expr::Unary(unary) if unary.op() == falcon_syntax::cst::UnaryOp::Minus => {
+            let Expr::IntLit(literal) = unary.operand().unparenthesized() else {
+                return None;
+            };
+            (literal, true)
+        }
+        _ => return None,
+    };
+    let value = i128::from(literal.value().parse::<i64>().ok()?);
+    Some(if negative { -value } else { value })
+}
+
+pub(crate) fn nested_integer_literal(mut expression: Expr<'_>) -> Option<i128> {
+    let mut negative = false;
+    while let Expr::Unary(unary) = expression.unparenthesized() {
+        if unary.op() != falcon_syntax::cst::UnaryOp::Minus {
+            return None;
+        }
+        negative = !negative;
+        expression = unary.operand();
+    }
+    let value = integer_literal(expression)?;
+    Some(if negative { -value } else { value })
+}
+
+pub(crate) fn reverse(op: BinaryOp) -> Option<BinaryOp> {
+    Some(match op {
+        BinaryOp::EqEq | BinaryOp::NotEq => op,
+        BinaryOp::Lt => BinaryOp::Gt,
+        BinaryOp::LtEq => BinaryOp::GtEq,
+        BinaryOp::Gt => BinaryOp::Lt,
+        BinaryOp::GtEq => BinaryOp::LtEq,
+        _ => return None,
+    })
+}
+
+pub(crate) fn interval(op: BinaryOp, bound: i128) -> Option<(i128, i128, Option<i128>)> {
+    Some(match op {
+        BinaryOp::EqEq => (bound, bound, None),
+        BinaryOp::NotEq => (i128::MIN, i128::MAX, Some(bound)),
+        BinaryOp::Lt => (i128::MIN, bound - 1, None),
+        BinaryOp::LtEq => (i128::MIN, bound, None),
+        BinaryOp::Gt => (bound + 1, i128::MAX, None),
+        BinaryOp::GtEq => (bound, i128::MAX, None),
+        _ => return None,
+    })
+}
+
 /// The analyzer `Identifier` name: `x` for a simple identifier and `a.b` for a
 /// prefixed identifier whose prefix is itself a simple identifier.
 pub(crate) fn identifier_name(expr: Expr<'_>) -> Option<(&str, Option<&str>)> {

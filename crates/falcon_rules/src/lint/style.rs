@@ -236,4 +236,15 @@ crate::declare_rules! {
     prefer_correct_error_name::PreferCorrectErrorName => ("prefer-correct-error-name", resolved, None, false, RuleSource::Falcon, options = prefer_correct_error_name::Options);
     prefer_correct_handler_name::PreferCorrectHandlerName => ("prefer-correct-handler-name", resolved, None, false, RuleSource::Falcon, options = prefer_correct_handler_name::Options);
     prefer_correct_callback_field_name::PreferCorrectCallbackFieldName => ("prefer-correct-callback-field-name", resolved, None, false, RuleSource::Falcon, options = prefer_correct_callback_field_name::Options);
+    prefer_single_declaration_per_file::PreferSingleDeclarationPerFile => ("prefer-single-declaration-per-file", resolved, None, false, RuleSource::Falcon, options = prefer_single_declaration_per_file::Options);
+    prefer_single_widget_per_file::PreferSingleWidgetPerFile => ("prefer-single-widget-per-file", resolved, Some(Domain::Flutter), false, RuleSource::Falcon, options = prefer_single_widget_per_file::Options);
+    prefer_prefixed_global_constants::PreferPrefixedGlobalConstants => ("prefer-prefixed-global-constants", file, None, false, RuleSource::Falcon, options = prefer_prefixed_global_constants::Options);
+    match_class_name_pattern::MatchClassNamePattern => ("match-class-name-pattern", file, None, false, RuleSource::Falcon, options = match_class_name_pattern::Options);
+    prefer_text_rich::PreferTextRich => ("prefer-text-rich", resolved, Some(Domain::Flutter), false, RuleSource::Falcon);
+    format_test_name::FormatTestName => ("format-test-name", resolved, Some(Domain::Test), false, RuleSource::Falcon, options = format_test_name::Options);
+    prefer_test_structure::PreferTestStructure => ("prefer-test-structure", resolved, Some(Domain::Test), false, RuleSource::Falcon, options = prefer_test_structure::Options);
+    avoid_cubits::AvoidCubits => ("avoid-cubits", resolved, Some(Domain::Bloc), false, RuleSource::Falcon);
+    avoid_returning_value_from_cubit_methods::AvoidReturningValueFromCubitMethods => ("avoid-returning-value-from-cubit-methods", resolved, Some(Domain::Bloc), false, RuleSource::Falcon);
+    avoid_notifier_constructors::AvoidNotifierConstructors => ("avoid-notifier-constructors", resolved, Some(Domain::Riverpod), false, RuleSource::Falcon);
+    prefer_single_notifier_per_file::PreferSingleNotifierPerFile => ("prefer-single-notifier-per-file", resolved, Some(Domain::Riverpod), false, RuleSource::Falcon);
 }

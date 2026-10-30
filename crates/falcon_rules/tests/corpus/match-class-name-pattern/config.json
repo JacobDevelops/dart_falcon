@@ -1,0 +1,18 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "match-class-name-pattern": {
+          "level": "warn",
+          "options": {
+            "entries": [
+              { "path": ".*(?:bad|good)\\.dart$", "pattern": "State$", "ignore-private": true },
+              { "path": ".*bad_private\\.dart$", "pattern": "^_.*State$" },
+              { "path": "^lib/(?:bad|good)_package\\.dart$", "pattern": "State$" }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -11,6 +11,23 @@ pub(crate) struct BlocTypes<'a> {
     program: Program<'a>,
 }
 
+#[derive(Clone, Copy)]
+enum BlocKind {
+    Bloc,
+    Cubit,
+    Either,
+}
+
+impl BlocKind {
+    fn names(self) -> &'static [&'static str] {
+        match self {
+            Self::Bloc => &["Bloc"],
+            Self::Cubit => &["Cubit"],
+            Self::Either => &["Bloc", "Cubit"],
+        }
+    }
+}
+
 impl<'a> BlocTypes<'a> {
     pub(crate) fn new(program: Program<'a>) -> Self {
         Self { program }
@@ -125,6 +142,36 @@ impl<'a> BlocTypes<'a> {
             })
     }
 
+    /// Recognizes implementation inheritance, excluding `implements`-only Cubits.
+    pub(crate) fn is_cubit_class(
+        &self,
+        class: ClassDecl<'_>,
+        model: &SemanticModel<'_>,
+        signatures: Option<&SignatureIndex>,
+    ) -> bool {
+        class
+            .extends()
+            .is_some_and(|supertype| self.is_api_syntax(supertype, model, "Cubit"))
+            || model
+                .resolve_name(class.name().name())
+                .is_some_and(|identity| {
+                    self.is_cubit_type(
+                        &ResolvedType::interface_identity(identity),
+                        model,
+                        signatures,
+                    )
+                })
+    }
+
+    pub(crate) fn is_cubit_type(
+        &self,
+        ty: &ResolvedType,
+        model: &SemanticModel<'_>,
+        signatures: Option<&SignatureIndex>,
+    ) -> bool {
+        self.is_bloc_type_at(ty, model, signatures, BlocKind::Cubit, &mut Vec::new())
+    }
+
     pub(crate) fn is_bloc_class(
         &self,
         class: ClassDecl<'_>,
@@ -171,7 +218,7 @@ impl<'a> BlocTypes<'a> {
         model: &SemanticModel<'_>,
         signatures: Option<&SignatureIndex>,
     ) -> bool {
-        self.is_bloc_type_at(ty, model, signatures, 0, true)
+        self.is_bloc_type_at(ty, model, signatures, BlocKind::Either, &mut Vec::new())
     }
 
     pub(crate) fn is_event_bloc_type(
@@ -180,7 +227,7 @@ impl<'a> BlocTypes<'a> {
         model: &SemanticModel<'_>,
         signatures: Option<&SignatureIndex>,
     ) -> bool {
-        self.is_bloc_type_at(ty, model, signatures, 0, false)
+        self.is_bloc_type_at(ty, model, signatures, BlocKind::Bloc, &mut Vec::new())
     }
 
     fn is_bloc_type_at(
@@ -188,46 +235,71 @@ impl<'a> BlocTypes<'a> {
         ty: &ResolvedType,
         model: &SemanticModel<'_>,
         signatures: Option<&SignatureIndex>,
-        depth: usize,
-        allow_cubit: bool,
+        kind: BlocKind,
+        visited: &mut Vec<DeclarationIdentity>,
     ) -> bool {
-        if Self::is_api_type(ty, model, "Bloc")
-            || (allow_cubit && Self::is_api_type(ty, model, "Cubit"))
+        if kind
+            .names()
+            .iter()
+            .any(|name| Self::is_api_type(ty, model, name))
         {
             return true;
         }
         let ResolvedTypeView::Interface { identity, .. } = ty.view() else {
             return false;
         };
-        if depth > 64 {
+        if visited.len() > 64 || visited.contains(identity) {
             return false;
         }
-        if signatures.is_some_and(|signatures| {
-            signatures.supertype_matches(identity, &|parent| {
-                is_api_identity(parent, model, "Bloc")
-                    || (allow_cubit && is_api_identity(parent, model, "Cubit"))
-            }) == Truth::Yes
-        }) {
-            return true;
-        }
-        self.program.declarations().any(|declaration| {
-            let TopLevelDecl::Class(class) = declaration else {
-                return false;
+        if let Some(signatures) = signatures {
+            let matches = |parent: &DeclarationIdentity| {
+                kind.names()
+                    .iter()
+                    .any(|name| is_api_identity(parent, model, name))
             };
-            if model.resolve_name(class.name().name()).as_ref() != Some(identity) {
+            let result = if matches!(kind, BlocKind::Cubit) {
+                signatures.member_supertype_matches(identity, &matches)
+            } else {
+                signatures.supertype_matches(identity, &matches)
+            };
+            match result {
+                Truth::Yes => return true,
+                Truth::No => return false,
+                Truth::Unknown => {}
+            }
+        }
+        visited.push(identity.clone());
+        let mut inherits = |supertype| {
+            let resolved = model.resolve_type(supertype);
+            kind.names()
+                .iter()
+                .any(|name| self.is_resolved_api_syntax(supertype, &resolved, model, name))
+                || self.is_bloc_type_at(&resolved, model, signatures, kind, visited)
+        };
+        self.program.declarations().any(|declaration| {
+            let name = match declaration {
+                TopLevelDecl::Class(class) => class.name(),
+                TopLevelDecl::MixinClass(class) => class.name(),
+                TopLevelDecl::ClassTypeAlias(alias) => alias.name(),
+                _ => return false,
+            };
+            if model.resolve_name(name.name()).as_ref() != Some(identity) {
                 return false;
             }
-            class.extends().is_some_and(|supertype| {
-                self.is_api_syntax(supertype, model, "Bloc")
-                    || (allow_cubit && self.is_api_syntax(supertype, model, "Cubit"))
-                    || self.is_bloc_type_at(
-                        &model.resolve_type(supertype),
-                        model,
-                        signatures,
-                        depth + 1,
-                        allow_cubit,
-                    )
-            })
+            match declaration {
+                TopLevelDecl::Class(class) => {
+                    class.extends().is_some_and(&mut inherits)
+                        || class.with_clause().any(&mut inherits)
+                }
+                TopLevelDecl::MixinClass(class) => {
+                    class.extends().is_some_and(&mut inherits)
+                        || class.with_clause().any(&mut inherits)
+                }
+                TopLevelDecl::ClassTypeAlias(alias) => {
+                    inherits(alias.superclass()) || alias.with_clause().any(&mut inherits)
+                }
+                _ => false,
+            }
         })
     }
 

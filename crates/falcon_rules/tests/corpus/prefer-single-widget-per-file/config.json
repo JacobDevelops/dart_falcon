@@ -1,0 +1,30 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "prefer-single-widget-per-file": "warn"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "**/good_options.dart",
+        "**/bad_lookalike.dart"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "prefer-single-widget-per-file": {
+              "level": "warn",
+              "options": {
+                "ignore-private-widgets": true,
+                "ignore-visible-for-testing": true
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

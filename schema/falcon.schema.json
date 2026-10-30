@@ -291,6 +291,12 @@
                 },
                 "unnecessary-lambdas": {
                   "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-local-functions": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-excessive-expressions": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
                 }
               },
               "description": "Per-rule severity levels for the `complexity` group."
@@ -703,6 +709,27 @@
                 },
                 "match-getter-setter-field-names": {
                   "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-not-encodable-in-to-json": {
+                  "$ref": "#/definitions/avoid-not-encodable-in-to-json"
+                },
+                "require-atomic-async-updates": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "pass-correct-accepted-type": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "handle-throwing-invocations": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "proper-super-calls": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-misused-test-matchers": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-empty-build-when": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
                 }
               },
               "description": "Per-rule severity levels for the `correctness` group."
@@ -787,6 +814,9 @@
                   "$ref": "#/definitions/ruleWithoutOptions"
                 },
                 "prefer-return-await": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "prefer-bytes-builder": {
                   "$ref": "#/definitions/ruleWithoutOptions"
                 }
               },
@@ -1510,6 +1540,39 @@
                 },
                 "prefer-correct-callback-field-name": {
                   "$ref": "#/definitions/prefer-correct-callback-field-name"
+                },
+                "prefer-single-declaration-per-file": {
+                  "$ref": "#/definitions/prefer-single-declaration-per-file"
+                },
+                "prefer-single-widget-per-file": {
+                  "$ref": "#/definitions/prefer-single-widget-per-file"
+                },
+                "prefer-prefixed-global-constants": {
+                  "$ref": "#/definitions/prefer-prefixed-global-constants"
+                },
+                "match-class-name-pattern": {
+                  "$ref": "#/definitions/match-class-name-pattern"
+                },
+                "prefer-text-rich": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "format-test-name": {
+                  "$ref": "#/definitions/format-test-name"
+                },
+                "prefer-test-structure": {
+                  "$ref": "#/definitions/prefer-test-structure"
+                },
+                "avoid-cubits": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-returning-value-from-cubit-methods": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-notifier-constructors": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "prefer-single-notifier-per-file": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
                 }
               },
               "description": "Per-rule severity levels for the `style` group."
@@ -1676,6 +1739,9 @@
                 },
                 "avoid-passing-bloc-to-widget": {
                   "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-similar-names": {
+                  "$ref": "#/definitions/avoid-similar-names"
                 }
               },
               "description": "Per-rule severity levels for the `suspicious` group."
@@ -1749,6 +1815,9 @@
                 },
                 "sort-pub-dependencies": {
                   "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-missing-test-files": {
+                  "$ref": "#/definitions/avoid-missing-test-files"
                 }
               },
               "description": "Per-rule severity levels for the `correctness` group."
@@ -1782,7 +1851,11 @@
             "suspicious": {
               "type": "object",
               "additionalProperties": false,
-              "properties": {},
+              "properties": {
+                "avoid-importing-entrypoint-exports": {
+                  "$ref": "#/definitions/avoid-importing-entrypoint-exports"
+                }
+              },
               "description": "Per-rule severity levels for the `suspicious` group."
             }
           }
@@ -2036,6 +2109,12 @@
                 },
                 "unnecessary-lambdas": {
                   "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-local-functions": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-excessive-expressions": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
                 }
               },
               "description": "Per-rule severity levels for the `complexity` group."
@@ -2448,6 +2527,27 @@
                 },
                 "match-getter-setter-field-names": {
                   "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-not-encodable-in-to-json": {
+                  "$ref": "#/definitions/avoid-not-encodable-in-to-json"
+                },
+                "require-atomic-async-updates": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "pass-correct-accepted-type": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "handle-throwing-invocations": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "proper-super-calls": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-misused-test-matchers": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-empty-build-when": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
                 }
               },
               "description": "Per-rule severity levels for the `correctness` group."
@@ -2532,6 +2632,9 @@
                   "$ref": "#/definitions/ruleWithoutOptions"
                 },
                 "prefer-return-await": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "prefer-bytes-builder": {
                   "$ref": "#/definitions/ruleWithoutOptions"
                 }
               },
@@ -3255,6 +3358,39 @@
                 },
                 "prefer-correct-callback-field-name": {
                   "$ref": "#/definitions/prefer-correct-callback-field-name"
+                },
+                "prefer-single-declaration-per-file": {
+                  "$ref": "#/definitions/prefer-single-declaration-per-file"
+                },
+                "prefer-single-widget-per-file": {
+                  "$ref": "#/definitions/prefer-single-widget-per-file"
+                },
+                "prefer-prefixed-global-constants": {
+                  "$ref": "#/definitions/prefer-prefixed-global-constants"
+                },
+                "match-class-name-pattern": {
+                  "$ref": "#/definitions/match-class-name-pattern"
+                },
+                "prefer-text-rich": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "format-test-name": {
+                  "$ref": "#/definitions/format-test-name"
+                },
+                "prefer-test-structure": {
+                  "$ref": "#/definitions/prefer-test-structure"
+                },
+                "avoid-cubits": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-returning-value-from-cubit-methods": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-notifier-constructors": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "prefer-single-notifier-per-file": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
                 }
               },
               "description": "Per-rule severity levels for the `style` group."
@@ -3421,6 +3557,9 @@
                 },
                 "avoid-passing-bloc-to-widget": {
                   "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-similar-names": {
+                  "$ref": "#/definitions/avoid-similar-names"
                 }
               },
               "description": "Per-rule severity levels for the `suspicious` group."
@@ -3488,6 +3627,9 @@
                 },
                 "sort-pub-dependencies": {
                   "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-missing-test-files": {
+                  "$ref": "#/definitions/avoid-missing-test-files"
                 }
               },
               "description": "Per-rule severity levels for the `correctness` group."
@@ -3521,7 +3663,11 @@
             "suspicious": {
               "type": "object",
               "additionalProperties": false,
-              "properties": {},
+              "properties": {
+                "avoid-importing-entrypoint-exports": {
+                  "$ref": "#/definitions/avoid-importing-entrypoint-exports"
+                }
+              },
               "description": "Per-rule severity levels for the `suspicious` group."
             }
           }
@@ -4099,6 +4245,48 @@
         }
       ]
     },
+    "avoid-importing-entrypoint-exports": {
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/ruleLevel"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "level"
+          ],
+          "properties": {
+            "level": {
+              "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
+            },
+            "options": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "only-in-src": {
+                      "description": "Restrict importing files to the package's `lib/src/` directory.",
+                      "type": "boolean",
+                      "default": true
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
     "avoid-long-records": {
       "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
@@ -4131,6 +4319,52 @@
                       "format": "uint",
                       "minimum": 0,
                       "default": 6
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "avoid-missing-test-files": {
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/ruleLevel"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "level"
+          ],
+          "properties": {
+            "level": {
+              "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
+            },
+            "options": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "patterns": {
+                      "description": "Regular expressions selecting package-relative source paths requiring tests.",
+                      "type": "array",
+                      "items": {
+                        "description": "A regex compiled when its containing rule options are loaded.",
+                        "type": "string"
+                      },
+                      "default": []
                     }
                   }
                 },
@@ -4359,6 +4593,51 @@
         }
       ]
     },
+    "avoid-not-encodable-in-to-json": {
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/ruleLevel"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "level"
+          ],
+          "properties": {
+            "level": {
+              "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
+            },
+            "options": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "methods": {
+                      "description": "Additional serialization methods to check alongside `toJson`.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
     "avoid-referencing-subclasses": {
       "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
@@ -4396,6 +4675,64 @@
                         "Freezed",
                         "unfreezed"
                       ]
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "avoid-similar-names": {
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/ruleLevel"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "level"
+          ],
+          "properties": {
+            "level": {
+              "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
+            },
+            "options": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "similarity-threshold": {
+                      "description": "Minimum normalized edit similarity, inclusive, between zero and one.",
+                      "type": "number",
+                      "format": "double",
+                      "minimum": 0.0,
+                      "maximum": 1.0,
+                      "default": 0.8
+                    },
+                    "show-similarity": {
+                      "description": "Include the normalized similarity score in diagnostic messages.",
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "ignored-names": {
+                      "description": "Exact declaration names excluded from both sides of comparisons.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
                     }
                   }
                 },
@@ -4939,6 +5276,59 @@
         }
       ]
     },
+    "format-test-name": {
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/ruleLevel"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "level"
+          ],
+          "properties": {
+            "level": {
+              "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
+            },
+            "options": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "test-name-pattern": {
+                      "description": "Regular expression required for `test` descriptions; absent means unrestricted.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "default": null
+                    },
+                    "test-widgets-name-pattern": {
+                      "description": "Regular expression required for `testWidgets` descriptions; absent means unrestricted.",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "default": null
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
     "initializers-ordering": {
       "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
       "oneOf": [
@@ -5027,6 +5417,71 @@
                         null
                       ],
                       "default": null
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "match-class-name-pattern": {
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/ruleLevel"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "level"
+          ],
+          "properties": {
+            "level": {
+              "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
+            },
+            "options": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "entries": {
+                      "description": "Path-specific class naming requirements. Empty entries disable the rule.",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "description": "Regular expression selecting file paths.",
+                            "type": "string"
+                          },
+                          "pattern": {
+                            "description": "Regular expression that class names must match.",
+                            "type": "string"
+                          },
+                          "ignore-private": {
+                            "description": "Whether private class names are exempt.",
+                            "type": "boolean",
+                            "default": false
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "pattern"
+                        ]
+                      },
+                      "default": []
                     }
                   }
                 },
@@ -6104,6 +6559,199 @@
                       "format": "uint",
                       "minimum": 0,
                       "default": 1
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "prefer-prefixed-global-constants": {
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/ruleLevel"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "level"
+          ],
+          "properties": {
+            "level": {
+              "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
+            },
+            "options": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "allowed-prefixes": {
+                      "description": "Accepted prefixes after leading underscores; an empty list disables the rule.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": [
+                        "k"
+                      ]
+                    },
+                    "ignore-private": {
+                      "description": "Ignore private top-level constants instead of checking their prefixes.",
+                      "type": "boolean",
+                      "default": false
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "prefer-single-declaration-per-file": {
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/ruleLevel"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "level"
+          ],
+          "properties": {
+            "level": {
+              "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
+            },
+            "options": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "ignore-private": {
+                      "description": "Ignore declarations whose names start with an underscore.",
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "ignore-enums": {
+                      "description": "Ignore enum declarations.",
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "ignore-visible-for-testing": {
+                      "description": "Ignore declarations annotated with `visibleForTesting` from `package:meta`.",
+                      "type": "boolean",
+                      "default": false
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "prefer-single-widget-per-file": {
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/ruleLevel"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "level"
+          ],
+          "properties": {
+            "level": {
+              "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
+            },
+            "options": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "ignore-private-widgets": {
+                      "description": "Ignore widgets whose names start with an underscore.",
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "ignore-visible-for-testing": {
+                      "description": "Ignore widgets annotated with `visibleForTesting`.",
+                      "type": "boolean",
+                      "default": false
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "prefer-test-structure": {
+      "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/ruleLevel"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "level"
+          ],
+          "properties": {
+            "level": {
+              "$ref": "#/definitions/ruleLevel"
+            },
+            "fix": {
+              "$ref": "#/definitions/ruleFix"
+            },
+            "options": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "title": "Options",
+                  "type": "object",
+                  "properties": {
+                    "use-alternative-comments": {
+                      "description": "Use `given`, `when`, and `then` section comments instead of arrange, act, and assert.",
+                      "type": "boolean",
+                      "default": false
                     }
                   }
                 },

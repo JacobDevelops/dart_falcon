@@ -1,0 +1,3 @@
+name: prefer_test_structure_fixture
+environment:
+  sdk: '>=3.9.0 <4.0.0'

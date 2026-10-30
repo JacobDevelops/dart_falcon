@@ -1,0 +1,3 @@
+name: flutter_bloc
+environment:
+  sdk: ^3.6.0

@@ -5,6 +5,29 @@ use falcon_syntax::cst::*;
 /// to their declaring variable, except instantiated members retain their own
 /// occurrence identity rather than canonicalizing to the generic declaration.
 pub(crate) fn same_element<'a>(
+    left: Expr<'a>,
+    left_write: bool,
+    right: Expr<'a>,
+    right_write: bool,
+    state: &SemanticState<'a>,
+) -> bool {
+    same_element_with_policy::<false>(left, left_write, right, right_write, state)
+}
+
+/// Compares known receiver identities, including explicit and implicit `this`.
+/// Unlike the SDK comparison, unknown roots and different dynamic member names
+/// never establish that an asynchronous update reads the same target.
+pub(crate) fn same_resolved_element<'a>(
+    left: Expr<'a>,
+    left_write: bool,
+    right: Expr<'a>,
+    right_write: bool,
+    state: &SemanticState<'a>,
+) -> bool {
+    same_element_with_policy::<true>(left, left_write, right, right_write, state)
+}
+
+fn same_element_with_policy<'a, const RESOLVED: bool>(
     mut left: Expr<'a>,
     mut left_write: bool,
     mut right: Expr<'a>,
@@ -13,9 +36,29 @@ pub(crate) fn same_element<'a>(
 ) -> bool {
     loop {
         match (left.unparenthesized(), right.unparenthesized()) {
+            (Expr::This(_), Expr::This(_)) if RESOLVED => return true,
             (Expr::Ident(left), Expr::Ident(right)) => {
-                return identifier_element(left, left_write, state)
-                    == identifier_element(right, right_write, state);
+                return match (
+                    identifier_element(left, left_write, state),
+                    identifier_element(right, right_write, state),
+                ) {
+                    (Some(left), Some(right)) => left == right,
+                    (None, None) => !RESOLVED,
+                    _ => false,
+                };
+            }
+            (Expr::Ident(_), Expr::Field(field)) | (Expr::Field(field), Expr::Ident(_))
+                if RESOLVED && matches!(field.object().unparenthesized(), Expr::This(_)) =>
+            {
+                return match (
+                    state.referenced_declaration(left, left_write),
+                    state.referenced_declaration(right, right_write),
+                ) {
+                    (Some(left), Some(right)) => {
+                        left.owner == right.owner && left.selector == right.selector
+                    }
+                    _ => false,
+                };
             }
             (Expr::Field(left_field_expr), Expr::Field(right_field_expr)) => {
                 let left_object = left_field_expr.object();
@@ -26,7 +69,15 @@ pub(crate) fn same_element<'a>(
                 let right_safe = right_field_expr.is_null_safe();
                 let left_prefixed = matches!(left_object, Expr::Ident(_)) && !left_safe;
                 let right_prefixed = matches!(right_object, Expr::Ident(_)) && !right_safe;
-                if left_prefixed != right_prefixed {
+                let explicit_this = |object: Expr<'_>| {
+                    matches!(object.unparenthesized(), Expr::Field(field)
+                        if matches!(field.object().unparenthesized(), Expr::This(_)))
+                };
+                if left_prefixed != right_prefixed
+                    && !(RESOLVED
+                        && (left_prefixed && explicit_this(right_object)
+                            || right_prefixed && explicit_this(left_object)))
+                {
                     return false;
                 }
                 let equal = match (
@@ -35,17 +86,27 @@ pub(crate) fn same_element<'a>(
                 ) {
                     (Some(left), Some(right)) => left == right,
                     (None, None) => {
-                        matches!(
-                            state
-                                .infer_access_receiver(left_object, left_field.name(), left_safe)
-                                .view(),
-                            falcon_analyze::ResolvedTypeView::Dynamic
-                        ) && matches!(
-                            state
-                                .infer_access_receiver(right_object, right_field.name(), right_safe)
-                                .view(),
-                            falcon_analyze::ResolvedTypeView::Dynamic
-                        )
+                        (!RESOLVED || left_field.name() == right_field.name())
+                            && matches!(
+                                state
+                                    .infer_access_receiver(
+                                        left_object,
+                                        left_field.name(),
+                                        left_safe
+                                    )
+                                    .view(),
+                                falcon_analyze::ResolvedTypeView::Dynamic
+                            )
+                            && matches!(
+                                state
+                                    .infer_access_receiver(
+                                        right_object,
+                                        right_field.name(),
+                                        right_safe
+                                    )
+                                    .view(),
+                                falcon_analyze::ResolvedTypeView::Dynamic
+                            )
                     }
                     _ => false,
                 };

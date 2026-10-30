@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 // the normal parser and indexes, never a second handwritten signature table.
 const CORE: &str = include_str!("sdk/lib/core/core.dart");
 const COLLECTION: &str = include_str!("sdk/lib/collection/collection.dart");
+const TYPED_DATA: &str = include_str!("sdk/lib/typed_data/typed_data.dart");
 
 #[allow(dead_code)]
 pub fn requires_sdk(file: &Path) -> bool {
@@ -71,6 +72,7 @@ pub fn sdk_project() -> tempfile::TempDir {
             ("async", include_str!("sdk/lib/async/async.dart")),
             ("math", include_str!("sdk/lib/math/math.dart")),
             ("convert", include_str!("sdk/lib/convert/convert.dart")),
+            ("typed_data", TYPED_DATA),
         ],
     );
     fs::create_dir_all(root.join("app/.dart_tool")).unwrap();

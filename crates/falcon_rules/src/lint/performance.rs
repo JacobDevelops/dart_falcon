@@ -30,4 +30,5 @@ crate::declare_rules! {
     move_variable_closer_to_its_usage::MoveVariableCloserToItsUsage => ("move-variable-closer-to-its-usage", resolved, None, false, RuleSource::Falcon, options = move_variable_closer_to_its_usage::Options);
     avoid_unnecessary_futures::AvoidUnnecessaryFutures => ("avoid-unnecessary-futures", resolved, None, false, RuleSource::Falcon);
     prefer_return_await::PreferReturnAwait => ("prefer-return-await", resolved, None, false, RuleSource::Falcon);
+    prefer_bytes_builder::PreferBytesBuilder => ("prefer-bytes-builder", resolved, None, false, RuleSource::Falcon);
 }

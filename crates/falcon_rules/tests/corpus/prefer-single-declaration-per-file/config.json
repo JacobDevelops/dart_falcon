@@ -1,0 +1,47 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "prefer-single-declaration-per-file": "warn"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "**/bad_private.dart"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "prefer-single-declaration-per-file": {
+              "level": "warn",
+              "options": {
+                "ignore-private": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/good_options.dart",
+        "**/bad_local_annotation.dart"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "prefer-single-declaration-per-file": {
+              "level": "warn",
+              "options": {
+                "ignore-enums": true,
+                "ignore-visible-for-testing": true
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

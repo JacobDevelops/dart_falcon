@@ -616,6 +616,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 }
                 self.resolve_name(&expression_segments(expression, true)?)
             }
+            Expr::GenericInstantiation(generic) => self.evaluate_type_literal(generic),
             Expr::Unary(unary) => {
                 let op = unary.op();
                 let operand = unary.operand();
@@ -669,9 +670,32 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             | Expr::Throw(_)
             | Expr::Switch(_)
             | Expr::SymbolLit(_)
-            | Expr::GenericInstantiation(_)
             | Expr::Error(_) => None,
         }
+    }
+
+    fn evaluate_type_literal(
+        &self,
+        generic: GenericInstantiationExpr<'_>,
+    ) -> Option<ConstantValue> {
+        let names = expression_segments(generic.target(), true)?;
+        if self
+            .model
+            .resolve_value(QualifiedName::from_segments(&names)?)
+            .is_some()
+        {
+            return None;
+        }
+        let identity = self.model.resolve_dotted(&names)?;
+        if self.mode == EvaluationMode::Stable && self.model.configurable_constant_path(&identity) {
+            return None;
+        }
+        let arguments = generic
+            .type_args()
+            .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
+            .collect();
+        let ty = self.model.instantiated_type_literal(&identity, arguments);
+        constant_type(&ty).map(ConstantValue::Type)
     }
 
     fn evaluate_collection(
@@ -2550,7 +2574,12 @@ fn constant_type(ty: &ResolvedType) -> Option<ConstantType> {
     })
 }
 
-fn resolved_constant_type(ty: &ConstantType) -> ResolvedType {
+/// Restores a constant's canonical type value for semantic type queries.
+///
+/// Preserves interface identities, instantiated arguments, nullability, records,
+/// and function signatures without resolving source names a second time.
+#[must_use]
+pub fn resolved_constant_type(ty: &ConstantType) -> ResolvedType {
     let named_types = |types: &[(String, ConstantType)]| {
         types
             .iter()
@@ -2834,6 +2863,49 @@ mod tests {
             None
         );
         assert_eq!(fallback.lookup(call.callee()), None);
+    }
+
+    #[test]
+    fn generic_type_literals_preserve_arguments_and_expand_aliases() {
+        with_source(
+            "typedef Values<T> = List<T>; const direct = {List<String>}; const alias = {Values<int>}; T identity<T>(T value) => value; const tearoff = identity<String>;",
+            |program, model, signatures| {
+                for (name, argument) in [("direct", "String"), ("alias", "int")] {
+                    let Some(ConstantValue::Set(_, values)) =
+                        evaluate_named(program, model, signatures, name)
+                    else {
+                        panic!("expected a constant set");
+                    };
+                    let [ConstantValue::Type(ty)] = values.as_slice() else {
+                        panic!("expected one type literal");
+                    };
+                    let resolved = resolved_constant_type(ty);
+                    assert!(resolved.interface("dart:core", "List"));
+                    assert!(resolved.arguments()[0].interface("dart:core", argument));
+                }
+                assert!(evaluate_named(program, model, signatures, "tearoff").is_none());
+            },
+        );
+    }
+
+    #[test]
+    fn resolved_constant_type_retains_instantiated_arguments_and_nullability() {
+        let ty = ConstantType::Interface(
+            DeclarationIdentity::sdk("dart:core", "List"),
+            vec![ConstantType::Interface(
+                DeclarationIdentity::sdk("dart:core", "String"),
+                Vec::new(),
+                false,
+            )],
+            true,
+        );
+        let resolved = resolved_constant_type(&ty);
+        assert!(resolved.interface("dart:core", "List"));
+        assert!(resolved.arguments()[0].interface("dart:core", "String"));
+        let ResolvedTypeKind::Interface { nullable, .. } = resolved.kind else {
+            panic!("expected an interface")
+        };
+        assert!(nullable);
     }
 
     #[test]

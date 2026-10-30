@@ -11,3 +11,11 @@ class HookCounter extends hooks.Notifier<int> {} /* expect: prefer-riverpod-noti
 class LegacyCounter extends StateNotifier<int> {} /* expect: prefer-riverpod-notifier-suffix */
 class BaseNotifier extends Notifier<int> {}
 class Child extends BaseNotifier {} /* expect: prefer-riverpod-notifier-suffix */
+class FamilyCounter extends FamilyNotifier<int, String> {} /* expect: prefer-riverpod-notifier-suffix */
+class AsyncFamilyCounter extends FamilyAsyncNotifier<int, String> {} /* expect: prefer-riverpod-notifier-suffix */
+class StreamFamilyCounter extends FamilyStreamNotifier<int, String> {} /* expect: prefer-riverpod-notifier-suffix */
+class AutoFamilyCounter extends AutoDisposeFamilyNotifier<int, String> {} /* expect: prefer-riverpod-notifier-suffix */
+class AutoAsyncFamilyCounter extends AutoDisposeFamilyAsyncNotifier<int, String> {} /* expect: prefer-riverpod-notifier-suffix */
+class AutoStreamFamilyCounter extends AutoDisposeFamilyStreamNotifier<int, String> {} /* expect: prefer-riverpod-notifier-suffix */
+class BuildlessStreamCounter extends BuildlessStreamNotifier<int> {} /* expect: prefer-riverpod-notifier-suffix */
+class AnyCounter extends AnyNotifier<int, int> {} /* expect: prefer-riverpod-notifier-suffix */

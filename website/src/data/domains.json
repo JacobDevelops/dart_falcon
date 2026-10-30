@@ -49,12 +49,15 @@
       "prefer-for-loop-in-children",
       "prefer-padding-over-container",
       "prefer-single-setstate",
+      "prefer-single-widget-per-file",
       "prefer-sized-box-square",
+      "prefer-text-rich",
       "prefer-transform-over-container",
       "prefer-using-list-view",
       "prefer-void-callback",
       "proper-controller-dispose",
       "proper-expanded-and-flexible",
+      "proper-super-calls",
       "proper-super-init-state",
       "require-super-dispose",
       "sized-box-for-whitespace",
@@ -79,11 +82,14 @@
     "rules": [
       "avoid-duplicate-test-assertions",
       "avoid-empty-test-groups",
+      "avoid-misused-test-matchers",
       "avoid-top-level-members-in-tests",
+      "format-test-name",
       "missing-test-assertion",
       "prefer-correct-test-file-name",
       "prefer-expect-later",
       "prefer-test-matchers",
+      "prefer-test-structure",
       "prefer-unique-test-names"
     ]
   },
@@ -92,11 +98,14 @@
     "rules": [
       "avoid-bloc-public-fields",
       "avoid-bloc-public-methods",
+      "avoid-cubits",
       "avoid-duplicate-bloc-event-handlers",
       "avoid-emit-outside-bloc",
+      "avoid-empty-build-when",
       "avoid-passing-bloc-to-bloc",
       "avoid-passing-bloc-to-widget",
       "avoid-passing-build-context-to-blocs",
+      "avoid-returning-value-from-cubit-methods",
       "check-is-not-closed-after-async-gap",
       "emit-new-bloc-state-instances",
       "handle-bloc-event-subclasses",
@@ -114,6 +123,7 @@
     "name": "riverpod",
     "rules": [
       "avoid-calling-notifier-members-inside-build",
+      "avoid-notifier-constructors",
       "avoid-public-notifier-properties",
       "avoid-ref-inside-state-dispose",
       "avoid-ref-read-inside-build",
@@ -127,6 +137,7 @@
       "prefer-ref-read-for-methods",
       "prefer-riverpod-notifier-suffix",
       "prefer-riverpod-provider-suffix",
+      "prefer-single-notifier-per-file",
       "use-ref-and-state-synchronously",
       "use-ref-read-synchronously"
     ]

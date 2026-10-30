@@ -1,0 +1,1 @@
+{"cross-file":{"rules":{"correctness":{"avoid-missing-test-files":{"level":"warn","options":{"patterns":["^lib/src/.*\\.dart$","^lib/root\\.dart$"]}}}}},"overrides":[{"includes":["**/good_defaults/**"],"cross-file":{"rules":{"correctness":{"avoid-missing-test-files":{"level":"warn","options":{}}}}}}]}

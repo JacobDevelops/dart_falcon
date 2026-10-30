@@ -1,0 +1,79 @@
+{
+  "linter": {
+    "rules": {
+      "style": {
+        "prefer-prefixed-global-constants": "warn"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/good_ignore_private.dart", "**/bad_ignore_private.dart"],
+      "linter": {
+        "rules": {
+          "style": {
+            "prefer-prefixed-global-constants": {
+              "level": "warn",
+              "options": { "ignore-private": true }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/bad_options.dart",
+        "**/good_options.dart"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "prefer-prefixed-global-constants": {
+              "level": "warn",
+              "options": {
+                "allowed-prefixes": ["s", "c"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/good_prefixes.dart",
+        "**/bad_prefixes.dart"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "prefer-prefixed-global-constants": {
+              "level": "warn",
+              "options": {
+                "allowed-prefixes": [
+                  "s", "c"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/good_empty_prefixes.dart"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "prefer-prefixed-global-constants": {
+              "level": "warn",
+              "options": {
+                "allowed-prefixes": []
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
