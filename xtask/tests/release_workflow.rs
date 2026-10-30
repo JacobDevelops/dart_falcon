@@ -1,5 +1,6 @@
 #![cfg(unix)]
 
+use std::fmt::Write as _;
 use std::{fs, process::Command};
 
 const CREDENTIALS: [(&str, &str); 8] = [
@@ -161,16 +162,7 @@ fn notarisation_reuses_history_without_waiting() {
         let name = "falcon-1.2.3-aarch64-darwin-ba7816bf8f01cfea414140de5dae2223b00361a3.zip";
         let existing = "11111111-1111-1111-1111-111111111111";
         let submitted = "22222222-2222-2222-2222-222222222222";
-        let mut history = String::from("id date name type status\n");
-        history.push_str(&format!(
-            "{existing} 2026-10-01 unrelated.zip zip invalid\n"
-        ));
-        if !statuses.is_empty() {
-            for status in statuses.split(',') {
-                let cli_status = status.to_ascii_lowercase();
-                history.push_str(&format!("{existing} 2026-10-01 {name} zip {cli_status}\n"));
-            }
-        }
+        let history = notarisation_history(statuses, name, existing);
         let output = Command::new("bash")
             .arg("-c")
             .arg(format!(
@@ -232,8 +224,8 @@ rcodesign() {{
             .env("APPLE_TEAM_ID", "team")
             .output()
             .unwrap();
-        assert_notarisation_result(
-            temp.path(),
+        assert_notarisation_case(
+            &temp,
             &output,
             statuses,
             published,
@@ -241,6 +233,34 @@ rcodesign() {{
             (name, existing, submitted),
         );
     }
+}
+
+fn notarisation_history(statuses: &str, name: &str, existing: &str) -> String {
+    let mut history = String::from("id date name type status\n");
+    writeln!(history, "{existing} 2026-10-01 unrelated.zip zip invalid").unwrap();
+    for status in statuses.split(',').filter(|status| !status.is_empty()) {
+        let cli_status = status.to_ascii_lowercase();
+        writeln!(history, "{existing} 2026-10-01 {name} zip {cli_status}").unwrap();
+    }
+    history
+}
+
+fn assert_notarisation_case(
+    temp: &tempfile::TempDir,
+    output: &std::process::Output,
+    statuses: &str,
+    published: bool,
+    expected: &str,
+    submission: (&str, &str, &str),
+) {
+    assert_notarisation_result(
+        temp.path(),
+        output,
+        statuses,
+        published,
+        expected,
+        submission,
+    );
 }
 
 fn assert_notarisation_result(

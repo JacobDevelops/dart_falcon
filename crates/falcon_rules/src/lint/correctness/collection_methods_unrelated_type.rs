@@ -66,7 +66,6 @@ impl<'a> Collector<'a> {
     }
 
     fn expected_argument(
-        &self,
         receiver: &ResolvedType,
         method: &str,
         state: &SemanticState<'_>,
@@ -94,15 +93,14 @@ impl<'a> Collector<'a> {
         if let Some(argument) = positional.next()
             && positional.next().is_none()
             && args.named().is_empty()
-            && let Some(expected) = self.expected_argument(receiver, method, state)
+            && let Some(expected) = Self::expected_argument(receiver, method, state)
         {
-            let context = self.argument_context(receiver, method, state);
+            let context = Self::argument_context(receiver, method, state);
             self.check(argument, &expected, context.as_ref(), state);
         }
     }
 
     fn argument_context(
-        &self,
         receiver: &ResolvedType,
         method: &str,
         state: &SemanticState<'_>,
@@ -124,7 +122,7 @@ impl<'a> Collector<'a> {
                 .instantiated_supertype(receiver, "dart:core", "Map", &state.model)
             && let Some(expected) = map.type_argument(0)
         {
-            let context = self.argument_context(receiver, "[]", state);
+            let context = Self::argument_context(receiver, "[]", state);
             self.check(index, &expected, context.as_ref(), state);
         }
     }

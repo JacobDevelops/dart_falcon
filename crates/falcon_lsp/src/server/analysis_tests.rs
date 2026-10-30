@@ -20,7 +20,7 @@ impl RelayClient {
         let (server, connection) = Connection::memory();
         let (input, inputs) = crossbeam_channel::unbounded();
         let (rounds, output) = crossbeam_channel::unbounded();
-        let thread = thread::spawn(move || relay(&server, input, output).unwrap());
+        let thread = thread::spawn(move || relay(&server, input, &output).unwrap());
         Self {
             connection,
             inputs,
@@ -249,7 +249,7 @@ fn newer_edits_suppress_stale_rounds_and_publish_each_file_only_once() {
                 assert_eq!(response.id, RequestId::from(3));
                 break;
             }
-            other => panic!("unexpected message: {other:?}"),
+            other @ Message::Request(_) => panic!("unexpected message: {other:?}"),
         }
     }
     published.sort_by(|a, b| a.uri.as_str().cmp(b.uri.as_str()));
@@ -430,17 +430,25 @@ fn real_worker_cancels_and_supersedes_before_an_ignored_notification() {
     let request_runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let worker_request_runs = Arc::clone(&request_runs);
     let worker = thread::spawn(move || {
-        analysis_worker_with(options, state, FileWatching::new(&json!({})), receiver, sender, |message| {
-            if matches!(message, Message::Request(request) if request.id == RequestId::from(1)) {
-                worker_request_runs.fetch_add(1, Ordering::Relaxed);
-            }
-            if matches!(message, Message::Notification(notification) if notification.method == DidOpenTextDocument::METHOD) {
-                started.send(()).unwrap();
-                resume.recv_timeout(TIMEOUT).unwrap();
-            }
-        }).unwrap();
+        analysis_worker_with(
+            &options,
+            state,
+            FileWatching::new(&json!({})),
+            &receiver,
+            &sender,
+            |message| {
+                if matches!(message, Message::Request(request) if request.id == RequestId::from(1)) {
+                    worker_request_runs.fetch_add(1, Ordering::Relaxed);
+                }
+                if matches!(message, Message::Notification(notification) if notification.method == DidOpenTextDocument::METHOD) {
+                    started.send(()).unwrap();
+                    resume.recv_timeout(TIMEOUT).unwrap();
+                }
+            },
+        )
+        .unwrap();
     });
-    let transport = thread::spawn(move || relay(&server, input, output).unwrap());
+    let transport = thread::spawn(move || relay(&server, input, &output).unwrap());
     let uri = format!("file://{}", temp.path().join("changed.dart").display());
     client.sender.send(ServerNotification::new(DidOpenTextDocument::METHOD.to_string(), json!({
         "textDocument": { "uri": uri, "languageId": "dart", "version": 1, "text": "void oldName() {}" }
@@ -480,7 +488,7 @@ fn real_worker_cancels_and_supersedes_before_an_ignored_notification() {
                 );
                 break;
             }
-            message => panic!("unexpected worker output: {message:?}"),
+            message @ Message::Request(_) => panic!("unexpected worker output: {message:?}"),
         }
     }
     assert_eq!(

@@ -1,4 +1,4 @@
-//! Avoid inherited-widget subscriptions during initState. Checks direct BuildContext dependency calls and known subscribing Flutter of methods, including synchronous local helper calls.
+//! Avoid inherited-widget subscriptions during initState. Checks direct `BuildContext` dependency calls and known subscribing Flutter of methods, including synchronous local helper calls.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;

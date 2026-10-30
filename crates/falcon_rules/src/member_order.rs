@@ -43,11 +43,15 @@ pub(crate) enum WidgetCategory {
 
 fn member_name(member: ClassMember<'_>) -> Option<&str> {
     match member {
-        ClassMember::Field(f) => f.declarators().next().map(|d| d.name().name()),
+        ClassMember::Field(f) => f
+            .declarators()
+            .next()
+            .map(VarDeclarator::name)
+            .map(Identifier::name),
         ClassMember::Method(m) => Some(m.name().name()),
         ClassMember::Getter(g) => Some(g.name().name()),
         ClassMember::Setter(s) => Some(s.name().name()),
-        ClassMember::Constructor(c) => c.constructor_name().map(|n| n.name()),
+        ClassMember::Constructor(c) => c.constructor_name().map(Identifier::name),
         _ => None,
     }
 }
@@ -59,7 +63,10 @@ fn is_private(member: ClassMember<'_>) -> bool {
 /// All DCL category tokens a member qualifies for (most specific first). The
 /// member's rank is the earliest of these that appears in the user's `order`.
 pub(crate) fn member_tokens(member: ClassMember<'_>) -> Vec<MemberCategory> {
-    use MemberCategory::*;
+    use MemberCategory::{
+        Constructors, Fields, Getters, Methods, NamedConstructors, PrivateFields, PrivateMethods,
+        PublicFields, PublicMethods, Setters, StaticFields, StaticMethods,
+    };
     match member {
         ClassMember::Field(f) => {
             let mut t = Vec::new();

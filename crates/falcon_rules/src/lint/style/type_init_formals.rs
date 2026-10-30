@@ -135,7 +135,7 @@ fn class_info(decl: TopLevelDecl<'_>) -> Option<(&str, ClassInfo<'_>)> {
 /// record, and builtin types, none of which can be a superclass we index.
 fn type_name(ty: DartType<'_>) -> Option<&str> {
     match ty {
-        DartType::Named(n) => n.segments().last().map(|s| s.name()),
+        DartType::Named(n) => n.segments().last().map(Identifier::name),
         _ => None,
     }
 }
@@ -254,7 +254,7 @@ fn super_param_type<'a>(
 /// the unnamed one), from an explicit `: super.named(...)` initializer.
 fn super_ctor_name(ctor: ConstructorDecl<'_>) -> Option<&str> {
     ctor.initializers().find_map(|init| match init {
-        ConstructorInitializer::SuperCall(call) => call.call_name().map(|n| n.name()),
+        ConstructorInitializer::SuperCall(call) => call.call_name().map(Identifier::name),
         _ => None,
     })
 }
@@ -262,7 +262,7 @@ fn super_ctor_name(ctor: ConstructorDecl<'_>) -> Option<&str> {
 fn find_ctor<'a>(class: &ClassInfo<'a>, name: Option<&str>) -> Option<ConstructorDecl<'a>> {
     class.members.clone().find_map(|member| match member {
         ClassMember::Constructor(c) if !c.is_factory() => {
-            let this_name = c.constructor_name().map(|n| n.name());
+            let this_name = c.constructor_name().map(Identifier::name);
             (this_name == name).then_some(c)
         }
         _ => None,

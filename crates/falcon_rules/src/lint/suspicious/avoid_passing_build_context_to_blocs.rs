@@ -1,4 +1,4 @@
-//! Keeps Flutter BuildContext arguments outside Bloc and Cubit APIs.
+//! Keeps Flutter `BuildContext` arguments outside Bloc and Cubit APIs.
 
 use crate::lint::support::bloc_passing::{Passing, prepare};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};

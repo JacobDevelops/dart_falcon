@@ -18,11 +18,12 @@ pub const SCHEMA_URL: &str = concat!(
 );
 
 /// Rule option schemas generated from the same types used during config loading.
+#[must_use]
 pub fn rule_options_schemas() -> Vec<(&'static str, Value)> {
     crate::lint::options::schemas()
 }
 
-fn rule_config(options: Value) -> Value {
+fn rule_config(options: &Value) -> Value {
     json!({
         "description": "A severity level, or an object with a severity level, rule-specific options and an optional autofix policy.",
         "oneOf": [
@@ -103,6 +104,11 @@ fn section_rules(cross_file: bool, preset_allowed: bool) -> Value {
 }
 
 /// Build the complete JSON Schema (draft-07) for falcon.json.
+///
+/// # Panics
+///
+/// Panics if a rule's registered group has no schema section.
+#[must_use]
 pub fn config_schema() -> Value {
     let mut domain_props = Map::new();
     for domain in Domain::ALL {
@@ -176,12 +182,12 @@ pub fn config_schema() -> Value {
         .expect("schema definitions");
     definitions.insert(
         "ruleWithoutOptions".into(),
-        rule_config(json!({
+        rule_config(&json!({
             "type": "object", "additionalProperties": false, "properties": {}
         })),
     );
     for (name, options) in rule_options_schemas() {
-        definitions.insert(name.into(), rule_config(options));
+        definitions.insert(name.into(), rule_config(&options));
     }
     schema
 }
@@ -314,6 +320,11 @@ fn schema_definitions() -> Value {
 
 /// The schema serialized exactly as it is written to disk: pretty-printed with a
 /// trailing newline. Shared by `cargo xtask schema` (writer) and the drift test.
+///
+/// # Panics
+///
+/// Panics if serializing the schema fails.
+#[must_use]
 pub fn config_schema_string() -> String {
     let mut s = serde_json::to_string_pretty(&config_schema()).expect("schema serializes");
     s.push('\n');

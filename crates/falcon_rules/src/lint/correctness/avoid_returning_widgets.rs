@@ -54,7 +54,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         }
         if let TopLevelDecl::Function(f) = decl {
             if let Some(ret_type) = f.return_type()
-                && contains_widget_type(self.model.resolve_type_in(ret_type, &self.parameters))
+                && contains_widget_type(&self.model.resolve_type_in(ret_type, &self.parameters))
             {
                 self.diags.push(self.ctx.diagnostic("Functions should not return `Widget` directly; extract to a separate widget class.", f.span()));
             }
@@ -70,7 +70,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn visit_class_member(&mut self, member: ClassMember<'a>) -> StructuralTraversal {
-        check_class_member(member, &mut self.diags, self.ctx, &self.model, &mut self.parameters);
+        check_class_member(&member, &mut self.diags, self.ctx, &self.model, &mut self.parameters);
         StructuralTraversal::SkipChildren
     }
 
@@ -87,8 +87,8 @@ fn is_widget_type(dart_type: &ResolvedType) -> bool {
             .any(|name| identity.is_package("flutter", name)))
 }
 
-fn contains_widget_type(dart_type: ResolvedType) -> bool {
-    is_widget_type(&dart_type)
+fn contains_widget_type(dart_type: &ResolvedType) -> bool {
+    is_widget_type(dart_type)
         || (["Future", "Stream", "Completer"]
             .iter()
             .any(|name| dart_type.interface("dart:async", name))
@@ -99,7 +99,7 @@ fn contains_widget_type(dart_type: ResolvedType) -> bool {
 
 
 fn check_class_member(
-    member: ClassMember<'_>,
+    member: &ClassMember<'_>,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
     model: &SemanticModel<'_>,
@@ -111,7 +111,7 @@ fn check_class_member(
                 parameters.push(m.type_params(), model);
             }
             if let Some(ret_type) = m.return_type()
-                && contains_widget_type(model.resolve_type_in(ret_type, parameters))
+                && contains_widget_type(&model.resolve_type_in(ret_type, parameters))
                 && m.name().name() != "build"
                 && !crate::lint::support::annotations::has_override(m.annotations(), *model)
             {
@@ -123,7 +123,7 @@ fn check_class_member(
         }
         ClassMember::Getter(g) => {
             if let Some(ret_type) = g.return_type()
-                && contains_widget_type(model.resolve_type_in(ret_type, parameters))
+                && contains_widget_type(&model.resolve_type_in(ret_type, parameters))
                 && g.name().name() != "build"
                 && !crate::lint::support::annotations::has_override(g.annotations(), *model)
             {

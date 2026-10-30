@@ -391,13 +391,13 @@ fn deprecated_option_keys_warn_with_paths_and_canonical_keys_win() {
 #[test]
 fn unknown_snake_case_option_keys_keep_their_spelling() {
     let mut options = json!({ "not_a_setting": 4 });
-    assert!(
+    assert_eq!(
         falcon_rules::canonicalize_option_keys(
             &mut options,
             "max-parameters-for-function",
             "linter.rules.complexity.max-parameters-for-function.options",
-        )
-        .is_empty()
+        ),
+        [] as [std::string::String; 0]
     );
     assert_eq!(options, json!({ "not_a_setting": 4 }));
 
@@ -478,7 +478,7 @@ fn typed_options_follow_matching_overrides_and_preserve_level_only_changes() {
     )
     .unwrap();
     let loaded = load_config(&path).unwrap();
-    assert!(loaded.warnings.is_empty());
+    assert_eq!(loaded.warnings, [] as [std::string::String; 0]);
     let source = "void f(int a, int b, int c) {}";
     let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parser::parse(source);
     let parsed = Arc::new(ParsedFile {
@@ -552,7 +552,7 @@ fn null_options_remain_absent_and_do_not_clear_previous_options() {
     )
     .unwrap();
     let loaded = load_config(&path).unwrap();
-    assert!(loaded.warnings.is_empty());
+    assert_eq!(loaded.warnings, [] as [std::string::String; 0]);
     assert_eq!(
         loaded
             .config
@@ -616,7 +616,7 @@ fn cross_file_typed_options_replace_boundaries_in_override_order() {
     )
     .unwrap();
     let loaded = load_config(&path).unwrap();
-    assert!(loaded.warnings.is_empty());
+    assert_eq!(loaded.warnings, [] as [std::string::String; 0]);
     for (file, expected) in [
         ("lib/a.dart", &base),
         ("test/a.dart", &replacement),
@@ -630,7 +630,7 @@ fn cross_file_typed_options_replace_boundaries_in_override_order() {
                     "correctness",
                     "banned-imports"
                 )
-                .map(|options| options.value()),
+                .map(falcon_config::RuleOptions::value),
             Some(expected),
             "{file}"
         );

@@ -131,6 +131,7 @@ pub fn walk_project(
 }
 
 /// Discover supported paths, pruning exclusions without reading file contents.
+#[must_use]
 pub fn discover_project(
     paths: &[PathBuf],
     filter: &PathFilter,
@@ -141,6 +142,7 @@ pub fn discover_project(
 
 /// Discover paths and snapshot inputs, traversed directories, and ancestor
 /// manifest candidates, including missing paths, without reading file contents.
+#[must_use]
 pub fn discover_project_with_watches(
     paths: &[PathBuf],
     filter: &PathFilter,
@@ -163,11 +165,11 @@ fn discover_project_inner(
         filtered_paths: Vec::new(),
     };
     let mut seen = HashSet::new();
-    let mut watched = track_watches.then(HashMap::new);
+    let mut index_by_path = track_watches.then(HashMap::new);
     let mut watches = Vec::new();
     for path in paths {
         let metadata = path.metadata();
-        record_watch(path, &mut watched, &mut watches, || {
+        record_watch(path, &mut index_by_path, &mut watches, || {
             metadata
                 .as_ref()
                 .ok()
@@ -219,7 +221,7 @@ fn discover_project_inner(
             };
             for ancestor in start.ancestors() {
                 let manifest = ancestor.join("pubspec.yaml");
-                record_watch(&manifest, &mut watched, &mut watches, || {
+                record_watch(&manifest, &mut index_by_path, &mut watches, || {
                     manifest
                         .metadata()
                         .ok()
@@ -239,7 +241,7 @@ fn discover_project_inner(
                 collect_manifests,
                 &mut seen,
                 &mut output,
-                &mut watched,
+                &mut index_by_path,
                 &mut watches,
             );
         }
@@ -262,10 +264,10 @@ fn discover_directory(
     collect_manifests: bool,
     seen: &mut HashSet<PathBuf>,
     output: &mut ProjectDiscovery,
-    watched: &mut Option<HashMap<PathBuf, usize>>,
+    index_by_path: &mut Option<HashMap<PathBuf, usize>>,
     watches: &mut Vec<DiscoveryWatch>,
 ) {
-    let track_watches = watched.is_some();
+    let track_watches = index_by_path.is_some();
     // Flutter plugin symlinks point into dependency caches and may cycle.
     for item in WalkDir::new(path)
         .follow_links(false)
@@ -277,15 +279,15 @@ fn discover_directory(
                     && (kind.is_file() || (kind.is_symlink() && entry.path().is_file()))
                     && admitted_file(entry.path(), filter, collect_manifests)
                 {
-                    record_entry(entry, watched, watches);
+                    record_entry(entry, index_by_path.as_ref(), watches);
                 }
                 return true;
             }
             if filter.excludes_directory(entry.path()) {
                 return false;
             }
-            record_entry(entry, watched, watches);
-            let index = record_watch(entry.path(), watched, watches, || {
+            record_entry(entry, index_by_path.as_ref(), watches);
+            let index = record_watch(entry.path(), index_by_path, watches, || {
                 entry
                     .path()
                     .metadata()
@@ -336,12 +338,12 @@ fn record_watch(
 
 fn record_entry(
     entry: &walkdir::DirEntry,
-    watched: &Option<HashMap<PathBuf, usize>>,
+    index_by_path: Option<&HashMap<PathBuf, usize>>,
     watches: &mut [DiscoveryWatch],
 ) {
-    if let Some(watched) = watched
+    if let Some(index_by_path) = index_by_path
         && let Some(parent) = entry.path().parent()
-        && let Some(&index) = watched.get(parent)
+        && let Some(&index) = index_by_path.get(parent)
         && let Some(entries) = &mut watches[index].entries
     {
         entries.push((
@@ -565,6 +567,6 @@ mod tests {
         std::fs::create_dir(directory.path().join("lib")).unwrap();
         let filter = PathFilter::from_includes(&["**".into()]);
         let discovery = discover_project(&[directory.path().to_path_buf()], &filter, true);
-        assert!(discovery.watches.is_empty());
+        assert_eq!(discovery.watches, [] as [DiscoveryWatch; 0]);
     }
 }

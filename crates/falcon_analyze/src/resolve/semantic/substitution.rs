@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    AliasComparison, AliasProvenance, Arc, BorrowedHashKey, BorrowedIdentity, DeclarationIdentity,
+    FunctionTypeShape, FxHashMap, FxHashSet, Hash, HashSet, ResolvedType, SemanticModel,
+    TypeParameterId, collect_parameter_ids,
+};
 use crate::resolve::semantic::ResolvedTypeKind;
 
 /// Substitution interns equal source subgraphs within one pass. Unlike semantic
@@ -130,8 +134,9 @@ impl<'a> SubstitutionMemo<'a> {
         // Match substitution's free-parameter boundary, not mentions_any's
         // bound traversal: an unreplaced parameter retains its original bound.
         let relevant = match ty {
-            ResolvedType { kind: ResolvedTypeKind::TypeParameter { id, .. } }
-            | ResolvedType { kind: ResolvedTypeKind::NonNullTypeParameter { id, .. } } => substitutions.contains_key(id),
+            ResolvedType {
+kind: ResolvedTypeKind::TypeParameter { id, .. } |
+    ResolvedTypeKind::NonNullTypeParameter { id, .. } } => substitutions.contains_key(id),
             ResolvedType { kind: ResolvedTypeKind::Interface { arguments, .. } } => arguments
                 .iter()
                 .any(|ty| self.is_relevant(ty, substitutions, true)),
@@ -265,14 +270,10 @@ fn instantiate_bound_type_memoized<'a>(
         ty,
         ResolvedType {
             kind: ResolvedTypeKind::Interface { .. }
-        } | ResolvedType {
-            kind: ResolvedTypeKind::Function { .. }
-        } | ResolvedType {
-            kind: ResolvedTypeKind::Record { .. }
-        } | ResolvedType {
-            kind: ResolvedTypeKind::TypeParameter { .. }
-        } | ResolvedType {
-            kind: ResolvedTypeKind::NonNullTypeParameter { .. }
+                | ResolvedTypeKind::Function { .. }
+                | ResolvedTypeKind::Record { .. }
+                | ResolvedTypeKind::TypeParameter { .. }
+                | ResolvedTypeKind::NonNullTypeParameter { .. }
         }
     ) {
         memo.insert(key, result.clone());

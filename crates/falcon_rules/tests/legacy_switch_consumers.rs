@@ -13,20 +13,14 @@ use falcon_rules::lint::complexity::max_switch_cases::MaxSwitchCases;
 use falcon_rules::lint::correctness::exhaustive_cases::ExhaustiveCases;
 use falcon_rules::lint::correctness::no_adjacent_strings_in_list::NoAdjacentStringsInList;
 use falcon_syntax::cst::visit::{Visitor, walk_stmt};
-use falcon_syntax::cst::{Stmt, SwitchCaseKind};
+use falcon_syntax::cst::{Stmt, SwitchCase, SwitchCaseKind};
 
 fn case_program(source: &str, legacy: bool) -> falcon_dart_parser::ParseResult {
-    let source = format!(
-        "// @dart = {}\n{source}",
-        if legacy { "2.19" } else { "3.13" }
-    );
-    let parsed = parse(&source);
-    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
     struct CaseKinds(bool, usize);
     impl<'a> Visitor<'a> for CaseKinds {
         fn visit_stmt(&mut self, node: Stmt<'a>) {
             if let Stmt::Switch(switch) = node {
-                for case in switch.cases().flat_map(|group| group.cases()) {
+                for case in switch.cases().flat_map(SwitchCase::cases) {
                     if matches!(case, SwitchCaseKind::Default(_)) {
                         continue;
                     }
@@ -37,6 +31,12 @@ fn case_program(source: &str, legacy: bool) -> falcon_dart_parser::ParseResult {
             walk_stmt(self, node);
         }
     }
+    let source = format!(
+        "// @dart = {}\n{source}",
+        if legacy { "2.19" } else { "3.13" }
+    );
+    let parsed = parse(&source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
     let mut kinds = CaseKinds(legacy, 0);
     kinds.visit_program(parsed.tree.program(&source));
     assert!(kinds.1 > 0);
@@ -156,8 +156,14 @@ fn legacy_pseudoenum_cases_preserve_coverage() {
         "{declaration}
         void f(E value) {{ switch (value) {{ case E.a: break; case E.b: break; }} }}"
     );
-    assert!(diagnostics(ExhaustiveCases::NAME, &ExhaustiveCases, &complete, false).is_empty());
-    assert!(diagnostics(ExhaustiveCases::NAME, &ExhaustiveCases, &complete, true).is_empty());
+    assert_eq!(
+        diagnostics(ExhaustiveCases::NAME, &ExhaustiveCases, &complete, false),
+        [] as [std::string::String; 0]
+    );
+    assert_eq!(
+        diagnostics(ExhaustiveCases::NAME, &ExhaustiveCases, &complete, true),
+        [] as [std::string::String; 0]
+    );
     let incomplete = format!(
         "{declaration}
         void f(E value) {{ switch (value) {{ case E.a: break; }} }}"

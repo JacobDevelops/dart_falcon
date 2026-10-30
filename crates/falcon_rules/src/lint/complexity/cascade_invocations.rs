@@ -69,8 +69,8 @@ impl Rule for CascadeInvocations {
             locals: ctx.local_declarations(program),
             prefixes: program
                 .imports()
-                .filter_map(|import| import.as_name())
-                .map(|prefix| prefix.name())
+                .filter_map(ImportDirective::as_name)
+                .map(Identifier::name)
                 .collect(),
             facts: HashMap::new(),
         }))
@@ -332,7 +332,7 @@ impl<'a> Scope<'_, 'a> {
         };
         let mut nodes = Vec::new();
         let mut member_names = Vec::new();
-        for op in cascade.sections().flat_map(|section| section.ops()) {
+        for op in cascade.sections().flat_map(CascadeSection::ops) {
             match op {
                 CascadeOp::NullAssert(_) => {}
                 CascadeOp::Field(field) => member_names.push(field.name()),
@@ -374,7 +374,7 @@ impl<'a> Scope<'_, 'a> {
             return Some(Element::Local(declaration));
         }
         match self.enclosing_member_owner(name) {
-            Some(Some(owner)) => {
+            Some(MemberOwner::Type(owner)) => {
                 // A field whose type mentions its class's type parameters is
                 // referenced through a fresh substituted member each time, so
                 // two statements never share its element.
@@ -391,7 +391,7 @@ impl<'a> Scope<'_, 'a> {
             }
             // Possibly inherited through an unresolvable supertype; only a
             // resolvable top-level declaration is taken at face value.
-            Some(None)
+            Some(MemberOwner::Unknown)
                 if self.state.model.resolve_value(name).is_none()
                     && self.state.model.resolve_name(name).is_none() =>
             {
@@ -419,10 +419,8 @@ impl<'a> Scope<'_, 'a> {
             .map(|_| Element::Type(name))
     }
 
-    /// The declaring type of the enclosing type's member `name`: `None` when
-    /// there is no enclosing type or no such member, `Some(None)` when the
-    /// hierarchy is unresolvable.
-    fn enclosing_member_owner(&self, name: &str) -> Option<Option<DeclarationIdentity>> {
+    /// The declaring type of the enclosing type's member `name`, if known.
+    fn enclosing_member_owner(&self, name: &str) -> Option<MemberOwner> {
         match self.state.enclosing_type.as_ref()?.view() {
             ResolvedTypeView::Interface { identity, .. } => {
                 member_owner(identity, name, self.state)
@@ -439,7 +437,11 @@ impl<'a> Scope<'_, 'a> {
             return false;
         };
         let receiver = match object {
-            None => return self.enclosing_member_owner(name).flatten().as_ref() == Some(owner),
+            None => {
+                return self.enclosing_member_owner(name).is_some_and(
+                    |member| matches!(member, MemberOwner::Type(identity) if identity == *owner),
+                );
+            }
             Some(Expr::Super(_)) => {
                 let Some(ResolvedTypeView::Interface { identity, .. }) =
                     self.state.enclosing_type.as_ref().map(ResolvedType::view)
@@ -459,9 +461,8 @@ impl<'a> Scope<'_, 'a> {
             Some(object) => self.static_type(object),
         };
         match receiver.as_ref().map(ResolvedType::view) {
-            Some(ResolvedTypeView::Interface { identity, .. }) => {
-                member_owner(identity, name, self.state).flatten().as_ref() == Some(owner)
-            }
+            Some(ResolvedTypeView::Interface { identity, .. }) => member_owner(identity, name, self.state)
+                .is_some_and(|member| matches!(member, MemberOwner::Type(member_owner) if member_owner == *owner)),
             Some(ResolvedTypeView::Dynamic) => false,
             // An unresolved receiver may be the owner itself.
             _ => true,
@@ -538,7 +539,10 @@ impl<'a> Scope<'_, 'a> {
         match object {
             Expr::Ident(identifier) if !self.is_local(identifier) => {
                 let name = identifier.name();
-                if matches!(self.enclosing_member_owner(name), Some(Some(_))) {
+                if matches!(
+                    self.enclosing_member_owner(name),
+                    Some(MemberOwner::Type(_))
+                ) {
                     let enclosing = self.state.enclosing_type.as_ref()?;
                     return self
                         .state
@@ -585,11 +589,8 @@ impl<'a> Scope<'_, 'a> {
     /// by `owner`.
     fn unqualified_in_owner(&self, name: &str, owner: &Owner) -> bool {
         match self.enclosing_member_owner(name) {
-            Some(Some(member_owner)) => *owner == Owner::Type(member_owner),
-            // An inherited member of an unresolvable hierarchy, or a
-            // top-level declaration: only the latter can be in a library.
-            Some(None) => matches!(owner, Owner::Library(_)) && self.top_level_in(name, owner),
-            None => self.top_level_in(name, owner),
+            Some(MemberOwner::Type(member_owner)) => *owner == Owner::Type(member_owner),
+            Some(MemberOwner::Unknown) | None => self.top_level_in(name, owner),
         }
     }
 
@@ -604,30 +605,39 @@ impl<'a> Scope<'_, 'a> {
     }
 }
 
-/// The declaring type of member `name` of `identity`: `None` when `identity`
-/// has no such member, `Some(None)` when its hierarchy is unresolvable.
+/// The known declaring type of a member, or an unresolved hierarchy.
+enum MemberOwner {
+    Type(DeclarationIdentity),
+    Unknown,
+}
+
+/// The declaring type of member `name` of `identity`.
 fn member_owner(
     identity: &DeclarationIdentity,
     name: &str,
     state: &SemanticState<'_>,
-) -> Option<Option<DeclarationIdentity>> {
+) -> Option<MemberOwner> {
     if !state
         .signatures
         .declared_member_facts(identity, name)
         .is_empty()
     {
-        return Some(Some(identity.clone()));
+        return Some(MemberOwner::Type(identity.clone()));
     }
-    match state.signatures.inherited_member_facts(identity, name) {
-        None => Some(None),
-        Some(facts) => facts.first().map(|fact| Some(fact.declaring_type.clone())),
-    }
+    state
+        .signatures
+        .inherited_member_facts(identity, name)
+        .map_or(Some(MemberOwner::Unknown), |facts| {
+            facts
+                .first()
+                .map(|fact| MemberOwner::Type(fact.declaring_type.clone()))
+        })
 }
 
-fn for_each_argument<'a>(args: ArgList<'a>, mut f: impl FnMut(Expr<'a>)) {
+fn for_each_argument<'a>(args: ArgList<'a>, f: impl FnMut(Expr<'a>)) {
     args.positional()
-        .chain(args.named().map(|argument| argument.value()))
-        .for_each(&mut f);
+        .chain(args.named().map(NamedArg::value))
+        .for_each(f);
 }
 
 /// Summarizes critical nodes: identifiers, closures, and for property
@@ -669,7 +679,7 @@ impl<'a> Visitor<'a> for Finder<'_, '_, 'a> {
                 }
                 Expr::Cascade(cascade) => {
                     if let Some(owner) = finder.owner {
-                        for op in cascade.sections().flat_map(|section| section.ops()) {
+                        for op in cascade.sections().flat_map(CascadeSection::ops) {
                             let name = match op {
                                 CascadeOp::Field(field) => field.name(),
                                 CascadeOp::Call(call) => call.name(),

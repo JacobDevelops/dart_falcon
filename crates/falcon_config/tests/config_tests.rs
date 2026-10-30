@@ -11,7 +11,7 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 fn temp_file_path(name: &str) -> PathBuf {
     let id = COUNTER.fetch_add(1, Ordering::Relaxed);
     let mut path = std::env::temp_dir();
-    path.push(format!("falcon_test_{}_{}", id, name));
+    path.push(format!("falcon_test_{id}_{name}"));
     path
 }
 
@@ -29,7 +29,7 @@ fn from_json(value: serde_json::Value) -> FalconConfig {
 fn test_default_config() {
     let cfg = FalconConfig::default();
     assert!(cfg.schema.is_none());
-    assert!(cfg.files.includes.patterns().is_empty());
+    assert_eq!(cfg.files.includes.patterns(), &[] as &[String]);
     assert!(cfg.linter.enabled);
     assert_eq!(cfg.linter.rules.recommended, None);
     assert!(cfg.linter.rules.groups.is_empty());
@@ -49,7 +49,7 @@ fn test_adoption_settings_parse_and_serialize() {
         std::path::Path::new("project/falcon.json"),
     )
     .expect("canonical adoption settings load");
-    assert!(loaded.warnings.is_empty());
+    assert_eq!(loaded.warnings, [] as [String; 0]);
     assert_eq!(
         loaded.config.baseline,
         Some(PathBuf::from("ci/falcon-baseline.json"))
@@ -192,7 +192,7 @@ fn test_rule_configuration_both_forms() {
         with_options
             .options_data()
             .and_then(|options| options.value().get("k"))
-            .and_then(|v| v.as_i64()),
+            .and_then(serde_json::Value::as_i64),
         Some(1)
     );
 
@@ -393,9 +393,7 @@ fn test_rule_options_scoped_to_group() {
         .expect("options present")
         .value();
     assert_eq!(
-        opts.get("items")
-            .and_then(|v| v.as_array())
-            .map(|a| a.len()),
+        opts.get("items").and_then(|v| v.as_array()).map(Vec::len),
         Some(2)
     );
     // Plain form or absent rule → no options.
@@ -515,7 +513,7 @@ fn test_legacy_schema_is_rejected() {
 #[test]
 fn test_find_config_in_cwd() {
     let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("falcon_test_find_config_{}", id));
+    let dir = std::env::temp_dir().join(format!("falcon_test_find_config_{id}"));
     fs::create_dir_all(&dir).expect("create temp dir");
     let config_path = dir.join("falcon.json");
     fs::write(&config_path, "{}").expect("write config");
@@ -529,16 +527,15 @@ fn test_find_config_in_cwd() {
 #[test]
 fn test_find_config_none_when_no_local_or_git_config() {
     let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("falcon_test_no_config_{}", id));
+    let dir = std::env::temp_dir().join(format!("falcon_test_no_config_{id}"));
     fs::create_dir_all(&dir).expect("create temp dir");
     assert!(!dir.join("falcon.json").exists());
 
     let found = find_config(&dir);
-    let home_config_exists = std::env::var("HOME")
-        .map(|h| std::path::Path::new(&h).join(".falcon.json").exists())
-        .unwrap_or(false);
+    let home_config_exists =
+        std::env::var("HOME").is_ok_and(|h| std::path::Path::new(&h).join(".falcon.json").exists());
     if !home_config_exists {
-        assert!(found.is_none(), "expected no config but got: {:?}", found);
+        assert!(found.is_none(), "expected no config but got: {found:?}");
     }
 
     let _ = fs::remove_dir(&dir);
@@ -993,14 +990,14 @@ fn test_override_options_replace_base_per_path() {
     assert_eq!(
         cfg.rule_options_data_for("lib/main.dart", "complexity", "max_lines_for_file")
             .and_then(|options| options.value().get("max_lines"))
-            .and_then(|v| v.as_u64()),
+            .and_then(serde_json::Value::as_u64),
         Some(400)
     );
     // Matching path: override options replace the base wholesale.
     assert_eq!(
         cfg.rule_options_data_for("test/widget_test.dart", "complexity", "max_lines_for_file")
             .and_then(|options| options.value().get("max_lines"))
-            .and_then(|v| v.as_u64()),
+            .and_then(serde_json::Value::as_u64),
         Some(10)
     );
 }
@@ -1020,7 +1017,7 @@ fn test_override_without_options_keeps_base_options() {
     assert_eq!(
         cfg.rule_options_data_for("test/widget_test.dart", "complexity", "max_lines_for_file")
             .and_then(|options| options.value().get("max_lines"))
-            .and_then(|v| v.as_u64()),
+            .and_then(serde_json::Value::as_u64),
         Some(400)
     );
 }

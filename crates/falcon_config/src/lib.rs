@@ -84,11 +84,16 @@ fn integer_with_range_minimum<'de, D: Deserializer<'de>, const RANGE_MIN: usize>
         return usize::try_from(value).map_err(|_| range_error());
     }
     let value = number.as_f64().ok_or_else(range_error)?;
-    // The exclusive bound avoids accepting 2^64 when usize::MAX rounds up as f64.
-    if value < 0.0 || value >= usize::MAX as f64 + 1.0 || value.fract() != 0.0 {
+    if !(0.0..18_446_744_073_709_551_616.0).contains(&value) || value.fract() != 0.0 {
         return Err(range_error());
     }
-    Ok(value as usize)
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the preceding range and integral-value checks make this conversion exact"
+    )]
+    let value = value as u64;
+    usize::try_from(value).map_err(|_| range_error())
 }
 
 /// Deserialize an optional JSON Schema integer, preserving null as `None`.
@@ -154,6 +159,7 @@ pub struct OverrideRules {
 
 impl Override {
     /// Match walked paths; invalid globs are ignored.
+    #[must_use]
     pub fn matches(&self, path: &str) -> bool {
         self.includes.admits(path)
     }
@@ -193,7 +199,7 @@ impl PathRoot {
                 if ancestor == parent {
                     return strip_root(cached.as_ref()?, &self.canonical).map(Path::to_path_buf);
                 }
-                resolved = cached.clone();
+                resolved.clone_from(cached);
                 break;
             }
             #[cfg(test)]
@@ -268,6 +274,7 @@ impl Serialize for PathFilter {
 }
 
 impl PathFilter {
+    #[must_use]
     pub fn from_includes(patterns: &[String]) -> Self {
         patterns.to_vec().into()
     }
@@ -319,6 +326,7 @@ impl PathFilter {
         self.compile();
     }
 
+    #[must_use]
     pub fn warnings(&self) -> &[String] {
         &self.warnings
     }
@@ -439,6 +447,7 @@ impl PathFilter {
             })
     }
 
+    #[must_use]
     pub fn excludes(&self, path: &str) -> bool {
         if let Some(filter) = self.package_filter(path) {
             return filter.excludes(path);
@@ -456,6 +465,7 @@ impl PathFilter {
         })
     }
 
+    #[must_use]
     pub fn excludes_directory(&self, path: &Path) -> bool {
         let text = path.to_string_lossy();
         // A replacement config can admit descendants excluded by the parent.
@@ -510,10 +520,12 @@ impl PathFilter {
             .any(|pattern| matches_path(pattern, &path))
     }
 
+    #[must_use]
     pub fn patterns(&self) -> &[String] {
         &self.patterns
     }
 
+    #[must_use]
     pub fn admits(&self, path: &str) -> bool {
         if let Some(filter) = self.package_filter(path) {
             return filter.admits(path);
@@ -563,6 +575,7 @@ impl FalconConfig {
     }
 
     /// Select the nearest package configuration, falling back to this config.
+    #[must_use]
     pub fn config_for_path(&self, path: &str) -> &Self {
         self.package_configs
             .iter()
@@ -571,6 +584,7 @@ impl FalconConfig {
             .map_or(self, |config| config.config_for_path(path))
     }
 
+    #[must_use]
     pub fn root_dir(&self) -> Option<&Path> {
         self.files
             .includes
@@ -579,6 +593,7 @@ impl FalconConfig {
             .map(|root| root.canonical.as_path())
     }
 
+    #[must_use]
     pub fn path_warnings(&self) -> Vec<String> {
         let mut warnings = self.files.includes.warnings.clone();
         for entry in &self.overrides {
@@ -587,6 +602,11 @@ impl FalconConfig {
         warnings
     }
 
+    /// Resolve paths relative to `base`, sharing the canonical root with overrides.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the root include filter has not been initialized.
     pub fn resolve_paths(&mut self, base: &Path) {
         self.files.includes.set_base_dir(base);
         let root = self.files.includes.root.as_ref().unwrap();
@@ -660,6 +680,7 @@ impl Default for CrossFileConfig {
 
 impl CrossFileConfig {
     /// Resolve a cross-file rule's effective severity, or `None` if disabled.
+    #[must_use]
     pub fn resolve_rule(
         &self,
         group: &str,
@@ -673,6 +694,7 @@ impl CrossFileConfig {
 }
 
 /// Map an explicit rule level to a resolved severity (`off` → disabled).
+#[must_use]
 pub fn level_to_severity(level: RulePlainConfiguration) -> Option<ResolvedSeverity> {
     match level {
         RulePlainConfiguration::Off => None,
@@ -756,6 +778,10 @@ impl RuleOptions {
     /// # Panics
     ///
     /// Panics if this wrapper was already initialized with a different type.
+    ///
+    /// # Errors
+    ///
+    /// Returns the initializer's error if parsing fails.
     pub fn get_or_try_init<T: Any + Send + Sync, E: Any + Send + Sync>(
         &self,
         initializer: impl FnOnce(&serde_json::Value) -> Result<T, E>,
@@ -799,8 +825,9 @@ impl RuleConfiguration {
     /// The configured level, regardless of form.
     pub fn level(&self) -> RulePlainConfiguration {
         match self {
-            RuleConfiguration::Plain(level) => *level,
-            RuleConfiguration::WithOptions { level, .. } => *level,
+            RuleConfiguration::Plain(level) | RuleConfiguration::WithOptions { level, .. } => {
+                *level
+            }
         }
     }
 
@@ -824,6 +851,10 @@ impl RuleConfiguration {
 }
 
 /// Parse a rule level string, naming the offending value on failure.
+///
+/// # Errors
+///
+/// Returns an error containing `value` when it is not a recognized level.
 pub fn level_from_str<E: de::Error>(value: &str) -> Result<RulePlainConfiguration, E> {
     match value {
         "off" => Ok(RulePlainConfiguration::Off),
@@ -923,6 +954,7 @@ pub enum ResolvedSeverity {
 impl FalconConfig {
     /// Resolve a rule's severity, or `None` if it is disabled.
     /// See [`LinterConfig::resolve_rule`].
+    #[must_use]
     pub fn resolve_rule(
         &self,
         group: &str,
@@ -939,6 +971,7 @@ impl FalconConfig {
     /// Matching overrides replace the whole options value in order, not individual
     /// fields. An override with absent or null options leaves earlier options intact,
     /// independently of its level.
+    #[must_use]
     pub fn rule_options_data_for(
         &self,
         path: &str,
@@ -953,6 +986,7 @@ impl FalconConfig {
     ///
     /// Matching overrides replace the whole value in order; absent or null
     /// options leave the previous value intact, independently of rule levels.
+    #[must_use]
     pub fn cross_file_options_data_for(
         &self,
         path: &str,
@@ -967,6 +1001,7 @@ impl FalconConfig {
     ///
     /// Matching overrides apply in order. An absent fix policy inherits the
     /// previous policy independently of levels and options.
+    #[must_use]
     pub fn rule_fix_for(&self, path: &str, group: &str, rule_name: &str) -> Option<RuleFix> {
         self.fix_for(path, group, rule_name, Section::Linter)
     }
@@ -975,6 +1010,7 @@ impl FalconConfig {
     ///
     /// Matching overrides apply in order; an absent policy leaves the previous
     /// policy intact. Package configurations replace the workspace configuration.
+    #[must_use]
     pub fn cross_file_fix_for(&self, path: &str, group: &str, rule_name: &str) -> Option<RuleFix> {
         self.fix_for(path, group, rule_name, Section::CrossFile)
     }
@@ -1010,6 +1046,7 @@ impl FalconConfig {
     }
 
     /// Return the full configuration path of effective file-rule options.
+    #[must_use]
     pub fn rule_options_location_for(
         &self,
         path: &str,
@@ -1020,6 +1057,7 @@ impl FalconConfig {
     }
 
     /// Return the full configuration path of effective cross-file-rule options.
+    #[must_use]
     pub fn cross_file_options_location_for(
         &self,
         path: &str,
@@ -1091,6 +1129,7 @@ impl FalconConfig {
     }
 
     /// Resolve file-rule severity, applying matching overrides in order (later wins).
+    #[must_use]
     pub fn resolve_rule_for(
         &self,
         path: &str,
@@ -1116,6 +1155,7 @@ impl FalconConfig {
     /// by every override whose `includes` match, applied in order (later wins).
     /// Mirrors [`Self::resolve_rule_for`] but reads the override's `cross_file`
     /// block and has no domain dimension. `None` means the rule is disabled here.
+    #[must_use]
     pub fn resolve_cross_file_rule_for(
         &self,
         path: &str,
@@ -1138,6 +1178,7 @@ impl FalconConfig {
     /// Whether a **cross-file** rule is enabled for any path — the base cross-file
     /// config or any override turns it on. Drives cross-file-rule registration,
     /// mirroring [`Self::is_rule_enabled_anywhere`].
+    #[must_use]
     pub fn is_cross_file_rule_enabled_anywhere(
         &self,
         group: &str,
@@ -1156,6 +1197,7 @@ impl FalconConfig {
     }
 
     /// Whether the base config or an override enables this rule for any path.
+    #[must_use]
     pub fn is_rule_enabled_anywhere(
         &self,
         group: &str,
@@ -1250,6 +1292,7 @@ impl LinterConfig {
     /// 3. Rule with domains: enabled if any of its domains resolves enabled. A
     ///    missing domain key defaults to `Recommended`.
     /// 4. No domains: enabled iff the recommended preset is active.
+    #[must_use]
     pub fn resolve_rule(
         &self,
         group: &str,
@@ -1290,6 +1333,7 @@ pub enum ConfigPathSegment {
 }
 
 /// Render a configuration location for diagnostics, never for navigation.
+#[must_use]
 pub fn format_config_path(path: &[ConfigPathSegment]) -> String {
     let mut rendered = String::new();
     for segment in path {
@@ -1315,11 +1359,13 @@ pub struct ConfigError(pub String, pub Vec<ConfigPathSegment>);
 
 impl ConfigError {
     /// Construct an error at the configuration root.
+    #[must_use]
     pub fn new(message: String) -> Self {
         Self(message, Vec::new())
     }
 
     /// Construct an error at its original configuration location.
+    #[must_use]
     pub fn at(message: String, path: Vec<ConfigPathSegment>) -> Self {
         Self(message, path)
     }
@@ -1334,6 +1380,7 @@ impl std::fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 /// Locate a deserialization failure by tracking object keys and array indices.
+#[must_use]
 pub fn deserialize_error_path<T: DeserializeOwned>(
     value: &Value,
     path: &[ConfigPathSegment],
@@ -1425,6 +1472,7 @@ fn validate_keys(
     kind: ConfigObject,
     warnings: &mut Vec<String>,
 ) -> Result<(), ConfigError> {
+    use ConfigObject as Object;
     if matches!(kind, ConfigObject::Rule) {
         validate_rule_level(value, path)?;
     }
@@ -1451,8 +1499,7 @@ fn validate_keys(
                     *legacy == key
                         && (matches!(kind, ConfigObject::Root) || *canonical == "cross-file")
                 })
-                .map(|(_, canonical)| *canonical)
-                .unwrap_or(key)
+                .map_or(key.as_str(), |(_, canonical)| *canonical)
         } else {
             key
         };
@@ -1463,7 +1510,6 @@ fn validate_keys(
                 format_config_path(&full_path)
             ));
         }
-        use ConfigObject as Object;
         let child = match (kind, canonical) {
             (Object::Root, "$schema" | "max-errors" | "baseline" | "error-on-warnings")
             | (Object::Files | Object::Override, "includes")
@@ -1483,11 +1529,14 @@ fn validate_keys(
                 }
                 None
             }
-            (Object::Override, "linter" | "cross-file") if value.is_null() => None,
+            (Object::Override, "linter" | "cross-file") | (Object::Linter, "domains")
+                if value.is_null() =>
+            {
+                None
+            }
             (Object::Override, "linter" | "cross-file") => Some(Object::OverrideRules),
             (Object::Linter | Object::CrossFile, "rules") => Some(Object::Rules),
             (Object::OverrideRules, "rules") => Some(Object::OverrideRuleEntries),
-            (Object::Linter, "domains") if value.is_null() => None,
             (Object::Linter, "domains") => Some(Object::Domains),
             (Object::Rules | Object::OverrideRuleEntries, group)
                 if RULE_GROUPS.contains(&group) =>
@@ -1558,9 +1607,9 @@ fn validate_rule_level(
 /// the legacy flat schema, and a zero `max-errors` value.
 pub fn deserialize_config(path: &Path) -> Result<LoadedConfig, ConfigError> {
     let content = std::fs::read_to_string(path)
-        .map_err(|e| ConfigError::new(format!("failed to read config file: {}", e)))?;
+        .map_err(|e| ConfigError::new(format!("failed to read config file: {e}")))?;
     let value: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| ConfigError::new(format!("failed to parse config JSON: {}", e)))?;
+        .map_err(|e| ConfigError::new(format!("failed to parse config JSON: {e}")))?;
     deserialize_config_value(&value, path)
 }
 
@@ -1629,6 +1678,7 @@ pub fn deserialize_config_value(
 }
 
 /// Whether `path` names `$HOME/.falcon.json`, resolving directory aliases but not config symlinks.
+#[must_use]
 pub fn is_home_config(path: &Path) -> bool {
     let Some(home) = std::env::var_os("HOME") else {
         return false;
@@ -1656,6 +1706,7 @@ pub fn is_home_config(path: &Path) -> bool {
 /// 2. Walk parent dirs to the nearest `.git` or `.jj` entry and check its `falcon.json`
 /// 3. `$HOME/.falcon.json` (via `std::env::var("HOME")`)
 /// 4. Return None if nothing found
+#[must_use]
 pub fn find_config(start_dir: &Path) -> Option<PathBuf> {
     let local_config = start_dir.join("falcon.json");
     if local_config.exists() {

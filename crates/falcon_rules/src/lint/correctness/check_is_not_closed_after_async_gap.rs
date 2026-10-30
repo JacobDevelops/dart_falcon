@@ -28,8 +28,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -83,10 +83,7 @@ impl<'a> Collector<'a> {
         {
             return false;
         }
-        if self
-            .types
-            .is_api_type(&state.environment.lookup(name), &state.model, "Emitter")
-        {
+        if BlocTypes::is_api_type(&state.environment.lookup(name), &state.model, "Emitter") {
             return true;
         }
         let declaration = state.environment.binding_declaration(name);
@@ -138,19 +135,23 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         async_gap_spans_with_guard(
             program,
             AsyncGapFacts::default(),
-            calls,
+            &calls,
             true,
             |expression, emitter| {
                 (closed.contains(&expression)
-                    || emitter.as_ref().is_some_and(|binding| done.get(&expression) == Some(binding)))
+                    || emitter
+                        .as_ref()
+                        .is_some_and(|binding| done.get(&expression) == Some(binding)))
                 .then_some(false)
             },
         )
         .into_iter()
-        .map(|span| ctx.diagnostic(
-            "Check `isClosed` after the `await` before adding an event or emitting a state.",
-            span,
-        ))
+        .map(|span| {
+            ctx.diagnostic(
+                "Check `isClosed` after the `await` before adding an event or emitting a state.",
+                span,
+            )
+        })
         .collect()
     }
 
@@ -174,15 +175,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             {
                 return;
             }
-            let binding = if emitter
-                && let Expr::Ident(identifier) = call.callee().unparenthesized()
-            {
-                state.environment.binding_declaration(identifier.name())
-            } else {
-                None
-            };
+            let binding =
+                if emitter && let Expr::Ident(identifier) = call.callee().unparenthesized() {
+                    state.environment.binding_declaration(identifier.name())
+                } else {
+                    None
+                };
             self.calls.insert(call.syntax().id(), binding);
         }
     }
 }
-

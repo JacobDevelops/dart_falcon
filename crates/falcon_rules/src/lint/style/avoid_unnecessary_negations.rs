@@ -34,7 +34,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             Expr::Unary(unary) if unary.op() == UnaryOp::Bang => {
                 let mut parent = unary.syntax().parent();
                 while parent.is_some_and(|node| matches!(Expr::cast(node), Some(Expr::Paren(_)))) {
-                    parent = parent.and_then(|node| node.parent());
+                    parent = parent.and_then(SyntaxNode::parent);
                 }
                 if parent.is_some_and(|node| matches!(Expr::cast(node),
                     Some(Expr::Unary(outer)) if outer.op() == UnaryOp::Bang))

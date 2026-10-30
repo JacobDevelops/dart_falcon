@@ -3,7 +3,7 @@ use falcon_syntax::cst::*;
 
 #[test]
 fn top_level_type_parameters_cover_declaration_shapes() {
-    let source = r#"
+    let source = r"
 class C<T> {}
 class Alias<T> = C<T> with M<T>;
 mixin M<T> {}
@@ -15,7 +15,7 @@ void f<T>() {}
 typedef F<T> = C<T>;
 typedef T Legacy<T>(T value);
 int value = 0;
-"#;
+";
     let parsed = parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
     let parameters: Vec<Vec<_>> = parsed
@@ -538,7 +538,7 @@ fn test_annotation_simple() {
 
 #[test]
 fn test_annotation_with_args() {
-    let src = r#"@Deprecated('use Bar') class Foo {}"#;
+    let src = r"@Deprecated('use Bar') class Foo {}";
     let source = src;
     let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
     let prog = tree.program(source);

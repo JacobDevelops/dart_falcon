@@ -14,7 +14,7 @@
 //!
 //! Profiling: `[profile.bench] debug = true` is set in the workspace manifest so
 //! flamegraphs resolve symbols:
-//!   cargo flamegraph --bench jfit_mobile_bench -- --bench full_pipeline
+//!   cargo flamegraph --bench `jfit_mobile_bench` -- --bench `full_pipeline`
 
 use std::path::PathBuf;
 

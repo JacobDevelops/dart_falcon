@@ -201,7 +201,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_constructor(&mut self, node: ConstructorRef<'a>) -> StructuralTraversal {
         let body = node
             .body
-            .map_or(Span::new(node.span.end, node.span.end), |body| body.span());
+            .map_or(Span::new(node.span.end, node.span.end), FunctionBody::span);
         self.check(node.params, Some(body));
         StructuralTraversal::Continue
     }
@@ -220,7 +220,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 cascade.sections().filter(|section| matches!(
                     section.ops().last(),
                     Some(CascadeOp::Assign(_) | CascadeOp::IndexAssign(_))
-                )).map(|section| section.span()),
+                )).map(CascadeSection::span),
             ),
             _ => {}
         }

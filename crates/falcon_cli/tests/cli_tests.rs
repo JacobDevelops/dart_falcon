@@ -147,15 +147,13 @@ fn test_run_check_integration_clean_file_exit_zero() {
     .unwrap();
     let config = dir.path().join("falcon.json");
     fs::write(&config, "{}").unwrap();
-    let code = run_check_with_sdk_locator(
-        CheckOptions {
-            paths: vec![dir.path().to_path_buf()],
-            config_path: Some(config),
-            quiet: true,
-            ..Default::default()
-        },
-        |_| None,
-    );
+    let options = CheckOptions {
+        paths: vec![dir.path().to_path_buf()],
+        config_path: Some(config),
+        quiet: true,
+        ..Default::default()
+    };
+    let code = run_check_with_sdk_locator(&options, |_| None);
     assert_eq!(code, 0);
 }
 

@@ -54,7 +54,7 @@ pub(crate) fn async_gap_spans(
         never: semantics.never,
         protected_callbacks: semantics.protected_callbacks,
     };
-    async_gap_spans_with_guard(program, facts, uses, false, |expression, kind| {
+    async_gap_spans_with_guard(program, facts, &uses, false, |expression, kind| {
         guards
             .get(&expression)
             .filter(|&value| value == kind)
@@ -68,7 +68,7 @@ pub(crate) fn async_gap_spans(
 pub(crate) fn async_gap_spans_with_guard<G>(
     program: Program<'_>,
     mut semantics: AsyncGapFacts,
-    uses: HashMap<NodeId, G>,
+    uses: &HashMap<NodeId, G>,
     conservative: bool,
     guard: impl Fn(NodeId, &G) -> Option<bool>,
 ) -> Vec<Span> {
@@ -91,7 +91,7 @@ pub(crate) fn async_gap_spans_with_guard<G>(
         reference: Key(NodeId(0), 0),
         cache: HashMap::new(),
     };
-    for (&expression, kind) in &uses {
+    for (&expression, kind) in uses {
         let key = Key(expression, 0);
         let Some(node) = tree.nodes.get(&key) else {
             continue;
@@ -187,14 +187,25 @@ enum Kind {
         subject: Key,
         cases: Vec<Key>,
     },
-    Case {
-        guards: Vec<Option<Option<Key>>>,
-        statements: Vec<Key>,
-    },
+    Case(CaseNode),
     Arm {
         guard: Option<Key>,
         body: Key,
     },
+}
+/// A switch case: guards of its non-default labels, whether its last label is
+/// `default`, and its statements.
+#[derive(Clone)]
+struct CaseNode {
+    guards: Vec<Option<Key>>,
+    default: bool,
+    statements: Vec<Key>,
+}
+/// Loop jumps that leave a node.
+#[derive(Clone, Copy, Default)]
+struct Jumps {
+    breaks: bool,
+    continues: bool,
 }
 struct Node {
     kind: Kind,
@@ -204,8 +215,7 @@ struct Node {
     terminates: bool,
     exits: bool,
     exit_override: Option<bool>,
-    breaks: bool,
-    continues: bool,
+    jumps: Jumps,
     literal: Option<bool>,
 }
 #[derive(Default)]
@@ -234,8 +244,7 @@ impl Tree<'_> {
                 terminates: false,
                 exits: false,
                 exit_override: None,
-                breaks: false,
-                continues: false,
+                jumps: Jumps::default(),
                 literal: None,
             },
         );
@@ -264,8 +273,7 @@ impl Tree<'_> {
                 terminates: false,
                 exits: false,
                 exit_override: None,
-                breaks: false,
-                continues: false,
+                jumps: Jumps::default(),
                 literal: None,
             },
         );
@@ -317,15 +325,16 @@ impl Tree<'_> {
                 | Kind::None
                 | Kind::Body
         );
-        let breaks =
-            !isolates_jumps && (node.breaks || node.children.iter().any(|k| self.nodes[k].breaks));
+        let breaks = !isolates_jumps
+            && (node.jumps.breaks || node.children.iter().any(|k| self.nodes[k].jumps.breaks));
         let continues = !isolates_jumps
-            && (node.continues || node.children.iter().any(|k| self.nodes[k].continues));
+            && (node.jumps.continues
+                || node.children.iter().any(|k| self.nodes[k].jumps.continues));
         let node = self.nodes.get_mut(&key).unwrap();
         node.terminates = terminates;
         node.exits = exits;
-        node.breaks = breaks;
-        node.continues = continues;
+        node.jumps.breaks = breaks;
+        node.jumps.continues = continues;
     }
     fn for_exits(&self, header: ForHeader<'_>, body: Key) -> bool {
         match header.init() {
@@ -344,7 +353,7 @@ impl Tree<'_> {
                     header.condition().map(Expr::unparenthesized),
                     Some(Expr::BoolLit(value)) if value.value()
                 ))
-                && (self.nodes[&body].exits || !self.nodes[&body].breaks))
+                && (self.nodes[&body].exits || !self.nodes[&body].jumps.breaks))
     }
 }
 fn condition(node: IfCondition<'_>) -> (Key, Option<Key>) {
@@ -554,11 +563,11 @@ impl<'a> Visitor<'a> for Tree<'a> {
         }
         let override_exit = match node {
             Stmt::Break(_) => {
-                self.nodes.get_mut(&stmt(node)).unwrap().breaks = true;
+                self.nodes.get_mut(&stmt(node)).unwrap().jumps.breaks = true;
                 Some(false)
             }
             Stmt::Continue(_) => {
-                self.nodes.get_mut(&stmt(node)).unwrap().continues = true;
+                self.nodes.get_mut(&stmt(node)).unwrap().jumps.continues = true;
                 Some(false)
             }
             Stmt::Labeled(n) => {
@@ -571,17 +580,17 @@ impl<'a> Visitor<'a> for Tree<'a> {
                     || (matches!(
                         n.condition().unparenthesized(),
                         Expr::BoolLit(value) if value.value()
-                    ) && !self.nodes[&stmt(n.body())].breaks),
+                    ) && !self.nodes[&stmt(n.body())].jumps.breaks),
             ),
             Stmt::DoWhile(n) => {
                 let body = &self.nodes[&stmt(n.body())];
                 Some(
-                    (body.exits && !body.breaks && !body.continues)
+                    (body.exits && !body.jumps.breaks && !body.jumps.continues)
                         || self.nodes[&expr(n.condition())].exits
                         || (matches!(
                             n.condition().unparenthesized(),
                             Expr::BoolLit(value) if value.value()
-                        ) && !body.breaks),
+                        ) && !body.jumps.breaks),
                 )
             }
             Stmt::For(n) => Some(self.for_exits(n.header(), stmt(n.body()))),
@@ -614,20 +623,23 @@ impl<'a> Visitor<'a> for Tree<'a> {
         self.leave();
     }
     fn visit_switch_case(&mut self, node: SwitchCase<'a>) {
-        let guards = node
-            .cases()
-            .map(|c| match c {
-                SwitchCaseKind::Pattern(label) => Some(label.guard().map(expr)),
-                SwitchCaseKind::Expr(_) => Some(None),
-                SwitchCaseKind::Default(_) => None,
-            })
-            .collect();
+        let mut guards = Vec::new();
+        let mut default = false;
+        for case in node.cases() {
+            default = matches!(case, SwitchCaseKind::Default(_));
+            match case {
+                SwitchCaseKind::Pattern(label) => guards.push(label.guard().map(expr)),
+                SwitchCaseKind::Expr(_) => guards.push(None),
+                SwitchCaseKind::Default(_) => {}
+            }
+        }
         self.enter(
             Key(node.syntax().id(), 4),
-            Kind::Case {
+            Kind::Case(CaseNode {
                 guards,
+                default,
                 statements: node.body().map(stmt).collect(),
-            },
+            }),
             node.span(),
         );
         walk_switch_case(self, node);
@@ -713,9 +725,8 @@ fn invert(state: State) -> State {
 }
 fn and(left: State, right: State) -> State {
     match (left, right) {
-        (None, _) => right,
+        (None, _) | (_, Some(AsyncState::Async)) => right,
         (_, None) => left,
-        (_, Some(AsyncState::Async)) => right,
         (Some(AsyncState::Async), _) => right,
         _ => left,
     }
@@ -864,16 +875,12 @@ impl<G> AsyncStateVisitor<'_, G> {
         let node = &self.tree.nodes[&key];
         let children = &node.children;
         if self.conservative
-            && (key.1 == 0
-                || matches!(
-                    node.kind,
-                    Kind::Catch | Kind::Case { .. } | Kind::Arm { .. }
-                ))
+            && (key.1 == 0 || matches!(node.kind, Kind::Catch | Kind::Case(_) | Kind::Arm { .. }))
         {
             return self.conservative_state(key, node);
         }
         match &node.kind {
-            Kind::None | Kind::Inert | Kind::Body | Kind::Exit => None,
+            Kind::None | Kind::Inert | Kind::Body | Kind::Exit | Kind::Unary(false) => None,
             Kind::Barrier => Some(AsyncState::Barrier),
             Kind::Uncertain => {
                 if children.contains(&self.reference) || self.any(children).is_some() {
@@ -897,7 +904,6 @@ impl<G> AsyncStateVisitor<'_, G> {
             Kind::Revisit => children.first().and_then(|&k| self.state(k)),
             Kind::Cast => children.first().and_then(|&k| asynchronous(self.state(k))),
             Kind::Unary(true) => invert(children.first().and_then(|&k| self.state(k))),
-            Kind::Unary(false) => None,
             Kind::Binary(op) => self.binary(*op, children),
             Kind::Assign => self.ordered(children, |k| children.last() == Some(&k)),
             // Statement and block evaluation layers share one analyzer node.
@@ -946,7 +952,7 @@ impl<G> AsyncStateVisitor<'_, G> {
             } => self.try_state(*body, catches, *finally),
             Kind::Catch => children.first().and_then(|&k| asynchronous(self.state(k))),
             Kind::Switch { subject, cases } => self.switch(*subject, cases),
-            Kind::Case { guards, statements } => self.case_state(guards, statements),
+            Kind::Case(case) => self.case_state(case),
             Kind::Arm { guard, body } => {
                 if *guard == Some(self.reference) {
                     None
@@ -1017,13 +1023,18 @@ impl<G> AsyncStateVisitor<'_, G> {
                 .or_else(|| self.any(catches))
         }
     }
-    fn case_state(&self, guards: &[Option<Option<Key>>], statements: &[Key]) -> State {
+    fn case_state(&self, case: &CaseNode) -> State {
+        let CaseNode {
+            guards,
+            default,
+            statements,
+        } = case;
         // Default scans preceding statements without a pattern guard.
         // The surrounding switch still skips default guard checks.
-        if guards.last().is_some_and(Option::is_none) {
+        if *default {
             return self.ordered(statements, |_| true);
         }
-        if guards.iter().flatten().any(|g| *g == Some(self.reference)) {
+        if guards.contains(&Some(self.reference)) {
             return None;
         }
         self.block(statements, false).or_else(|| {
@@ -1032,7 +1043,6 @@ impl<G> AsyncStateVisitor<'_, G> {
             } else {
                 guards
                     .iter()
-                    .flatten()
                     .flatten()
                     .find_map(|&k| asynchronous(self.state(k)))
             }
@@ -1071,8 +1081,8 @@ impl<G> AsyncStateVisitor<'_, G> {
             BinaryOp::And => and(l, r),
             BinaryOp::Or => match (l, r) {
                 (_, Some(AsyncState::Async | AsyncState::NotMounted)) => r,
-                (Some(AsyncState::Async | AsyncState::NotMounted), _) => l,
-                (Some(AsyncState::Mounted), Some(AsyncState::Mounted)) => l,
+                (Some(AsyncState::Async | AsyncState::NotMounted), _)
+                | (Some(AsyncState::Mounted), Some(AsyncState::Mounted)) => l,
                 _ => None,
             },
             BinaryOp::EqEq | BinaryOp::NotEq => {
@@ -1141,10 +1151,13 @@ impl<G> AsyncStateVisitor<'_, G> {
         let mut fallthrough = true;
         let mut all_mounted = true;
         for (i, &key) in cases[..=index].iter().enumerate().rev() {
-            let Kind::Case { guards, statements } = &self.tree.nodes[&key].kind else {
+            let Kind::Case(CaseNode {
+                guards, statements, ..
+            }) = &self.tree.nodes[&key].kind
+            else {
                 continue;
             };
-            for guard in guards.iter().rev().flatten() {
+            for guard in guards.iter().rev() {
                 let state = guard.and_then(|k| self.state(k));
                 if state == Some(AsyncState::Async) {
                     return state;
@@ -1171,12 +1184,12 @@ mod tests {
     use falcon_syntax::cst::visit::walk_expr;
 
     fn conservative_reports(body: &str) -> Vec<String> {
-        let source = format!("Future<void> f() async {{ {body} }}");
-        let parsed = parse(&source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let program = parsed.tree.program(&source);
         #[derive(Default)]
         struct Calls {
+            #[expect(
+                clippy::zero_sized_map_values,
+                reason = "async_gap_spans_with_guard takes per-use guard data; this probe needs none"
+            )]
             uses: HashMap<NodeId, ()>,
             guards: HashSet<NodeId>,
         }
@@ -1194,12 +1207,16 @@ mod tests {
                 walk_expr(self, expression);
             }
         }
+        let source = format!("Future<void> f() async {{ {body} }}");
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let program = parsed.tree.program(&source);
         let mut calls = Calls::default();
         calls.visit_program(program);
         async_gap_spans_with_guard(
             program,
             AsyncGapFacts::default(),
-            calls.uses,
+            &calls.uses,
             true,
             |expression, ()| calls.guards.contains(&expression).then_some(false),
         )
@@ -1216,7 +1233,7 @@ mod tests {
                 format!("{guard} == false && ready"),
                 format!("!{guard} || ready"),
             ] {
-                let expected = if condition.contains("||") { 1 } else { 0 };
+                let expected = usize::from(condition.contains("||"));
                 let body = format!("await load(); if ({condition}) emit(1);");
                 assert_eq!(conservative_reports(&body).len(), expected, "{body}");
             }

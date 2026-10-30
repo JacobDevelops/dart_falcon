@@ -6,8 +6,8 @@
 //! result, because replacing it changes List<T> to T. Future.any is excluded when
 //! its result is discarded, to preserve its error listener.
 
-use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, expression_segments};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -111,7 +111,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             None => "Use the single `Future` directly instead of wrapping it in `Future.wait` or `Future.any`."
                 .to_owned(),
         };
-        self.diagnostics.push(self.ctx.diagnostic(message, argument.span()));
+        self.diagnostics
+            .push(self.ctx.diagnostic(message, argument.span()));
     }
 
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
@@ -151,8 +152,10 @@ fn discarded_future(expression: Expr<'_>, state: &SemanticState<'_>) -> bool {
                 if matches!(Stmt::cast(parent), Some(Stmt::Expr(_))) {
                     return true;
                 }
-                if !matches!(state.expected().map(falcon_analyze::ResolvedType::view), Some(falcon_analyze::ResolvedTypeView::Void))
-                    || !matches!(FunctionBody::cast(parent), Some(FunctionBody::Arrow(_)))
+                if !matches!(
+                    state.expected().map(falcon_analyze::ResolvedType::view),
+                    Some(falcon_analyze::ResolvedTypeView::Void)
+                ) || !matches!(FunctionBody::cast(parent), Some(FunctionBody::Arrow(_)))
                 {
                     return false;
                 }
@@ -160,10 +163,10 @@ fn discarded_future(expression: Expr<'_>, state: &SemanticState<'_>) -> bool {
                     return false;
                 };
                 let marker = FunctionDecl::cast(owner)
-                    .map(|function| function.async_marker())
-                    .or_else(|| LocalFuncDecl::cast(owner).map(|function| function.async_marker()))
-                    .or_else(|| FuncExpr::cast(owner).map(|function| function.async_marker()))
-                    .or_else(|| MethodDecl::cast(owner).map(|method| method.async_marker()));
+                    .map(FunctionDecl::async_marker)
+                    .or_else(|| LocalFuncDecl::cast(owner).map(LocalFuncDecl::async_marker))
+                    .or_else(|| FuncExpr::cast(owner).map(FuncExpr::async_marker))
+                    .or_else(|| MethodDecl::cast(owner).map(MethodDecl::async_marker));
                 return marker == Some(AsyncMarker::Sync);
             }
         }

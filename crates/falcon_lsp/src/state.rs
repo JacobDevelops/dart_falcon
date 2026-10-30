@@ -60,6 +60,13 @@ fn document_parse_result(
     }
 }
 
+/// Parse-derived document state that is updated together after each parse.
+#[derive(Default)]
+pub struct DocumentParseState {
+    has_parse_errors: bool,
+    source_rejected: bool,
+}
+
 /// One open document: full text, cached syntax tree, and instrumentation counters.
 pub struct DocumentState {
     parsed: Arc<ParsedFile>,
@@ -69,11 +76,7 @@ pub struct DocumentState {
     unresolved_path: bool,
     pub version: Option<i32>,
     language_version: LanguageVersion,
-    /// Whether the last parse produced errors — carried so the cross-file pass
-    /// can populate [`ProjectFile::has_parse_errors`] without re-parsing.
-    has_parse_errors: bool,
-    /// Rejected buffers keep no usable syntax and publish only ingestion diagnostics.
-    source_rejected: bool,
+    parse_state: DocumentParseState,
     /// Parse and worker diagnostics from the last parse, kept so `analyze` can
     /// publish them alongside lints without re-parsing (parity with the CLI).
     syntax_diagnostics: Vec<Diagnostic>,
@@ -99,7 +102,22 @@ pub struct DocumentState {
     pub analyze_count: u64,
 }
 
+impl std::ops::Deref for DocumentState {
+    type Target = DocumentParseState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.parse_state
+    }
+}
+
+impl std::ops::DerefMut for DocumentState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.parse_state
+    }
+}
+
 impl DocumentState {
+    #[must_use]
     pub fn text(&self) -> &str {
         &self.parsed.source
     }
@@ -241,6 +259,7 @@ struct CrossFileIndexCache {
     external_identity: Option<Arc<IdentityIndex>>,
 }
 
+#[derive(Clone, Copy)]
 enum ProjectView {
     Semantic,
     CrossFile,
@@ -287,6 +306,11 @@ impl ConfigStamp {
     }
 }
 
+enum DiskFileStamp {
+    NotChecked,
+    Checked(Option<FileStamp>),
+}
+
 struct CachedDiskFile {
     parsed: Arc<ParsedFile>,
     has_parse_errors: bool,
@@ -322,12 +346,71 @@ struct RootConfig {
     analysis: ProjectAnalysis,
 }
 
-/// Server-side cache: open documents, active config, enabled rule set.
-pub struct LspState {
-    documents: HashMap<String, DocumentState>,
+/// Client capability and workspace lifecycle flags, grouped by responsibility.
+pub struct ClientCapabilities {
     code_action_resolve: bool,
     workspace_document_changes: bool,
     pub(crate) workspace_apply_edit: bool,
+    semantics: SemanticFlags,
+}
+
+pub struct SemanticFlags {
+    cross_file_resolve_semantics: bool,
+    resolve_semantics: bool,
+    workspace: WorkspaceFlags,
+}
+
+pub struct WorkspaceFlags {
+    workspace_initialized: bool,
+    dynamic_file_watching: bool,
+}
+
+impl std::ops::Deref for ClientCapabilities {
+    type Target = SemanticFlags;
+
+    fn deref(&self) -> &Self::Target {
+        &self.semantics
+    }
+}
+
+impl std::ops::DerefMut for ClientCapabilities {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.semantics
+    }
+}
+
+impl std::ops::Deref for SemanticFlags {
+    type Target = WorkspaceFlags;
+
+    fn deref(&self) -> &Self::Target {
+        &self.workspace
+    }
+}
+
+impl std::ops::DerefMut for SemanticFlags {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.workspace
+    }
+}
+
+impl std::ops::Deref for LspState {
+    type Target = ClientCapabilities;
+
+    fn deref(&self) -> &Self::Target {
+        &self.capabilities
+    }
+}
+
+impl std::ops::DerefMut for LspState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.capabilities
+    }
+}
+
+/// Server-side cache: open documents, active config, enabled rule set.
+pub struct LspState {
+    documents: HashMap<String, DocumentState>,
+    capabilities: ClientCapabilities,
     config: FalconConfig,
     additional_root_configs: Vec<RootConfig>,
     config_path: Option<PathBuf>,
@@ -338,7 +421,6 @@ pub struct LspState {
     /// Cross-file rules; empty unless enabled by config. When empty the
     /// cross-file pass is skipped entirely (the whole-workspace walk is expensive).
     cross_file_rules: CrossFileRuleRegistry,
-    cross_file_resolve_semantics: bool,
     cross_file_index_cache: Option<CrossFileIndexCache>,
     cross_file_index_build_count: u64,
     cross_file_external_cache: Option<CrossFileExternalCache>,
@@ -347,9 +429,6 @@ pub struct LspState {
     workspace_root: PathBuf,
     /// Client roots override the config-derived fallback for project discovery.
     workspace_roots: Vec<PathBuf>,
-    workspace_initialized: bool,
-    /// Whether any enabled per-file or cross-file rule consumes resolver-backed semantic facts.
-    resolve_semantics: bool,
     /// Lazily rebuilt after document, config, or watched-workspace changes.
     semantic_snapshot: Option<SemanticSnapshot>,
     /// Retained only across declaration edits; never exposed as current facts.
@@ -396,7 +475,6 @@ pub struct LspState {
     project_paths: Option<Vec<(PathBuf, bool)>>,
     project_path_patterns: Vec<String>,
     project_discovery_watches: Vec<DiscoveryWatch>,
-    dynamic_file_watching: bool,
     #[cfg(test)]
     fallback_scan_count: u64,
 }
@@ -405,6 +483,7 @@ impl LspState {
     /// Create state with config from `config_path`, or discovery from the
     /// current directory when `None` (same order as the CLI: cwd → git root →
     /// `$HOME/.falcon.json` → defaults).
+    #[must_use]
     pub fn new(config_path: Option<PathBuf>) -> Self {
         let start_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         Self::new_from_environment(config_path, AnalysisEnvironment::default(), start_dir)
@@ -458,9 +537,19 @@ impl LspState {
         let resolve_semantics = analysis.resolve;
         Self {
             documents: HashMap::new(),
-            code_action_resolve: false,
-            workspace_document_changes: false,
-            workspace_apply_edit: false,
+            capabilities: ClientCapabilities {
+                code_action_resolve: false,
+                workspace_document_changes: false,
+                workspace_apply_edit: false,
+                semantics: SemanticFlags {
+                    cross_file_resolve_semantics,
+                    resolve_semantics,
+                    workspace: WorkspaceFlags {
+                        workspace_initialized: false,
+                        dynamic_file_watching: true,
+                    },
+                },
+            },
             config,
             additional_root_configs: Vec::new(),
             config_path,
@@ -469,13 +558,10 @@ impl LspState {
             config_start_dir,
             rules,
             cross_file_rules,
-            cross_file_resolve_semantics,
             cross_file_index_cache: None,
             cross_file_index_build_count: 0,
             workspace_roots: vec![workspace_root.clone()],
-            workspace_initialized: false,
             workspace_root,
-            resolve_semantics,
             semantic_snapshot: None,
             previous_semantic_snapshot: None,
             semantic_snapshot_error: None,
@@ -511,7 +597,6 @@ impl LspState {
             project_paths: None,
             project_path_patterns: Vec::new(),
             project_discovery_watches: Vec::new(),
-            dynamic_file_watching: true,
             #[cfg(test)]
             fallback_scan_count: 0,
         }
@@ -557,7 +642,9 @@ impl LspState {
         ) {
             self.fallback_config_stamps.entry(path).or_insert(stamp);
         }
-        let mut messages = Vec::new();
+        let mut messages = Vec::with_capacity(self.workspace_roots.len().saturating_sub(1));
+        let mut resolve_semantics = self.resolve_semantics;
+        let mut cross_file_resolve_semantics = self.cross_file_resolve_semantics;
         self.additional_root_configs.reserve(
             self.workspace_roots
                 .len()
@@ -578,8 +665,8 @@ impl LspState {
                     config
                 });
             let analysis = ProjectAnalysis::new(&config);
-            self.resolve_semantics |= analysis.resolve;
-            self.cross_file_resolve_semantics |= analysis.cross_file_resolve;
+            resolve_semantics |= analysis.resolve;
+            cross_file_resolve_semantics |= analysis.cross_file_resolve;
             let entry = RootConfig { config, analysis };
             if let Some(existing) = self.additional_root_configs.get_mut(index) {
                 *existing = entry;
@@ -587,6 +674,8 @@ impl LspState {
                 self.additional_root_configs.push(entry);
             }
         }
+        self.resolve_semantics = resolve_semantics;
+        self.cross_file_resolve_semantics = cross_file_resolve_semantics;
         messages
     }
 
@@ -1122,8 +1211,10 @@ impl LspState {
                 declaration_signature: next_signature,
                 version,
                 language_version,
-                has_parse_errors: source_rejected || parsed.has_errors,
-                source_rejected,
+                parse_state: DocumentParseState {
+                    has_parse_errors: source_rejected || parsed.has_errors,
+                    source_rejected,
+                },
                 syntax_diagnostics,
                 last_diagnostics: Vec::new(),
                 diagnostics_parse_count: 0,
@@ -1142,6 +1233,10 @@ impl LspState {
     /// defers analysis behind the debounce window.
     ///
     /// Returns false if the document is not open.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the document cache changes unexpectedly during this exclusive state mutation.
     pub fn change(&mut self, uri: &str, mut text: String, version: Option<i32>) -> bool {
         if !self.documents.contains_key(uri) {
             warn!(uri, "didChange for unopened document — ignored");
@@ -1188,6 +1283,10 @@ impl LspState {
 
     /// `textDocument/didSave`: refresh filesystem identity when resolvable and
     /// any supplied text (re-parsing only when it actually differs), then analyze.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the document cache changes unexpectedly during this exclusive state mutation.
     pub fn save(&mut self, uri: &str, text: Option<String>) -> Vec<Diagnostic> {
         let saved_path = watched_path(&uri_to_path(uri));
         self.disk_files.remove(&saved_path);
@@ -1238,6 +1337,10 @@ impl LspState {
     }
 
     /// `textDocument/didClose`: restore the disk revision before dropping the buffer.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the document cache changes unexpectedly during this exclusive state mutation.
     pub fn close(&mut self, uri: &str) {
         let Some(document) = self.documents.get(uri) else {
             return;
@@ -1311,6 +1414,10 @@ impl LspState {
     }
 
     /// Run enabled rules over the cached CST, in shared project diagnostic order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the document cache changes unexpectedly during this exclusive state mutation.
     pub fn analyze(&mut self, uri: &str) -> Vec<Diagnostic> {
         if !self.documents.contains_key(uri) {
             return Vec::new();
@@ -1381,7 +1488,7 @@ impl LspState {
         sort_diagnostics(&mut diagnostics);
         doc.analyze_count += 1;
         doc.diagnostics_parse_count = doc.parse_count;
-        doc.last_diagnostics = diagnostics.clone();
+        doc.last_diagnostics.clone_from(&diagnostics);
         debug!(uri, count = diagnostics.len(), "analyzed document");
         diagnostics
     }
@@ -1435,13 +1542,9 @@ impl LspState {
             || document_path(uri, &self.workspace_roots).0,
             |doc| doc.path.clone(),
         );
-        let mut uris = self
-            .semantic_snapshot
-            .as_ref()
-            .map(|snapshot| {
-                affected_open_uris_in_snapshot(snapshot, &changed_path, &self.documents)
-            })
-            .unwrap_or_default();
+        let mut uris = self.semantic_snapshot.as_ref().map_or_default(|snapshot| {
+            affected_open_uris_in_snapshot(snapshot, &changed_path, &self.documents)
+        });
         if let Some(previous) = self.pending_semantic_affected.remove(uri) {
             uris.extend(previous);
         }
@@ -1579,7 +1682,7 @@ impl LspState {
                 sort_diagnostics(&mut merged);
             }
             if let Some(doc) = self.documents.get_mut(&uri) {
-                doc.last_diagnostics = merged.clone();
+                doc.last_diagnostics.clone_from(&merged);
                 doc.had_cross_file_diags = has_now;
             }
             published.push((uri, merged));
@@ -1811,10 +1914,10 @@ impl LspState {
             return (indexes, rebuilt, Some(Arc::clone(&cache.identities)));
         }
         let graph_roots = Self::cross_file_graph_roots(&files);
-        if !self
+        if self
             .cross_file_external_cache
             .as_ref()
-            .is_some_and(|cache| cache.roots == graph_roots)
+            .is_none_or(|cache| cache.roots != graph_roots)
         {
             self.rebuild_cross_file_external(&files, &paths, graph_roots);
         }
@@ -1862,7 +1965,10 @@ impl LspState {
                             .map(|part| part.uri().value().into_owned()),
                     )
                     .collect();
-                if let Some(uri) = program.part_of_directive().and_then(|part| part.uri()) {
+                if let Some(uri) = program
+                    .part_of_directive()
+                    .and_then(falcon_syntax::cst::PartOfDirective::uri)
+                {
                     uris.push(uri.value().into_owned());
                 }
                 uris.extend(falcon_analyze::doc_imports(program, file.source()).map(str::to_owned));
@@ -2477,7 +2583,7 @@ impl LspState {
             .any(|root| path.starts_with(root))
             && self.admits_project_dart(path)
             && path.is_file()
-            && std::fs::canonicalize(path).ok().is_some_and(|resolved| {
+            && std::fs::canonicalize(path).is_ok_and(|resolved| {
                 self.workspace_roots
                     .iter()
                     .any(|root| resolved.starts_with(root))
@@ -2493,20 +2599,13 @@ impl LspState {
     /// cross-file rules must not infer absence from that partial set.
     fn collect_project_files(&mut self, view: ProjectView) -> (Vec<ProjectFile>, bool) {
         let paths = self.discover_project_paths();
+        let capacity = self.prepare_project_files(&paths, view);
         let mut complete = true;
-        self.refresh_environment(
-            paths
-                .iter()
-                .filter(|(_, is_dart)| *is_dart || matches!(view, ProjectView::CrossFile))
-                .map(|(path, _)| path.as_path()),
-        );
-        self.refresh_document_versions();
         let open_by_path: HashMap<&Path, &DocumentState> = self
             .documents
             .values()
             .map(|doc| (doc.path.as_path(), doc))
             .collect();
-        let capacity = paths.len() + self.documents.len();
         let mut files = Vec::with_capacity(capacity);
         let mut seen = HashSet::with_capacity(capacity);
         let mut worker_failure = None;
@@ -2535,12 +2634,19 @@ impl LspState {
             let (language_version, stamp) = self.project_disk_revision(path, *is_dart);
             if let Some(cached) = self.disk_files.get(path)
                 && cached.language_version == language_version
-                && stamp.as_ref().is_none_or(|stamp| &cached.stamp == stamp)
+                && match &stamp {
+                    DiskFileStamp::NotChecked => true,
+                    DiskFileStamp::Checked(Some(stamp)) => cached.stamp.as_ref() == Some(stamp),
+                    DiskFileStamp::Checked(None) => cached.stamp.is_none(),
+                }
             {
                 files.push(cached.project_file(normalized));
                 continue;
             }
-            let stamp = stamp.unwrap_or_else(|| FileStamp::read(path));
+            let stamp = match stamp {
+                DiskFileStamp::NotChecked | DiskFileStamp::Checked(None) => FileStamp::read(path),
+                DiskFileStamp::Checked(Some(stamp)) => Some(stamp),
+            };
             self.disk_read_count += 1;
             let fallback_stamp = stamp.clone();
             if !self.dynamic_file_watching {
@@ -2562,7 +2668,17 @@ impl LspState {
             if *is_dart {
                 self.disk_parse_count += 1;
             }
-            let file = match self.parse_project_source(path, source, language_version, *is_dart) {
+            #[cfg(test)]
+            let parser_failure_path = self.parser_failure_path.as_deref();
+            #[cfg(not(test))]
+            let parser_failure_path = None;
+            let file = match Self::parse_project_source(
+                path,
+                source,
+                language_version,
+                *is_dart,
+                parser_failure_path,
+            ) {
                 Ok(file) => file,
                 Err(error) => {
                     worker_failure = Some((normalized.clone(), error));
@@ -2579,6 +2695,27 @@ impl LspState {
         if matches!(view, ProjectView::Semantic) {
             Self::append_open_semantic_files(&mut files, open_by_path, &seen);
         }
+        self.finish_project_files(files, complete, paths, worker_failure)
+    }
+
+    fn prepare_project_files(&mut self, paths: &[(PathBuf, bool)], view: ProjectView) -> usize {
+        self.refresh_environment(
+            paths
+                .iter()
+                .filter(|(_, is_dart)| *is_dart || matches!(view, ProjectView::CrossFile))
+                .map(|(path, _)| path.as_path()),
+        );
+        self.refresh_document_versions();
+        paths.len() + self.documents.len()
+    }
+
+    fn finish_project_files(
+        &mut self,
+        files: Vec<ProjectFile>,
+        complete: bool,
+        paths: Vec<(PathBuf, bool)>,
+        worker_failure: Option<(PathBuf, std::io::Error)>,
+    ) -> (Vec<ProjectFile>, bool) {
         self.project_paths = Some(paths);
         if let Some((path, error)) = worker_failure {
             self.record_semantic_worker_failure(&path, error);
@@ -2603,14 +2740,15 @@ impl LspState {
         &self,
         path: &Path,
         is_dart: bool,
-    ) -> (Option<LanguageVersion>, Option<Option<FileStamp>>) {
+    ) -> (Option<LanguageVersion>, DiskFileStamp) {
         let language_version = is_dart
             .then(|| self.environment.package_language_version(path))
             .flatten();
-        let stamp = self
-            .semantic_snapshot
-            .is_none()
-            .then(|| FileStamp::read(path));
+        let stamp = if self.semantic_snapshot.is_none() {
+            DiskFileStamp::Checked(FileStamp::read(path))
+        } else {
+            DiskFileStamp::NotChecked
+        };
         (language_version, stamp)
     }
 
@@ -2670,18 +2808,21 @@ impl LspState {
     }
 
     fn parse_project_source(
-        &self,
         path: &Path,
         source: String,
         language_version: Option<LanguageVersion>,
         is_dart: bool,
+        parser_failure_path: Option<&Path>,
     ) -> std::io::Result<ProjectFile> {
         if !is_dart {
             return Ok(manifest_file(path.to_path_buf(), source));
         }
         let result = try_parse_for_package(&source, language_version);
-        #[cfg(test)]
-        let result = self.inject_parser_failure(path, result);
+        let result = if parser_failure_path == Some(path) {
+            falcon_dart_parser::with_stack(|| panic!("project parser regression"))
+        } else {
+            result
+        };
         let parsed = result.map_err(|error| {
             std::io::Error::other(format!("parsing {}: {error}", path.display()))
         })?;
@@ -2838,7 +2979,7 @@ fn load_from(
                     .into_iter()
                     .map(|message| ShowMessageParams {
                         typ: MessageType::WARNING,
-                        message: format!("Falcon: {}: {message}", label),
+                        message: format!("Falcon: {label}: {message}"),
                     })
                     .chain(errors.into_iter().map(|error| ShowMessageParams {
                         typ: MessageType::ERROR,
@@ -2848,7 +2989,7 @@ fn load_from(
             )
         }
         Err(error) => {
-            let message = format!("Falcon: failed to load config {}: {error}", label);
+            let message = format!("Falcon: failed to load config {label}: {error}");
             warn!("{message}");
             (
                 None,
@@ -2940,19 +3081,18 @@ fn watched_path(path: &Path) -> PathBuf {
 /// Keep missing inner symlinks lexical until materialization, resolving only the workspace prefix.
 fn document_path(uri: &str, workspace_roots: &[PathBuf]) -> (PathBuf, bool) {
     let path = uri_to_path(uri);
-    match std::fs::canonicalize(&path) {
-        Ok(path) => (path, false),
-        Err(_) => {
-            let path = falcon_analyze::lexical_normalize(&path);
-            for ancestor in path.ancestors() {
-                let resolved = canonical_or_lexical(ancestor);
-                if let Some(root) = workspace_roots.iter().find(|root| **root == resolved) {
-                    let suffix = path.strip_prefix(ancestor).expect("path ancestor");
-                    return (root.join(suffix), true);
-                }
+    if let Ok(path) = std::fs::canonicalize(&path) {
+        (path, false)
+    } else {
+        let path = falcon_analyze::lexical_normalize(&path);
+        for ancestor in path.ancestors() {
+            let resolved = canonical_or_lexical(ancestor);
+            if let Some(root) = workspace_roots.iter().find(|root| **root == resolved) {
+                let suffix = path.strip_prefix(ancestor).expect("path ancestor");
+                return (root.join(suffix), true);
             }
-            (path, true)
         }
+        (path, true)
     }
 }
 
@@ -2966,15 +3106,17 @@ pub(crate) fn uri_to_path(uri: &str) -> PathBuf {
                 .scheme()
                 .is_some_and(|scheme| scheme.as_str() == "file")
         })
-        .map(|parsed| {
-            PathBuf::from(
-                parsed
-                    .path()
-                    .as_estr()
-                    .decode()
-                    .into_string_lossy()
-                    .into_owned(),
-            )
-        })
-        .unwrap_or_else(|| PathBuf::from(uri.strip_prefix("file://").unwrap_or(uri)))
+        .map_or_else(
+            || PathBuf::from(uri.strip_prefix("file://").unwrap_or(uri)),
+            |parsed| {
+                PathBuf::from(
+                    parsed
+                        .path()
+                        .as_estr()
+                        .decode()
+                        .into_string_lossy()
+                        .into_owned(),
+                )
+            },
+        )
 }

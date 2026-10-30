@@ -135,6 +135,8 @@ pub(crate) fn count_package_diagnostics(
 }
 
 /// Render workspace metadata without changing legacy single-project reports.
+/// # Panics
+/// Panics if a diagnostic cannot be serialized to JSON.
 pub fn render_with_packages(
     format: OutputFormat,
     diagnostics: &[Diagnostic],
@@ -199,7 +201,7 @@ pub fn render_with_packages(
                 entry
             })
             .collect();
-        return json_string(entries.into());
+        return json_string(&entries.into());
     }
     render_impl(format, diagnostics, root, packages)
 }
@@ -228,6 +230,7 @@ fn package_values(packages: &[PackageSummary], root: &Path) -> Vec<Value> {
 /// Repeated fingerprints receive occurrence suffixes (`:2`, `:3`, ...).
 /// GitLab and Sonar paths are relative to the invocation directory; other report
 /// paths and all baseline fingerprints use the supplied project root.
+#[must_use]
 pub fn render(format: OutputFormat, diagnostics: &[Diagnostic], root: &Path) -> String {
     render_impl(format, diagnostics, root, &[])
 }
@@ -287,10 +290,10 @@ fn render_impl(
         })
         .collect();
     match format {
-        OutputFormat::Sarif => json_string(sarif(&entries, root, packages)),
-        OutputFormat::Gitlab => json_string(gitlab(&entries)),
+        OutputFormat::Sarif => json_string(&sarif(&entries, root, packages)),
+        OutputFormat::Gitlab => json_string(&gitlab(&entries)),
         OutputFormat::Checkstyle => checkstyle(&entries),
-        OutputFormat::Sonar => json_string(sonar(&entries)),
+        OutputFormat::Sonar => json_string(&sonar(&entries)),
         OutputFormat::Html => html(&entries),
         OutputFormat::Text | OutputFormat::Json => unreachable!("handled before source loading"),
     }
@@ -304,8 +307,8 @@ struct Entry<'a> {
     fingerprint: Option<String>,
 }
 
-fn json_string(value: Value) -> String {
-    serde_json::to_string_pretty(&value).expect("report values are JSON serializable")
+fn json_string(value: &Value) -> String {
+    serde_json::to_string_pretty(value).expect("report values are JSON serializable")
 }
 
 fn sarif(entries: &[Entry<'_>], root: &Path, packages: &[PackageSummary]) -> Value {
@@ -498,7 +501,7 @@ fn escape_markup(text: &str) -> String {
             '\r' => escaped.push_str("&#13;"),
             // XML 1.0 excludes these controls even as character references.
             '\0'..='\u{8}' | '\u{b}' | '\u{c}' | '\u{e}'..='\u{1f}' | '\u{fffe}' | '\u{ffff}' => {
-                escaped.push('\u{fffd}')
+                escaped.push('\u{fffd}');
             }
             _ => escaped.push(character),
         }
@@ -657,7 +660,7 @@ mod tests {
             &summaries,
         ))
         .unwrap();
-        assert!(empty.is_empty());
+        assert_eq!(empty, [] as [serde_json::Value; 0]);
     }
 
     #[test]

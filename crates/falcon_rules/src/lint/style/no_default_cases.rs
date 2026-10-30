@@ -18,7 +18,9 @@
 //! Adopted from the official `no_default_cases` lint.
 
 use falcon_analyze::TypeKind;
-use falcon_analyze::{AnalyzeContext, DeclarationIdentity, ResolvedTypeView, Rule, RulePreparation};
+use falcon_analyze::{
+    AnalyzeContext, DeclarationIdentity, ResolvedTypeView, Rule, RulePreparation,
+};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::TokenKind;
 use falcon_syntax::cst::*;
@@ -85,7 +87,7 @@ impl Collector<'_> {
                 TokenKind::Default,
             )
             .next()
-            .map_or(case.span().start, |token| token.offset());
+            .map_or(case.span().start, SyntaxToken::offset);
         let start = case
             .labels()
             .filter(|label| Span::new(from, keyword).contains(label.span()))
@@ -136,7 +138,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         if self.is_enum_or_enum_like(identity, state) {
             let span = self.default_member_span(case, index);
-            self.diags.push(self.ctx.diagnostic("Avoid using a `default` member in this switch.", span));
+            self.diags.push(
+                self.ctx
+                    .diagnostic("Avoid using a `default` member in this switch.", span),
+            );
         }
     }
 }

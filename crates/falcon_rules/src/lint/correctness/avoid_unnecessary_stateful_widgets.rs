@@ -1,8 +1,8 @@
-//! Warns when a StatefulWidget's local State contains only a pure build method.
+//! Warns when a `StatefulWidget`'s local State contains only a pure build method.
 //!
 //! Both declarations must resolve to Flutter types in this file. State fields,
 //! mixins, lifecycle methods, extra instance members, and any State member use
-//! other than widget conservatively retain the StatefulWidget. Inherited custom
+//! other than widget conservatively retain the `StatefulWidget`. Inherited custom
 //! State bases are ignored because they may own lifecycle behavior.
 
 use falcon_analyze::{

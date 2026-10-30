@@ -47,13 +47,13 @@ fn reports(name: &'static str, rule: &dyn Rule, source: &str) -> Vec<String> {
 
 #[test]
 fn comments_do_not_hide_grouping_or_create_grouping() {
-    assert!(
+    assert_eq!(
         reports(
             "no-adjacent-strings-in-list",
             &NoAdjacentStringsInList,
             "var values = [( /* note */ 'a' 'b' /* note */ )];"
-        )
-        .is_empty()
+        ),
+        [] as [std::string::String; 0]
     );
     assert_eq!(
         reports(
@@ -124,21 +124,21 @@ fn extension_type_representation_formals_are_implicitly_final() {
         ),
         ["int input", "int amount"]
     );
-    assert!(
+    assert_eq!(
         reports(
             "prefer-final-parameters",
             &PreferFinalParameters,
             "// @dart=3.12\nextension type const E._((int, int) value) {}"
-        )
-        .is_empty()
+        ),
+        [] as [std::string::String; 0]
     );
-    assert!(
+    assert_eq!(
         reports(
             "prefer-final-parameters",
             &PreferFinalParameters,
             "// @dart=3.13\nclass C(int value) { int plus(int amount) => amount; }"
-        )
-        .is_empty()
+        ),
+        [] as [std::string::String; 0]
     );
 }
 
@@ -152,13 +152,13 @@ fn wildcard_pattern_grouping_does_not_hide_expression_grouping() {
         ),
         ["(value)", "(1)"]
     );
-    assert!(
+    assert_eq!(
         reports(
             "unnecessary-parenthesis",
             &UnnecessaryParenthesis,
             "void f(Object? value) { if (value case (_)) {} switch (value) { case (_): break; } }"
-        )
-        .is_empty()
+        ),
+        [] as [std::string::String; 0]
     );
 }
 
@@ -253,7 +253,7 @@ fn duplicate_map_key_scan_skips_for_element_entries() {
 
 #[test]
 fn grouped_arrow_awaits_are_reported_once_at_the_await_keyword() {
-    let source = r#"
+    let source = r"
 Future<int> plain(Future<int> value) async => await value;
 Future<int> grouped(Future<int> value) async => (await value);
 Future<int> nested(Future<int> value) async => ((await value));
@@ -264,7 +264,7 @@ void outer(Future<int> value) {
   final callback = () async => ((await value));
 }
 Future<int> notReturned(Future<int> value) async => 1 + (await value);
-"#;
+";
     assert_eq!(
         reports(
             "unnecessary-await-in-return",
@@ -277,7 +277,7 @@ Future<int> notReturned(Future<int> value) async => 1 + (await value);
 
 #[test]
 fn primary_constructor_fields_are_not_unused_ordinary_parameters() {
-    let source = r#"
+    let source = r"
 // @dart=3.13
 class Declaring(final int value) {
   this {}
@@ -289,7 +289,7 @@ class FieldInitializer(int value) {
 class Ordinary {
   Ordinary(int unused) {}
 }
-"#;
+";
     assert_eq!(
         reports("avoid-unused-parameters", &AvoidUnusedParameters, source),
         ["unused"]
@@ -365,7 +365,7 @@ void pattern<T>(T? value) {
 
 #[test]
 fn pattern_initializers_keep_non_expression_parent_exemptions() {
-    assert!(
+    assert_eq!(
         reports(
             "unnecessary-parenthesis",
             &UnnecessaryParenthesis,
@@ -376,8 +376,8 @@ fn pattern_initializers_keep_non_expression_parent_exemptions() {
              final (left, right) = (await fetch());\n\
              print([sum, cast, check, left, right]);\n\
              }"
-        )
-        .is_empty()
+        ),
+        [] as [std::string::String; 0]
     );
 }
 
@@ -418,12 +418,12 @@ fn cascade_result_invocations_reach_trailing_comma_checks() {
         ),
         vec![")"],
     );
-    assert!(
+    assert_eq!(
         reports(
             "prefer-trailing-comma",
             &PreferTrailingComma,
             "void f(dynamic target, int value) { target..factory()(\nvalue,\n); }",
-        )
-        .is_empty(),
+        ),
+        [] as [std::string::String; 0],
     );
 }

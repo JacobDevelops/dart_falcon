@@ -2,7 +2,7 @@
 //!
 //! Resources created in a long-lived Riverpod provider need an explicit lifetime.
 //! Use an autoDispose provider or register the resource's cleanup with ref.onDispose.
-//! Checks package-confirmed Provider, FutureProvider and StreamProvider callbacks
+//! Checks package-confirmed Provider, `FutureProvider` and `StreamProvider` callbacks
 //! for resolved constructor-created instances with a zero-required-argument
 //! close or cancel method. Dispose types are left to dispose-provided-instances.
 //! Borrowed values, deferred closures and unknown types are excluded. This

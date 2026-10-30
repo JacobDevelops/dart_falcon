@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    Arc, DeclarationIdentity, FileId, FxHashMap, FxHashSet, Hash, Hasher, Truth, TypeParam,
+    TypeParameterScope, index_fixpoint, unrelated,
+};
 
 /// Address identity whose referent must remain live for the cache's lifetime.
 pub(super) struct BorrowedIdentity<'a, T: ?Sized>(&'a T);
@@ -317,6 +320,7 @@ pub struct FunctionTypeShape {
 }
 
 impl FunctionTypeShape {
+    #[must_use]
     pub fn empty() -> Arc<Self> {
         static EMPTY: std::sync::LazyLock<Arc<FunctionTypeShape>> =
             std::sync::LazyLock::new(|| {
@@ -328,6 +332,7 @@ impl FunctionTypeShape {
         Arc::clone(&EMPTY)
     }
 
+    #[must_use]
     pub fn new(mut required_named: Vec<String>, type_parameters: Vec<ResolvedType>) -> Arc<Self> {
         if required_named.is_empty() && type_parameters.is_empty() {
             return Self::empty();
@@ -585,6 +590,7 @@ impl ResolvedType {
         Self { kind }
     }
 
+    #[must_use]
     pub fn new_interface(
         identity: DeclarationIdentity,
         arguments: Arc<[ResolvedType]>,
@@ -592,7 +598,7 @@ impl ResolvedType {
         extension_type: bool,
     ) -> Self {
         Self::from_kind(ResolvedTypeKind::Interface {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             identity,
             arguments,
             nullable,
@@ -600,6 +606,7 @@ impl ResolvedType {
         })
     }
 
+    #[must_use]
     pub fn new_type_parameter(
         id: TypeParameterId,
         bound: Arc<ResolvedType>,
@@ -612,10 +619,12 @@ impl ResolvedType {
         })
     }
 
+    #[must_use]
     pub fn new_non_null_type_parameter(id: TypeParameterId, bound: Arc<ResolvedType>) -> Self {
         Self::from_kind(ResolvedTypeKind::NonNullTypeParameter { id, bound })
     }
 
+    #[must_use]
     pub fn new_function(
         shape: Option<Arc<FunctionTypeShape>>,
         optional_positional: usize,
@@ -626,7 +635,7 @@ impl ResolvedType {
     ) -> Self {
         Self::from_kind(ResolvedTypeKind::Function {
             shape,
-            alias: Default::default(),
+            alias: FunctionTypeAlias::default(),
             optional_positional,
             return_type,
             positional,
@@ -635,13 +644,14 @@ impl ResolvedType {
         })
     }
 
+    #[must_use]
     pub fn new_record(
         positional: Arc<[ResolvedType]>,
         named: Arc<[(String, ResolvedType)]>,
         nullable: bool,
     ) -> Self {
         Self::from_kind(ResolvedTypeKind::Record {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             positional,
             named,
             nullable,
@@ -649,6 +659,7 @@ impl ResolvedType {
     }
 
     /// The typedef declaration behind a function type, when available.
+    #[must_use]
     pub fn function_alias_identity(&self) -> Option<&DeclarationIdentity> {
         match &self.kind {
             ResolvedTypeKind::Function { alias, .. } => alias.identity(),
@@ -656,6 +667,7 @@ impl ResolvedType {
         }
     }
 
+    #[must_use]
     pub fn view(&self) -> ResolvedTypeView<'_> {
         match &self.kind {
             ResolvedTypeKind::Unknown => ResolvedTypeView::Unknown,
@@ -719,6 +731,7 @@ impl ResolvedType {
     /// Maps immediate semantic children, including parameter bounds and function
     /// binder bounds, retaining this occurrence's provenance and unchanged storage.
     /// The callback controls recursion into each child.
+    #[must_use]
     pub fn map_children(&self, mut map: impl FnMut(&ResolvedType) -> ResolvedType) -> Self {
         let mut result = self.clone();
         match &mut result.kind {
@@ -1686,6 +1699,7 @@ impl ResolvedType {
         self
     }
 
+    #[must_use]
     pub fn function_return_type(&self) -> Option<Self> {
         let ResolvedTypeKind::Function {
             return_type, alias, ..
@@ -1696,6 +1710,7 @@ impl ResolvedType {
         Some(return_type.as_ref().clone().projected_from(alias))
     }
 
+    #[must_use]
     pub fn type_argument(&self, index: usize) -> Option<Self> {
         let ResolvedTypeKind::Interface {
             arguments,
@@ -1714,6 +1729,7 @@ impl ResolvedType {
         (0..self.arguments().len()).filter_map(|index| self.type_argument(index))
     }
 
+    #[must_use]
     pub fn record_positional(&self, index: usize) -> Option<Self> {
         let ResolvedTypeKind::Record {
             positional,
@@ -1728,6 +1744,7 @@ impl ResolvedType {
             .map(|ty| ty.clone().projected_from(occurrence))
     }
 
+    #[must_use]
     pub fn record_field(&self, name: &str) -> Option<Self> {
         let ResolvedTypeKind::Record {
             positional,
@@ -1751,14 +1768,15 @@ impl ResolvedType {
             .map(|ty| ty.clone().projected_from(occurrence))
     }
 
+    #[must_use]
     pub fn interface_identity(identity: DeclarationIdentity) -> Self {
         Self::new_interface(identity, empty_type_arguments(), false, false)
     }
 
+    #[must_use]
     pub fn nullable(&self) -> bool {
         match &self.kind {
-            ResolvedTypeKind::Null => true,
-            ResolvedTypeKind::Dynamic | ResolvedTypeKind::Unknown => true,
+            ResolvedTypeKind::Null | ResolvedTypeKind::Dynamic | ResolvedTypeKind::Unknown => true,
             ResolvedTypeKind::Interface { nullable, .. }
             | ResolvedTypeKind::TypeParameter { nullable, .. }
             | ResolvedTypeKind::Function { nullable, .. }
@@ -1769,6 +1787,7 @@ impl ResolvedType {
         }
     }
 
+    #[must_use]
     pub fn with_nullable(&self, nullable: bool) -> Self {
         if self.nullable() == nullable {
             return self.clone();
@@ -1836,6 +1855,7 @@ impl ResolvedType {
 
     /// Whether this type provably excludes null without declaration context.
     /// Extension types require `SignatureIndex::is_non_nullable`.
+    #[must_use]
     pub fn is_non_nullable(&self) -> bool {
         unrelated::non_nullable(self) == Truth::Yes
     }
@@ -1856,6 +1876,7 @@ impl ResolvedType {
     }
 
     /// Dart's `NonNull`, rather than merely removing a written `?` suffix.
+    #[must_use]
     pub fn non_null(&self) -> Self {
         match &self.kind {
             ResolvedTypeKind::TypeParameter { id, bound, .. } if !bound.is_non_nullable() => {
@@ -1869,10 +1890,12 @@ impl ResolvedType {
         }
     }
 
+    #[must_use]
     pub fn interface(&self, library: &str, name: &str) -> bool {
         matches!(&self.kind, ResolvedTypeKind::Interface { identity, .. } if identity.is_sdk(library, name))
     }
 
+    #[must_use]
     pub fn arguments(&self) -> &[ResolvedType] {
         match &self.kind {
             ResolvedTypeKind::Interface { arguments, .. } => arguments,

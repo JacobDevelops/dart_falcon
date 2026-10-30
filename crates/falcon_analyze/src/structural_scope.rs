@@ -123,6 +123,7 @@ macro_rules! structural_nodes {
         impl StructuralInterests {
             /// Macro support; derive subscriptions from the implemented method names.
             #[doc(hidden)]
+            #[must_use]
             pub const fn with_hook(self, name: &str) -> Self {
                 $(
                     if Self::hook_name_eq(name, stringify!($visit)) {
@@ -425,6 +426,7 @@ impl StructuralInterests {
         true
     }
 
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             enter: 0,
@@ -433,6 +435,7 @@ impl StructuralInterests {
         }
     }
 
+    #[must_use]
     pub const fn all() -> Self {
         Self {
             enter: u128::MAX,
@@ -441,16 +444,19 @@ impl StructuralInterests {
         }
     }
 
+    #[must_use]
     pub const fn enter(mut self, kind: StructuralKind) -> Self {
         self.enter |= 1 << kind as usize;
         self
     }
 
+    #[must_use]
     pub const fn exit(mut self, kind: StructuralKind) -> Self {
         self.exit |= 1 << kind as usize;
         self
     }
 
+    #[must_use]
     pub const fn routing(mut self) -> Self {
         self.routing = true;
         self

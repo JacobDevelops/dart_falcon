@@ -1,6 +1,6 @@
-//! Flags type declarations whose name is not well-formed UpperCamelCase.
+//! Flags type declarations whose name is not well-formed `UpperCamelCase`.
 //!
-//! Consistent UpperCamelCase type names are a core Dart convention that keeps
+//! Consistent `UpperCamelCase` type names are a core Dart convention that keeps
 //! types visually distinct from members and values. A name is accepted only when
 //! it starts with an uppercase ASCII letter, contains no `$`, and — after a
 //! single leading underscore is stripped — is between 3 and 40 characters long;
@@ -83,8 +83,7 @@ fn check_type_name(name_ident: Identifier<'_>, diags: &mut Vec<Diagnostic>, ctx:
 
     if !is_valid {
         diags.push(ctx.diagnostic(format!(
-            "Type name `{}` should be in `UpperCamelCase` and between 3 and 40 characters.",
-            name
+            "Type name `{name}` should be in `UpperCamelCase` and between 3 and 40 characters."
         ), name_ident.span()));
     }
 }

@@ -174,10 +174,8 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             // constructor initializers have separate name-resolution rules.
             StructuralNode::MethodDecl(_) | StructuralNode::GetterDecl(_)
             | StructuralNode::SetterDecl(_) | StructuralNode::OperatorDecl(_)
-            | StructuralNode::ConstructorDecl(_) | StructuralNode::LocalFuncDecl(_) => {
-                matches!(child, StructuralNode::FunctionBody(_))
-            }
-            StructuralNode::Expr(Expr::FuncExpr(_)) => {
+            | StructuralNode::ConstructorDecl(_) | StructuralNode::LocalFuncDecl(_)
+            | StructuralNode::Expr(Expr::FuncExpr(_)) => {
                 matches!(child, StructuralNode::FunctionBody(_))
             }
             StructuralNode::LocalVar(_) => matches!(child, StructuralNode::VarDeclarator(_)),

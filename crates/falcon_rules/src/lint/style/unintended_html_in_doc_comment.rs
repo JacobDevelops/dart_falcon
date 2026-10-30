@@ -257,8 +257,8 @@ mod tests {
 
     #[test]
     fn dartdoc_square_bracket_references_are_not_html() {
-        assert!(spanned("/// See [List<int>] for details.\nclass A {}").is_empty());
-        assert!(spanned("/// The [Map<String, int>] result.\nclass A {}").is_empty());
+        assert_eq!(spanned("/// See [List<int>] for details.\nclass A {}"), [] as [&str; 0]);
+        assert_eq!(spanned("/// The [Map<String, int>] result.\nclass A {}"), [] as [&str; 0]);
         // The carve-out ends at the closing bracket.
         assert_eq!(
             spanned("/// See [List<int>] then Future<void>.\nclass A {}"),
@@ -268,6 +268,6 @@ mod tests {
 
     #[test]
     fn keygen_is_a_known_html_tag() {
-        assert!(spanned("/// Renders a <keygen> control.\nclass A {}").is_empty());
+        assert_eq!(spanned("/// Renders a <keygen> control.\nclass A {}"), [] as [&str; 0]);
     }
 }

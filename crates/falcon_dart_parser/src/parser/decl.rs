@@ -280,7 +280,9 @@ impl<'src> Parser<'src> {
     /// distinguishes `static (int, int) m()` (record return type) from a member
     /// named after the keyword such as `external()`.
     fn record_type_prefixes_member(&self, offset: usize) -> bool {
-        use TokenKind::*;
+        use TokenKind::{
+            Async, Comma, Eof, Eq, Function, Get, LParen, Lt, Operator, Qmark, Semicolon, Set, Sync,
+        };
         let i = self.pos + offset;
         if self.kind_at(i) != LParen {
             return false;
@@ -360,16 +362,10 @@ impl<'src> Parser<'src> {
                 }
             }
             match self.cur().kind {
-                TokenKind::Static => {
-                    self.advance();
-                }
-                TokenKind::Abstract => {
-                    self.advance();
-                }
-                TokenKind::External => {
-                    self.advance();
-                }
-                TokenKind::Covariant => {
+                TokenKind::Static
+                | TokenKind::Abstract
+                | TokenKind::External
+                | TokenKind::Covariant => {
                     self.advance();
                 }
                 TokenKind::Late => {

@@ -38,7 +38,7 @@ impl Rule for CommentReferences {
         };
         let sdk_loaded = ctx
             .identities()
-            .is_some_and(|identities| identities.has_sdk_sources());
+            .is_some_and(falcon_analyze::IdentityIndex::has_sdk_sources);
         let scopes = DocScopes::new(program, &state.model, ctx.source());
         let resolver = DocResolver::new(
             program,

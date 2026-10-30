@@ -27,7 +27,7 @@ fn test_format_text_error() {
     // 1-based line:col of the span start, not the raw byte range.
     assert!(text.contains("file.dart:2:1:"), "got: {text}");
     assert!(
-        !text.contains("+"),
+        !text.contains('+'),
         "must not print raw byte offsets: {text}"
     );
 }

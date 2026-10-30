@@ -121,7 +121,7 @@ impl<'a> Collector<'a> {
             .first()
             .zip(ctor.initializers.last())
             .map(|(first, last)| Span::new(first.span().start, last.span().end));
-        let regions = [initializers, ctor.body.map(|body| body.span())];
+        let regions = [initializers, ctor.body.map(FunctionBody::span)];
         self.references.entry(parameter.name().span()).or_default();
         self.candidates.push(Candidate {
             parameter: parameter.name().span(),

@@ -1,4 +1,4 @@
-//! Flags named extensions whose name is not UpperCamelCase.
+//! Flags named extensions whose name is not `UpperCamelCase`.
 //!
 //! Extensions are types and should follow the same naming convention as classes
 //! and enums so that tooling and readers treat them consistently. Leading

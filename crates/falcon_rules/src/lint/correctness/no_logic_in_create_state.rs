@@ -155,8 +155,7 @@ fn body_result(
         Truth::Yes if args.positional().is_empty() && args.named().is_empty() => {
             BodyResult::Trivial
         }
-        Truth::Yes => BodyResult::Violation,
-        Truth::No => BodyResult::Violation,
+        Truth::Yes | Truth::No => BodyResult::Violation,
         Truth::Unknown => BodyResult::Unknown,
     }
 }

@@ -24,6 +24,7 @@ use falcon_analyze::{
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
+use falcon_syntax::cst::NamedArg as Arg;
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
@@ -109,7 +110,7 @@ impl<'a> Collector<'a> {
     fn check(
         &mut self,
         name: Identifier<'a>,
-        lookup: Lookup<'_>,
+        lookup: &Lookup<'_>,
         target: Option<&ResolvedType>,
         state: &SemanticState<'a>,
     ) {
@@ -155,7 +156,7 @@ impl<'a> Collector<'a> {
         } else {
             Lookup::Member(&receiver_type)
         };
-        self.check(name, lookup, target.as_ref(), state);
+        self.check(name, &lookup, target.as_ref(), state);
     }
 
     /// An unqualified `toString`, resolved against implicit `this`.
@@ -167,13 +168,13 @@ impl<'a> Collector<'a> {
             return;
         };
         let target = self.stale_this(name.span().start).cloned();
-        self.check(name, Lookup::Member(enclosing), target.as_ref(), state);
+        self.check(name, &Lookup::Member(enclosing), target.as_ref(), state);
     }
 
     fn check_arguments(&mut self, args: ArgList<'a>, state: &SemanticState<'a>) {
         for argument in args
             .positional()
-            .chain(args.named().map(|argument| argument.value()))
+            .chain(args.named().map(Arg::value))
         {
             match argument.unparenthesized() {
                 Expr::Field(field) => {
@@ -245,7 +246,7 @@ fn is_type_subtype(target: &ResolvedType, state: &SemanticState<'_>) -> bool {
 }
 
 /// Whether the `toString` reference's element is `Object.toString`.
-fn resolves_to_object_to_string(lookup: Lookup<'_>, state: &SemanticState<'_>) -> bool {
+fn resolves_to_object_to_string(lookup: &Lookup<'_>, state: &SemanticState<'_>) -> bool {
     let signatures = &state.signatures;
     // Every type has `toString`: finding none means `Object`'s is unindexed.
     let is_object = |fact: Option<Option<&falcon_analyze::MemberFacts>>| match fact {
@@ -253,7 +254,7 @@ fn resolves_to_object_to_string(lookup: Lookup<'_>, state: &SemanticState<'_>) -
         Some(None) => true,
         None => false,
     };
-    let ty = match lookup {
+    let ty = match *lookup {
         Lookup::Super => {
             return match state.enclosing_type.as_ref().map(ResolvedType::view) {
                 Some(ResolvedTypeView::Interface { identity, .. }) => {
@@ -267,7 +268,7 @@ fn resolves_to_object_to_string(lookup: Lookup<'_>, state: &SemanticState<'_>) -
     match ty.view() {
         ResolvedTypeView::Dynamic => true,
         ResolvedTypeView::TypeParameter { bound, .. } => {
-            resolves_to_object_to_string(Lookup::Member(bound), state)
+            resolves_to_object_to_string(&Lookup::Member(bound), state)
         }
         ResolvedTypeView::Interface { identity, .. } => {
             // `dart:core` `Type` redeclares `toString`.

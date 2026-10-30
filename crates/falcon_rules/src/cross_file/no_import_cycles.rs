@@ -50,14 +50,14 @@ impl CrossFileRule for NoImportCycles {
                 std::iter::once(directive.uri()).chain(
                     directive
                         .configurable_uris()
-                        .map(|alternative| alternative.uri()),
+                        .map(falcon_syntax::cst::ConfigurableUri::uri),
                 )
             });
             let exports = program.exports().flat_map(|directive| {
                 std::iter::once(directive.uri()).chain(
                     directive
                         .configurable_uris()
-                        .map(|alternative| alternative.uri()),
+                        .map(falcon_syntax::cst::ConfigurableUri::uri),
                 )
             });
             for uri in imports.chain(exports) {

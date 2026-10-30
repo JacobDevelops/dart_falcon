@@ -195,11 +195,11 @@ fn explicit_base_still_loads_members_and_cli_exclusions_remain_global() {
         .includes
         .extend_excludes(&["packages/a/lib/**".into()]);
     assert!(!config.files.includes.admits(&file.to_string_lossy()));
-    assert!(
+    assert_eq!(
         walk_project(&[root.to_path_buf()], &config.files.includes, false)
             .unwrap()
-            .files
-            .is_empty()
+            .files,
+        [] as [(std::path::PathBuf, std::string::String); 0]
     );
 }
 
@@ -251,7 +251,7 @@ fn tolerant_loading_retains_root_and_valid_members_with_qualified_errors() {
     assert_eq!(errors.len(), 1);
     assert!(errors[0].to_string().contains(&bad.display().to_string()));
     assert!(errors[0].to_string().contains("enabld"));
-    assert!(!errors[0].1.is_empty());
+    assert_ne!(errors[0].1, [] as [falcon_config::ConfigPathSegment; 0]);
     for (member, expected) in [("a", None), ("b", Some(ResolvedSeverity::Error))] {
         assert_eq!(
             loaded.config.resolve_rule_for(
@@ -575,11 +575,11 @@ fn global_exclusions_escape_workspace_directory_metacharacters() {
     let mut config = load_project_config(None, &root).unwrap().config;
     config.files.includes.extend_excludes(&["**/gen/**".into()]);
     assert!(!config.files.includes.admits(&file.to_string_lossy()));
-    assert!(
+    assert_eq!(
         walk_project(&[root], &config.files.includes, false)
             .unwrap()
-            .files
-            .is_empty()
+            .files,
+        [] as [(std::path::PathBuf, std::string::String); 0]
     );
 }
 

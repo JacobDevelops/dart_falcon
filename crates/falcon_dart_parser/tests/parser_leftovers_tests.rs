@@ -77,7 +77,10 @@ fn repeated_unclosed_interpolations_recover_in_linear_time() {
             .recv_timeout(std::time::Duration::from_secs(10))
             .expect("malformed interpolation recovery must finish within ten seconds");
         assert!(tokens.iter().any(|token| token.kind == TokenKind::Error));
-        assert_eq!(tokens.iter().map(|token| token.len()).sum::<usize>(), len);
+        assert_eq!(
+            tokens.iter().map(falcon_syntax::Token::len).sum::<usize>(),
+            len
+        );
         assert_eq!(tokens.last().unwrap().kind, TokenKind::Eof);
     }
 }

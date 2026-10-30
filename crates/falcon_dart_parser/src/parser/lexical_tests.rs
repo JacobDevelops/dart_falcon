@@ -39,7 +39,7 @@ fn retains_nested_tokens_with_absolute_offsets_and_trivia() {
 
 #[test]
 fn raw_and_escaped_dollars_do_not_create_interpolation_regions() {
-    for source in [r#"r'${ignored}'"#, r#"'\${ignored}'"#] {
+    for source in [r"r'${ignored}'", r"'\${ignored}'"] {
         let tree = crate::lex_tree(source);
         assert!(
             !tree
@@ -55,7 +55,7 @@ fn raw_and_escaped_dollars_do_not_create_interpolation_regions() {
 
 #[test]
 fn adjacent_literals_and_simple_identifiers_keep_distinct_regions() {
-    let source = r#"'$left$right' '${third}'"#;
+    let source = r"'$left$right' '${third}'";
     let tokens = Lexer::new(source).tokenize();
     let first = tokens
         .iter()
@@ -71,7 +71,7 @@ fn adjacent_literals_and_simple_identifiers_keep_distinct_regions() {
     let tree = crate::lex_tree(source);
     assert_eq!(
         tree.identifier_tokens(source)
-            .map(|token| token.text())
+            .map(falcon_syntax::cst::SyntaxToken::text)
             .collect::<Vec<_>>(),
         ["left", "right", "third"]
     );
@@ -82,7 +82,7 @@ fn adjacent_literals_and_simple_identifiers_keep_distinct_regions() {
 
 #[test]
 fn malformed_outer_strings_preserve_lexer_tokens() {
-    for source in [r#"'${missing'"#, r#"'unterminated"#] {
+    for source in [r"'${missing'", r"'unterminated"] {
         let tree = crate::lex_tree(source);
         let original = Lexer::new(source).tokenize();
         assert_eq!(tree.tokens(source).len(), original.len());
@@ -187,7 +187,7 @@ fn lexical_tree_retains_manifest_interpolation_identifiers() {
     assert!(tree.program(source).declarations().is_empty());
     assert_eq!(
         tree.identifier_tokens(source)
-            .map(|token| token.text())
+            .map(falcon_syntax::cst::SyntaxToken::text)
             .collect::<Vec<_>>(),
         [
             "name",
@@ -247,9 +247,9 @@ fn escaped_interpolation_brace_is_an_expression_error() {
 #[test]
 fn interpolation_braces_in_quoted_strings_and_comments_remain_isolated() {
     for source in [
-        r#"void f() { var x = '${'\}'}'; }"#,
-        r#"void f() { var x = '${r'\}'}'; }"#,
-        r#"void f() { var x = '${/* \} */ 1}'; }"#,
+        r"void f() { var x = '${'\}'}'; }",
+        r"void f() { var x = '${r'\}'}'; }",
+        r"void f() { var x = '${/* \} */ 1}'; }",
     ] {
         let parsed = crate::parse(source);
         assert!(parsed.errors.is_empty(), "{source}: {:?}", parsed.errors);
@@ -280,7 +280,7 @@ fn lexer_only_entry_retains_deep_interpolation_tokens() {
     );
     assert_eq!(
         tree.identifier_tokens(&source)
-            .map(|token| token.text())
+            .map(falcon_syntax::cst::SyntaxToken::text)
             .collect::<Vec<_>>(),
         ["Name"]
     );

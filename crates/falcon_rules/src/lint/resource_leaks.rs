@@ -738,22 +738,6 @@ enum BindingKind {
 
 impl<'a> References<'a> {
     fn new(program: Program<'a>, len: usize, model: &SemanticModel<'_>) -> Self {
-        let file = Span::new(0, len);
-        let mut references = Self {
-            scopes: vec![file],
-            classes: Vec::new(),
-            callables: Vec::new(),
-            bindings: Vec::new(),
-            owners: Vec::new(),
-            resolved_fields: Vec::new(),
-            extension_receivers: Vec::new(),
-            mixin_constraints: Vec::new(),
-            constructors: Vec::new(),
-            primary_parameters: Vec::new(),
-            in_primary: false,
-            dynamic_writes: HashSet::new(),
-            cascade_properties: HashSet::new(),
-        };
         struct Contexts<'r, 's, 'model, 'tree> {
             references: &'r mut References<'tree>,
             model: &'s SemanticModel<'model>,
@@ -776,6 +760,22 @@ impl<'a> References<'a> {
                 self.references.visit_top_level_decl(node);
             }
         }
+        let file = Span::new(0, len);
+        let mut references = Self {
+            scopes: vec![file],
+            classes: Vec::new(),
+            callables: Vec::new(),
+            bindings: Vec::new(),
+            owners: Vec::new(),
+            resolved_fields: Vec::new(),
+            extension_receivers: Vec::new(),
+            mixin_constraints: Vec::new(),
+            constructors: Vec::new(),
+            primary_parameters: Vec::new(),
+            in_primary: false,
+            dynamic_writes: HashSet::new(),
+            cascade_properties: HashSet::new(),
+        };
         walk_program(
             &mut Contexts {
                 references: &mut references,

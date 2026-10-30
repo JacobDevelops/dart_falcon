@@ -157,7 +157,7 @@ mod tests {
 
     #[test]
     fn mixed_chains_preserve_greedy_pairs_filters_and_diagnostic_order() {
-        let source = r#"
+        let source = r"
 void f(String a, String b, String c) {
   'a' + a + 'b' + b + 'c' + c;
   a + b + 'd' + c + 'e';
@@ -168,7 +168,7 @@ void f(String a, String b, String c) {
   r'raw' 'adjacent' + a;
   'x' + a.toString();
 }
-"#;
+";
         let actual: Vec<_> = diagnostics(source)
             .iter()
             .map(|diagnostic| (diagnostic.span.start, diagnostic.span.end))

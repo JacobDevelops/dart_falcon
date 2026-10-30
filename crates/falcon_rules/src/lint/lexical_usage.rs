@@ -45,8 +45,7 @@ impl NameScopes {
 }
 /// The headers of collection-`for` elements of a literal `node` (looking
 /// through nested `if`/`for` elements, which are not expressions).
-pub(crate) fn collection_for_inits<'a>(node: Expr<'a>) -> Vec<ForInit<'a>> {
-    let mut out = Vec::new();
+pub(crate) fn collection_for_inits(node: Expr<'_>) -> Vec<ForInit<'_>> {
     fn collection_element<'a>(element: CollectionElement<'a>, out: &mut Vec<ForInit<'a>>) {
         match element {
             CollectionElement::For(node) => {
@@ -79,6 +78,7 @@ pub(crate) fn collection_for_inits<'a>(node: Expr<'a>) -> Vec<ForInit<'a>> {
             MapElement::Entry(_) | MapElement::Spread(_) => {}
         }
     }
+    let mut out = Vec::new();
     match node.unparenthesized() {
         Expr::List(node) => {
             for element in node.elements() {

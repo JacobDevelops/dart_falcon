@@ -44,17 +44,23 @@ impl Rule for UseToAndAsIfApplicable {
             ctx,
             signatures,
             model: SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types()),
-            owner: None,
+            owner: Owner::Outside,
             diags: Vec::new(),
         }))
     }
+}
+
+enum Owner {
+    Outside,
+    Extension,
+    Resolved(DeclarationIdentity),
 }
 
 struct Collector<'a, 'ctx> {
     ctx: &'a AnalyzeContext<'ctx>,
     signatures: &'a SignatureIndex,
     model: SemanticModel<'a>,
-    owner: Option<Option<DeclarationIdentity>>,
+    owner: Owner,
     diags: Vec<Diagnostic>,
 }
 
@@ -63,32 +69,30 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
 
     fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
-        self.owner = None;
-            // Extensions have no supertypes to inherit from.
-            let owner = match decl {
-                TopLevelDecl::Extension(_) => None,
-                TopLevelDecl::Class(node) => Some(node.name().name()),
-                TopLevelDecl::Mixin(node) => Some(node.name().name()),
-                TopLevelDecl::MixinClass(node) => Some(node.name().name()),
-                TopLevelDecl::Enum(node) => Some(node.name().name()),
-                TopLevelDecl::ExtensionType(node) => Some(node.name().name()),
-                _ => return StructuralTraversal::Continue,
-            };
-            let owner = match owner {
-                Some(name) => match self.model.resolve_name(name) {
-                    Some(identity) => Some(identity),
-                    None => return StructuralTraversal::Continue,
-                },
-                None => None,
-            };
-        self.owner = Some(owner);
+        self.owner = Owner::Outside;
+        let owner_name = match decl {
+            TopLevelDecl::Extension(_) => {
+                self.owner = Owner::Extension;
+                return StructuralTraversal::Continue;
+            }
+            TopLevelDecl::Class(node) => node.name().name(),
+            TopLevelDecl::Mixin(node) => node.name().name(),
+            TopLevelDecl::MixinClass(node) => node.name().name(),
+            TopLevelDecl::Enum(node) => node.name().name(),
+            TopLevelDecl::ExtensionType(node) => node.name().name(),
+            _ => return StructuralTraversal::Continue,
+        };
+        let Some(identity) = self.model.resolve_name(owner_name) else {
+            return StructuralTraversal::Continue;
+        };
+        self.owner = Owner::Resolved(identity);
         StructuralTraversal::Continue
     }
 
     fn visit_class_member(&mut self, member: ClassMember<'a>) -> StructuralTraversal {
-        let Some(owner) = &self.owner else {
+        if matches!(&self.owner, Owner::Outside) {
             return StructuralTraversal::Continue;
-        };
+        }
                 let (name, params, return_type, body, span) = match member {
                     ClassMember::Method(method) => (
                         method.name().name(),
@@ -116,11 +120,14 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
                 {
                     return StructuralTraversal::Continue;
                 }
-                let inherited = owner.as_ref().map_or(Some(false), |owner| {
-                    self.signatures
+                let inherited = match &self.owner {
+                    Owner::Outside => return StructuralTraversal::Continue,
+                    Owner::Extension => Some(false),
+                    Owner::Resolved(owner) => self
+                        .signatures
                         .inherited_member_facts(owner, name)
-                        .map(|facts| facts.iter().any(|fact| fact.kind == MemberKind::Method))
-                });
+                        .map(|facts| facts.iter().any(|fact| fact.kind == MemberKind::Method)),
+                };
                 if inherited != Some(true) {
                     self.diags.push(self.ctx.diagnostic(
                         "Start the name of the method with `to` or `as`.",

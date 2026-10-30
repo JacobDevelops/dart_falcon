@@ -15,14 +15,13 @@
 
 use falcon_analyze::Number;
 use falcon_analyze::{
-    AnalyzeContext, ConstantValue, ResolvedTypeView, Rule, RulePreparation, Truth,
-    ConstantContext, evaluate_constant, parse_int,
+    AnalyzeContext, ConstantContext, ConstantValue, ResolvedTypeView, Rule, RulePreparation, Truth,
+    evaluate_constant, parse_int,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-
 
 #[derive(Default)]
 pub struct PreferContains;
@@ -97,7 +96,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
 
 /// The comparison `indexOf(...) <op> value` for a `value <= 0`.
 fn finding(value: i128, op: BinaryOp) -> Option<Finding> {
-    use BinaryOp::*;
+    use BinaryOp::{EqEq, Gt, GtEq, Lt, LtEq, NotEq};
     match (value, op) {
         (-1, EqEq | NotEq | LtEq | Gt) | (0, GtEq | Lt) => Some(Finding::UseContains),
         (-1, Lt) => Some(Finding::AlwaysFalse),
@@ -150,7 +149,7 @@ fn unassigned_index_of<'a>(mut expression: Expr<'a>, state: &SemanticState<'a>) 
     let mut arguments = call
         .args()
         .positional()
-        .chain(call.args().named().map(|argument| argument.value()));
+        .chain(call.args().named().map(NamedArg::value));
     match (arguments.next(), arguments.next(), arguments.next()) {
         (Some(_), Some(start), None) => int_value(start, state) == Some(0),
         _ => true,
@@ -179,7 +178,13 @@ fn unsigned_int_value<'a>(expression: Expr<'a>, state: &SemanticState<'a>) -> Op
             {
                 return None;
             }
-            match evaluate_constant(expression, ConstantContext { locals: Some(&constants), ..ConstantContext::new(&state.model, &state.signatures) })? {
+            match evaluate_constant(
+                expression,
+                ConstantContext {
+                    locals: Some(&constants),
+                    ..ConstantContext::new(&state.model, &state.signatures)
+                },
+            )? {
                 ConstantValue::Number(Number::Int(value)) => Some(value),
                 _ => None,
             }

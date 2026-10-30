@@ -15,6 +15,9 @@ pub struct PackageMetadata {
 }
 
 impl PackageMetadata {
+    ///
+    /// # Panics
+    /// Panics if the manifest path has no parent directory.
     pub fn load(manifest: &Path) -> Self {
         let source = std::fs::read_to_string(manifest).ok();
         let yaml = source
@@ -49,6 +52,7 @@ impl PackageMetadata {
     }
 
     /// The strictly parsed name; malformed manifests are not valid import owners.
+    #[must_use]
     pub fn parsed_name(&self) -> Option<&str> {
         self.yaml.as_ref()?.as_mapping()?.get("name")?.as_str()
     }
@@ -66,6 +70,7 @@ impl PackageMetadata {
         .then_some(canonical)
     }
 
+    #[must_use]
     pub fn checks_flutter_web_imports(&self) -> bool {
         self.yaml.as_ref().is_some_and(|yaml| {
             !yaml["dependencies"]["flutter"].is_null()
@@ -83,6 +88,7 @@ pub struct FilePackage {
 }
 
 impl FilePackage {
+    #[must_use]
     pub fn discover(path: &Path) -> Self {
         let path = canonical_or_lexical(&super::package_config::absolute(path));
         let package = enclosing_pubspec_normalized(&path)
@@ -138,24 +144,29 @@ impl FilePackage {
         }
     }
 
+    #[must_use]
     pub fn metadata(&self) -> Option<&PackageMetadata> {
         self.package.as_deref()
     }
 
+    #[must_use]
     pub fn identity(&self) -> Option<&PackageIdentity> {
         self.metadata().map(|package| &package.identity)
     }
 
+    #[must_use]
     pub fn lib_identity(&self) -> Option<&PackageIdentity> {
         self.identity().filter(|_| self.in_lib)
     }
 
+    #[must_use]
     pub fn in_directory(&self, name: &str) -> bool {
         self.directory.as_deref() == Some(name)
     }
 }
 
 /// Find the nearest manifest without resolving symlinks inside virtual sources.
+#[must_use]
 pub fn enclosing_pubspec(path: &Path) -> Option<PathBuf> {
     let path = canonical_or_lexical(path);
     enclosing_pubspec_normalized(&path)
@@ -182,6 +193,9 @@ pub(crate) fn canonical_comparison_path(path: &Path) -> PathBuf {
     path
 }
 
+/// # Panics
+/// Panics if a discovered manifest path has no parent directory.
+#[must_use]
 pub fn canonical_package_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| {
         let path = canonical_or_lexical(path);
@@ -205,6 +219,7 @@ fn canonical_lib_root(root: &Path) -> PathBuf {
         .unwrap_or_else(|_| canonical_or_lexical(root).join("lib"))
 }
 
+#[must_use]
 pub fn package_identity(manifest: &Path) -> PackageIdentity {
     PackageMetadata::load(manifest).identity
 }
@@ -394,7 +409,7 @@ mod tests {
         let source = root.path().join("lib/source.dart");
         let environment = AnalysisEnvironment::with_sdk_locator(|_| None);
         let mut baseline = environment.config_stamps();
-        environment.file_package(&source);
+        let _ = environment.file_package(&source);
         assert!(!baseline.extend_discovery(environment.config_stamps()));
         assert!(!baseline.extend_discovery(environment.config_stamps()));
         std::fs::write(&manifest, "name: changed\n").unwrap();

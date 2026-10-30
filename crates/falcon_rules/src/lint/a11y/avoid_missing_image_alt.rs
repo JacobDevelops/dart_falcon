@@ -1,4 +1,4 @@
-//! Requires semanticLabel on Flutter Image and imageSemanticLabel on FadeInImage.
+//! Requires semanticLabel on Flutter Image and imageSemanticLabel on `FadeInImage`.
 //! Explicitly null labels are missing; empty labels and dynamic label expressions
 //! are accepted. Explicit true or dynamic excludeFromSemantics values are exempt;
 //! only an absent flag or literal false proves an image needs a label.

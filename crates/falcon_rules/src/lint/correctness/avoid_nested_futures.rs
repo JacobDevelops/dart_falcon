@@ -5,7 +5,7 @@
 //! declaration identities and lexical type parameters. Collections of futures
 //! are not nested wrappers; inferred-only types are deliberately not reported.
 //!
-//! Reference: https://dcm.dev/docs/rules/common/avoid-nested-futures/
+//! Reference: <https://dcm.dev/docs/rules/common/avoid-nested-futures/>
 
 use crate::lint::support::nested_async::{Nesting, prepare_nested};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};

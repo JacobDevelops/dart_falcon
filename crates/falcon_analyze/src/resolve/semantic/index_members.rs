@@ -1,7 +1,21 @@
-use super::*;
+use super::{
+    Arc, AstChildren, ClassRestriction, ConstConstructorBody, Cow, DeclarationFacts,
+    DeclarationIdentity, Expr, ExtensionFacts, FunctionTypeAlias, FxHashMap, FxHashSet, HashSet,
+    InferenceContext, InstanceAccess, LibraryId, MemberFacts, MemberKind, ResolvedSignature,
+    ResolvedType, SDK_INTERFACE_MEMBERS, SemanticModel, SignatureIndex, Truth,
+    TypeConstraintContext, TypeEnvironment, TypeKind, TypeParameterId, TypeParameterScope,
+    has_inference_holes, index_fixpoint, infer_type_constraints, inference_candidate,
+    instantiate_parameter_bound, mentions_any, same_library, top_rank,
+};
 use crate::resolve::semantic::ResolvedTypeKind;
+pub(super) enum Lookup<T> {
+    Unknown,
+    Absent,
+    Found(T),
+}
 
 impl SignatureIndex {
+    #[must_use]
     pub fn declaration(&self, identity: &DeclarationIdentity) -> Option<&DeclarationFacts> {
         self.type_facts.get(identity)?.declaration.as_ref()
     }
@@ -16,22 +30,16 @@ impl SignatureIndex {
     /// Type of a closure parameter or return that `context` does not supply:
     /// Dart's `dynamic` without a context or under a resolved non-function
     /// one, but `Unknown` when the context exists and is unresolved.
+    #[must_use]
     pub fn uncontextual_closure_type(&self, context: Option<&ResolvedType>) -> ResolvedType {
         match context {
-            Some(
-                ResolvedType {
-                    kind: ResolvedTypeKind::Unknown,
-                }
-                | ResolvedType {
-                    kind: ResolvedTypeKind::TypeParameter { .. },
-                }
-                | ResolvedType {
-                    kind: ResolvedTypeKind::NonNullTypeParameter { .. },
-                }
-                | ResolvedType {
-                    kind: ResolvedTypeKind::Function { .. },
-                },
-            ) => ResolvedType::UNKNOWN,
+            Some(ResolvedType {
+                kind:
+                    ResolvedTypeKind::Unknown
+                    | ResolvedTypeKind::TypeParameter { .. }
+                    | ResolvedTypeKind::NonNullTypeParameter { .. }
+                    | ResolvedTypeKind::Function { .. },
+            }) => ResolvedType::UNKNOWN,
             Some(ResolvedType {
                 kind: ResolvedTypeKind::Interface { identity, .. },
             }) if identity.is_sdk("dart:async", "FutureOr")
@@ -46,13 +54,14 @@ impl SignatureIndex {
 
     /// The number of type parameters an indexed class, mixin, enum, or
     /// extension type declares (project, loaded external, or curated fallback).
+    #[must_use]
     pub fn type_parameter_count(&self, identity: &DeclarationIdentity) -> Option<usize> {
-        self.type_parameters(identity)
-            .map(|parameters| parameters.len())
+        self.type_parameters(identity).map(<[TypeParameterId]>::len)
     }
 
     /// The declaration kind (class, mixin, enum, ...) of the indexed type
     /// `identity`, project or external; `None` when unindexed.
+    #[must_use]
     pub fn type_kind(&self, identity: &DeclarationIdentity) -> Option<TypeKind> {
         self.type_facts.get(identity)?.kind
     }
@@ -61,11 +70,13 @@ impl SignatureIndex {
         self.constants.get(identity).map(crate::NodeRef::expr)
     }
 
+    #[must_use]
     pub fn constant_type(&self, identity: &DeclarationIdentity) -> Option<&DeclarationIdentity> {
         self.constant_types.get(identity)
     }
 
     /// Whether `name` is a value of the project enum `identity`.
+    #[must_use]
     pub fn is_enum_value(&self, identity: &DeclarationIdentity, name: &str) -> bool {
         self.type_facts
             .get(identity)
@@ -74,21 +85,25 @@ impl SignatureIndex {
     }
 
     /// Whether `identity` is a project enum.
+    #[must_use]
     pub fn is_enum(&self, identity: &DeclarationIdentity) -> bool {
         self.enum_value_names(identity).is_some()
     }
 
     /// Names of the declared values of an indexed enum, in declaration order.
+    #[must_use]
     pub fn enum_value_names(&self, identity: &DeclarationIdentity) -> Option<&[String]> {
         self.type_facts.get(identity)?.enum_values.as_deref()
     }
 
     /// The explicit `extends` type of an indexed class or mixin class.
+    #[must_use]
     pub fn superclass(&self, identity: &DeclarationIdentity) -> Option<&ResolvedType> {
         self.type_facts.get(identity)?.superclass.as_ref()
     }
 
     /// The body of the project `const` constructor `identity.name`.
+    #[must_use]
     pub fn const_constructor(
         &self,
         identity: &DeclarationIdentity,
@@ -112,6 +127,7 @@ impl SignatureIndex {
 
     /// `ty` viewed as an instance of `target` (the analyzer's `asInstanceOf`):
     /// `ty` itself or the supertype instantiation naming `target`.
+    #[must_use]
     pub fn as_instance_of(
         &self,
         ty: &ResolvedType,
@@ -129,15 +145,14 @@ impl SignatureIndex {
     ) -> Truth {
         match ty {
             ResolvedType {
-                kind: ResolvedTypeKind::TypeParameter { bound, .. },
-            }
-            | ResolvedType {
-                kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+                kind:
+                    ResolvedTypeKind::TypeParameter { bound, .. }
+                    | ResolvedTypeKind::NonNullTypeParameter { bound, .. },
             } => self.declaration_subtype(bound, target, model),
             ResolvedType {
                 kind: ResolvedTypeKind::Interface { identity, .. },
             } if !self.has_cyclic_supertypes(identity) => {
-                let result = self.ancestor_matches(
+                let result = Self::ancestor_matches(
                     identity,
                     |identity| {
                         self.type_facts
@@ -170,12 +185,14 @@ impl SignatureIndex {
     }
 
     /// The static read type of a top-level variable or getter.
+    #[must_use]
     pub fn value_type(&self, identity: &DeclarationIdentity) -> Option<&ResolvedType> {
         index_fixpoint::record_inference_read(index_fixpoint::InferenceInputRef::Value(identity));
         self.value_types.get(identity)
     }
 
     /// Whether reading this top-level value invokes a getter.
+    #[must_use]
     pub fn is_value_getter(&self, identity: &DeclarationIdentity) -> bool {
         self.value_getters.contains(identity)
             || self
@@ -192,6 +209,7 @@ impl SignatureIndex {
                 .is_some_and(|base| base.is_cyclic_value(identity))
     }
 
+    #[must_use]
     pub fn function(&self, identity: &DeclarationIdentity) -> Option<&ResolvedSignature> {
         self.functions.get(identity)
     }
@@ -205,6 +223,7 @@ impl SignatureIndex {
 
     /// Includes generative constructors forwarded by named mixin applications,
     /// with parameter types rebound to the application's own generic scope.
+    #[must_use]
     pub fn constructor(
         &self,
         identity: &DeclarationIdentity,
@@ -218,6 +237,7 @@ impl SignatureIndex {
 
     /// Whether source facts prove an explicit or implicit constructor exists.
     /// Abstract classes and enums also have implicit unnamed constructors.
+    #[must_use]
     pub fn has_constructor(&self, identity: &DeclarationIdentity, name: &str) -> bool {
         self.constructor(identity, name).is_some()
             || (name == "new"
@@ -235,6 +255,7 @@ impl SignatureIndex {
 
     /// Whether a constructor can be referenced as a callable tear-off.
     /// Enum and abstract generative constructors exist but cannot be torn off.
+    #[must_use]
     pub fn has_constructor_tearoff(&self, identity: &DeclarationIdentity, name: &str) -> bool {
         self.has_constructor(identity, name)
             && !self.is_enum(identity)
@@ -249,6 +270,7 @@ impl SignatureIndex {
 
     /// A constructor tear-off's callable type, including its constructed result
     /// and alias substitutions; shared with ordinary expression inference.
+    #[must_use]
     pub fn constructor_tearoff_type(
         &self,
         identity: &DeclarationIdentity,
@@ -261,7 +283,7 @@ impl SignatureIndex {
             return None;
         }
         // Constructor typing does not inspect lexical flow scopes.
-        TypeEnvironment::default().constructor_tearoff(
+        TypeEnvironment::constructor_tearoff(
             identity.clone(),
             name,
             AstChildren::empty(),
@@ -277,6 +299,7 @@ impl SignatureIndex {
     }
 
     /// The declaration's generic owner parameters in source order.
+    #[must_use]
     pub fn type_parameters(&self, identity: &DeclarationIdentity) -> Option<&[TypeParameterId]> {
         let facts = self.type_facts.get(identity)?;
         facts
@@ -289,6 +312,7 @@ impl SignatureIndex {
     /// `identity` instantiated with its own `parameters`, each bounded by its
     /// instantiate-to-bound default, as the result of a constructor whose type
     /// arguments are inferred.
+    #[must_use]
     pub fn self_instantiation(
         &self,
         identity: DeclarationIdentity,
@@ -297,7 +321,7 @@ impl SignatureIndex {
     ) -> ResolvedType {
         let extension_type = self.type_kind(&identity) == Some(TypeKind::ExtensionType);
         ResolvedType::from_kind(ResolvedTypeKind::Interface {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             identity,
             arguments: parameters
                 .iter()
@@ -347,6 +371,10 @@ impl SignatureIndex {
     }
 
     /// Whether the declaration explicitly records the named constructor as const.
+    #[expect(
+        clippy::must_use_candidate,
+        reason = "querying records an inference dependency even when its result is intentionally discarded"
+    )]
     pub fn is_const_constructor(&self, identity: &DeclarationIdentity, name: &str) -> bool {
         index_fixpoint::record_inference_read(index_fixpoint::InferenceInputRef::Constructors(
             identity,
@@ -359,6 +387,7 @@ impl SignatureIndex {
         })
     }
 
+    #[must_use]
     pub fn resolved_constructor(
         &self,
         receiver: &ResolvedType,
@@ -380,6 +409,7 @@ impl SignatureIndex {
         Some((signature, substitutions))
     }
 
+    #[must_use]
     pub fn member(&self, identity: &DeclarationIdentity, name: &str) -> Option<&ResolvedSignature> {
         self.member_entry(identity, name)?.signature.as_ref()
     }
@@ -423,6 +453,7 @@ impl SignatureIndex {
         }
     }
 
+    #[must_use]
     pub fn inherited_member_facts(
         &self,
         identity: &DeclarationIdentity,
@@ -436,6 +467,7 @@ impl SignatureIndex {
     /// `identity`'s supertype graph, and whether that graph is fully known (no
     /// unresolved, dependency, or unlisted SDK supertypes). `None` when
     /// `identity` itself is unknown.
+    #[must_use]
     pub fn known_inherited_member_facts(
         &self,
         identity: &DeclarationIdentity,
@@ -538,6 +570,7 @@ impl SignatureIndex {
     /// (not a mixin) declares an instance member: the analyzer's
     /// `interfaceMembers` reaching a non-`Object` `ClassElement`. `Unknown`
     /// when an unresolved, dependency, or unlisted SDK supertype is reached.
+    #[must_use]
     pub fn inherits_class_instance_member(
         &self,
         identity: &DeclarationIdentity,
@@ -632,59 +665,90 @@ impl SignatureIndex {
     /// `base`, or `interface` modifier its direct supertypes induce (still
     /// `Sealed` when they induce none). `None` when the declaration or a
     /// supertype the induction depends on is not indexed.
+    #[must_use]
     pub fn effective_restriction(
         &self,
         identity: &DeclarationIdentity,
     ) -> Option<Option<ClassRestriction>> {
-        self.effective_restriction_inner(identity, &mut HashSet::new())
+        match self.effective_restriction_inner(identity, &mut HashSet::new()) {
+            Lookup::Unknown => None,
+            Lookup::Absent => Some(None),
+            Lookup::Found(restriction) => Some(Some(restriction)),
+        }
     }
 
     fn effective_restriction_inner<'a>(
         &'a self,
         identity: &'a DeclarationIdentity,
         visiting: &mut HashSet<&'a DeclarationIdentity>,
-    ) -> Option<Option<ClassRestriction>> {
+    ) -> Lookup<ClassRestriction> {
         use ClassRestriction::{Base, Final, Interface, Sealed};
         if *identity == DeclarationIdentity::OBJECT {
-            return Some(None);
+            return Lookup::Absent;
         }
-        let facts = self.type_facts.get(identity)?;
-        facts.kind?;
+        let Some(facts) = self.type_facts.get(identity) else {
+            return Lookup::Unknown;
+        };
+        if facts.kind.is_none() {
+            return Lookup::Unknown;
+        }
         let declared = facts.restriction;
         if declared != Some(Sealed) {
-            return Some(declared);
+            return declared.map_or(Lookup::Absent, Lookup::Found);
         }
         if !visiting.insert(identity) {
-            return None;
+            return Lookup::Unknown;
         }
-        let (_, supertypes) = facts.supertypes.as_ref()?;
+        let Some((_, supertypes)) = facts.supertypes.as_ref() else {
+            return Lookup::Unknown;
+        };
         let mut restriction_of = |ty: &'a ResolvedType| match ty {
             ResolvedType {
                 kind: ResolvedTypeKind::Interface { identity, .. },
             } => self.effective_restriction_inner(identity, visiting),
-            _ => None,
+            _ => Lookup::Unknown,
         };
         // The trailing implicit `Object` is no declared interface.
         let mut interfaces = supertypes.iter();
         interfaces.next_back();
         for _ in 0..facts.superclass_edge_count() {
-            interfaces.next()?;
+            if interfaces.next().is_none() {
+                return Lookup::Unknown;
+            }
         }
         let superclass = match &facts.superclass {
-            Some(superclass) => restriction_of(superclass)?,
+            Some(superclass) => match restriction_of(superclass) {
+                Lookup::Unknown => return Lookup::Unknown,
+                Lookup::Absent => None,
+                Lookup::Found(restriction) => Some(restriction),
+            },
             None => None,
         };
-        let mixins = facts
+        let Some(mixins) = facts
             .mixin_applications
             .iter()
             .map(|mixin| {
                 interfaces.next()?;
-                restriction_of(mixin)
+                match restriction_of(mixin) {
+                    Lookup::Unknown => None,
+                    Lookup::Absent => Some(None),
+                    Lookup::Found(restriction) => Some(Some(restriction)),
+                }
             })
-            .collect::<Option<Vec<_>>>()?;
-        let interfaces = interfaces
-            .map(&mut restriction_of)
-            .collect::<Option<Vec<_>>>()?;
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Lookup::Unknown;
+        };
+        let Some(interface_restrictions) = interfaces
+            .map(|interface| match restriction_of(interface) {
+                Lookup::Unknown => None,
+                Lookup::Absent => Some(None),
+                Lookup::Found(restriction) => Some(Some(restriction)),
+            })
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Lookup::Unknown;
+        };
         let any = |types: &[Option<ClassRestriction>], wanted: &[ClassRestriction]| {
             types
                 .iter()
@@ -698,16 +762,24 @@ impl SignatureIndex {
                 Some(Final) => Final,
                 Some(Base) if any(&mixins, &[Interface]) => Final,
                 Some(Base) => Base,
-                Some(Interface) if any(&interfaces, &[Base]) || any(&mixins, &[Base]) => Final,
+                Some(Interface)
+                    if any(&interface_restrictions, &[Base]) || any(&mixins, &[Base]) =>
+                {
+                    Final
+                }
                 Some(Interface) => Interface,
-                _ if any(&interfaces, &[Base, Final]) || any(&mixins, &[Base, Final]) => Base,
-                _ if any(&mixins, &[Interface]) && any(&interfaces, &[Base]) => Final,
+                _ if any(&interface_restrictions, &[Base, Final])
+                    || any(&mixins, &[Base, Final]) =>
+                {
+                    Base
+                }
+                _ if any(&mixins, &[Interface]) && any(&interface_restrictions, &[Base]) => Final,
                 _ if any(&mixins, &[Interface]) => Interface,
                 _ => Sealed,
             }
         };
         visiting.remove(identity);
-        Some(Some(induced))
+        Lookup::Found(induced)
     }
 
     /// Whether `identity` or one of its supertypes is annotated `@immutable`:
@@ -715,6 +787,7 @@ impl SignatureIndex {
     /// `superclass_only` just the `extends` chain. SDK types never carry the
     /// annotation; `Unknown` when an unresolved or dependency type is reached
     /// before an annotated one.
+    #[must_use]
     pub fn has_immutable_supertype(
         &self,
         identity: &DeclarationIdentity,
@@ -748,8 +821,7 @@ impl SignatureIndex {
                 self.type_facts
                     .get(&current)
                     .and_then(|facts| facts.supertypes.as_ref())
-                    .map(|(_, supertypes)| supertypes.iter().collect())
-                    .unwrap_or_default()
+                    .map_or_default(|(_, supertypes)| supertypes.iter().collect())
             };
             for supertype in next {
                 match supertype {
@@ -767,6 +839,7 @@ impl SignatureIndex {
     /// a class on its superclass chain, or an applied mixin declares a
     /// non-final, non-abstract instance field. `None` when the chain reaches a
     /// type whose members are unknown.
+    #[must_use]
     pub fn has_non_final_field(&self, identity: &DeclarationIdentity) -> Option<bool> {
         self.has_non_final_field_inner(identity, &mut HashSet::new())
     }
@@ -815,26 +888,40 @@ impl SignatureIndex {
     ///
     /// `Some(None)` when nothing is inherited, `None` when the chain reaches a
     /// type whose members falcon does not know.
+    #[must_use]
     pub fn inherited_concrete_member(
         &self,
         identity: &DeclarationIdentity,
         name: &str,
     ) -> Option<Option<&MemberFacts>> {
+        match self.inherited_concrete_member_inner(identity, name) {
+            Lookup::Unknown => None,
+            Lookup::Absent => Some(None),
+            Lookup::Found(member) => Some(Some(member)),
+        }
+    }
+
+    fn inherited_concrete_member_inner(
+        &self,
+        identity: &DeclarationIdentity,
+        name: &str,
+    ) -> Lookup<&MemberFacts> {
         let mut visited = HashSet::from([identity.clone()]);
-        if let Some((found, _)) = self.concrete_member_in_chain(
+        match self.concrete_member_in_chain(
             identity,
             identity,
             name,
             |fact| fact.kind != MemberKind::Setter,
             &mut visited,
-        )? {
-            return Some(Some(found));
+        ) {
+            Lookup::Unknown => return Lookup::Unknown,
+            Lookup::Found((found, _)) => return Lookup::Found(found),
+            Lookup::Absent => {}
         }
-        Some(
-            self.declared_member(identity, &DeclarationIdentity::OBJECT, name, |fact| {
-                !fact.is_abstract && fact.kind != MemberKind::Setter
-            }),
-        )
+        self.declared_member(identity, &DeclarationIdentity::OBJECT, name, |fact| {
+            !fact.is_abstract && fact.kind != MemberKind::Setter
+        })
+        .map_or(Lookup::Absent, Lookup::Found)
     }
 
     pub(super) fn concrete_member_in_chain(
@@ -844,13 +931,19 @@ impl SignatureIndex {
         name: &str,
         filter: impl Fn(&MemberFacts) -> bool + Copy,
         visited: &mut HashSet<DeclarationIdentity>,
-    ) -> Option<Option<(&MemberFacts, &ResolvedType)>> {
-        for supertype in self.type_facts.get(identity)?.member_supertypes.as_ref()? {
+    ) -> Lookup<(&MemberFacts, &ResolvedType)> {
+        let Some(facts) = self.type_facts.get(identity) else {
+            return Lookup::Unknown;
+        };
+        let Some(supertypes) = facts.member_supertypes.as_ref() else {
+            return Lookup::Unknown;
+        };
+        for supertype in supertypes {
             let ResolvedType {
                 kind: ResolvedTypeKind::Interface { identity: next, .. },
             } = supertype
             else {
-                return None;
+                return Lookup::Unknown;
             };
             if *next == DeclarationIdentity::OBJECT || !visited.insert(next.clone()) {
                 continue;
@@ -858,20 +951,20 @@ impl SignatureIndex {
             // Curated SDK entries describe only some members; only SDK
             // declarations indexed from loaded sources are searched.
             if matches!(next, DeclarationIdentity::Sdk { .. }) && self.type_kind(next).is_none() {
-                return None;
+                return Lookup::Unknown;
             }
             if let Some(found) =
                 self.declared_member(owner, next, name, |fact| !fact.is_abstract && filter(fact))
             {
-                return Some(Some((found, supertype)));
+                return Lookup::Found((found, supertype));
             }
-            if let Some((found, _)) =
-                self.concrete_member_in_chain(owner, next, name, filter, visited)?
-            {
-                return Some(Some((found, supertype)));
+            match self.concrete_member_in_chain(owner, next, name, filter, visited) {
+                Lookup::Unknown => return Lookup::Unknown,
+                Lookup::Found((found, _)) => return Lookup::Found((found, supertype)),
+                Lookup::Absent => {}
             }
         }
-        Some(None)
+        Lookup::Absent
     }
 
     /// The non-static, non-setter member named `name` in the interface of
@@ -880,13 +973,18 @@ impl SignatureIndex {
     ///
     /// `Some(None)` when the interface has no such member, `None` when a
     /// supertype's members are unknown before a declaration is found.
+    #[must_use]
     pub fn interface_member(
         &self,
         owner: &DeclarationIdentity,
         identity: &DeclarationIdentity,
         name: &str,
     ) -> Option<Option<&MemberFacts>> {
-        self.interface_member_inner(owner, identity, name, &mut HashSet::new())
+        match self.interface_member_inner(owner, identity, name, &mut HashSet::new()) {
+            Lookup::Unknown => None,
+            Lookup::Absent => Some(None),
+            Lookup::Found(member) => Some(Some(member)),
+        }
     }
 
     fn interface_member_inner(
@@ -895,38 +993,46 @@ impl SignatureIndex {
         identity: &DeclarationIdentity,
         name: &str,
         visited: &mut HashSet<DeclarationIdentity>,
-    ) -> Option<Option<&MemberFacts>> {
+    ) -> Lookup<&MemberFacts> {
         if !visited.insert(identity.clone()) {
-            return Some(None);
+            return Lookup::Absent;
         }
         let is_object = *identity == DeclarationIdentity::OBJECT;
         if matches!(identity, DeclarationIdentity::Sdk { .. })
             && !is_object
             && self.type_kind(identity).is_none()
         {
-            return None;
+            return Lookup::Unknown;
         }
         if let Some(found) = self.declared_member(owner, identity, name, |fact| {
             fact.kind != MemberKind::Setter
         }) {
-            return Some(Some(found));
+            return Lookup::Found(found);
         }
         if is_object {
-            return Some(None);
+            return Lookup::Absent;
         }
-        let (_, supertypes) = self.type_facts.get(identity)?.supertypes.as_ref()?;
+        let Some((_, supertypes)) = self
+            .type_facts
+            .get(identity)
+            .and_then(|facts| facts.supertypes.as_ref())
+        else {
+            return Lookup::Unknown;
+        };
         for supertype in supertypes {
             let ResolvedType {
                 kind: ResolvedTypeKind::Interface { identity: next, .. },
             } = supertype
             else {
-                return None;
+                return Lookup::Unknown;
             };
-            if let Some(found) = self.interface_member_inner(owner, next, name, visited)? {
-                return Some(Some(found));
+            match self.interface_member_inner(owner, next, name, visited) {
+                Lookup::Unknown => return Lookup::Unknown,
+                Lookup::Found(found) => return Lookup::Found(found),
+                Lookup::Absent => {}
             }
         }
-        Some(None)
+        Lookup::Absent
     }
 
     /// `identity`'s own non-static declaration of `name` matching `filter`,
@@ -949,6 +1055,7 @@ impl SignatureIndex {
 
     /// The applicable extension's identity, preserving receiver nullability
     /// and giving instance members precedence over implicit extensions.
+    #[must_use]
     pub fn resolved_extension_owner(
         &self,
         receiver: &ResolvedType,
@@ -987,6 +1094,7 @@ impl SignatureIndex {
     }
 
     /// The applicable extension owner for a borrowed read or write member name.
+    #[must_use]
     pub fn resolved_extension_access_owner(
         &self,
         receiver: &ResolvedType,
@@ -998,6 +1106,7 @@ impl SignatureIndex {
     }
 
     /// Applicable extension on-types without constructing setter spellings.
+    #[must_use]
     pub fn applicable_extension_access_on_types(
         &self,
         receiver: &ResolvedType,
@@ -1026,9 +1135,7 @@ impl SignatureIndex {
         if matches!(
             receiver,
             ResolvedType {
-                kind: ResolvedTypeKind::Dynamic
-            } | ResolvedType {
-                kind: ResolvedTypeKind::Unknown
+                kind: ResolvedTypeKind::Dynamic | ResolvedTypeKind::Unknown
             }
         ) {
             return None;
@@ -1115,6 +1222,7 @@ impl SignatureIndex {
     }
 
     /// Whether a visible extension getter may apply and therefore have effects.
+    #[must_use]
     pub fn has_possible_extension_getter(
         &self,
         receiver: &ResolvedType,
@@ -1135,6 +1243,7 @@ impl SignatureIndex {
     }
 
     /// Facts for the members named `name` that `identity` itself declares.
+    #[must_use]
     pub fn declared_member_facts(
         &self,
         identity: &DeclarationIdentity,
@@ -1147,6 +1256,7 @@ impl SignatureIndex {
     /// On-types of the visible extensions declaring the instance member `name`
     /// (setters as `name=`, operators by symbol) that apply to the non-nullable
     /// form of `receiver`; `None` when some candidate's applicability is unknown.
+    #[must_use]
     pub fn applicable_extension_on_types(
         &self,
         receiver: &ResolvedType,
@@ -1209,8 +1319,10 @@ impl SignatureIndex {
         extension: &ExtensionFacts,
         model: &SemanticModel<'_>,
     ) -> FxHashMap<TypeParameterId, ResolvedType> {
-        let mut inferred =
-            FxHashMap::with_capacity_and_hasher(extension.parameters.len(), Default::default());
+        let mut inferred = FxHashMap::with_capacity_and_hasher(
+            extension.parameters.len(),
+            rustc_hash::FxBuildHasher,
+        );
         let mut upper = FxHashMap::default();
         if extension.parameters.is_empty() {
             return inferred;
@@ -1359,6 +1471,7 @@ impl SignatureIndex {
     }
 
     /// The on-type of the visible extension named `name`.
+    #[must_use]
     pub fn visible_extension_on_type(
         &self,
         name: &str,
@@ -1373,6 +1486,7 @@ impl SignatureIndex {
     }
 
     /// The declared on-type of a resolved explicit extension override.
+    #[must_use]
     pub fn extension_on_type(&self, identity: &DeclarationIdentity) -> Option<&ResolvedType> {
         self.all_extensions()
             .find(|extension| extension.identity.as_ref() == Some(identity))
@@ -1381,6 +1495,7 @@ impl SignatureIndex {
 
     /// The declared signature of method `name` of the named extension
     /// `identity`, as invoked through an explicit extension override.
+    #[must_use]
     pub fn extension_override_method(
         &self,
         identity: &DeclarationIdentity,
@@ -1520,6 +1635,7 @@ impl SignatureIndex {
 
     /// The declaration owning the instance member `name` read on `receiver`
     /// (field, getter or method tear-off).
+    #[must_use]
     pub fn resolved_readable_member_owner(
         &self,
         receiver: &ResolvedType,
@@ -1531,6 +1647,7 @@ impl SignatureIndex {
 
     /// The declaration owning the instance member `name` written on
     /// `receiver` (settable field or setter).
+    #[must_use]
     pub fn resolved_writable_member_owner(
         &self,
         receiver: &ResolvedType,
@@ -1542,6 +1659,7 @@ impl SignatureIndex {
 
     /// Resolves a `super` read or write, checking applied mixins before `extends`
     /// and excluding declarations on the enclosing class itself.
+    #[must_use]
     pub fn resolved_super_member_owner(
         &self,
         receiver: &ResolvedType,
@@ -1635,6 +1753,7 @@ impl SignatureIndex {
         }
     }
 
+    #[must_use]
     pub fn resolved_member_owner(
         &self,
         receiver: &ResolvedType,
@@ -1650,6 +1769,7 @@ impl SignatureIndex {
         Some(identity)
     }
 
+    #[must_use]
     pub fn resolved_member_facts(
         &self,
         receiver: &ResolvedType,
@@ -1661,6 +1781,7 @@ impl SignatureIndex {
         (!facts.is_empty()).then_some(facts.as_slice())
     }
 
+    #[must_use]
     pub fn is_promotable_field(
         &self,
         receiver: &ResolvedType,
@@ -1719,6 +1840,7 @@ impl SignatureIndex {
 
     /// Resolve a static read's declaration, including interface members provided
     /// by a class's `noSuchMethod` implementation.
+    #[must_use]
     pub fn resolved_interface_member_facts(
         &self,
         receiver: &ResolvedType,
@@ -1779,11 +1901,10 @@ impl SignatureIndex {
                         .get(index)
                         .or_else(|| self.owner_defaults.get(id))
                         .cloned()
-                        .map(|ty| match occurrence {
+                        .map_or(ResolvedType::DYNAMIC, |ty| match occurrence {
                             Some(owner) => ty.projected_from(owner),
                             None => ty,
-                        })
-                        .unwrap_or(ResolvedType::DYNAMIC),
+                        }),
                 )
             })
             .collect()
@@ -1791,6 +1912,7 @@ impl SignatureIndex {
 
     /// The supertype of `this_type` through which `super.name` resolves: its
     /// mixins (last first), then its superclass; for a mixin, its `on` types.
+    #[must_use]
     pub fn super_receiver(
         &self,
         this_type: &ResolvedType,
@@ -1806,6 +1928,7 @@ impl SignatureIndex {
     }
 
     /// The supertype through which a `super.name` assignment resolves.
+    #[must_use]
     pub fn super_receiver_for_write(
         &self,
         this_type: &ResolvedType,
@@ -1865,6 +1988,7 @@ impl SignatureIndex {
         supertypes.into_iter().nth(position)
     }
 
+    #[must_use]
     pub fn resolved_member(
         &self,
         receiver: &ResolvedType,
@@ -1914,6 +2038,7 @@ impl SignatureIndex {
 
     /// The declared signature of the extension method `name` invoked on
     /// `receiver`, with its optional named identity and declaring library.
+    #[must_use]
     pub fn extension_method(
         &self,
         receiver: &ResolvedType,
@@ -1961,6 +2086,7 @@ impl SignatureIndex {
 
     /// Resolve an explicitly selected extension method, inferring its owner's
     /// type arguments from the override receiver unless they are supplied.
+    #[must_use]
     pub fn resolved_extension_override_method(
         &self,
         identity: &DeclarationIdentity,
@@ -1990,6 +2116,7 @@ impl SignatureIndex {
     }
 
     /// The getter type of the single applicable visible extension.
+    #[must_use]
     pub fn resolved_extension_getter(
         &self,
         receiver: &ResolvedType,
@@ -2015,6 +2142,7 @@ impl SignatureIndex {
     }
 
     /// Resolve an instance field or getter, never an extension getter.
+    #[must_use]
     pub fn resolved_field(
         &self,
         receiver: &ResolvedType,
@@ -2040,6 +2168,7 @@ impl SignatureIndex {
         Some((field.clone(), substitutions))
     }
 
+    #[must_use]
     pub fn resolved_writable_field(
         &self,
         receiver: &ResolvedType,
@@ -2064,6 +2193,7 @@ impl SignatureIndex {
         Some((field.clone(), substitutions))
     }
 
+    #[must_use]
     pub fn field(
         &self,
         identity: &DeclarationIdentity,

@@ -57,7 +57,7 @@ falcon_analyze::structural_visitor! {
         }
 
         fn exit_program(&mut self, _node: Program<'a>) {
-            assert!(self.functions.is_empty());
+            assert_eq!(self.functions, [] as [usize; 0]);
             self.record("program-exit", 0);
         }
 
@@ -106,7 +106,7 @@ falcon_analyze::structural_visitor! {
         }
 
         fn finish(self: Box<Self>) -> Vec<Diagnostic> {
-            assert!(self.functions.is_empty());
+            assert_eq!(self.functions, [] as [usize; 0]);
             self.record("finish", 0);
             vec![Diagnostic::new(
                 "structural-test",
@@ -151,7 +151,6 @@ fn keys(events: &[(usize, &'static str, usize)], id: usize, kind: &str) -> Vec<u
 
 #[test]
 fn shared_collectors_preserve_existing_source_order_and_node_identity() {
-    let source = "void f() { for (var i = 0; i < 2; i += 1) { print(3); } var (a, b) = (4, 5); }";
     struct Baseline(Vec<usize>);
     impl<'a> Visitor<'a> for Baseline {
         fn visit_expr(&mut self, node: Expr<'a>) {
@@ -159,6 +158,7 @@ fn shared_collectors_preserve_existing_source_order_and_node_identity() {
             walk_expr(self, node);
         }
     }
+    let source = "void f() { for (var i = 0; i < 2; i += 1) { print(3); } var (a, b) = (4, 5); }";
     let parsed = Arc::new(ParsedFile {
         source: source.into(),
         tree: falcon_dart_parser::parse(source).tree,
@@ -223,8 +223,8 @@ fn pruning_and_child_routing_are_collector_local_and_restore_at_siblings() {
     );
     assert!(keys(&events, 0, "expr").contains(&parameter));
     assert!(!keys(&events, 2, "expr").contains(&parameter));
-    assert!(keys(&events, 2, "params").is_empty());
-    assert!(keys(&events, 2, "params-exit").is_empty());
+    assert_eq!(keys(&events, 2, "params"), [] as [usize; 0]);
+    assert_eq!(keys(&events, 2, "params-exit"), [] as [usize; 0]);
     assert!(keys(&events, 2, "expr").contains(&binary));
     assert!(keys(&events, 2, "expr-exit").contains(&binary));
     assert!(!keys(&events, 2, "expr").contains(&right));

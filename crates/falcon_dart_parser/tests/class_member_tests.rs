@@ -121,7 +121,11 @@ fn test_named_constructor_still_constructor() {
     match only_class(prog).members().next().unwrap() {
         ClassMember::Constructor(ctor) => {
             assert_eq!(ctor.name().name(), "C");
-            assert_eq!(ctor.constructor_name().map(|n| n.name()), Some("named"));
+            assert_eq!(
+                ctor.constructor_name()
+                    .map(falcon_syntax::cst::Identifier::name),
+                Some("named")
+            );
         }
         other => panic!("expected named constructor, got {other:?}"),
     }
@@ -168,7 +172,11 @@ fn test_factory_constructor_still_constructor() {
     match only_class(prog).members().next().unwrap() {
         ClassMember::Constructor(ctor) => {
             assert!(ctor.is_factory());
-            assert_eq!(ctor.constructor_name().map(|n| n.name()), Some("make"));
+            assert_eq!(
+                ctor.constructor_name()
+                    .map(falcon_syntax::cst::Identifier::name),
+                Some("make")
+            );
         }
         other => panic!("expected factory constructor, got {other:?}"),
     }
@@ -314,7 +322,11 @@ fn test_extension_type_named_constructor_is_constructor() {
         TopLevelDecl::ExtensionType(e) => match e.members().next().unwrap() {
             ClassMember::Constructor(ctor) => {
                 assert_eq!(ctor.name().name(), "E");
-                assert_eq!(ctor.constructor_name().map(|n| n.name()), Some("zero"));
+                assert_eq!(
+                    ctor.constructor_name()
+                        .map(falcon_syntax::cst::Identifier::name),
+                    Some("zero")
+                );
             }
             other => panic!("expected constructor in extension type, got {other:?}"),
         },
@@ -356,7 +368,7 @@ fn enum_constant_named_constructor() {
         other => panic!("expected enum, got {other:?}"),
     };
     let ctor = en.variants().next().unwrap().constructor_name();
-    assert_eq!(ctor.map(|i| i.name()), Some("foo"));
+    assert_eq!(ctor.map(falcon_syntax::cst::Identifier::name), Some("foo"));
 }
 
 #[test]
@@ -455,8 +467,10 @@ fn annotation_before_nullable_record_return_type() {
         ClassMember::Method(m) => {
             assert_eq!(m.name().name(), "m");
             assert!(
-                m.annotations()
-                    .any(|a| a.name().last().map(|i| i.name()) == Some("override")),
+                m.annotations().any(
+                    |a| a.name().last().map(falcon_syntax::cst::Identifier::name)
+                        == Some("override")
+                ),
                 "annotations: {:?}",
                 m.annotations()
             );
@@ -894,8 +908,9 @@ fn only_ctor(prog: Program<'_>) -> ConstructorDecl<'_> {
     }
 }
 
-fn ctor_name<'a>(ctor: ConstructorDecl<'a>) -> Option<&'a str> {
-    ctor.constructor_name().map(|n| n.name())
+fn ctor_name(ctor: ConstructorDecl<'_>) -> Option<&str> {
+    ctor.constructor_name()
+        .map(falcon_syntax::cst::Identifier::name)
 }
 
 #[test]

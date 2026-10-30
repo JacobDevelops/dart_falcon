@@ -124,14 +124,17 @@ impl Collector<'_, '_> {
 
     fn report(&mut self, index: usize) {
         let token = self.tokens[index];
-        self.diags.push(self.ctx.diagnostic("Add the required trailing comma.", DiagSpan {
-            start: token.offset(),
-            end: token.offset() + token.len(),
-        }));
+        self.diags.push(self.ctx.diagnostic(
+            "Add the required trailing comma.",
+            DiagSpan {
+                start: token.offset(),
+                end: token.offset() + token.len(),
+            },
+        ));
     }
 
     /// Checks an argument list, assert, or collection literal opened at `open`.
-    fn check_elements(&mut self, open: Option<usize>, last: Last<'_>) {
+    fn check_elements(&mut self, open: Option<usize>, last: &Last<'_>) {
         let Some(open) = open else { return };
         let Some(close) = self.matching_close(open) else {
             return;
@@ -145,7 +148,7 @@ impl Collector<'_, '_> {
         }
         if let Last::Expr(expr) = last
             && self.end(before_close) <= expr.span().end
-            && self.is_exempt(expr)
+            && self.is_exempt(*expr)
         {
             return;
         }
@@ -195,12 +198,12 @@ impl Collector<'_, '_> {
             return;
         };
         let open = self.find_from(args.span().start, TokenKind::LParen);
-        self.check_elements(open, last);
+        self.check_elements(open, &last);
     }
 
     fn check_assert(&mut self, span: Span, condition: Expr<'_>, message: Option<Expr<'_>>) {
         let open = self.find_from(span.start, TokenKind::LParen);
-        self.check_elements(open, Last::Expr(message.unwrap_or(condition)));
+        self.check_elements(open, &Last::Expr(message.unwrap_or(condition)));
     }
 
     fn check_collection(
@@ -218,7 +221,7 @@ impl Collector<'_, '_> {
             | CollectionElement::For(_) => Last::Other,
         };
         let open = self.find_from(span.start, kind);
-        self.check_elements(open, last);
+        self.check_elements(open, &last);
     }
 
     /// The analyzer's exemptions for a multi-line positional last element.
@@ -249,7 +252,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
             Expr::Call(call) => self.check_args(call.args()),
             Expr::New(new) => self.check_args(new.args()),
             Expr::Cascade(cascade) => {
-                for op in cascade.sections().flat_map(|section| section.ops()) {
+                for op in cascade.sections().flat_map(CascadeSection::ops) {
                     match op {
                         CascadeOp::Call(call) => self.check_args(call.args()),
                         CascadeOp::Invoke(invoke) => self.check_args(invoke.args()),
@@ -266,7 +269,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
             Expr::Map(map) => {
                 if !map.elements().is_empty() {
                     let open = self.find_from(map.span().start, TokenKind::LBrace);
-                    self.check_elements(open, Last::Other);
+                    self.check_elements(open, &Last::Other);
                 }
             }
             Expr::FuncExpr(function) => self.check_param_list(function.params()),
@@ -289,7 +292,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
                 ConstructorInitializer::SuperCall(call) => self.check_args(call.args()),
                 ConstructorInitializer::ThisCall(call) => self.check_args(call.args()),
                 ConstructorInitializer::Assert(assert) => {
-                    self.check_assert(assert.span(), assert.condition(), assert.message())
+                    self.check_assert(assert.span(), assert.condition(), assert.message());
                 }
                 ConstructorInitializer::FieldInit(_) => {}
             }
@@ -300,7 +303,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
     fn visit_enum_decl(&mut self, node: EnumDecl<'a>) -> StructuralTraversal {
         for args in node
             .variants()
-            .filter_map(|variant| variant.args())
+            .filter_map(EnumVariant::args)
         {
             self.check_args(args);
         }

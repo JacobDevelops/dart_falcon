@@ -495,7 +495,7 @@ pub(crate) enum DocLookup<'s> {
     Unknown,
 }
 
-impl<'s> DocLookup<'s> {
+impl DocLookup<'_> {
     fn absent_or(self, other: impl FnOnce() -> Self) -> Self {
         match self {
             DocLookup::Absent => other(),
@@ -524,11 +524,11 @@ fn type_names<'a>(types: AstChildren<'a, TypeParam<'a>>) -> impl Iterator<Item =
     types.map(|param| param.name().name().to_owned())
 }
 
-fn param_names<'a>(params: FormalParamList<'a>) -> impl Iterator<Item = String> + 'a {
+fn param_names(params: FormalParamList<'_>) -> impl Iterator<Item = String> + '_ {
     params.params().map(|param| param.name().name().to_owned())
 }
 
-fn declared_members(members: EffectiveMembers<'_>) -> HashMap<String, bool> {
+fn declared_members(members: &EffectiveMembers<'_>) -> HashMap<String, bool> {
     let mut names = HashMap::new();
     for member in members.declared.clone() {
         match member {
@@ -674,7 +674,7 @@ impl DocScopes {
             }
             TopLevelDecl::Error(_) => return,
         };
-        let mut declared = declared_members(members.clone());
+        let mut declared = declared_members(&members);
         if let TopLevelDecl::Enum(enumeration) = declaration {
             declared.extend(
                 enumeration
@@ -731,7 +731,7 @@ impl DocScopes {
         let span = extension.span();
         let mut parameters = TypeParameterScope::default();
         parameters.push(extension.type_params(), model);
-        let members = declared_members(EffectiveMembers::declared(extension.members()));
+        let members = declared_members(&EffectiveMembers::declared(extension.members()));
         if let Some(name) = extension.name() {
             self.extensions
                 .insert(name.name().to_owned(), members.clone());
@@ -782,7 +782,7 @@ impl DocScopes {
             locals.extend(
                 function
                     .params()
-                    .filter_map(|param| param.name())
+                    .filter_map(FunctionTypeParam::name)
                     .map(|name| name.name().to_owned()),
             );
         }
@@ -1167,7 +1167,10 @@ impl<'r, 'a> DocResolver<'r, 'a> {
     fn member<'s>(&self, first: &DocLookup<'s>, name: &'s str) -> DocLookup<'s> {
         match first {
             DocLookup::Unknown => DocLookup::Unknown,
-            DocLookup::Absent => DocLookup::Absent,
+            DocLookup::Absent
+            | DocLookup::Found(
+                DocElement::Local | DocElement::Member { .. } | DocElement::Opaque,
+            ) => DocLookup::Absent,
             DocLookup::Found(DocElement::Prefix(prefix)) => {
                 match self.model.resolve_doc_prefixed(prefix, name) {
                     DocName::Declaration { identity, kind } => {
@@ -1196,9 +1199,6 @@ impl<'r, 'a> DocResolver<'r, 'a> {
             DocLookup::Found(DocElement::Extension(extension)) => {
                 self.extension_member(extension, name)
             }
-            DocLookup::Found(
-                DocElement::Local | DocElement::Member { .. } | DocElement::Opaque,
-            ) => DocLookup::Absent,
         }
     }
 

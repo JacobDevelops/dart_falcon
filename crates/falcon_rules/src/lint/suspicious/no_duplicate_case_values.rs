@@ -99,13 +99,13 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         if let Stmt::Switch(switch) = node {
             let patterns = switch
                 .cases()
-                .flat_map(|case| case.cases())
+                .flat_map(SwitchCase::cases)
                 .filter_map(|case| match case {
                     SwitchCaseKind::Pattern(pattern) => Some(pattern.pattern()),
                     SwitchCaseKind::Expr(_) | SwitchCaseKind::Default(_) => None,
                 });
             self.check_patterns(patterns);
-            self.check_expressions(switch.cases().flat_map(|case| case.cases()).filter_map(
+            self.check_expressions(switch.cases().flat_map(SwitchCase::cases).filter_map(
                 |case| match case {
                     SwitchCaseKind::Expr(expression) => Some(expression.expr()),
                     _ => None,
@@ -117,7 +117,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         if let Expr::Switch(switch) = node {
-            self.check_patterns(switch.arms().map(|arm| arm.pattern()));
+            self.check_patterns(switch.arms().map(SwitchExprArm::pattern));
         }
         StructuralTraversal::Continue
     }
@@ -171,8 +171,7 @@ fn pattern_constants(
     match pattern {
         Pattern::Literal(_) | Pattern::Const(_) => {
             evaluate_pattern_constant(pattern, ConstantContext { owner, fields: Some(fields), ..ConstantContext::new(model, signatures) })
-                .map(|value| vec![(value, pattern.span())])
-                .unwrap_or_default()
+                .map_or_default(|value| vec![(value, pattern.span())])
         }
         Pattern::LogicalOr(logical) => {
             let mut values = pattern_constants(logical.left(), owner, fields, model, signatures);

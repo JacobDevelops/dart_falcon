@@ -201,14 +201,13 @@ impl<'a> Visitor<'a> for ChainProbe<'_, '_> {
                     probe.has_call = true;
                     probe.valid = matches!(callee.unparenthesized(), Expr::Field(field) if field.field().name() != "new")
                         && !probe.model.is_some_and(|model| {
-                            falcon_analyze::resolve_call_constructor(callee, model, true).is_some_and(
-                                |(identity, name)| {
+                            falcon_analyze::resolve_call_constructor(callee, model, true)
+                                .is_some_and(|(identity, name)| {
                                     !probe.signatures.is_some_and(|signatures| {
                                         signatures.member(&identity, name).is_some()
                                             && signatures.constructor(&identity, name).is_none()
                                     })
-                                },
-                            )
+                                })
                         });
                     Some(callee.span())
                 }
@@ -380,7 +379,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
     fn visit_var_declarator(&mut self, node: VarDeclarator<'a>) -> StructuralTraversal {
         self.initializers.push(self.initializer);
-        self.initializer = node.initializer().map(|expr| expr.span());
+        self.initializer = node.initializer().map(Expr::span);
         StructuralTraversal::Continue
     }
 

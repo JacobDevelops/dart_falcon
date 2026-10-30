@@ -3,15 +3,20 @@
 use falcon_diagnostics::Diagnostic;
 
 /// Format diagnostics as human-readable text lines, joined by newlines.
+#[must_use]
 pub fn format_text(diagnostics: &[Diagnostic]) -> String {
     diagnostics
         .iter()
-        .map(|d| d.format_text())
+        .map(Diagnostic::format_text)
         .collect::<Vec<_>>()
         .join("\n")
 }
 
 /// Format diagnostics as a JSON array string.
+///
+/// # Panics
+/// Panics if diagnostics contain a value that cannot be serialized.
+#[must_use]
 pub fn format_json(diagnostics: &[Diagnostic]) -> String {
     serde_json::to_string_pretty(diagnostics).expect("diagnostics are JSON serializable")
 }

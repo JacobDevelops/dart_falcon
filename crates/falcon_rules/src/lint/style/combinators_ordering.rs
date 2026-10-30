@@ -26,8 +26,8 @@ impl Rule for CombinatorsOrdering {
     ) -> RulePreparation<'a> {
         let combinators = program
             .imports()
-            .flat_map(|import| import.combinators())
-            .chain(program.exports().flat_map(|export| export.combinators()));
+            .flat_map(ImportDirective::combinators)
+            .chain(program.exports().flat_map(ExportDirective::combinators));
         RulePreparation::Diagnostics(
             combinators
                 .filter_map(|combinator| {

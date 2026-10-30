@@ -12,8 +12,8 @@ use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 
-use crate::lint::support::package_manifests::{imported_package, is_library_file, read_manifest};
 use super::enclosing_pubspec;
+use crate::lint::support::package_manifests::{imported_package, is_library_file, read_manifest};
 
 #[derive(Default)]
 pub struct UndeclaredDependencies;
@@ -43,14 +43,14 @@ impl CrossFileRule for UndeclaredDependencies {
                 std::iter::once(directive.uri()).chain(
                     directive
                         .configurable_uris()
-                        .map(|alternative| alternative.uri()),
+                        .map(falcon_syntax::cst::ConfigurableUri::uri),
                 )
             });
             let exports = file.program().exports().flat_map(|directive| {
                 std::iter::once(directive.uri()).chain(
                     directive
                         .configurable_uris()
-                        .map(|alternative| alternative.uri()),
+                        .map(falcon_syntax::cst::ConfigurableUri::uri),
                 )
             });
             for uri in imports.chain(exports) {

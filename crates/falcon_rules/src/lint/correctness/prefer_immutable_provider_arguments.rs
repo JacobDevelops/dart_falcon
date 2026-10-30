@@ -119,7 +119,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         for argument in call
             .args()
             .positional()
-            .chain(call.args().named().map(|argument| argument.value()))
+            .chain(call.args().named().map(NamedArg::value))
         {
             let mut equality = ArgumentEquality {
                 state,

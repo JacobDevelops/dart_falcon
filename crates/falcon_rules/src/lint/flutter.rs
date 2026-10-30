@@ -91,7 +91,7 @@ pub(crate) fn has_active_gesture_callback(args: ArgList<'_>, widget_name: &str) 
     })
 }
 
-pub(crate) fn widget_construction<'a>(expr: Expr<'a>) -> Option<(&'a str, ArgList<'a>, Span)> {
+pub(crate) fn widget_construction(expr: Expr<'_>) -> Option<(&str, ArgList<'_>, Span)> {
     match expr.unparenthesized() {
         Expr::New(node) => {
             let DartType::Named(named) = node.dart_type() else {

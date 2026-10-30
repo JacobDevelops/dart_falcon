@@ -1,6 +1,15 @@
 //! Invocation metadata is resolved before null-chain result lifting.
 
-use super::*;
+#[cfg(test)]
+use super::{
+    Arc, FunctionBody, IdentityIndex, Path, Program, TopLevelDecl, TypeParameterScope, null_shorted,
+};
+use super::{
+    AstChildren, Cow, DartType, DeclarationIdentity, Expr, FxHashMap, InferenceContext, MemberKind,
+    QualifiedName, ResolvedSignature, ResolvedType, SemanticModel, SignatureIndex,
+    SubstitutionMemo, TypeEnvironment, TypeParameterId, expression_has_dot_shorthand_base,
+    expression_qualified_name, expression_segments, resolve_call_constructor,
+};
 use crate::resolve::semantic::ResolvedTypeKind;
 
 /// A callable declaration and its receiver substitutions. Indexed signatures
@@ -15,6 +24,7 @@ pub struct ResolvedInvocation<'signature, 'tree> {
 impl ResolvedInvocation<'_, '_> {
     /// Constructors infer owner parameters against their instantiated result;
     /// other invocations infer the callable's own type parameters.
+    #[must_use]
     pub fn inference_signature(
         &self,
     ) -> (
@@ -57,7 +67,7 @@ impl TypeEnvironment {
         context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
     ) -> ResolvedType {
-        self.infer_in_context(expression, context_copy(context), expected, None)
+        self.infer_in_context(expression, context, expected, None)
     }
 
     /// The reached receiver of an access, before shorted null is added. Member
@@ -107,10 +117,10 @@ impl TypeEnvironment {
         })
     }
 
-    pub(super) fn invocation_declaration<'a, 'lookup, F: Fn(&str) -> Option<ResolvedType>>(
+    pub(super) fn invocation_declaration<'a, F: Fn(&str) -> Option<ResolvedType>>(
         &self,
         target: Expr<'_>,
-        context: &InferenceContext<'a, '_, 'lookup, F>,
+        context: &InferenceContext<'a, '_, '_, F>,
         reached_receiver: &mut Option<ResolvedType>,
         expected: Option<&ResolvedType>,
         include_override: bool,
@@ -204,12 +214,12 @@ impl TypeEnvironment {
         }
     }
 
-    fn extension_override_invocation<'a, 'lookup, F: Fn(&str) -> Option<ResolvedType>>(
+    fn extension_override_invocation<'a, F: Fn(&str) -> Option<ResolvedType>>(
         &self,
         object: Expr<'_>,
         field: &str,
         is_null_safe: bool,
-        context: &InferenceContext<'a, '_, 'lookup, F>,
+        context: &InferenceContext<'a, '_, '_, F>,
     ) -> Option<(
         &'a ResolvedSignature,
         FxHashMap<TypeParameterId, ResolvedType>,
@@ -250,27 +260,22 @@ impl TypeEnvironment {
     /// Resolves contextual parameter metadata without lifting the signature's
     /// return type for a null-shorted call. Locals shadow own members, which
     /// shadow library declarations, which shadow inherited members.
-    pub fn resolved_invocation<'signature, 'tree, 'lookup, F: Fn(&str) -> Option<ResolvedType>>(
+    pub fn resolved_invocation<'signature, 'tree, F: Fn(&str) -> Option<ResolvedType>>(
         &self,
         callee: Expr<'tree>,
         type_args: AstChildren<'tree, DartType<'tree>>,
-        context: &InferenceContext<'signature, '_, 'lookup, F>,
+        context: &InferenceContext<'signature, '_, '_, F>,
     ) -> Option<ResolvedInvocation<'signature, 'tree>> {
         self.resolved_invocation_in(callee, type_args, context, None, &mut None, true)
             .ok()
     }
 
     // Err carries the final result when parameter inference is unnecessary.
-    pub(super) fn resolved_invocation_in<
-        'signature,
-        'tree,
-        'lookup,
-        F: Fn(&str) -> Option<ResolvedType>,
-    >(
+    pub(super) fn resolved_invocation_in<'signature, 'tree, F: Fn(&str) -> Option<ResolvedType>>(
         &self,
         mut target: Expr<'tree>,
         mut explicit: AstChildren<'tree, DartType<'tree>>,
-        context: &InferenceContext<'signature, '_, 'lookup, F>,
+        context: &InferenceContext<'signature, '_, '_, F>,
         expected: Option<&ResolvedType>,
         reached_receiver: &mut Option<ResolvedType>,
         metadata: bool,
@@ -331,7 +336,7 @@ impl TypeEnvironment {
             (Cow::Borrowed(signature), owner)
         } else {
             let receiver = callee_type.unwrap_or_else(|| {
-                self.infer_unshorted(target, context_copy(context), None, reached_receiver.take())
+                self.infer_unshorted(target, context, None, reached_receiver.take())
             });
             self.invocation_value_signature(&receiver, target, context, metadata)?
         };
@@ -346,11 +351,11 @@ impl TypeEnvironment {
         })
     }
 
-    fn invocation_value_signature<'a, 'lookup, F: Fn(&str) -> Option<ResolvedType>>(
+    fn invocation_value_signature<'a, F: Fn(&str) -> Option<ResolvedType>>(
         &self,
         receiver: &ResolvedType,
         target: Expr<'_>,
-        context: &InferenceContext<'a, '_, 'lookup, F>,
+        context: &InferenceContext<'a, '_, '_, F>,
         metadata: bool,
     ) -> Result<
         (
@@ -422,6 +427,7 @@ impl TypeEnvironment {
 impl SignatureIndex {
     /// Whether an instance field or accessor has an instantiated element rather
     /// than the declaration's canonical variable element.
+    #[must_use]
     pub fn member_access_is_substituted(
         &self,
         receiver: &ResolvedType,
@@ -440,6 +446,7 @@ impl SignatureIndex {
     }
 
     /// Reads an instantiated field or getter, excluding method tear-offs.
+    #[must_use]
     pub fn instantiated_data_read(
         &self,
         receiver: &ResolvedType,
@@ -455,6 +462,7 @@ impl SignatureIndex {
 
     /// Reads a member on an already instantiated receiver, without a syntax
     /// expression or contextual generic tear-off instantiation.
+    #[must_use]
     pub fn instantiated_member_read(
         &self,
         receiver: &ResolvedType,
@@ -764,7 +772,7 @@ mod tests {
                     let substitutions = environment.infer_signature_substitutions_with_result(
                         invocation.inference_signature(),
                         args,
-                        invocation.type_args.clone(),
+                        &invocation.type_args,
                         &context,
                         None,
                         None,
@@ -779,7 +787,7 @@ mod tests {
                     );
                     let result = if invocation.constructor_result.is_some() {
                         ResolvedType::from_kind(ResolvedTypeKind::Interface {
-                            occurrence: Default::default(),
+                            occurrence: super::super::FunctionTypeAlias::default(),
                             identity: model.resolve_name("Box").unwrap(),
                             arguments: vec![token.clone()].into(),
                             nullable: false,

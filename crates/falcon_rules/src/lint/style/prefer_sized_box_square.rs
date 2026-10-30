@@ -1,4 +1,4 @@
-//! Prefers SizedBox.square for an unnamed Flutter SizedBox whose explicit width
+//! Prefers SizedBox.square for an unnamed Flutter `SizedBox` whose explicit width
 //! and height are stable variable reads or numeric literals with identical token
 //! spelling. Calls, getters, indexing, missing/null dimensions and existing named
 //! constructors are excluded. No automatic fix is offered.
@@ -47,7 +47,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             let dimension = |name| {
                 args.named()
                     .find(|arg| arg.name().name() == name)
-                    .map(|arg| arg.value())
+                    .map(NamedArg::value)
             };
             match (dimension("width"), dimension("height")) {
                 (Some(width), Some(height)) => {

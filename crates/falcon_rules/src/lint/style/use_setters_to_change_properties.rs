@@ -69,42 +69,39 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
         self.owner = None;
         let model = &self.model;
-            let (owner_type, unresolved_super, extension) = match decl {
-                TopLevelDecl::Extension(node) => {
-                    // Extension members resolve `this` against the `on` type
-                    // and never override.
-                    let mut parameters = TypeParameterScope::default();
-                    parameters.push(node.type_params(), model);
-                    (
-                        model.resolve_type_in(node.on_type(), &parameters),
-                        false,
-                        true,
-                    )
-                }
-                _ => {
-                    let name = match decl {
-                        TopLevelDecl::Class(node) => node.name().name(),
-                        TopLevelDecl::MixinClass(node) => node.name().name(),
-                        TopLevelDecl::Mixin(node) => node.name().name(),
-                        TopLevelDecl::Enum(node) => node.name().name(),
-                        TopLevelDecl::ExtensionType(node) => node.name().name(),
-                        _ => return StructuralTraversal::Continue,
-                    };
-                    let Some(owner) = model.resolve_name(name) else {
-                        return StructuralTraversal::Continue;
-                    };
-                    let unresolved_super = match decl {
-                        TopLevelDecl::Class(class) => class.extends().is_some_and(|ty| {
-                            matches!(model.resolve_type(ty).view(), ResolvedTypeView::Unknown)
-                        }),
-                        _ => false,
-                    };
-                    (
-                        ResolvedType::interface_identity(owner),
-                        unresolved_super,
-                        false,
-                    )
-                }
+            let (owner_type, unresolved_super, extension) = if let TopLevelDecl::Extension(node) = decl {
+                // Extension members resolve `this` against the `on` type
+                // and never override.
+                let mut parameters = TypeParameterScope::default();
+                parameters.push(node.type_params(), model);
+                (
+                    model.resolve_type_in(node.on_type(), &parameters),
+                    false,
+                    true,
+                )
+            } else {
+                let name = match decl {
+                    TopLevelDecl::Class(node) => node.name().name(),
+                    TopLevelDecl::MixinClass(node) => node.name().name(),
+                    TopLevelDecl::Mixin(node) => node.name().name(),
+                    TopLevelDecl::Enum(node) => node.name().name(),
+                    TopLevelDecl::ExtensionType(node) => node.name().name(),
+                    _ => return StructuralTraversal::Continue,
+                };
+                let Some(owner) = model.resolve_name(name) else {
+                    return StructuralTraversal::Continue;
+                };
+                let unresolved_super = match decl {
+                    TopLevelDecl::Class(class) => class.extends().is_some_and(|ty| {
+                        matches!(model.resolve_type(ty).view(), ResolvedTypeView::Unknown)
+                    }),
+                    _ => false,
+                };
+                (
+                    ResolvedType::interface_identity(owner),
+                    unresolved_super,
+                    false,
+                )
             };
         self.owner = crate::lint::declarations::members_of(decl)
             .map(|members| (members, owner_type, unresolved_super, extension));
@@ -114,8 +111,13 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
     fn visit_method_decl(&mut self, method: MethodDecl<'a>) -> StructuralTraversal {
         if let Some((members, owner_type, unresolved_super, extension)) = &self.owner
             && changes_property(
-                method, members.clone(), owner_type, self.signatures, &self.model,
-                *unresolved_super, *extension,
+                method,
+                members,
+                owner_type,
+                self.signatures,
+                &self.model,
+                *unresolved_super,
+                *extension,
             )
         {
                     self.diags.push(self.ctx.diagnostic(
@@ -130,7 +132,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
 
 fn changes_property<'a>(
     method: MethodDecl<'a>,
-    members: AstChildren<'a, ClassMember<'a>>,
+    members: &AstChildren<'a, ClassMember<'a>>,
     owner_type: &ResolvedType,
     signatures: &SignatureIndex,
     model: &SemanticModel<'_>,
@@ -163,7 +165,7 @@ fn changes_property<'a>(
     // A property of the type itself: declared by it or, for an extension,
     // by the extension or its `on` type.
     let own_property = |name: &str, receiver: &ResolvedType| {
-        declares_property(members.clone(), name)
+        declares_property(members, name)
             || if extension {
                 signatures
                     .resolved_writable_field(receiver, name, model)
@@ -225,7 +227,7 @@ fn changes_property<'a>(
         // members are known to win over library-level declarations; inside
         // an extension the `on` type is only reached when nothing lexical is.
         Expr::Ident(identifier) if identifier.name() != param.name().name() => {
-            declares_property(members.clone(), identifier.name())
+            declares_property(members, identifier.name())
                 || if extension {
                     !method.is_static()
                         && model.resolve_value(identifier.name()).is_none()
@@ -274,8 +276,8 @@ fn property_body_expression(body: FunctionBody<'_>) -> Option<Expr<'_>> {
 }
 
 /// A field or setter of this name declared by the type itself.
-fn declares_property<'a>(mut members: AstChildren<'a, ClassMember<'a>>, name: &str) -> bool {
-    members.any(|member| match member {
+fn declares_property<'a>(members: &AstChildren<'a, ClassMember<'a>>, name: &str) -> bool {
+    members.clone().any(|member| match member {
         ClassMember::Field(field) => field
             .declarators()
             .any(|declarator| declarator.name().name() == name),

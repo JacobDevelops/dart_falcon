@@ -28,3 +28,6 @@ tempfile  = { workspace = true }
 [[bench]]
 name    = "rules_bench"
 harness = false
+
+[lints]
+workspace = true

@@ -36,10 +36,10 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 
 use falcon_analyze::{
-    AnalyzeContext, ConstantContext, ConstantValue, DeclarationIdentity, MemberSelector,
-    MemberSelectorKind as SelectorKind, QualifiedName, ResolvedType, ResolvedTypeView, Rule,
-    RulePreparation, SemanticModel, SignatureIndex, SourceSelector, TypeParameterScope,
-    evaluate_constant, resolve_new_constructor,
+    AnalyzeContext, ConstantContext, ConstantValue, DeclarationIdentity, IdentityIndex,
+    MemberSelector, MemberSelectorKind as SelectorKind, NodeRef, QualifiedName, ResolvedType,
+    ResolvedTypeView, Rule, RulePreparation, SemanticModel, SignatureIndex, SourceSelector,
+    TypeParameterScope, evaluate_constant, resolve_new_constructor,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::TokenKind;
@@ -73,7 +73,7 @@ impl Rule for DeprecatedMemberUseFromSamePackage {
                 let (source, annotations) =
                     identities.library_source_annotations(ctx.file_path())?;
                 deprecation(
-                    annotations.iter().map(|node| node.cast::<Annotation>()),
+                    annotations.iter().map(NodeRef::cast::<Annotation>),
                     SemanticModel::new(source, &annotations.first()?.file, identities, ctx.types()),
                     ctx.signatures(),
                 )
@@ -310,8 +310,8 @@ impl<'a> Visitor<'a> for Frontier<'a> {
             if let Some(owner) = owner {
                 let target = constructor_target(
                     owner.clone(),
-                    name.map_or("new", |n| n.name()),
-                    name.map_or(span, |n| n.span()),
+                    name.map_or("new", Identifier::name),
+                    name.map_or(span, Identifier::span),
                 );
                 self.arguments(&target, args);
                 self.types.push(target);
@@ -324,7 +324,7 @@ impl<'a> Visitor<'a> for Frontier<'a> {
         {
             let span = crate::lint::declarations::documented_node_span(
                 node.span,
-                node.annotations,
+                &node.annotations,
                 self.ctx,
             );
             self.types
@@ -431,8 +431,8 @@ impl<'a> Visitor<'a> for Frontier<'a> {
                 let constructor = node.constructor_name();
                 let target = constructor_target(
                     owner,
-                    constructor.map_or("new", |n| n.name()),
-                    constructor.map_or(identifier.span(), |n| n.span()),
+                    constructor.map_or("new", Identifier::name),
+                    constructor.map_or(identifier.span(), Identifier::span),
                 );
                 // `@A()` names the class; only `@A.named()` names a constructor.
                 if constructor.is_some() {
@@ -743,7 +743,7 @@ struct LocalParameter {
     message: String,
 }
 
-fn constructor_target<'a>(owner: DeclarationIdentity, name: &'a str, span: Span) -> Target<'a> {
+fn constructor_target(owner: DeclarationIdentity, name: &str, span: Span) -> Target<'_> {
     Target {
         name: "".into(),
         owner,
@@ -854,15 +854,14 @@ impl<'ctx> Uses<'ctx> {
             if let Some((source, annotations)) = identities.library_source_annotations(&path)
                 && let Some(node) = annotations.first()
                 && let Some(message) = deprecation(
-                    annotations.iter().map(|node| node.cast::<Annotation>()),
+                    annotations.iter().map(NodeRef::cast::<Annotation>),
                     SemanticModel::new(&path, &node.file, identities, ctx.types()),
                     ctx.signatures(),
                 )
             {
                 let name = identities
                     .library_uri(library)
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| file_uri(source));
+                    .map_or_else(|| file_uri(source), str::to_owned);
                 uses.emit_message(source, &name, directive_span, &message);
             }
             for combinator in combinators {
@@ -885,9 +884,7 @@ impl<'ctx> Uses<'ctx> {
     fn report_documentation(&mut self, program: Program<'_>, state: &SemanticState<'_>) {
         let ctx = self.ctx;
         let uses = self;
-        let sdk_loaded = ctx
-            .identities()
-            .is_some_and(|identities| identities.has_sdk_sources());
+        let sdk_loaded = ctx.identities().is_some_and(IdentityIndex::has_sdk_sources);
         let scopes = DocScopes::new(program, &state.model, ctx.source());
         let resolver = DocResolver::new(
             program,
@@ -1103,7 +1100,7 @@ impl<'ctx> Uses<'ctx> {
         }
         let receiver = state.infer(callee);
         if !matches!(receiver.view(), ResolvedTypeView::Function { .. })
-            && let Some(mut target) = self.member(&receiver, "call", node.span(), state, false)
+            && let Some(mut target) = Self::member(&receiver, "call", node.span(), state, false)
         {
             target.name = "call".into();
             self.report(&target);
@@ -1176,7 +1173,7 @@ impl<'ctx> Uses<'ctx> {
         };
         let model = SemanticModel::new(path, &annotation.file, identities, self.ctx.types());
         let Some(message) = deprecation(
-            annotations.iter().map(|node| node.cast::<Annotation>()),
+            annotations.iter().map(NodeRef::cast::<Annotation>),
             model,
             self.ctx.signatures(),
         ) else {
@@ -1220,7 +1217,6 @@ impl<'ctx> Uses<'ctx> {
     }
 
     fn member<'node>(
-        &self,
         receiver: &ResolvedType,
         name: &'node str,
         span: Span,
@@ -1320,7 +1316,7 @@ impl<'a> SemanticRuleVisitor<'a> for Uses<'a> {
                     CascadeOp::Call(call) => call.name(),
                     _ => unreachable!(),
                 };
-                if let Some(target) = self.member(receiver, name.name(), name.span(), state, false)
+                if let Some(target) = Self::member(receiver, name.name(), name.span(), state, false)
                 {
                     self.report(&target);
                     if let CascadeOp::Call(call) = operation {
@@ -1331,7 +1327,7 @@ impl<'a> SemanticRuleVisitor<'a> for Uses<'a> {
             CascadeOp::Invoke(invoke) => {
                 let args = invoke.args();
                 if !matches!(receiver.view(), ResolvedTypeView::Function { .. })
-                    && let Some(target) = self.member(
+                    && let Some(target) = Self::member(
                         receiver,
                         "call",
                         Span::new(section.start, args.span().end),
@@ -1402,7 +1398,7 @@ impl<'a> SemanticRuleVisitor<'a> for Uses<'a> {
                 if !write && operator == AssignOp::Eq {
                     continue;
                 }
-                if let Some(target) = self.member(receiver, name.name(), name.span(), state, write)
+                if let Some(target) = Self::member(receiver, name.name(), name.span(), state, write)
                 {
                     self.report(&target);
                 }
@@ -1420,7 +1416,7 @@ impl<'a> SemanticRuleVisitor<'a> for Uses<'a> {
                 .model
                 .resolve_type_in(pattern.type_(), &state.type_parameters);
             for field in pattern.fields() {
-                if let Some(target) = self.member(
+                if let Some(target) = Self::member(
                     &receiver,
                     field.name().name(),
                     field.name().span(),
@@ -1449,10 +1445,10 @@ impl<'a> SemanticRuleVisitor<'a> for Uses<'a> {
             };
             (owner, MemberSelector::DECLARATION)
         } else {
-            let Some(qualified) = QualifiedName::from_identifiers(qualifier) else {
+            let Some(qualified_name) = QualifiedName::from_identifiers(qualifier) else {
                 return;
             };
-            let Some(owner) = state.model.resolve_name(qualified) else {
+            let Some(owner) = state.model.resolve_name(qualified_name) else {
                 return;
             };
             (
@@ -2115,7 +2111,7 @@ void use(int value) {
 
     #[test]
     fn cascade_index_spans_follow_each_index_in_the_local_token_store() {
-        let source = r#"
+        let source = r"
 class Box {
   Box get items => this;
   Box add(List<int> values) => this;
@@ -2127,7 +2123,7 @@ void use(Box box) {
   box..add([3])[4];
   print('${(box..items[5])}');
 }
-"#;
+";
         let mut diagnostics = analyze(source, fixture_path());
         diagnostics.sort_unstable_by_key(|diagnostic| (diagnostic.span.start, diagnostic.span.end));
         let actual: Vec<_> = diagnostics

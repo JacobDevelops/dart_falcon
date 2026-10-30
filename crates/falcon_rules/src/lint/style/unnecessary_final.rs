@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn local_final_span_ignores_keyword_words_in_documentation_and_metadata() {
-        let source = r#"void f() {
+        let source = r"void f() {
   /// final belongs to this documentation, not the declaration keyword.
   @pragma('final')
   late final value = 1;
@@ -184,7 +184,7 @@ mod tests {
   @pragma('final')
   final (first, second) = (value, 2);
   print(first + second);
-}"#;
+}";
         let parsed = parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
         let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {

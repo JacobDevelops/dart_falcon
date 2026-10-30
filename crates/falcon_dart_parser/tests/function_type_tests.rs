@@ -138,7 +138,7 @@ fn positional_record_type_fields_preserve_optional_source_names() {
     assert_eq!(record.positional().len(), 3);
     let names: Vec<_> = record
         .positional_names()
-        .map(|name| name.map(|name| name.name()))
+        .map(|name| name.map(falcon_syntax::cst::Identifier::name))
         .collect();
     assert_eq!(names, [Some("first"), None, Some("last")]);
 }

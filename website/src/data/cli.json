@@ -192,7 +192,7 @@
     },
     {
       "name": "migrate",
-      "about": "Migrate to falcon.json. Converts a dart_code_linter / pyramid_lint analysis_options.yaml, or upgrades an existing falcon.json by rewriting legacy rule ids to their canonical form (auto-detected from the input)",
+      "about": "Migrate to falcon.json. Converts a `dart_code_linter` / `pyramid_lint` `analysis_options.yaml`, or upgrades an existing falcon.json by rewriting legacy rule ids to their canonical form (auto-detected from the input)",
       "usage": "falcon migrate [OPTIONS]",
       "args": [
         {
@@ -201,7 +201,7 @@
           "short": null,
           "valueName": "PATH",
           "default": null,
-          "help": "Path to the input: an analysis_options.yaml to convert, or an existing falcon.json to upgrade (default: ./analysis_options.yaml)",
+          "help": "Path to the input: an `analysis_options.yaml` to convert, or an existing falcon.json to upgrade (default: ./`analysis_options.yaml`)",
           "possibleValues": [],
           "positional": false
         },

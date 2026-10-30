@@ -1,10 +1,10 @@
 //! Flags Riverpod consumer widgets whose build reference is unused.
-//! A direct ConsumerWidget or HookConsumerWidget subclass can use a regular
-//! widget when it does not need its WidgetRef. References are matched to the
+//! A direct `ConsumerWidget` or `HookConsumerWidget` subclass can use a regular
+//! widget when it does not need its `WidgetRef`. References are matched to the
 //! parameter declaration, so nested consumers with their own ref do not count.
 //! Abstract/generic classes, mixins, interfaces, missing bodies and uncertain
 //! reference types are excluded, as are locally subclassed widgets and helpers
-//! that use a WidgetRef parameter.
+//! that use a `WidgetRef` parameter.
 
 use crate::lint::riverpod::is_exact_type;
 use falcon_analyze::used_parameters;
@@ -34,7 +34,7 @@ impl Rule for AvoidUnnecessaryConsumerWidgets {
                     .into_iter()
                     .flat_map(|library| library.siblings().iter().copied()),
             )
-            .flat_map(|program| program.declarations())
+            .flat_map(Program::declarations)
             .filter_map(|declaration| match declaration {
                 TopLevelDecl::Class(class) => class.extends(),
                 TopLevelDecl::ClassTypeAlias(alias) => Some(alias.superclass()),
@@ -150,11 +150,14 @@ impl Collector<'_> {
         {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic(if is_exact_type(self.ctx, &superclass, &["HookConsumerWidget"]) {
-            "This widget does not use its `ref`; convert it to a `HookWidget`."
-        } else {
-            "This widget does not use its `ref`; convert it to a `StatelessWidget`."
-        }, class.name().span()));
+        self.diagnostics.push(self.ctx.diagnostic(
+            if is_exact_type(self.ctx, &superclass, &["HookConsumerWidget"]) {
+                "This widget does not use its `ref`; convert it to a `HookWidget`."
+            } else {
+                "This widget does not use its `ref`; convert it to a `StatelessWidget`."
+            },
+            class.name().span(),
+        ));
     }
 }
 

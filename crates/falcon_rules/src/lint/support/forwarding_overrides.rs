@@ -128,7 +128,7 @@ impl Collector<'_> {
         let inherited_protected = self.inherited_protected(member, &owner, name);
         let own_protected =
             crate::lint::declarations::has_meta_annotation(annotations.clone(), "protected", model);
-        if state_only && !(inherited_protected && !own_protected) {
+        if state_only && (!inherited_protected || own_protected) {
             return;
         }
         if (!state_only && inherited_protected && !own_protected)

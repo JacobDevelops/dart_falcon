@@ -33,7 +33,7 @@ impl Order {
                     current.span(),
                 ));
             }
-            previous = name.map(|name| name.name());
+            previous = name.map(Identifier::name);
         }
     }
 }

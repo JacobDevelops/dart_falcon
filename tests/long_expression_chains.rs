@@ -326,8 +326,12 @@ mod semantic_walkers {
 
 mod guard_walkers {
     use super::semantic_walkers::check_rule_source;
+    use falcon_analyze::{AnalyzeContext, ParsedFile, RuleAnalysis};
+    use falcon_config::FalconConfig;
+    use falcon_rules::lint::style::library_annotations::LibraryAnnotations;
+    use std::path::PathBuf;
     use std::process::Command;
-
+    use std::sync::Arc;
     #[test]
     fn repeatable_switch_guard() {
         let chain = format!("true{}", " && true".repeat(99_999));
@@ -420,11 +424,6 @@ mod guard_walkers {
             );
             return;
         }
-        use falcon_analyze::{AnalyzeContext, ParsedFile, RuleAnalysis};
-        use falcon_config::FalconConfig;
-        use falcon_rules::lint::style::library_annotations::LibraryAnnotations;
-        use std::path::PathBuf;
-        use std::sync::Arc;
 
         let chain = format!("1{}", " + 1".repeat(99_999));
         let source = format!(

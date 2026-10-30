@@ -94,14 +94,17 @@ fn pattern_debug(name: &str, value: &impl fmt::Debug, f: &mut fmt::Formatter<'_>
 }
 
 impl<'a> WildcardPattern<'a> {
+    #[must_use]
     pub fn type_(self) -> Option<DartType<'a>> {
         self.0.child()
     }
 }
 impl<'a> VariablePattern<'a> {
+    #[must_use]
     pub fn type_(self) -> Option<DartType<'a>> {
         self.0.child()
     }
+    #[must_use]
     pub fn name(self) -> Identifier<'a> {
         self.0.required()
     }
@@ -131,18 +134,26 @@ inner_pattern!(NullCheckPattern, "NullCheck");
 inner_pattern!(NullAssertPattern, "NullAssert");
 inner_pattern!(ParenPattern, "ParenPattern");
 impl<'a> CastPattern<'a> {
+    #[must_use]
     pub fn inner(self) -> Pattern<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn cast_type(self) -> DartType<'a> {
         self.0.required()
     }
 }
 debug_node!(CastPattern => "Cast" { inner, cast_type, span });
 impl<'a> RelationalPattern<'a> {
+    #[must_use]
     pub fn value(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
+    /// Returns the relational operator.
+    ///
+    /// # Panics
+    /// Panics if the parser did not emit a relational operator token.
     pub fn op(self) -> RelationalPatternOp {
         match self
             .0
@@ -173,6 +184,11 @@ pub enum LiteralPatternValue<'a> {
     NegDouble(&'a str),
 }
 impl<'a> LiteralPattern<'a> {
+    #[must_use]
+    /// Returns the literal value represented by this pattern.
+    ///
+    /// # Panics
+    /// Panics if the parser did not emit a literal pattern token.
     pub fn value(self) -> LiteralPatternValue<'a> {
         if let Some(string) = self.0.child::<StringLitNode<'a>>() {
             return LiteralPatternValue::String(string);
@@ -205,15 +221,19 @@ pub struct PatternNames<'a> {
     dynamic: Option<Identifier<'a>>,
 }
 impl<'a> PatternNames<'a> {
+    #[must_use]
     pub fn len(&self) -> usize {
         self.clone().count()
     }
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.first().is_none()
     }
+    #[must_use]
     pub fn first(&self) -> Option<Identifier<'a>> {
         self.clone().next()
     }
+    #[must_use]
     pub fn last(&self) -> Option<Identifier<'a>> {
         Iterator::last(self.clone())
     }
@@ -237,6 +257,7 @@ pub enum ConstPatternValue<'a> {
     Expr(Expr<'a>),
 }
 impl<'a> ConstPattern<'a> {
+    #[must_use]
     pub fn value(self) -> ConstPatternValue<'a> {
         if let Some(value) = self
             .0
@@ -281,12 +302,15 @@ impl<'a> AstNode<'a> for ListPatternElement<'a> {
     }
 }
 impl<'a> ListPatternElement<'a> {
+    #[must_use]
     pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         <Self as AstNode>::cast(node)
     }
+    #[must_use]
     pub fn syntax(self) -> SyntaxNode<'a> {
         <Self as AstNode>::syntax(self)
     }
+    #[must_use]
     pub fn span(self) -> Span {
         match self {
             Self::Pattern(p) => p.span(),
@@ -304,15 +328,18 @@ impl fmt::Debug for ListPatternElement<'_> {
 }
 typed_node!(RestPattern, RestPattern);
 impl<'a> RestPattern<'a> {
+    #[must_use]
     pub fn pattern(self) -> Option<Pattern<'a>> {
         self.0.child()
     }
 }
 debug_tuple!(RestPattern => "Rest" { pattern, span });
 impl<'a> ListPattern<'a> {
+    #[must_use]
     pub fn type_arg(self) -> Option<DartType<'a>> {
         TypeArgs::of(self.0).next()
     }
+    #[must_use]
     pub fn elements(self) -> AstChildren<'a, ListPatternElement<'a>> {
         AstChildren::new(self.0)
     }
@@ -324,6 +351,7 @@ debug_node!(ListPattern {
 });
 
 impl<'a> RecordPattern<'a> {
+    #[must_use]
     pub fn fields(self) -> AstChildren<'a, RecordPatternField<'a>> {
         AstChildren::new(self.0)
     }
@@ -343,15 +371,19 @@ impl<'a> AstNode<'a> for RecordPatternField<'a> {
     }
 }
 impl<'a> RecordPatternField<'a> {
+    #[must_use]
     pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         <Self as AstNode>::cast(node)
     }
+    #[must_use]
     pub fn syntax(self) -> SyntaxNode<'a> {
         self.0
     }
+    #[must_use]
     pub fn pattern(self) -> Pattern<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn name(self) -> Option<Identifier<'a>> {
         self.0.child::<Identifier>().or_else(|| {
             (self
@@ -362,6 +394,11 @@ impl<'a> RecordPatternField<'a> {
             .flatten()
         })
     }
+    #[must_use]
+    /// Returns the source span of this record pattern field.
+    ///
+    /// # Panics
+    /// Panics if this field has no record-pattern parent.
     pub fn span(self) -> Span {
         let span = self.0.span();
         let parent = self.0.parent().expect("record field has a record parent");
@@ -389,6 +426,7 @@ impl<'a> RecordPatternField<'a> {
             span
         }
     }
+    #[must_use]
     pub fn source_name(self) -> Option<Identifier<'a>> {
         self.name()
             .filter(|name| name.span().end <= self.pattern().span().start)
@@ -401,12 +439,15 @@ debug_node!(RecordPatternField {
 });
 
 impl<'a> MapPattern<'a> {
+    #[must_use]
     pub fn type_args(self) -> AstChildren<'a, DartType<'a>> {
         TypeArgs::of(self.0)
     }
+    #[must_use]
     pub fn entries(self) -> AstChildren<'a, MapPatternEntry<'a>> {
         AstChildren::new(self.0)
     }
+    #[must_use]
     pub fn has_rest(self) -> bool {
         self.0.child_token(TokenKind::DotDotDot).is_some()
     }
@@ -419,18 +460,22 @@ debug_node!(MapPattern {
 });
 typed_node!(MapPatternEntry, MapPatternEntry);
 impl<'a> MapPatternEntry<'a> {
+    #[must_use]
     pub fn key(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn pattern(self) -> Pattern<'a> {
         self.0.required()
     }
 }
 debug_node!(MapPatternEntry { key, pattern, span });
 impl<'a> ObjectPattern<'a> {
+    #[must_use]
     pub fn type_(self) -> DartType<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn fields(self) -> AstChildren<'a, ObjectPatternField<'a>> {
         AstChildren::new(self.0)
     }
@@ -442,6 +487,11 @@ debug_node!(ObjectPattern {
 });
 typed_node!(ObjectPatternField, ObjectPatternField);
 impl<'a> ObjectPatternField<'a> {
+    #[must_use]
+    /// Returns this object pattern field's identifier.
+    ///
+    /// # Panics
+    /// Panics if neither a field name nor recoverable lexical name exists.
     pub fn name(self) -> Identifier<'a> {
         let shorthand = self
             .0
@@ -463,9 +513,11 @@ impl<'a> ObjectPatternField<'a> {
                 Identifier::synthetic(self.0, name, span)
             })
     }
+    #[must_use]
     pub fn pattern(self) -> Option<Pattern<'a>> {
         self.0.child()
     }
+    #[must_use]
     pub fn source_name(self) -> Option<Identifier<'a>> {
         let name = self.name();
         let span = name.span();

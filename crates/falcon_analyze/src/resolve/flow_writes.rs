@@ -307,7 +307,7 @@ impl<'a> Visitor<'a> for FlowWrites {
                         for statement in statement.body().stmts() {
                             visitor.visit_stmt(statement);
                         }
-                    })
+                    });
                 });
                 for catch in statement.catches() {
                     self.scoped(|visitor| {
@@ -365,7 +365,7 @@ impl<'a> Visitor<'a> for FlowWrites {
                 self.callable_bindings
                     .insert(function.span().start, self.bindings());
                 self.callable(Some(function.span().start), |visitor| {
-                    walk_stmt(visitor, statement)
+                    walk_stmt(visitor, statement);
                 });
             }
             _ => walk_stmt(self, statement),
@@ -418,7 +418,7 @@ impl<'a> Visitor<'a> for FlowWrites {
                         .callable_bindings
                         .insert(function.span().start, visitor.bindings());
                     visitor.callable(Some(function.span().start), |visitor| {
-                        walk_expr(visitor, expression)
+                        walk_expr(visitor, expression);
                     });
                     false
                 }
@@ -593,10 +593,10 @@ mod tests {
         assert!(!writes.anywhere_captured.is_empty());
         assert!(!writes.callable_captured_writes.is_empty());
         assert!(writes.scopes.is_empty());
-        assert!(writes.callable_scopes.is_empty());
-        assert!(writes.callable_ids.is_empty());
+        assert_eq!(writes.callable_scopes, [] as [usize; 0]);
+        assert_eq!(writes.callable_ids, [] as [std::option::Option<usize>; 0]);
         assert!(writes.callable_captures.is_empty());
-        assert!(writes.regions.is_empty());
+        assert_eq!(writes.regions, [] as [(usize, usize, usize); 0]);
         assert!(writes.callable_bindings.is_empty());
         assert!(writes.captured_bindings.is_empty());
         assert!(writes.written_bindings.is_empty());

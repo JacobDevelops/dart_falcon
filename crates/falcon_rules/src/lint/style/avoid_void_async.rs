@@ -91,7 +91,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_> {
                 .tree()
                 .tokens_in(self.ctx.source(), operator.span())
                 .find(|token| token.kind() == falcon_syntax::TokenKind::Operator)
-                .map_or(operator.span(), |token| token.span());
+                .map_or(operator.span(), cst::SyntaxToken::span);
             self.check(
                 operator.async_marker(),
                 operator.return_type(),

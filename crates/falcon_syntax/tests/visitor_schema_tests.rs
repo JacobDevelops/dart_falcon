@@ -88,72 +88,138 @@ impl Recorder {
     }
 }
 
+// Keep the declaration category explicit so the dispatcher remains exhaustive
+// without burying its other categories in a long function.
+macro_rules! declaration_kinds {
+    () => {
+        Program
+            | LibraryDirective
+            | PartOfDirective
+            | PartDirective
+            | ImportDirective
+            | ExportDirective
+            | ConfigurableUri
+            | Combinator
+            | ClassDecl
+            | PrimaryConstructor
+            | PrimaryConstructorBody
+            | ClassTypeAliasDecl
+            | FieldDecl
+            | VarDeclarator
+            | ConstructorDecl
+            | RedirectedConstructor
+            | SuperCallInitializer
+            | ThisCallInitializer
+            | FieldInitializer
+            | AssertInitializer
+            | MethodDecl
+            | GetterDecl
+            | SetterDecl
+            | OperatorDecl
+            | MixinDecl
+            | MixinClassDecl
+            | EnumDecl
+            | EnumVariant
+            | ExtensionDecl
+            | ExtensionTypeDecl
+            | FunctionDecl
+            | TopLevelVarDecl
+            | TypeAliasDecl
+            | FormalParamList
+            | FormalParam(_)
+            | ArrowBody
+            | NativeBody
+            | Annotation
+            | NamedType
+            | FunctionType
+            | FunctionTypeParam(_)
+            | RecordType
+            | NamedRecordField
+            | TypeParam
+            | VoidType
+            | DynamicType
+    };
+}
+
 fn node_hook(kind: NodeKind, default_chains: bool) -> Option<&'static str> {
     use NodeKind::*;
 
     match kind {
-        Program | LibraryDirective | PartOfDirective => declaration_hook(kind, default_chains),
-        PartDirective | ImportDirective | ExportDirective => declaration_hook(kind, default_chains),
-        ConfigurableUri | Combinator | ClassDecl => declaration_hook(kind, default_chains),
-        PrimaryConstructor | PrimaryConstructorBody => declaration_hook(kind, default_chains),
-        ClassTypeAliasDecl | FieldDecl | VarDeclarator => declaration_hook(kind, default_chains),
-        ConstructorDecl | RedirectedConstructor => declaration_hook(kind, default_chains),
-        SuperCallInitializer | ThisCallInitializer => declaration_hook(kind, default_chains),
-        FieldInitializer | AssertInitializer | MethodDecl => declaration_hook(kind, default_chains),
-        GetterDecl | SetterDecl | OperatorDecl => declaration_hook(kind, default_chains),
-        MixinDecl | MixinClassDecl | EnumDecl => declaration_hook(kind, default_chains),
-        EnumVariant | ExtensionDecl | ExtensionTypeDecl => declaration_hook(kind, default_chains),
-        FunctionDecl | TopLevelVarDecl | TypeAliasDecl => declaration_hook(kind, default_chains),
-        FormalParamList | FormalParam(_) | ArrowBody => declaration_hook(kind, default_chains),
-        NativeBody | Annotation | NamedType => declaration_hook(kind, default_chains),
-        FunctionType | FunctionTypeParam(_) | RecordType => declaration_hook(kind, default_chains),
-        NamedRecordField | TypeParam | VoidType => declaration_hook(kind, default_chains),
-        DynamicType => declaration_hook(kind, default_chains),
-        Block | IfStmt | CaseCondition | ForStmt => statement_hook(kind, default_chains),
-        ForHeader | ForInInit | PatternForInInit => statement_hook(kind, default_chains),
-        ForExprsInit | WhileStmt | DoWhileStmt | SwitchStmt => statement_hook(kind, default_chains),
-        SwitchCase | CasePatternLabel | CaseExprLabel => statement_hook(kind, default_chains),
-        DefaultLabel | TryCatchStmt | CatchClause => statement_hook(kind, default_chains),
-        ReturnStmt | ThrowStmt | RethrowStmt | EmptyStmt => statement_hook(kind, default_chains),
-        BreakStmt | ContinueStmt | LocalVarDecl => statement_hook(kind, default_chains),
-        PatternDeclaration | PatternAssignStmt => statement_hook(kind, default_chains),
-        LabeledStmt | LocalFuncDecl | AssertStmt => statement_hook(kind, default_chains),
-        YieldStmt | ExprStmt | ErrorNode | Identifier => statement_hook(kind, default_chains),
-        StringLitNode | AdjacentStrings => statement_hook(kind, default_chains),
-        StringInterpolation | CascadeSection | CascadeField => statement_hook(kind, default_chains),
-        CascadeIndex | CascadeNullAssert | CascadeCall => statement_hook(kind, default_chains),
-        CascadeInvoke | CascadeAssign | CascadeIndexAssign => statement_hook(kind, default_chains),
-        NullAwareElement | SpreadElement | IfElement => statement_hook(kind, default_chains),
-        ForElement | MapEntry | MapSpreadElement => statement_hook(kind, default_chains),
-        MapIfElement | MapForElement | RecordField => statement_hook(kind, default_chains),
-        ArgList | NamedArg | SwitchExprArm | LiteralPattern => statement_hook(kind, default_chains),
-        ConstPattern | ListPattern | RecordPattern => statement_hook(kind, default_chains),
-        MapPattern | ObjectPattern | RestPattern => statement_hook(kind, default_chains),
-        RecordPatternField | MapPatternEntry => statement_hook(kind, default_chains),
-        ObjectPatternField => statement_hook(kind, default_chains),
-        WildcardPattern | VariablePattern => expression_hook(kind, default_chains),
-        LogicalAndPattern | LogicalOrPattern => expression_hook(kind, default_chains),
-        RelationalPattern | CastPattern | NullCheckPattern => expression_hook(kind, default_chains),
-        NullAssertPattern | ParenPattern | ErrorPattern => expression_hook(kind, default_chains),
-        IntLitExpr | DoubleLitExpr | BoolLitExpr => expression_hook(kind, default_chains),
-        NullLitExpr | ParenExpr | ThisExpr | SuperExpr => expression_hook(kind, default_chains),
-        UnaryExpr | PostfixIncDecExpr | BinaryExpr => expression_hook(kind, default_chains),
-        AssignExpr | ConditionalExpr | IsExpr | AsExpr => expression_hook(kind, default_chains),
-        FieldExpr | IndexExpr | CallExpr | CascadeExpr => expression_hook(kind, default_chains),
-        ListExpr | MapExpr | SetExpr | RecordExpr => expression_hook(kind, default_chains),
-        FuncExpr | NewExpr | DotShorthandExpr | AwaitExpr => expression_hook(kind, default_chains),
-        ThrowExpr | SwitchExpr | NullAssertExpr => expression_hook(kind, default_chains),
-        SymbolLitExpr | GenericInstantiationExpr => expression_hook(kind, default_chains),
-        ErrorExpr | ExtendsClause | WithClause => expression_hook(kind, default_chains),
-        ImplementsClause | OnClause | SetterParameter => expression_hook(kind, default_chains),
-        LegacyTypedef | TypeArgs | ForCondition => expression_hook(kind, default_chains),
-        ForUpdates | AwaitFor | ExprCondition | ExprGuard => expression_hook(kind, default_chains),
-        ConstPatternExpr | Error => expression_hook(kind, default_chains),
+        declaration_kinds!() => Some(declaration_hook(kind)),
+        Block | IfStmt | CaseCondition | ForStmt | ForHeader | ForInInit | PatternForInInit
+        | ForExprsInit | WhileStmt | DoWhileStmt | SwitchStmt | SwitchCase | CasePatternLabel
+        | CaseExprLabel | DefaultLabel | TryCatchStmt | CatchClause | ReturnStmt | ThrowStmt
+        | RethrowStmt | EmptyStmt | BreakStmt | ContinueStmt | LocalVarDecl
+        | PatternDeclaration | PatternAssignStmt | LabeledStmt | LocalFuncDecl | AssertStmt
+        | YieldStmt | ExprStmt | ErrorNode | Identifier | StringLitNode | AdjacentStrings
+        | StringInterpolation | CascadeSection | CascadeField | CascadeIndex
+        | CascadeNullAssert | CascadeCall | CascadeInvoke | CascadeAssign | CascadeIndexAssign
+        | NullAwareElement | SpreadElement | IfElement | ForElement | MapEntry
+        | MapSpreadElement | MapIfElement | MapForElement | RecordField | ArgList | NamedArg
+        | SwitchExprArm | LiteralPattern | ConstPattern | ListPattern | RecordPattern
+        | MapPattern | ObjectPattern | RestPattern | RecordPatternField | MapPatternEntry
+        | ObjectPatternField => Some(statement_hook(kind)),
+        WildcardPattern
+        | VariablePattern
+        | LogicalAndPattern
+        | LogicalOrPattern
+        | RelationalPattern
+        | CastPattern
+        | NullCheckPattern
+        | NullAssertPattern
+        | ParenPattern
+        | ErrorPattern
+        | IntLitExpr
+        | DoubleLitExpr
+        | BoolLitExpr
+        | NullLitExpr
+        | ParenExpr
+        | ThisExpr
+        | SuperExpr
+        | UnaryExpr
+        | PostfixIncDecExpr
+        | BinaryExpr
+        | AssignExpr
+        | ConditionalExpr
+        | IsExpr
+        | AsExpr
+        | FieldExpr
+        | IndexExpr
+        | CallExpr
+        | CascadeExpr
+        | ListExpr
+        | MapExpr
+        | SetExpr
+        | RecordExpr
+        | FuncExpr
+        | NewExpr
+        | DotShorthandExpr
+        | AwaitExpr
+        | ThrowExpr
+        | SwitchExpr
+        | NullAssertExpr
+        | SymbolLitExpr
+        | GenericInstantiationExpr
+        | ErrorExpr
+        | ExtendsClause
+        | WithClause
+        | ImplementsClause
+        | OnClause
+        | SetterParameter
+        | LegacyTypedef
+        | TypeArgs
+        | ForCondition
+        | ForUpdates
+        | AwaitFor
+        | ExprCondition
+        | ExprGuard
+        | ConstPatternExpr
+        | Error => expression_hook(kind, default_chains),
     }
 }
 
-fn declaration_hook(kind: NodeKind, _default_chains: bool) -> Option<&'static str> {
-    Some(match kind {
+fn declaration_hook(kind: NodeKind) -> &'static str {
+    match kind {
         NodeKind::Program => "Program",
         NodeKind::LibraryDirective => "LibraryDirective",
         NodeKind::PartOfDirective => "PartOfDirective",
@@ -199,11 +265,11 @@ fn declaration_hook(kind: NodeKind, _default_chains: bool) -> Option<&'static st
         NodeKind::TypeParam => "TypeParam",
         NodeKind::VoidType | NodeKind::DynamicType => "DartType",
         _ => unreachable!("node_hook dispatches only declaration kinds here"),
-    })
+    }
 }
 
-fn statement_hook(kind: NodeKind, _default_chains: bool) -> Option<&'static str> {
-    Some(match kind {
+fn statement_hook(kind: NodeKind) -> &'static str {
+    match kind {
         NodeKind::Block => "Block",
         NodeKind::IfStmt => "IfStmt",
         NodeKind::CaseCondition => "IfCondition",
@@ -267,7 +333,7 @@ fn statement_hook(kind: NodeKind, _default_chains: bool) -> Option<&'static str>
         NodeKind::MapPatternEntry => "MapPatternEntry",
         NodeKind::ObjectPatternField => "ObjectPatternField",
         _ => unreachable!("node_hook dispatches only statement kinds here"),
-    })
+    }
 }
 
 fn expression_hook(kind: NodeKind, default_chains: bool) -> Option<&'static str> {
@@ -515,7 +581,7 @@ recording_visitor! {
 
 #[test]
 fn representative_program_walks_source_children_exactly_once() {
-    let source = r#"
+    let source = r"
         library sample;
         import 'a.dart' as prefix show Visible;
         typedef Callback = int Function(int argument);
@@ -535,7 +601,7 @@ fn representative_program_walks_source_children_exactly_once() {
             }
           }
         }
-    "#;
+    ";
     let parsed = parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
     let mut recorder = Recorder::default();
@@ -603,7 +669,7 @@ fn legacy_typedef_walks_written_parameters_not_synthesized_copies() {
 #[test]
 fn explicit_hooks_and_default_leaves_reach_all_retained_syntax() {
     let sources = [
-        r#"
+        r"
             import 'default.dart' if (dart.library.io) 'io.dart' show Visible;
             export 'api.dart' hide Hidden;
             part 'part.dart';
@@ -626,8 +692,8 @@ fn explicit_hooks_and_default_leaves_reach_all_retained_syntax() {
             class Initialized { int field; Initialized() : field = 1; }
             class Derived extends Parent { Object method() => super.value; }
             void nativeFunction() native '${nativeArgument}';
-        "#,
-        r#"
+        ",
+        r"
             typedef Callback = (int, {String label}) Function<T>(T value, {int count});
             var closure = <T extends Bound>(T value) => value;
             void f(Object value, [int count = 1]) async {
@@ -658,8 +724,8 @@ fn explicit_hooks_and_default_leaves_reach_all_retained_syntax() {
               labeled: for (;;) { break labeled; }
               throw value;
             }
-        "#,
-        r#"
+        ",
+        r"
             void f(Object value) {
               switch (value) {
                 case const (constant + 1): break;
@@ -676,7 +742,7 @@ fn explicit_hooks_and_default_leaves_reach_all_retained_syntax() {
               try { target(); } on Failure catch (error, stack) { rethrow; }
               finally { cleanup(); }
             }
-        "#,
+        ",
         "part of library_name;",
         "Iterable<dynamic> generator() sync* { yield value; yield* values; }",
     ];

@@ -1,10 +1,10 @@
 //! Semantic facts for the structural async-state visitor.
 //!
-//! Mirrors SDK 3.13.5's declaration-based BuildContext classification through
+//! Mirrors SDK 3.13.5's declaration-based `BuildContext` classification through
 //! the shared semantic visitor. Assignments do not change a binding's declared
 //! context type. Getter-backed fields exclude nullable declarations; local
 //! variables and parameters do not. Boolean getter identities distinguish
-//! Flutter State from BuildContext, but cannot represent custom State getter
+//! Flutter State from `BuildContext`, but cannot represent custom State getter
 //! overrides separately.
 //! Generic constructor type arguments do not change protected callback identity.
 
@@ -61,8 +61,7 @@ pub(crate) fn prepare<'a>(
                 let ty = variable.var_type().map(|ty| state.model.resolve_type(ty));
                 for declarator in variable.declarators() {
                     if let Some(ty) = ty
-                        .as_ref()
-                        .cloned()
+                        .clone()
                         .or_else(|| declarator.initializer().map(|value| state.infer(value)))
                     {
                         collector.globals.insert(declarator.name().name(), ty);
@@ -307,15 +306,6 @@ pub(crate) fn constant_bool<'a>(
     state: &SemanticState<'a>,
     cache: &ConstantCache,
 ) -> Option<bool> {
-    if let Expr::BoolLit(literal) = expression.unparenthesized() {
-        return Some(literal.value());
-    }
-    if !matches!(
-        expression.unparenthesized(),
-        Expr::Ident(_) | Expr::Field(_) | Expr::Unary(_) | Expr::Binary(_) | Expr::Conditional(_)
-    ) {
-        return None;
-    }
     // The shared evaluator resolves library constants, not lexical bindings.
     // Do not accidentally fold a shadowed library constant as a local value.
     struct BoundNames<'a, 'model> {
@@ -333,6 +323,15 @@ pub(crate) fn constant_bool<'a>(
                 }
             });
         }
+    }
+    if let Expr::BoolLit(literal) = expression.unparenthesized() {
+        return Some(literal.value());
+    }
+    if !matches!(
+        expression.unparenthesized(),
+        Expr::Ident(_) | Expr::Field(_) | Expr::Unary(_) | Expr::Binary(_) | Expr::Conditional(_)
+    ) {
+        return None;
     }
     let mut names = BoundNames {
         state,
@@ -448,10 +447,12 @@ impl<'a> Collector<'a> {
             return;
         }
         match (identity.name(), constructor) {
-            ("Future", "new" | "" | "microtask") => self.callbacks(args, &[0], &[]),
-            ("Future", "delayed") => self.callbacks(args, &[1], &[]),
-            ("Stream", "eventTransformed" | "periodic") => self.callbacks(args, &[1], &[]),
-            ("Stream", "multi") => self.callbacks(args, &[0], &[]),
+            ("Future", "new" | "" | "microtask") | ("Stream", "multi") => {
+                self.callbacks(args, &[0], &[]);
+            }
+            ("Future", "delayed") | ("Stream", "eventTransformed" | "periodic") => {
+                self.callbacks(args, &[1], &[]);
+            }
             ("StreamController", "new" | "") => {
                 self.callbacks(args, &[], &["onListen", "onPause", "onResume", "onCancel"]);
             }
@@ -498,9 +499,11 @@ impl<'a> Collector<'a> {
             return;
         }
         match (identity.name(), method) {
-            ("Future", "catchError" | "onError") => self.callbacks(args, &[0], &["test"]),
+            ("Future", "catchError" | "onError") | ("Stream", "handleError") => {
+                self.callbacks(args, &[0], &["test"]);
+            }
             ("Future", "then") => self.callbacks(args, &[0], &["onError"]),
-            ("Future", "timeout") | ("Stream", "timeout") => {
+            ("Future" | "Stream", "timeout") => {
                 self.callbacks(args, &[], &["onTimeout"]);
             }
             ("Future", "whenComplete") => self.callbacks(args, &[0], &[]),
@@ -510,7 +513,6 @@ impl<'a> Collector<'a> {
             ("Stream", "firstWhere" | "lastWhere" | "singleWhere") => {
                 self.callbacks(args, &[0], &["orElse"]);
             }
-            ("Stream", "handleError") => self.callbacks(args, &[0], &["test"]),
             ("Stream", "listen") => self.callbacks(args, &[0], &["onError", "onDone"]),
             ("Stream", "fold") => self.callbacks(args, &[1], &[]),
             (
@@ -542,12 +544,11 @@ impl<'a> Collector<'a> {
                                 state
                                     .signatures
                                     .resolved_member(&receiver, call.name().name(), &state.model)
-                                    .map(|(signature, substitutions)| {
+                                    .map_or(ResolvedType::UNKNOWN, |(signature, substitutions)| {
                                         state
                                             .model
                                             .substitute(&signature.return_type, &substitutions)
-                                    })
-                                    .unwrap_or(ResolvedType::UNKNOWN),
+                                    }),
                             );
                         }
                     }
@@ -556,7 +557,7 @@ impl<'a> Collector<'a> {
                         if operations.peek().is_some() {
                             receiver = Cow::Owned(state.cascade_invoke_return_type(
                                 &receiver,
-                                invoke.type_args(),
+                                &invoke.type_args(),
                                 invoke.args(),
                             ));
                         }
@@ -574,10 +575,9 @@ impl<'a> Collector<'a> {
                                             &state.model,
                                         )
                                     })
-                                    .map(|(ty, substitutions)| {
+                                    .map_or(ResolvedType::UNKNOWN, |(ty, substitutions)| {
                                         state.model.substitute(&ty, &substitutions)
-                                    })
-                                    .unwrap_or(ResolvedType::UNKNOWN),
+                                    }),
                             );
                         }
                     }
@@ -586,12 +586,11 @@ impl<'a> Collector<'a> {
                             state
                                 .signatures
                                 .resolved_member(&receiver, "[]", &state.model)
-                                .map(|(signature, substitutions)| {
+                                .map_or(ResolvedType::UNKNOWN, |(signature, substitutions)| {
                                     state
                                         .model
                                         .substitute(&signature.return_type, &substitutions)
-                                })
-                                .unwrap_or(ResolvedType::UNKNOWN),
+                                }),
                         );
                     }
                     CascadeOp::Assign(..) | CascadeOp::IndexAssign(..) => {}

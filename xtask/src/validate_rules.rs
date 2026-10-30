@@ -85,13 +85,13 @@ fn compare_file_diagnostics(
     let all_exps = parse_expectations(source);
     let exps: Vec<Expectation> = all_exps
         .into_iter()
-        .filter(|e| rule_filter.map(|r| e.rule == r).unwrap_or(true))
+        .filter(|e| rule_filter.is_none_or(|r| e.rule == r))
         .collect();
 
     let diags: Vec<(usize, &DiagnosticJson)> = raw_diags
         .iter()
         .enumerate()
-        .filter(|(_, d)| rule_filter.map(|r| d.rule == r).unwrap_or(true))
+        .filter(|(_, d)| rule_filter.is_none_or(|r| d.rule == r))
         .collect();
 
     let mut matched_diag_indices = vec![false; raw_diags.len()];
@@ -138,9 +138,7 @@ fn compare_file_diagnostics(
     let false_positives: Vec<UnexpectedDiagnostic> = raw_diags
         .iter()
         .enumerate()
-        .filter(|(i, d)| {
-            !matched_diag_indices[*i] && rule_filter.map(|r| d.rule == r).unwrap_or(true)
-        })
+        .filter(|(i, d)| !matched_diag_indices[*i] && rule_filter.is_none_or(|r| d.rule == r))
         .map(|(_, d)| UnexpectedDiagnostic {
             rule: d.rule.clone(),
             line: d.line,
@@ -267,9 +265,8 @@ fn project_expectations(project_dir: &Path, rule_name: &str) -> Vec<(String, Exp
     let fixture_files = recursive_files(project_dir);
     let mut expectations: Vec<(String, Expectation)> = Vec::new();
     for file in &fixture_files {
-        let source = match fs::read_to_string(file) {
-            Ok(source) => source,
-            Err(_) => continue,
+        let Ok(source) = fs::read_to_string(file) else {
+            continue;
         };
         let key = file.to_string_lossy().into_owned();
         for exp in parse_expectations(&source) {
@@ -304,14 +301,13 @@ pub(crate) fn run(options: Options) -> Result<(), String> {
     // Walk corpus/{rule_name}/*.dart
     let mut rule_dirs: Vec<PathBuf> = fs::read_dir(&corpus_path)
         .expect("Failed to read corpus directory")
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .map(|e| e.path())
         .filter(|p| p.is_dir())
         .filter(|p| {
             rule_filter
                 .as_ref()
-                .map(|r| p.file_name().and_then(|n| n.to_str()) == Some(r.as_str()))
-                .unwrap_or(true)
+                .is_none_or(|r| p.file_name().and_then(|n| n.to_str()) == Some(r.as_str()))
         })
         .collect();
     rule_dirs.sort();

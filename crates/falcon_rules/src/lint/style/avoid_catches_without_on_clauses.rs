@@ -67,12 +67,12 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 exception: exception.name(),
                 state,
                 can_rethrow: true,
-                has_valid_use: false,
+                found: false,
             };
             for statement in catch.body().stmts() {
                 uses.visit_stmt(statement);
             }
-            if uses.has_valid_use {
+            if uses.found {
                 continue;
             }
             let span = self
@@ -94,10 +94,10 @@ struct ValidUse<'s, 'a> {
     exception: &'s str,
     state: &'s SemanticState<'a>,
     can_rethrow: bool,
-    has_valid_use: bool,
+    found: bool,
 }
 
-impl<'s, 'a> ValidUse<'s, 'a> {
+impl<'a> ValidUse<'_, 'a> {
     fn mentions_exception(&self, expr: Expr<'a>) -> bool {
         let mut found = false;
         for_each_expr(expr, &mut |node| {
@@ -109,10 +109,10 @@ impl<'s, 'a> ValidUse<'s, 'a> {
     fn check_arguments(&mut self, args: ArgList<'a>) {
         if args
             .positional()
-            .chain(args.named().map(|argument| argument.value()))
+            .chain(args.named().map(NamedArg::value))
             .any(|argument| self.mentions_exception(argument))
         {
-            self.has_valid_use = true;
+            self.found = true;
         }
     }
 
@@ -196,11 +196,11 @@ impl<'a> Visitor<'a> for ValidUse<'_, 'a> {
             return;
         }
         if matches!(node, Stmt::Rethrow(_)) {
-            self.has_valid_use = self.can_rethrow;
+            self.found = self.can_rethrow;
         } else if let Stmt::Throw(statement) = node
             && self.mentions_exception(statement.value())
         {
-            self.has_valid_use = true;
+            self.found = true;
         }
         walk_stmt(self, node);
     }
@@ -221,7 +221,7 @@ impl<'a> Visitor<'a> for ValidUse<'_, 'a> {
             }
             match node {
                 Expr::Throw(throw) if this.mentions_exception(throw.expr()) => {
-                    this.has_valid_use = true;
+                    this.found = true;
                 }
                 Expr::Call(call)
                     if this.forwards_error(call.callee(), call.type_args(), call.args()) =>

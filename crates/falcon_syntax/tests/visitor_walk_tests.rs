@@ -494,6 +494,13 @@ fn walks_literal_pattern_string() {
 }
 
 #[test]
+fn walks_positional_record_literal_values() {
+    let recorder = record("var value = (1, 2);");
+    assert!(recorder.has_int("1"));
+    assert!(recorder.has_int("2"));
+}
+
+#[test]
 fn walks_operator_params() {
     let r = record("class C { C operator +(OpParam other) => this; }");
     assert!(r.has_named("OpParam"), "operator param type not walked");
@@ -540,6 +547,17 @@ fn adjacent_string_span_covers_full_run() {
 
 #[test]
 fn program_callbacks_preserve_traversal_order_and_coverage() {
+    struct Expressions(Vec<String>);
+    impl<'a> Visitor<'a> for Expressions {
+        fn visit_expr(&mut self, expr: Expr<'a>) {
+            match expr {
+                Expr::Binary(binary) if binary.op() == BinaryOp::Add => self.0.push("+".to_owned()),
+                Expr::IntLit(value) => self.0.push(value.value().to_owned()),
+                _ => {}
+            }
+            walk_expr(self, expr);
+        }
+    }
     let src = "@tag(1 + 2) int top = 3; \
      class C { \
        int field = 4; \
@@ -554,17 +572,6 @@ fn program_callbacks_preserve_traversal_order_and_coverage() {
     let program = tree.program(src);
     assert!(errors.is_empty(), "{errors:?}");
 
-    struct Expressions(Vec<String>);
-    impl<'a> Visitor<'a> for Expressions {
-        fn visit_expr(&mut self, expr: Expr<'a>) {
-            match expr {
-                Expr::Binary(binary) if binary.op() == BinaryOp::Add => self.0.push("+".to_owned()),
-                Expr::IntLit(value) => self.0.push(value.value().to_owned()),
-                _ => {}
-            }
-            walk_expr(self, expr);
-        }
-    }
     let mut expressions = Expressions(Vec::new());
     expressions.visit_program(program);
     assert_eq!(
@@ -718,7 +725,7 @@ fn default_expression_walk_handles_hundred_thousand_link_arena_chains() {
             1 + LINKS * identifiers_per_link,
             "{kind:?}",
         );
-        assert_eq!(counter.types, LINKS * types_per_link, "{kind:?}",);
+        assert_eq!(counter.types, LINKS * types_per_link, "{kind:?}");
         let mut expressions = 0;
         for_each_expr(Expr::cast(tree.root(&source)).unwrap(), &mut |_| {
             expressions += 1;
@@ -887,6 +894,20 @@ impl<'a> Visitor<'a> for Counter {
 
 #[test]
 fn expression_helper_preserves_preorder_across_synchronous_children() {
+    struct Pruned(usize, usize);
+    impl<'a> Visitor<'a> for Pruned {
+        fn visit_expr(&mut self, node: Expr<'a>) {
+            walk_expr_chain_with_exit(
+                self,
+                node,
+                |visitor, _| {
+                    visitor.0 += 1;
+                    false
+                },
+                |visitor, _| visitor.1 += 1,
+            );
+        }
+    }
     let source = "var value = a + b * f(c, d);";
     let parsed = parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
@@ -920,20 +941,6 @@ fn expression_helper_preserves_preorder_across_synchronous_children() {
         ],
     );
 
-    struct Pruned(usize, usize);
-    impl<'a> Visitor<'a> for Pruned {
-        fn visit_expr(&mut self, node: Expr<'a>) {
-            walk_expr_chain_with_exit(
-                self,
-                node,
-                |visitor, _| {
-                    visitor.0 += 1;
-                    false
-                },
-                |visitor, _| visitor.1 += 1,
-            );
-        }
-    }
     let mut pruned = Pruned(0, 0);
     pruned.visit_expr(expression);
     assert_eq!((pruned.0, pruned.1), (1, 1));
@@ -1172,7 +1179,7 @@ fn shared_elements_preserve_nested_order_and_leaf_metadata() {
         }
     }
 
-    let source = r#"
+    let source = r"
         void f() async {
           var values = [
             if (100)
@@ -1190,7 +1197,7 @@ fn shared_elements_preserve_nested_order_and_leaf_metadata() {
             await for (var entry in [211]) 212: entry,
           };
         }
-    "#;
+    ";
     let parsed = parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
     let mut elements = Elements::default();
@@ -1251,7 +1258,7 @@ fn shared_element_override_prunes_only_map_loops() {
         }
     }
 
-    let source = r#"
+    let source = r"
         var values = [
           if (listCondition)
             for (var item in listItems)
@@ -1264,7 +1271,7 @@ fn shared_element_override_prunes_only_map_loops() {
           else visibleKey: visibleValue,
           ...mapSpread,
         };
-    "#;
+    ";
     let parsed = parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
     let mut visitor = Pruning::default();

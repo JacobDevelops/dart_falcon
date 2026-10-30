@@ -33,6 +33,10 @@ pub enum OutputFormat {
 
 /// Options for the check pipeline.
 #[derive(Debug, Clone, Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "CheckOptions is a public clap Args type; its boolean fields are part of the public API and CLI flags"
+)]
 pub struct CheckOptions {
     /// Paths to lint (defaults to the current directory)
     pub paths: Vec<PathBuf>,
@@ -236,7 +240,7 @@ fn collect_check_impl(
         sdk_locator,
         paths,
         workspace.as_ref(),
-        config,
+        &config,
         root,
         error_on_warnings,
     )
@@ -247,14 +251,14 @@ fn collect_selected_check(
     sdk_locator: Option<SdkLocator>,
     paths: &[PathBuf],
     workspace: Option<&falcon_project::Workspace>,
-    config: falcon_config::FalconConfig,
+    config: &falcon_config::FalconConfig,
     root: PathBuf,
     error_on_warnings: bool,
 ) -> Result<CheckOutput, String> {
-    let cli_filter = check_path_filter(options, &config);
+    let cli_filter = check_path_filter(options, config);
     let filter = cli_filter.as_ref().unwrap_or(&config.files.includes);
     let max_errors = options.max_errors.or(config.max_errors);
-    let mut analysis = ProjectAnalysis::new(&config);
+    let mut analysis = ProjectAnalysis::new(config);
     let collect_programs = analysis.collect_programs;
     // The fix pass shares the initial project snapshot and dependency closure.
     analysis.collect_programs |= options.write && analysis.resolve;
@@ -277,7 +281,7 @@ fn collect_selected_check(
         &walked.filtered_paths,
     );
     if files.is_empty() && manifests.is_empty() {
-        crate::adoption::apply_baseline(options, &config, &root, &mut unmatched, &HashMap::new())?;
+        crate::adoption::apply_baseline(options, config, &root, &mut unmatched, &HashMap::new())?;
         crate::report::count_package_diagnostics(&mut packages, &unmatched);
         return Ok(CheckOutput {
             exit_code: i32::from(!unmatched.is_empty()),
@@ -301,7 +305,7 @@ fn collect_selected_check(
         apply_selected_fixes(
             options,
             &analysis,
-            &config,
+            config,
             &mut environment,
             (&mut files, &manifests),
             &root,
@@ -315,7 +319,7 @@ fn collect_selected_check(
     let (mut diagnostics, project_files, pipeline_failed, has_unmatched) = finish_project_analysis(
         &analysis,
         &mut environment,
-        &config,
+        config,
         filter,
         &mut files,
         &mut manifests,
@@ -327,7 +331,7 @@ fn collect_selected_check(
     falcon_project::sort_diagnostics(&mut diagnostics);
     apply_check_baseline(
         options,
-        &config,
+        config,
         &root,
         &mut diagnostics,
         &project_files,
@@ -498,7 +502,7 @@ fn apply_selected_fixes(
             match WriteSnapshot::capture(path, source) {
                 Ok(snapshot) => Some(snapshot),
                 Err(message) => {
-                    fix_reports.push(fix_report(path, message));
+                    fix_reports.push(fix_report(path, &message));
                     continue;
                 }
             }
@@ -518,7 +522,8 @@ fn apply_selected_fixes(
             },
         );
         if let Some(stop) = outcome.stop {
-            fix_reports.push(fix_report(path, stop.to_string()));
+            let message = stop.to_string();
+            fix_reports.push(fix_report(path, &message));
             continue;
         }
         if outcome.source == *source {
@@ -532,7 +537,7 @@ fn apply_selected_fixes(
             project_file,
             environment,
         ) {
-            fix_reports.push(fix_report(path, message));
+            fix_reports.push(fix_report(path, &message));
             continue;
         }
         if options.dry_run {
@@ -601,7 +606,7 @@ fn finish_project_analysis(
     (diagnostics, project_files, pipeline_failed, has_unmatched)
 }
 
-fn fix_report(path: &Path, message: String) -> Diagnostic {
+fn fix_report(path: &Path, message: &str) -> Diagnostic {
     let mut diagnostic = Diagnostic::new(
         AUTOFIX_DIAGNOSTIC_ID,
         Severity::Error,
@@ -828,23 +833,24 @@ fn append_full_file_diff(output: &mut String, path: &str, before: &str, after: &
 
 /// Run the check pipeline and print diagnostics. Errors fail, warnings fail
 /// only when requested, and pipeline errors always return 1.
-pub fn run_check(options: CheckOptions) -> i32 {
+#[must_use]
+pub fn run_check(options: &CheckOptions) -> i32 {
     run_check_impl(options, None)
 }
 
 /// Run the check pipeline with an explicit SDK discovery policy.
 pub fn run_check_with_sdk_locator(
-    options: CheckOptions,
+    options: &CheckOptions,
     sdk_locator: fn(Option<&PackageConfig>) -> Option<DartSdk>,
 ) -> i32 {
     run_check_impl(options, Some(sdk_locator))
 }
 
-fn run_check_impl(options: CheckOptions, sdk_locator: Option<SdkLocator>) -> i32 {
-    let result = match collect_check_impl(&options, sdk_locator) {
+fn run_check_impl(options: &CheckOptions, sdk_locator: Option<SdkLocator>) -> i32 {
+    let result = match collect_check_impl(options, sdk_locator) {
         Ok(output) => output,
         Err(e) => {
-            eprintln!("error: {}", e);
+            eprintln!("error: {e}");
             return 1;
         }
     };

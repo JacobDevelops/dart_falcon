@@ -69,11 +69,13 @@ pub struct LibraryGrouping {
 
 impl LibraryGrouping {
     /// Sibling file indices of file `i` (the same-library files, excluding `i`).
+    #[must_use]
     pub fn siblings(&self, i: usize) -> &[usize] {
         &self.siblings[i]
     }
 
     /// Whether file `i`'s library has an unresolved part.
+    #[must_use]
     pub fn is_unresolved(&self, i: usize) -> bool {
         self.unresolved[i]
     }
@@ -82,10 +84,12 @@ impl LibraryGrouping {
         self.missing_generated_parts_only[i]
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.siblings.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.siblings.is_empty()
     }
@@ -94,6 +98,7 @@ impl LibraryGrouping {
 /// Group `files` (each a `(path, program)`) into libraries. Paths identify each
 /// file and resolve `part` URIs; they need not exist on disk (grouping falls
 /// back to lexical path normalization when they do not).
+#[must_use]
 pub fn group_libraries(files: &[(PathBuf, Program<'_>)]) -> LibraryGrouping {
     let n = files.len();
     let mut uf = UnionFind::new(n);
@@ -127,14 +132,13 @@ pub fn group_libraries(files: &[(PathBuf, Program<'_>)]) -> LibraryGrouping {
 
         // Owner → part links (`part 'uri';`).
         for part in program.part_directives() {
-            match resolve_relative(dir, &part.uri().value())
+            if let Some(j) = resolve_relative(dir, &part.uri().value())
                 .and_then(|p| by_path.get(p.as_path()).copied())
             {
-                Some(j) => uf.union(i, j),
-                None => {
-                    unresolved[i] = true;
-                    missing_generated_parts_only[i] &= is_generated_part(path, &part.uri().value());
-                }
+                uf.union(i, j);
+            } else {
+                unresolved[i] = true;
+                missing_generated_parts_only[i] &= is_generated_part(path, &part.uri().value());
             }
         }
 
@@ -147,12 +151,11 @@ pub fn group_libraries(files: &[(PathBuf, Program<'_>)]) -> LibraryGrouping {
             } else {
                 None
             };
-            match owner {
-                Some(j) => uf.union(i, j),
-                None => {
-                    unresolved[i] = true;
-                    missing_generated_parts_only[i] = false;
-                }
+            if let Some(j) = owner {
+                uf.union(i, j);
+            } else {
+                unresolved[i] = true;
+                missing_generated_parts_only[i] = false;
             }
         }
     }
@@ -218,6 +221,7 @@ fn is_generated_part(owner: &Path, uri: &str) -> bool {
 }
 
 /// Recognize Dart generator outputs by their conventional filename suffix.
+#[must_use]
 pub fn is_generated_dart_file(path: &Path) -> bool {
     const SUFFIXES: &[&str] = &["g", "freezed", "gr", "config", "mocks", "chopper", "mapper"];
     path.extension().is_some_and(|ext| ext == "dart")
@@ -258,7 +262,10 @@ pub fn library_unit_by<'a>(
 
 /// Join dotted identifier segments into `a.b.c`.
 fn dotted<'a>(segments: impl Iterator<Item = Identifier<'a>>) -> String {
-    segments.map(|id| id.name()).collect::<Vec<_>>().join(".")
+    segments
+        .map(falcon_syntax::cst::Identifier::name)
+        .collect::<Vec<_>>()
+        .join(".")
 }
 
 /// Resolve a *relative* directive URI against a directory. `dart:` and
@@ -273,11 +280,13 @@ fn resolve_relative(dir: &Path, uri: &str) -> Option<PathBuf> {
 
 /// Canonical path when it exists (so two spellings compare equal), else a
 /// lexical normalization that resolves `.`/`..` without touching the FS.
+#[must_use]
 pub fn canonical_or_lexical(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| lexical_normalize(path))
 }
 
 /// Normalize `.` and `..` components without accessing the filesystem.
+#[must_use]
 pub fn lexical_normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for comp in path.components() {
@@ -358,8 +367,8 @@ mod tests {
             (PathBuf::from("/proj/b.dart"), b.program()),
         ];
         let g = group_libraries(&files);
-        assert!(g.siblings(0).is_empty());
-        assert!(g.siblings(1).is_empty());
+        assert_eq!(g.siblings(0), [] as [usize; 0]);
+        assert_eq!(g.siblings(1), [] as [usize; 0]);
         assert!(!g.is_unresolved(0));
         assert!(!g.is_unresolved(1));
     }
@@ -406,7 +415,7 @@ mod tests {
             (PathBuf::from("/proj/p.dart"), part.program()),
         ];
         let g = group_libraries(&files);
-        assert!(g.siblings(2).is_empty());
+        assert_eq!(g.siblings(2), [] as [usize; 0]);
         assert!(g.is_unresolved(2));
     }
 
@@ -435,7 +444,7 @@ mod tests {
         let files = vec![(PathBuf::from("/proj/owner.dart"), owner.program())];
         let g = group_libraries(&files);
         assert!(g.is_unresolved(0));
-        assert!(g.siblings(0).is_empty());
+        assert_eq!(g.siblings(0), [] as [usize; 0]);
     }
 
     #[test]

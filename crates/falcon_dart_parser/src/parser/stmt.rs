@@ -4,7 +4,7 @@ use falcon_syntax::token::TokenKind;
 
 use super::{CompletedMarker, Marker, Parser, expr::Brackets};
 
-impl<'src> Parser<'src> {
+impl Parser<'_> {
     pub(super) fn parse_block(&mut self) -> CompletedMarker {
         let marker = self.start();
         self.expect(TokenKind::LBrace);
@@ -359,17 +359,17 @@ impl<'src> Parser<'src> {
                     self.advance();
                     // Before patterns (Dart < 3.0) a case operand is a constant
                     // expression, not a pattern: `case 1 + 2:`, `case -x:`.
-                    if !self.version.supports(Feature::Patterns) {
-                        self.parse_expr();
-                        self.expect(TokenKind::Colon);
-                        label_marker.complete(self, NodeKind::CaseExprLabel);
-                    } else {
+                    if self.version.supports(Feature::Patterns) {
                         self.parse_pattern();
                         if self.eat(TokenKind::When).is_some() {
                             self.parse_expr();
                         }
                         self.expect(TokenKind::Colon);
                         label_marker.complete(self, NodeKind::CasePatternLabel);
+                    } else {
+                        self.parse_expr();
+                        self.expect(TokenKind::Colon);
+                        label_marker.complete(self, NodeKind::CaseExprLabel);
                     }
                     has_case = true;
                 } else if self.at(TokenKind::Default) {

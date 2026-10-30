@@ -58,7 +58,10 @@ impl<'a> Collector<'a> {
                 ))
                 || late_trust_pragma(annotation, &self.declared_names, self.ctx)
             {
-                self.diagnostics.push(self.ctx.diagnostic("Attach library annotations to a library directive.", annotation.span()));
+                self.diagnostics.push(self.ctx.diagnostic(
+                    "Attach library annotations to a library directive.",
+                    annotation.span(),
+                ));
             }
         }
     }
@@ -108,7 +111,7 @@ fn first_non_library_directive(program: Program<'_>) -> Option<usize> {
         .min()
 }
 
-fn declaration_annotations<'a>(decl: TopLevelDecl<'a>) -> impl Iterator<Item = Annotation<'a>> {
+fn declaration_annotations(decl: TopLevelDecl<'_>) -> impl Iterator<Item = Annotation<'_>> {
     AstChildren::new(decl.syntax()).filter(move |_| !matches!(decl, TopLevelDecl::Error(_)))
 }
 
@@ -194,7 +197,7 @@ impl<'a> Visitor<'a> for LibraryTargetFinder {
     }
 }
 
-fn constructed_type<'a>(expr: Expr<'a>) -> Option<&'a str> {
+fn constructed_type(expr: Expr<'_>) -> Option<&str> {
     match expr.unparenthesized() {
         Expr::New(new) => type_name(new.dart_type()),
         Expr::Call(call) => match call.callee().unparenthesized() {
@@ -209,9 +212,9 @@ fn constructed_type<'a>(expr: Expr<'a>) -> Option<&'a str> {
     }
 }
 
-fn type_name<'a>(ty: DartType<'a>) -> Option<&'a str> {
+fn type_name(ty: DartType<'_>) -> Option<&str> {
     match ty {
-        DartType::Named(named) => named.segments().next_back().map(|name| name.name()),
+        DartType::Named(named) => named.segments().next_back().map(Identifier::name),
         _ => None,
     }
 }
@@ -222,6 +225,7 @@ fn is_library_annotation(
     local_names: &HashSet<&str>,
     ctx: &AnalyzeContext,
 ) -> bool {
+    const TEST_LIBRARY_NAMES: &[&str] = &["TestOn", "Timeout", "Tags", "OnPlatform"];
     if ctx.identities().is_some() && ctx.signatures().is_some() {
         return canonical_library_annotation(annotation, ctx);
     }
@@ -231,7 +235,6 @@ fn is_library_annotation(
     if local_names.contains(last.name()) {
         return annotation.name().count() == 1;
     }
-    const TEST_LIBRARY_NAMES: &[&str] = &["TestOn", "Timeout", "Tags", "OnPlatform"];
     if !TEST_LIBRARY_NAMES.contains(&last.name()) {
         return false;
     }
@@ -242,7 +245,7 @@ fn is_library_annotation(
     };
     program.imports().any(|import| {
         import.uri().value() == "package:test/test.dart"
-            && import.as_name().map(|name| name.name()) == prefix
+            && import.as_name().map(Identifier::name) == prefix
             && import_exposes(import, last.name())
     })
 }
@@ -285,7 +288,7 @@ fn declared_names<'a>(program: Program<'a>, ctx: &AnalyzeContext<'a>) -> HashSet
             .flat_map(|library| library.siblings().iter().copied()),
     );
     let mut names = HashSet::new();
-    for decl in programs.flat_map(|program| program.declarations()) {
+    for decl in programs.flat_map(Program::declarations) {
         let name = match decl {
             TopLevelDecl::Class(decl) => decl.name(),
             TopLevelDecl::ClassTypeAlias(decl) => decl.name(),

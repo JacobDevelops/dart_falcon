@@ -1,5 +1,5 @@
 //! Analyzer-confirmed inference regressions that need external member signatures.
-//! Like falcon_analyze's external_libraries tests, these load parsed Dart source
+//! Like `falcon_analyze`'s `external_libraries` tests, these load parsed Dart source
 //! from a small local SDK-shaped tree, never an installed SDK or production table.
 
 #[path = "support/inference.rs"]
@@ -13,12 +13,12 @@ use inference::assert_lints as assert_external_lints;
 fn unmodifiable_list_view_inherits_element_type() {
     assert_external_lints(
         "collection-methods-unrelated-type",
-        r#"import 'dart:collection';
+        r"import 'dart:collection';
 void inferredReceivers(UnmodifiableListView<int> view) {
   view.contains('x'); /* expect: collection-methods-unrelated-type */
   view.contains(1);
 }
-"#,
+",
         1,
     );
 }
@@ -27,11 +27,11 @@ void inferredReceivers(UnmodifiableListView<int> view) {
 fn inherited_sdk_where_chain_keeps_closure_slots() {
     assert_external_lints(
         "null-closures",
-        r#"void inheritedSdkChain(List<int> values) {
+        r"void inheritedSdkChain(List<int> values) {
   values.where((value) => true).firstWhere((value) => true, orElse: null); /* expect: null-closures */
   values.where((value) => true).firstWhere((value) => true, orElse: () => 0);
 }
-"#,
+",
         1,
     );
 }
@@ -49,13 +49,13 @@ fn nullable_callback_calls_preserve_declared_return_types() {
 fn inherited_getter_and_callback_parameter_are_boolean() {
     assert_external_lints(
         "no-literal-bool-comparisons",
-        r#"extension E on List<int> {
+        r"extension E on List<int> {
   bool m() => isNotEmpty == true; /* expect: no-literal-bool-comparisons */
 }
 void closureParameter(List<bool> l) {
   l.any((e) => e == true); /* expect: no-literal-bool-comparisons */
 }
-"#,
+",
         2,
     );
 }
@@ -64,13 +64,13 @@ void closureParameter(List<bool> l) {
 fn string_index_and_operator_keep_string_receiver_type() {
     assert_external_lints(
         "noop-primitive-operations",
-        r#"void indexed(String s) {
+        r"void indexed(String s) {
   s[0].toString(); /* expect: noop-primitive-operations */
 }
 void multiply(String s) {
   (s * 2).toString(); /* expect: noop-primitive-operations */
 }
-"#,
+",
         2,
     );
 }
@@ -79,7 +79,7 @@ void multiply(String s) {
 fn inherited_list_getters_preserve_throw_type() {
     assert_external_lints(
         "only-throw-errors",
-        r#"void typed(List<Object> errors) {
+        r"void typed(List<Object> errors) {
   throw errors.first; /* expect: only-throw-errors */
 }
 void inferred() {
@@ -91,7 +91,7 @@ void inferred() {
   }
   throw errors.first; /* expect: only-throw-errors */
 }
-"#,
+",
         2,
     );
 }
@@ -109,7 +109,7 @@ fn raw_generics_function_joins_extensions_null_shorting_and_overrides() {
 fn redundant_constant_collections_records_and_types() {
     assert_external_lints(
         "avoid-redundant-argument-values",
-        r#"void list({List<int> x = const []}) {}
+        r"void list({List<int> x = const []}) {}
 void record({(int, String) x = (1, 'a')}) {}
 void type({Type x = int}) {}
 void f() {
@@ -117,7 +117,7 @@ void f() {
   record(x: (1, 'a')); /* expect: avoid-redundant-argument-values */
   type(x: int); /* expect: avoid-redundant-argument-values */
 }
-"#,
+",
         3,
     );
 }
@@ -126,7 +126,7 @@ void f() {
 fn callable_inherited_enum_and_annotation_integer_contexts() {
     assert_external_lints(
         "prefer-int-literals",
-        r#"class C { double call(double x) => x; }
+        r"class C { double call(double x) => x; }
 abstract class I { void m(double x); }
 class J implements I { void m(x) {} }
 void f(C c, J j) {
@@ -141,7 +141,7 @@ enum E {
 class A { const A(double x); }
 @A(1.0) /* expect: prefer-int-literals */
 void annotated() {}
-"#,
+",
         4,
     );
 }
@@ -150,7 +150,7 @@ void annotated() {}
 fn null_shorting_in_declaration_initializers_keeps_extension_results() {
     assert_external_lints(
         "omit-local-variable-types",
-        r#"class Leaf {}
+        r"class Leaf {}
 class Root { Leaf get leaf => Leaf(); }
 extension LeafValue on Leaf { int get value => 1; int read() => 1; }
 Root? root;
@@ -171,7 +171,7 @@ void use(Holder holder) {
   final int? e = holder.called; /* expect: omit-local-variable-types */
   final int? f = holder.indexed; /* expect: omit-local-variable-types */
 }
-"#,
+",
         6,
     );
 }
@@ -180,7 +180,7 @@ void use(Holder holder) {
 fn parameter_and_local_annotations_use_constructor_argument_contexts() {
     assert_external_lints(
         "prefer-int-literals",
-        r#"class A { const A(double value); }
+        r"class A { const A(double value); }
 void top(@A(1.0) int value) {} /* expect: prefer-int-literals */
 void nested(void callback(@A(1.0) int value)) {} /* expect: prefer-int-literals */
 void deep(void callback(void inner(@A(1.0) int value))) {} /* expect: prefer-int-literals */
@@ -205,7 +205,7 @@ class C {
     final callback = (@A(1.0) int value) {}; /* expect: prefer-int-literals */
   }
 }
-"#,
+",
         20,
     );
 }
@@ -226,7 +226,7 @@ fn dependency_frontend_fail_uses_its_declaring_library() {
     let app = root.join("app");
 
     write_frontend_dependency_fixture(root, &app);
-    let source = r#"import 'package:test_api/src/frontend/expect.dart';
+    let source = r"import 'package:test_api/src/frontend/expect.dart';
 import 'package:test_api/src/frontend/expect.dart' as expectations;
 void unprefixed() {
   try { fail('no throw'); /* expect: use-test-throws-matchers */
@@ -240,7 +240,7 @@ void shadowed() {
   void fail(String message) {}
   try { fail('no throw'); } catch (_) {}
 }
-"#;
+";
     let path = app.join("lib/main.dart");
     std::fs::write(&path, source).unwrap();
     let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
@@ -328,7 +328,7 @@ fn public_docs_internal_requires_meta_identity() {
     // Dart 3.13.5 reports the fake annotation's declarations, not meta.internal.
     assert_external_lints(
         "public-member-api-docs",
-        r#"import 'package:meta/meta.dart' as meta;
+        r"import 'package:meta/meta.dart' as meta;
 /// A locally declared annotation, not package:meta's marker.
 const internal = 0;
 @internal
@@ -347,7 +347,7 @@ void hiddenFunction() {}
 final fakeValue = 1; /* expect: public-member-api-docs */
 @meta.internal
 final hiddenValue = 1;
-"#,
+",
         4,
     );
 }

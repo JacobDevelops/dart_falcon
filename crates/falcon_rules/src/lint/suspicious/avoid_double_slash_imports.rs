@@ -34,11 +34,11 @@ fn directive_uris(program: Program<'_>) -> impl Iterator<Item = StringLitNode<'_
     program
         .imports()
         .flat_map(|import| {
-            std::iter::once(import.uri()).chain(import.configurable_uris().map(|uri| uri.uri()))
+            std::iter::once(import.uri()).chain(import.configurable_uris().map(ConfigurableUri::uri))
         })
         .chain(program.exports().flat_map(|export| {
-            std::iter::once(export.uri()).chain(export.configurable_uris().map(|uri| uri.uri()))
+            std::iter::once(export.uri()).chain(export.configurable_uris().map(ConfigurableUri::uri))
         }))
-        .chain(program.part_directives().map(|part| part.uri()))
-        .chain(program.part_of_directive().and_then(|part| part.uri()))
+        .chain(program.part_directives().map(PartDirective::uri))
+        .chain(program.part_of_directive().and_then(PartOfDirective::uri))
 }

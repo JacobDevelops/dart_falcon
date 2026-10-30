@@ -66,7 +66,7 @@ impl ArgumentTypeFallback<'_> {
             .chain(
                 self.args
                     .named()
-                    .map(|argument| argument.value())
+                    .map(falcon_syntax::cst::NamedArg::value)
                     .zip(self.named.iter().map(|(_, value)| value)),
             )
             .find(|(expression, _)| expression.syntax().id() == argument.syntax().id())
@@ -106,6 +106,10 @@ impl Number {
         Self::Float(value.to_bits())
     }
 
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "Dart numeric coercion rounds integers to IEEE 754 doubles"
+    )]
     fn float(self) -> f64 {
         match self {
             Self::Int(value) => value as f64,
@@ -116,6 +120,7 @@ impl Number {
 
 /// Whether instances use primitive equality rather than a custom `==`.
 /// Enums and `Object` qualify; incomplete class hierarchies do not.
+#[must_use]
 pub fn class_has_primitive_equality(
     identity: &DeclarationIdentity,
     signatures: &SignatureIndex,
@@ -187,6 +192,7 @@ pub struct ConstantContext<'a, 'model> {
 }
 
 impl<'a, 'model> ConstantContext<'a, 'model> {
+    #[must_use]
     pub fn new(model: &SemanticModel<'model>, signatures: &'a SignatureIndex) -> Self {
         Self {
             model: *model,
@@ -212,12 +218,17 @@ impl<'a, 'model> ConstantContext<'a, 'model> {
         );
         evaluator.local_constants = self.locals;
         evaluator.shared_cache = self.cache.filter(|_| !self.stable);
-        evaluator.stable_evaluation = self.stable;
+        evaluator.mode = if self.stable {
+            EvaluationMode::Stable
+        } else {
+            EvaluationMode::Ordinary
+        };
         evaluator
     }
 }
 
 /// Evaluates an expression, including its optional declared type context.
+#[must_use]
 pub fn evaluate_constant(
     expression: Expr<'_>,
     context: ConstantContext<'_, '_>,
@@ -293,7 +304,7 @@ pub fn evaluate_pattern_constant(
                 evaluator.evaluate_with_context(expression, context.expected)
             }
             ConstPatternValue::Name(names) => {
-                let names: Vec<_> = names.map(|name| name.name()).collect();
+                let names: Vec<_> = names.map(falcon_syntax::cst::Identifier::name).collect();
                 evaluator.resolve_name(&names)
             }
         },
@@ -305,7 +316,7 @@ pub fn evaluate_pattern_constant(
                 Some(ConstantValue::Number(Number::Int(parse_int(value)?)))
             }
             LiteralPatternValue::NegInt(value) => eval_unary(
-                &UnaryOp::Minus,
+                UnaryOp::Minus,
                 ConstantValue::Number(Number::Int(parse_int(value)?)),
             ),
             value @ (LiteralPatternValue::Double(_) | LiteralPatternValue::NegDouble(_)) => {
@@ -318,7 +329,7 @@ pub fn evaluate_pattern_constant(
                     text.replace('_', "").parse::<f64>().ok()?,
                 ));
                 if negative {
-                    eval_unary(&UnaryOp::Minus, value)
+                    eval_unary(UnaryOp::Minus, value)
                 } else {
                     Some(value)
                 }
@@ -337,12 +348,13 @@ pub fn evaluate_constant_name<'syntax>(
     names: impl Iterator<Item = Identifier<'syntax>>,
     context: ConstantContext<'_, '_>,
 ) -> Option<ConstantValue> {
-    let names: Vec<_> = names.map(|name| name.name()).collect();
+    let names: Vec<_> = names.map(falcon_syntax::cst::Identifier::name).collect();
     context.evaluator(&HashMap::new()).resolve_name(&names)
 }
 
 /// Whether a known constant value provably passes or fails a runtime cast.
 /// `None` means its runtime type or the target's subtype relation is incomplete.
+#[must_use]
 pub fn constant_cast_validity(
     value: &ConstantValue,
     target: &ResolvedType,
@@ -364,6 +376,7 @@ pub struct Construction {
 
 /// Runs a constant constructor. Arguments use the query's lexical scope;
 /// constructor bodies use their own declaring scope.
+#[must_use]
 pub fn evaluate_construction(
     identity: &DeclarationIdentity,
     constructor: &str,
@@ -373,7 +386,7 @@ pub fn evaluate_construction(
 ) -> Construction {
     let fields = HashMap::new();
     let mut evaluator = context.evaluator(&fields);
-    let value = evaluator.invoke(identity.clone(), constructor, type_args.to_vec(), args);
+    let value = evaluator.invoke(identity, constructor, type_args.to_vec(), args);
     Construction {
         fails: evaluator.failed,
         value: value.filter(|_| !evaluator.failed),
@@ -383,6 +396,7 @@ pub fn evaluate_construction(
 /// The explicit type arguments of a constructor call: on the call itself
 /// (`Box<int>(1)`) or on the class name of a named constructor
 /// (`Box<int>.named(1)`).
+#[must_use]
 pub fn invocation_type_args<'e>(
     callee: Expr<'e>,
     type_args: AstChildren<'e, DartType<'e>>,
@@ -441,13 +455,24 @@ struct ConstructorState {
     super_named: Vec<(String, Option<ConstantValue>)>,
     superclass: Option<ResolvedType>,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EvaluationMode {
+    Stable,
+    Ordinary,
+}
+
+enum ConstantLookup<T> {
+    NotApplicable,
+    Value(Option<T>),
+}
+
 struct ConstEvaluator<'a, 'model> {
     owner: Option<&'a DeclarationIdentity>,
     fields: &'a HashMap<&'a str, Expr<'a>>,
     local_constants: Option<&'a LocalConstants<'a>>,
     /// Reject environment defaults, conditional library paths, and captured
     /// locals whose dependency provenance was discarded.
-    stable_evaluation: bool,
+    mode: EvaluationMode,
     owner_model: SemanticModel<'model>,
     model: SemanticModel<'model>,
     unqualified_fields: bool,
@@ -486,7 +511,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             owner,
             fields,
             local_constants: None,
-            stable_evaluation: false,
+            mode: EvaluationMode::Ordinary,
             owner_model: model,
             model,
             unqualified_fields: true,
@@ -595,7 +620,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 let op = unary.op();
                 let operand = unary.operand();
                 let value = self.evaluate_with_context(operand, expected)?;
-                eval_unary(&op, value)
+                eval_unary(op, value)
             }
             Expr::Binary(binary) => self.evaluate_binary(binary),
             Expr::Conditional(conditional) => match self.evaluate(conditional.condition())? {
@@ -610,9 +635,8 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             Expr::New(new) if new.is_const() => {
                 let (identity, constructor, type_args) =
                     self.new_target(new.dart_type(), new.constructor_name())?;
-                self.invoke(identity, constructor, type_args, new.args())
+                self.invoke(&identity, &constructor, type_args, new.args())
             }
-            Expr::New(_) => None,
             Expr::Call(call) => {
                 let callee = call.callee();
                 let type_args = call.type_args();
@@ -621,7 +645,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 let type_args = invocation_type_args(callee, type_args)
                     .map(|ty| self.model.resolve_type_in(ty, &self.type_parameters))
                     .collect();
-                self.invoke(identity, constructor, type_args, args)
+                self.invoke(&identity, constructor, type_args, args)
             }
             Expr::List(_) | Expr::Set(_) | Expr::Map(_) | Expr::Record(_) => {
                 self.evaluate_collection(expression, expected)
@@ -633,7 +657,8 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             Expr::Is(_) | Expr::As(_) | Expr::DotShorthand(_) => {
                 self.evaluate_type_operation(expression, expected)
             }
-            Expr::This(_)
+            Expr::New(_)
+            | Expr::This(_)
             | Expr::Super(_)
             | Expr::PostfixIncDec(_)
             | Expr::Assign(_)
@@ -816,14 +841,14 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             && *right != ConstantValue::Null
         {
             let ConstantValue::Instance(class, ..) = left.as_ref() else {
-                return Some(eval_equality(&op, &left, &right));
+                return Some(eval_equality(op, &left, &right));
             };
             if !class_has_primitive_equality(class, self.signatures) {
                 return None;
             }
         }
         if matches!(op, BinaryOp::EqEq | BinaryOp::NotEq) {
-            return Some(eval_equality(&op, &left, &right));
+            return Some(eval_equality(op, &left, &right));
         }
         if !matches!(
             left.as_ref(),
@@ -834,16 +859,14 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         ) {
             return None;
         }
-        eval_binary(&op, left.into_owned(), Arc::unwrap_or_clone(right))
+        eval_binary(op, left.into_owned(), Arc::unwrap_or_clone(right))
     }
 
     fn cast_accepts(&self, value: &ConstantValue, target: &ResolvedType) -> Option<bool> {
         if matches!(
             target,
             ResolvedType {
-                kind: ResolvedTypeKind::Unknown
-            } | ResolvedType {
-                kind: ResolvedTypeKind::TypeParameter { .. }
+                kind: ResolvedTypeKind::Unknown | ResolvedTypeKind::TypeParameter { .. }
             }
         ) {
             return None;
@@ -851,9 +874,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         if matches!(
             target,
             ResolvedType {
-                kind: ResolvedTypeKind::Dynamic
-            } | ResolvedType {
-                kind: ResolvedTypeKind::Void
+                kind: ResolvedTypeKind::Dynamic | ResolvedTypeKind::Void
             }
         ) {
             return Some(true);
@@ -884,9 +905,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         if matches!(
             target,
             ResolvedType {
-                kind: ResolvedTypeKind::Dynamic
-            } | ResolvedType {
-                kind: ResolvedTypeKind::Void
+                kind: ResolvedTypeKind::Dynamic | ResolvedTypeKind::Void
             }
         ) {
             return Some(true);
@@ -945,7 +964,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             return (!unknown).then_some(true);
         }
         let source = ResolvedType::from_kind(ResolvedTypeKind::Interface {
-            occurrence: Default::default(),
+            occurrence: crate::resolve::FunctionTypeAlias::default(),
             identity: class.clone(),
             arguments: Vec::new().into(),
             nullable: false,
@@ -995,7 +1014,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 .local_constants
                 .and_then(|locals| locals.get(*local_name))
         {
-            return if self.stable_evaluation {
+            return if self.mode == EvaluationMode::Stable {
                 None
             } else {
                 let value = (*value).as_ref()?;
@@ -1022,13 +1041,13 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             } else {
                 self.static_scope.clone()
             };
-            if self.stable_evaluation
+            if self.mode == EvaluationMode::Stable
                 && let Some(owner) = scope.as_ref()
             {
                 let receiver = ResolvedType::from_kind(ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: crate::resolve::FunctionTypeAlias::default(),
                     identity: owner.clone(),
-                    arguments: Default::default(),
+                    arguments: std::sync::Arc::default(),
                     nullable: false,
                     extension_type: false,
                 });
@@ -1041,19 +1060,20 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 }
             }
             if let Some(scope) = scope
-                && let Some(value) = self.static_member(scope, local_name, false)
+                && let ConstantLookup::Value(value) = self.static_member(scope, local_name, false)
             {
                 return value;
             }
         } else if let Some(owner) = self.model.resolve_dotted(&names[..names.len() - 1]) {
-            if self.stable_evaluation && self.model.configurable_constant_path(&owner) {
+            if self.mode == EvaluationMode::Stable && self.model.configurable_constant_path(&owner)
+            {
                 return None;
             }
             // A private static member is invisible outside its library.
             if !self.model.member_visible(&owner, local_name) {
                 return None;
             }
-            if let Some(value) = self.static_member(owner, local_name, true) {
+            if let ConstantLookup::Value(value) = self.static_member(owner, local_name, true) {
                 return value;
             }
         }
@@ -1062,7 +1082,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         else {
             return self.resolve_type_literal(names);
         };
-        if self.stable_evaluation && self.model.configurable_constant_path(&identity) {
+        if self.mode == EvaluationMode::Stable && self.model.configurable_constant_path(&identity) {
             return None;
         }
         if let Some(signature) = self.signatures.function(&identity) {
@@ -1077,7 +1097,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
 
     fn resolve_type_literal(&self, names: &[&str]) -> Option<Arc<ConstantValue>> {
         let ty = self.model.resolve_type_name(names)?;
-        if self.stable_evaluation
+        if self.mode == EvaluationMode::Stable
             && let ResolvedType {
                 kind: ResolvedTypeKind::Interface { identity, .. },
             } = &ty
@@ -1090,16 +1110,15 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             .map(Arc::new)
     }
 
-    /// The value of `owner`'s enum value or static constant `name`; `None`
-    /// when `owner` declares neither, `Some(None)` when it is not evaluable.
+    /// The value of a static member, distinguishing absence from an unknown value.
     fn static_member(
         &mut self,
         owner: DeclarationIdentity,
         name: &str,
         include_constructors: bool,
-    ) -> Option<Option<Arc<ConstantValue>>> {
+    ) -> ConstantLookup<Arc<ConstantValue>> {
         if self.signatures.is_enum_value(&owner, name) {
-            return Some(Some(Arc::new(ConstantValue::EnumValue(
+            return ConstantLookup::Value(Some(Arc::new(ConstantValue::EnumValue(
                 owner.clone(),
                 name.to_owned(),
             ))));
@@ -1109,7 +1128,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 .signatures
                 .constructor_tearoff_type(&owner, name, &self.model)
         {
-            return Some(constant_type(&ty).and_then(|ty| {
+            return ConstantLookup::Value(constant_type(&ty).and_then(|ty| {
                 let ConstantType::Function(result, ..) = &ty else {
                     return None;
                 };
@@ -1129,18 +1148,24 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             .iter()
             .any(|fact| fact.is_static && fact.kind == crate::MemberKind::Method)
         {
-            return Some(self.signatures.member(&owner, name).and_then(|signature| {
-                constant_type(&signature.function_type())
-                    .map(|ty| Arc::new(ConstantValue::TearOff(owner.clone(), name.to_owned(), ty)))
-            }));
+            return ConstantLookup::Value(self.signatures.member(&owner, name).and_then(
+                |signature| {
+                    constant_type(&signature.function_type()).map(|ty| {
+                        Arc::new(ConstantValue::TearOff(owner.clone(), name.to_owned(), ty))
+                    })
+                },
+            ));
         }
         let signatures = self.signatures;
         let constant = signatures
-            .declaration(&owner)?
-            .static_consts
-            .iter()
-            .find(|constant| constant.name == name)?;
-        Some(self.initializer(ConstantKey::Static(owner, &constant.name)))
+            .declaration(&owner)
+            .into_iter()
+            .flat_map(|declaration| &declaration.static_consts)
+            .find(|constant| constant.name == name);
+        let Some(constant) = constant else {
+            return ConstantLookup::NotApplicable;
+        };
+        ConstantLookup::Value(self.initializer(ConstantKey::Static(owner, &constant.name)))
     }
 
     fn initializer(&mut self, key: ConstantKey<'a>) -> Option<Arc<ConstantValue>> {
@@ -1400,11 +1425,10 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                     .iter()
                     .any(|fact| fact.is_static && fact.kind == crate::MemberKind::Method)
             {
-                return Some(
-                    self.signatures
-                        .member(owner, name)
-                        .map_or(ResolvedType::UNKNOWN, |signature| signature.function_type()),
-                );
+                return Some(self.signatures.member(owner, name).map_or(
+                    ResolvedType::UNKNOWN,
+                    crate::ResolvedSignature::function_type,
+                ));
             }
             if let Some(identity) = self.model.resolve_value(name)
                 && let Some(ty) = self.signatures.value_type(&identity)
@@ -1438,16 +1462,20 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         let DartType::Named(named) = dart_type else {
             return None;
         };
-        let segments: Vec<&str> = named.segments().map(|segment| segment.name()).collect();
+        let segments: Vec<&str> = named
+            .segments()
+            .map(falcon_syntax::cst::Identifier::name)
+            .collect();
         let (identity, constructor) = match constructor_name {
             Some(name) => (self.model.resolve_dotted(&segments)?, name.name()),
-            None => match self.model.resolve_dotted(&segments) {
-                Some(identity) => (identity, "new"),
-                None => {
+            None => {
+                if let Some(identity) = self.model.resolve_dotted(&segments) {
+                    (identity, "new")
+                } else {
                     let (constructor, class) = segments.split_last()?;
                     (self.model.resolve_dotted(class)?, *constructor)
                 }
-            },
+            }
         };
         let type_args = named
             .type_args()
@@ -1459,21 +1487,20 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
     /// Evaluates `args` here, then runs the constructor.
     fn invoke(
         &mut self,
-        identity: DeclarationIdentity,
-        constructor: impl AsRef<str>,
+        identity: &DeclarationIdentity,
+        constructor: &str,
         type_args: Vec<ResolvedType>,
         args: ArgList<'_>,
     ) -> Option<ConstantValue> {
-        if self.stable_evaluation && self.model.configurable_constant_path(&identity) {
+        if self.mode == EvaluationMode::Stable && self.model.configurable_constant_path(identity) {
             return None;
         }
-        if let Some(value) = self.environment_constant(&identity, constructor.as_ref(), args) {
+        if let ConstantLookup::Value(value) = self.environment_constant(identity, constructor, args)
+        {
             return value;
         }
         let signatures = self.signatures;
-        let mut signature = signatures
-            .constructor(&identity, constructor.as_ref())
-            .cloned();
+        let mut signature = signatures.constructor(identity, constructor).cloned();
         let mut type_args = type_args;
         let inference = signature.as_ref().and_then(|signature| {
             (type_args.is_empty() && !signature.owner_parameters.is_empty()).then(|| {
@@ -1528,7 +1555,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             let inferred = TypeEnvironment::new().infer_signature_substitutions(
                 &inference,
                 args,
-                AstChildren::empty(),
+                &AstChildren::empty(),
                 &context,
                 None,
                 &FxHashMap::default(),
@@ -1566,38 +1593,40 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 }
             }
         }
-        self.construct(identity, constructor.as_ref(), type_args, positional, named)
+        self.construct(identity, constructor, type_args, positional, named)
     }
 
     /// `bool`/`int`/`String.fromEnvironment` and `bool.hasEnvironment`.
     /// Stable evaluation leaves them unknown; ordinary evaluation folds as the
     /// CLI analyzer does with an empty declared-variable map. Web bool declarations
-    /// remain unknown. `None` means this is not an environment constructor.
+    /// remain unknown. `NotApplicable` denotes other constructors.
     fn environment_constant(
         &mut self,
         identity: &DeclarationIdentity,
         constructor: &str,
         args: ArgList<'_>,
-    ) -> Option<Option<ConstantValue>> {
+    ) -> ConstantLookup<ConstantValue> {
         let is_core = |name| identity.is_sdk("dart:core", name);
-        if self.stable_evaluation
+        if self.mode == EvaluationMode::Stable
             && ((constructor == "fromEnvironment"
                 && (is_core("bool") || is_core("int") || is_core("String")))
                 || (constructor == "hasEnvironment" && is_core("bool")))
         {
-            return Some(None);
+            return ConstantLookup::Value(None);
         }
         let fallback = match constructor {
-            "hasEnvironment" if is_core("bool") => return Some(Some(ConstantValue::Bool(false))),
+            "hasEnvironment" if is_core("bool") => {
+                return ConstantLookup::Value(Some(ConstantValue::Bool(false)));
+            }
             "fromEnvironment" if is_core("bool") => ConstantValue::Bool(false),
             "fromEnvironment" if is_core("int") => ConstantValue::Number(Number::Int(0)),
             "fromEnvironment" if is_core("String") => ConstantValue::String(String::new()),
-            _ => return None,
+            _ => return ConstantLookup::NotApplicable,
         };
         let Some(Some(ConstantValue::String(name))) =
             args.positional().first().map(|name| self.evaluate(name))
         else {
-            return Some(None);
+            return ConstantLookup::Value(None);
         };
         // Analyzer's evaluateFactoryConstructorCall deliberately uses
         // BoolState.UNKNOWN_VALUE for these two declarations (SDK issue 50045),
@@ -1608,9 +1637,9 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 "dart.library.js_util" | "dart.library.js_interop"
             )
         {
-            return Some(None);
+            return ConstantLookup::Value(None);
         }
-        Some(
+        ConstantLookup::Value(
             match args
                 .named()
                 .find(|argument| argument.name().name() == "defaultValue")
@@ -1666,7 +1695,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
     /// type and every field's value.
     fn construct(
         &mut self,
-        identity: DeclarationIdentity,
+        identity: &DeclarationIdentity,
         constructor: &str,
         type_args: Vec<ResolvedType>,
         positional: Vec<Option<ConstantValue>>,
@@ -1675,12 +1704,12 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         const MAX_DEPTH: usize = 32;
         let signatures = self.signatures;
         if self.constructor_depth >= MAX_DEPTH
-            || !signatures.is_const_constructor(&identity, constructor)
+            || !signatures.is_const_constructor(identity, constructor)
         {
             return None;
         }
-        let body = signatures.const_constructor(&identity, constructor)?;
-        let model = self.model.for_declaration(&identity)?;
+        let body = signatures.const_constructor(identity, constructor)?;
+        let model = self.model.for_declaration(identity)?;
         self.constructor_depth += 1;
         let previous_model = std::mem::replace(&mut self.model, model);
         let previous_fields = std::mem::replace(&mut self.unqualified_fields, false);
@@ -1692,14 +1721,13 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         let previous_type_parameters = std::mem::take(&mut self.type_parameters);
         self.type_parameters.push_bindings(
             signatures
-                .type_parameters(&identity)
+                .type_parameters(identity)
                 .unwrap_or(&[])
                 .iter()
                 .zip(&type_args)
                 .map(|(parameter, ty)| (parameter.name.clone(), ty.clone())),
         );
-        let value =
-            self.run_constructor(&identity, constructor, body, type_args, positional, named);
+        let value = self.run_constructor(identity, constructor, body, type_args, positional, named);
         self.parameters.pop();
         self.constructor_depth -= 1;
         self.parameter_types = previous_parameter_types;
@@ -1787,13 +1815,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                         }
                     }
                     let (positional, named) = self.arguments(args, signature.as_ref(), None);
-                    return self.construct(
-                        identity.clone(),
-                        target,
-                        state.type_args,
-                        positional,
-                        named,
-                    );
+                    return self.construct(identity, target, state.type_args, positional, named);
                 }
                 ConstructorInitializer::SuperCall(initializer) => {
                     super_constructor = initializer.call_name().map_or("new", |name| name.name());
@@ -1879,7 +1901,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             });
             match initializing {
                 Some(InitializingFormal::This) => {
-                    fields.push((param.name().name().to_owned(), value.clone()))
+                    fields.push((param.name().name().to_owned(), value.clone()));
                 }
                 Some(InitializingFormal::Super) => match param.kind() {
                     ParamKind::Named { .. } => {
@@ -1934,7 +1956,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             (&target, &target_constructor),
         )?;
         self.construct(
-            target,
+            &target,
             &target_constructor,
             target_arguments,
             arguments.0,
@@ -2000,7 +2022,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             let inferred = TypeEnvironment::new().infer_signature_substitutions(
                 &inference,
                 None,
-                AstChildren::empty(),
+                &AstChildren::empty(),
                 &context,
                 Some(&expected),
                 &FxHashMap::default(),
@@ -2083,11 +2105,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             super_named,
             ..
         } = state;
-        let environment = self
-            .parameters
-            .last_mut()
-            .map(std::mem::take)
-            .unwrap_or_default();
+        let environment = self.parameters.last_mut().map_or_default(std::mem::take);
         if self.failed {
             return None;
         }
@@ -2121,7 +2139,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 },
             ) => {
                 match self.construct(
-                    superclass.clone(),
+                    superclass,
                     super_constructor,
                     ty.type_arguments().collect(),
                     super_positional,
@@ -2171,7 +2189,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
         let parameter_types = body
             .params
             .iter()
-            .map(|param| param.cast::<FormalParam<'_>>())
+            .map(crate::NodeRef::cast::<FormalParam<'_>>)
             .filter(|param| !matches!(param.kind(), ParamKind::Named { .. }))
             .zip(&signature.positional)
             .map(|(param, ty)| (param.name().name(), ty))
@@ -2316,6 +2334,11 @@ fn value_type(value: &ConstantValue) -> Option<ConstantType> {
 /// Integer literals (including unary negation) acquire double identity in a
 /// double source context. Other integer expressions retain their runtime type.
 /// Inspect the source before converting: integer evaluation alone loses `-0`.
+#[must_use]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "Dart double context intentionally rounds integer literals"
+)]
 pub fn contextual_number(
     value: ConstantValue,
     expression: Expr<'_>,
@@ -2457,7 +2480,7 @@ fn decode_string_content(
 fn constant_type(ty: &ResolvedType) -> Option<ConstantType> {
     let positional =
         |types: &[ResolvedType]| types.iter().map(constant_type).collect::<Option<Vec<_>>>();
-    let named = |types: &[(String, ResolvedType)]| {
+    let named_types = |types: &[(String, ResolvedType)]| {
         let mut result = types
             .iter()
             .map(|(name, ty)| Some((name.clone(), constant_type(ty)?)))
@@ -2501,7 +2524,7 @@ fn constant_type(ty: &ResolvedType) -> Option<ConstantType> {
         } => ConstantType::Function(
             Box::new(constant_type(return_type)?),
             positional(parameters)?,
-            named(names)?,
+            named_types(names)?,
             *optional_positional,
             *nullable,
             shape
@@ -2517,21 +2540,18 @@ fn constant_type(ty: &ResolvedType) -> Option<ConstantType> {
                     nullable,
                     ..
                 },
-        } => ConstantType::Record(positional(fields)?, named(names)?, *nullable),
+        } => ConstantType::Record(positional(fields)?, named_types(names)?, *nullable),
         ResolvedType {
-            kind: ResolvedTypeKind::Unknown,
-        }
-        | ResolvedType {
-            kind: ResolvedTypeKind::TypeParameter { .. },
-        }
-        | ResolvedType {
-            kind: ResolvedTypeKind::NonNullTypeParameter { .. },
+            kind:
+                ResolvedTypeKind::Unknown
+                | ResolvedTypeKind::TypeParameter { .. }
+                | ResolvedTypeKind::NonNullTypeParameter { .. },
         } => return None,
     })
 }
 
 fn resolved_constant_type(ty: &ConstantType) -> ResolvedType {
-    let named = |types: &[(String, ConstantType)]| {
+    let named_types = |types: &[(String, ConstantType)]| {
         types
             .iter()
             .map(|(name, ty)| (name.clone(), resolved_constant_type(ty)))
@@ -2544,7 +2564,7 @@ fn resolved_constant_type(ty: &ConstantType) -> ResolvedType {
         ConstantType::Null => ResolvedType::NULL,
         ConstantType::Interface(declaration, arguments, nullable) => {
             ResolvedType::from_kind(ResolvedTypeKind::Interface {
-                occurrence: Default::default(),
+                occurrence: crate::resolve::FunctionTypeAlias::default(),
                 identity: declaration.clone(),
                 arguments: arguments.iter().map(resolved_constant_type).collect(),
                 nullable: *nullable,
@@ -2563,23 +2583,23 @@ fn resolved_constant_type(ty: &ConstantType) -> ResolvedType {
                 .as_ref()
                 .map(|names| crate::resolve::FunctionTypeShape::new(names.clone(), Vec::new())),
             optional_positional: *optional_positional,
-            alias: Default::default(),
+            alias: crate::resolve::FunctionTypeAlias::default(),
             return_type: std::sync::Arc::new(resolved_constant_type(result)),
             positional: positional.iter().map(resolved_constant_type).collect(),
-            named: named(names),
+            named: named_types(names),
             nullable: *nullable,
         }),
         ConstantType::Record(positional, names, nullable) => {
             ResolvedType::from_kind(ResolvedTypeKind::Record {
-                occurrence: Default::default(),
+                occurrence: crate::resolve::FunctionTypeAlias::default(),
                 positional: positional.iter().map(resolved_constant_type).collect(),
-                named: named(names),
+                named: named_types(names),
                 nullable: *nullable,
             })
         }
     }
 }
-fn eval_unary(op: &UnaryOp, value: ConstantValue) -> Option<ConstantValue> {
+fn eval_unary(op: UnaryOp, value: ConstantValue) -> Option<ConstantValue> {
     match (op, value) {
         (UnaryOp::Minus, ConstantValue::Number(Number::Int(value))) => {
             let value = i64::try_from(value)
@@ -2599,7 +2619,11 @@ fn eval_unary(op: &UnaryOp, value: ConstantValue) -> Option<ConstantValue> {
     }
 }
 
-fn eval_equality(op: &BinaryOp, left: &ConstantValue, right: &ConstantValue) -> ConstantValue {
+#[expect(
+    clippy::float_cmp,
+    reason = "Dart numeric equality uses exact IEEE 754 comparison"
+)]
+fn eval_equality(op: BinaryOp, left: &ConstantValue, right: &ConstantValue) -> ConstantValue {
     let equal = match (left, right) {
         (ConstantValue::Number(Number::Int(left)), ConstantValue::Number(Number::Int(right))) => {
             left == right
@@ -2616,7 +2640,14 @@ fn eval_equality(op: &BinaryOp, left: &ConstantValue, right: &ConstantValue) -> 
     })
 }
 
-fn eval_binary(op: &BinaryOp, left: ConstantValue, right: ConstantValue) -> Option<ConstantValue> {
+fn wrapping_integer(value: i128) -> ConstantValue {
+    let low_bytes = value.to_le_bytes()[..8]
+        .try_into()
+        .expect("eight low bytes");
+    ConstantValue::Number(Number::Int(i128::from(i64::from_le_bytes(low_bytes))))
+}
+
+fn eval_binary(op: BinaryOp, left: ConstantValue, right: ConstantValue) -> Option<ConstantValue> {
     match op {
         BinaryOp::EqEq | BinaryOp::NotEq => return Some(eval_equality(op, &left, &right)),
         BinaryOp::And => return bool_pair(left, right).map(|(l, r)| ConstantValue::Bool(l && r)),
@@ -2652,7 +2683,8 @@ fn eval_binary(op: &BinaryOp, left: ConstantValue, right: ConstantValue) -> Opti
     {
         return None;
     }
-    let integer = |value: i128| Some(ConstantValue::Number(Number::Int(i128::from(value as i64))));
+
+    let integer = |value| Some(wrapping_integer(value));
     match (op, left, right) {
         (BinaryOp::Add, Number::Int(left), Number::Int(right)) => integer(left.checked_add(right)?),
         (BinaryOp::Sub, Number::Int(left), Number::Int(right)) => integer(left.checked_sub(right)?),
@@ -2726,6 +2758,7 @@ fn bool_pair(left: ConstantValue, right: ConstantValue) -> Option<(bool, bool)> 
 
 /// Parse a Dart integer literal's source spelling, honouring `0x`/`0X` prefixes and
 /// `_` digit separators.
+#[must_use]
 pub fn parse_int(value: &str) -> Option<i128> {
     let value = value.replace('_', "");
     if let Some(hex) = value
@@ -2815,7 +2848,7 @@ mod tests {
                 panic!("expected a shared library name");
             };
             let constant = constant_type(&ResolvedType::from_kind(ResolvedTypeKind::Interface {
-                occurrence: Default::default(),
+                occurrence: crate::resolve::FunctionTypeAlias::default(),
                 identity: identity.clone(),
                 arguments: Vec::new().into(),
                 nullable: false,
@@ -2972,7 +3005,7 @@ mod tests {
         });
     }
 
-    const CONSTANT_SOURCE: &str = r#"
+    const CONSTANT_SOURCE: &str = r"
 import 'dart:async';
 class ConstBox<T> {
   final T value;
@@ -3152,7 +3185,7 @@ const nullableListIsFutureOr = <int?>[] is List<FutureOr<int?>>;
 const nullableCast = null as int?;
 const nonNullableCast = null as int;
 const futureOrCast = null as FutureOr<int?>;
-"#;
+";
 
     fn with_constants(test: impl FnOnce(Program<'_>, &SemanticModel<'_>, &SignatureIndex)) {
         with_source(CONSTANT_SOURCE, test);
@@ -3181,7 +3214,7 @@ const futureOrCast = null as FutureOr<int?>;
             variable
                 .declarators()
                 .find(|declarator| declarator.name().name() == name)
-                .and_then(|declarator| declarator.initializer())
+                .and_then(falcon_syntax::cst::VarDeclarator::initializer)
         })?;
         let owner = model.resolve_value(name)?;
         evaluate_constant(
@@ -3366,7 +3399,7 @@ const futureOrCast = null as FutureOr<int?>;
                     TopLevelDecl::Variable(variable) => Some(variable),
                     _ => None,
                 })
-                .flat_map(|variable| variable.declarators())
+                .flat_map(falcon_syntax::cst::TopLevelVarDecl::declarators)
                 .map(|declarator| (declarator.name().name(), declarator.initializer().unwrap()))
                 .collect();
             with_source("", |_, model, signatures| {
@@ -3467,7 +3500,7 @@ const futureOrCast = null as FutureOr<int?>;
                         variable
                             .declarators()
                             .find(|declarator| declarator.name().name() == "value")
-                            .and_then(|declarator| declarator.initializer())
+                            .and_then(falcon_syntax::cst::VarDeclarator::initializer)
                     })
                     .unwrap();
                 for modes in [[false, true, false, true], [true, false, true, false]] {
@@ -3629,7 +3662,7 @@ const futureOrCast = null as FutureOr<int?>;
                 let first = evaluator.resolve_name_shared(&["a110"]).unwrap();
                 let second = evaluator.resolve_name_shared(&["a109"]).unwrap();
                 assert!(Arc::ptr_eq(&first, &second));
-            })
+            });
         })
         .unwrap();
     }
@@ -3653,7 +3686,7 @@ const futureOrCast = null as FutureOr<int?>;
                 TopLevelDecl::Variable(variable) => Some(variable),
                 _ => None,
             })
-            .flat_map(|variable| variable.declarators())
+            .flat_map(falcon_syntax::cst::TopLevelVarDecl::declarators)
             .map(|declarator| (declarator.name().name(), declarator.initializer().unwrap()))
             .collect();
         with_source("", |_, model, signatures| {
@@ -3817,7 +3850,7 @@ const futureOrCast = null as FutureOr<int?>;
             evaluator.parameters.push(scope.clone());
             assert_eq!(
                 evaluator.construct(
-                    identity,
+                    &identity,
                     "new",
                     Vec::new(),
                     vec![Some(ConstantValue::Number(Number::Int(1)))],
@@ -4195,7 +4228,7 @@ const futureOrCast = null as FutureOr<int?>;
                         variable
                             .declarators()
                             .find(|declarator| declarator.name().name() == name)
-                            .and_then(|declarator| declarator.initializer())
+                            .and_then(falcon_syntax::cst::VarDeclarator::initializer)
                     })
                     .unwrap()
             };
@@ -4317,7 +4350,7 @@ const futureOrCast = null as FutureOr<int?>;
                     variable
                         .declarators()
                         .find(|declarator| declarator.name().name() == "numValues")
-                        .and_then(|declarator| declarator.initializer())
+                        .and_then(falcon_syntax::cst::VarDeclarator::initializer)
                 })
                 .unwrap();
             assert_eq!(
@@ -4432,15 +4465,15 @@ const futureOrCast = null as FutureOr<int?>;
         let left = ConstantValue::Number(Number::Int(-1));
         let shift = ConstantValue::Number(Number::Int(1));
         assert_eq!(
-            eval_binary(&BinaryOp::Shr, left.clone(), shift.clone()),
+            eval_binary(BinaryOp::Shr, left.clone(), shift.clone()),
             Some(ConstantValue::Number(Number::Int(-1)))
         );
         assert_eq!(
-            eval_binary(&BinaryOp::UShr, left.clone(), shift),
+            eval_binary(BinaryOp::UShr, left.clone(), shift),
             Some(ConstantValue::Number(Number::Int(i128::from(i64::MAX))))
         );
         assert_eq!(
-            eval_binary(&BinaryOp::UShr, left, ConstantValue::Number(Number::Int(0))),
+            eval_binary(BinaryOp::UShr, left, ConstantValue::Number(Number::Int(0))),
             Some(ConstantValue::Number(Number::Int(-1)))
         );
     }

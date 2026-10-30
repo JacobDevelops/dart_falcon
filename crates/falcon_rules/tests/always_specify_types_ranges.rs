@@ -43,7 +43,7 @@ fn assert_rule_ranges(rule_name: &'static str, source: &str, expected: &[(&str, 
 #[test]
 fn collection_literals_highlight_only_the_begin_token() {
     assert_ranges(
-        r#"void main() {
+        r"void main() {
   List<int> list = [1, 2];
   Set<int> set = {1, 2};
   Map<String, int> map = {'x': 1};
@@ -54,7 +54,7 @@ fn collection_literals_highlight_only_the_begin_token() {
   List<int> conditional = [if (true) 1, ...<int>[2]];
   Map<int, int> loop = {for (final entry in <int>[]) entry: entry};
 }
-"#,
+",
         &[
             ("[1, 2];", "["),
             ("{1, 2};", "{"),
@@ -74,7 +74,7 @@ fn collection_literals_highlight_only_the_begin_token() {
 #[test]
 fn unmodified_parameters_highlight_metadata_modifiers_defaults_and_function_suffixes() {
     assert_ranges(
-        r#"const int marker = 0;
+        r"const int marker = 0;
 class C {
   void method(covariant input) {}
   set value(covariant assigned) {}
@@ -83,7 +83,7 @@ class C {
 void parameters(callback(arg), generic<T>(T arg), @marker decorated,
     [optional = 1, nullableCallback(item)? = null]) {}
 void named({required argument, @marker required annotated}) {}
-"#,
+",
         &[
             ("covariant input", "covariant input"),
             ("covariant assigned", "covariant assigned"),
@@ -112,14 +112,14 @@ fn modified_parameters_highlight_only_the_type_replacing_keyword() {
     // These modifiers are accepted by the parser even where the analyzer also
     // reports EXTRANEOUS_MODIFIER; its lint still highlights the keyword.
     assert_ranges(
-        r#"const int marker = 0;
+        r"const int marker = 0;
 void parameters(final modified, var mutable, @marker final annotated,
     [final optional = 1]) {}
 class C {
   void method(covariant final modifiedMember) {}
   set value(covariant final assigned) {}
 }
-"#,
+",
         &[
             ("final modified,", "final"),
             ("var mutable", "var"),
@@ -134,7 +134,7 @@ class C {
 #[test]
 fn patterns_highlight_the_binding_name_or_its_own_keyword() {
     assert_ranges(
-        r#"class Box<T> { final T value; const Box(this.value); }
+        r"class Box<T> { final T value; const Box(this.value); }
 void patterns(Object object) {
   var (left, right) = (1, 2);
   final [head, ...tail] = <int>[1, 2];
@@ -144,7 +144,7 @@ void patterns(Object object) {
   if (object case Box<int>(:final int value)) {}
   if (object case Box<int>(value: var item)) {}
 }
-"#,
+",
         &[
             ("left, right", "left"),
             ("right)", "right"),
@@ -162,7 +162,7 @@ void patterns(Object object) {
 #[test]
 fn declaration_keywords_and_raw_generic_type_names_keep_their_full_ranges() {
     assert_ranges(
-        r#"class Box<T> { const Box(); const Box.named(); }
+        r"class Box<T> { const Box(); const Box.named(); }
 var top = 1;
 class C { static late final field = 2; }
 void main() {
@@ -177,7 +177,7 @@ void main() {
   print(Box);
   switch (Object()) { case Box(): break; }
 }
-"#,
+",
         &[
             ("var top", "var"),
             ("final field", "final"),
@@ -198,12 +198,12 @@ void main() {
 #[test]
 fn classic_loop_declarations_retain_their_keyword_outside_the_declaration_range() {
     assert_ranges(
-        r#"void main() {
+        r"void main() {
   for (var index = 0; index < 2; index++) {}
   for (final item = 0; item < 2;) { break; }
   List<int> values = <int>[for (var entry = 0; entry < 2; entry++) entry];
 }
-"#,
+",
         &[
             ("var index", "var"),
             ("final item", "final"),
@@ -214,7 +214,7 @@ fn classic_loop_declarations_retain_their_keyword_outside_the_declaration_range(
 
 #[test]
 fn return_type_rules_highlight_operator_names_instead_of_the_operator_keyword() {
-    let source = r#"const int marker = 0;
+    let source = r"const int marker = 0;
 class C {
   operator +(int other) => this;
   operator ==(Object other) => false;
@@ -223,7 +223,7 @@ class C {
   @marker
   operator /* gap */ -(int other) => this;
 }
-"#;
+";
     for rule in ["always-declare-return-types", "type-annotate-public-apis"] {
         assert_rule_ranges(
             rule,
@@ -241,10 +241,10 @@ class C {
 #[test]
 fn closure_parameters_use_the_same_keyword_and_complete_parameter_ranges() {
     assert_ranges(
-        r#"void main() {
+        r"void main() {
   Object callback = (final value, {required argument, flag = false}) => value;
 }
-"#,
+",
         &[
             ("final value", "final"),
             ("required argument", "required argument"),
@@ -255,7 +255,7 @@ fn closure_parameters_use_the_same_keyword_and_complete_parameter_ranges() {
 
 #[test]
 fn documented_parameters_include_the_last_attached_documentation_group() {
-    let source = r#"const int marker = 0;
+    let source = r"const int marker = 0;
 void f(
  /// The callback.
  callback,
@@ -280,7 +280,7 @@ class C {
  /// Typed docs.
  int input) {}
 }
-"#;
+";
     for rule in ["always-specify-types", "type-annotate-public-apis"] {
         assert_rule_ranges(
             rule,
@@ -316,7 +316,7 @@ fn modified_setter_parameters_only_include_documentation_for_the_public_api_rule
 
 #[test]
 fn parameter_documentation_uses_metadata_precedence_before_extending_the_range() {
-    let source = r#"const int marker = 0;
+    let source = r"const int marker = 0;
 void f(
  /// a
  @marker
@@ -339,7 +339,7 @@ class C {
  /// setter b
  input) {}
 }
-"#;
+";
     for rule in ["always-specify-types", "type-annotate-public-apis"] {
         assert_rule_ranges(
             rule,
@@ -357,13 +357,13 @@ class C {
 #[test]
 fn documented_closure_parameters_inside_interpolations_use_their_local_token_store() {
     assert_ranges(
-        r#"void main() {
+        r"void main() {
   String text = '${(
  /// interpolation
  value,
  ) => value}';
 }
-"#,
+",
         &[("/// interpolation", "/// interpolation\n value")],
     );
 }

@@ -31,7 +31,9 @@ pub use semantic::{
     ResolvedType, ResolvedTypeView, SemanticModel, SignatureIndex, TypeEnvironment,
     TypeParameterId, TypeParameterScope, TypeRelation,
 };
-pub(crate) use semantic::{ResolvedTypeKind, binary_result, null_coalesce_result};
+pub(crate) use semantic::{
+    FunctionTypeAlias, ResolvedTypeKind, binary_result, null_coalesce_result,
+};
 pub use semantic::{
     expression_has_dot_shorthand_base, expression_segments, resolve_call_constructor,
     resolve_new_constructor,

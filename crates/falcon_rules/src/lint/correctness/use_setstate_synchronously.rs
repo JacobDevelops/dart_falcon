@@ -1,4 +1,4 @@
-//! Require a mounted check before calling setState after an async gap. Reuses the BuildContext async-state analysis and its control-flow guards.
+//! Require a mounted check before calling setState after an async gap. Reuses the `BuildContext` async-state analysis and its control-flow guards.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;

@@ -97,6 +97,12 @@ enum Callee {
     Variable,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LocalCallee {
+    Unstable,
+    Stable(Callee),
+}
+
 /// Declaration IDs of the `final`, non-`late`
 /// local variables and parameters and of the local functions in a file. The
 /// analyzer does not count a `const` variable as final.
@@ -187,7 +193,7 @@ impl<'a> Visitor<'a> for StableLocals {
     }
 }
 
-fn late_fields<'a>(program: Program<'a>) -> HashSet<&'a str> {
+fn late_fields(program: Program<'_>) -> HashSet<&str> {
     program
         .declarations()
         .flat_map(|declaration| members_of(declaration).into_iter().flatten())
@@ -204,7 +210,7 @@ fn initializer_spans<'a>(
     declarators: AstChildren<'a, VarDeclarator<'a>>,
 ) -> impl Iterator<Item = (usize, usize)> + 'a {
     declarators
-        .filter_map(|declarator| declarator.initializer())
+        .filter_map(VarDeclarator::initializer)
         .map(|initializer| (initializer.span().start, initializer.span().end))
 }
 
@@ -323,10 +329,13 @@ impl<'a> Collector<'a> {
 
     /// For an identifier naming a local, whether that local is a stable
     /// `final` variable or local function; `None` when it is not a local.
-    fn local(&self, name: Identifier<'_>) -> Option<Option<Callee>> {
-        self.locals
-            .get(&name.span().start)
-            .map(|declaration| self.stable_locals.get(declaration).copied())
+    fn local(&self, name: Identifier<'_>) -> Option<LocalCallee> {
+        self.locals.get(&name.span().start).map(|declaration| {
+            self.stable_locals
+                .get(declaration)
+                .copied()
+                .map_or(LocalCallee::Unstable, LocalCallee::Stable)
+        })
     }
 
     fn top_level_function(&self, name: &str) -> bool {
@@ -354,11 +363,7 @@ impl<'a> Collector<'a> {
     }
 
     /// Facts for `name` as a member of the enclosing type, through `this`.
-    fn enclosing_member<'s>(
-        &self,
-        name: &str,
-        state: &'s SemanticState<'_>,
-    ) -> Option<&'s [MemberFacts]> {
+    fn enclosing_member<'s>(name: &str, state: &'s SemanticState<'_>) -> Option<&'s [MemberFacts]> {
         let receiver = state.enclosing_type.as_ref()?;
         state
             .signatures
@@ -369,29 +374,34 @@ impl<'a> Collector<'a> {
     /// a function or method, or a `final` variable or field holding one.
     fn stable_function(&self, name: Identifier<'_>, state: &SemanticState<'_>) -> Option<Callee> {
         if let Some(local) = self.local(name) {
-            return local;
+            return match local {
+                LocalCallee::Unstable => None,
+                LocalCallee::Stable(callee) => Some(callee),
+            };
         }
         let name = name.name();
         let signatures = state.signatures.as_ref();
-        if let Some(facts) = self.enclosing_member(name, state) {
+        if let Some(facts) = Self::enclosing_member(name, state) {
             return self
                 .member_callee(facts, name, false, signatures)
                 .or_else(|| self.member_callee(facts, name, true, signatures));
         }
-        if let Some(ResolvedTypeView::Interface { identity, .. }) = state.enclosing_type.as_ref().map(ResolvedType::view) {
+        if let Some(ResolvedTypeView::Interface { identity, .. }) =
+            state.enclosing_type.as_ref().map(ResolvedType::view)
+        {
             let facts = signatures.declared_member_facts(identity, name);
             if !facts.is_empty() {
                 return self.member_callee(facts, name, true, signatures);
             }
         }
-        if self.top_level_function(name) || self.imported_function(name.into(), state) {
+        if self.top_level_function(name) || Self::imported_function(name.into(), state) {
             return Some(Callee::Function);
         }
         self.final_top_level_variable(name)
             .then_some(Callee::Variable)
     }
 
-    fn imported_function(&self, name: QualifiedName<'_>, state: &SemanticState<'_>) -> bool {
+    fn imported_function(name: QualifiedName<'_>, state: &SemanticState<'_>) -> bool {
         state.model.resolve_sdk_member(name).is_some()
             || state
                 .model
@@ -402,8 +412,7 @@ impl<'a> Collector<'a> {
     /// A callable declaration, not merely an imported value of callable type.
     fn function_or_method(&self, name: Identifier<'_>, state: &SemanticState<'_>) -> bool {
         self.top_level_function(name.name())
-            || self
-                .enclosing_member(name.name(), state)
+            || Self::enclosing_member(name.name(), state)
                 .is_some_and(|facts| facts.iter().any(|fact| fact.kind == MemberKind::Method))
             || state
                 .model
@@ -430,7 +439,7 @@ impl<'a> Collector<'a> {
         };
         let signatures = state.signatures.as_ref();
         if let Some(local) = self.local(name) {
-            if local.is_none() {
+            if local == LocalCallee::Unstable {
                 return false;
             }
         } else if self.import_prefix(name.name()).is_some() {
@@ -438,8 +447,7 @@ impl<'a> Collector<'a> {
             // resolved here.
             return fields.is_empty();
         } else if !(state.model.resolve_name(name.name()).is_some()
-            || self
-                .enclosing_member(name.name(), state)
+            || Self::enclosing_member(name.name(), state)
                 .is_some_and(|facts| self.final_field(facts, name.name(), signatures))
             || self.final_top_level_variable(name.name())
             || self.function_or_method(name, state))
@@ -511,13 +519,12 @@ impl<'a> Collector<'a> {
 
     fn deferred(&self, receiver: Expr<'a>) -> bool {
         matches!(receiver.unparenthesized(), Expr::Ident(name)
-            if self.import_prefix(name.name()).is_some_and(|import| import.is_deferred()))
+            if self.import_prefix(name.name()).is_some_and(ImportDirective::is_deferred))
     }
 
     /// Whether every closure parameter's type is known: written, or supplied
     /// by the context.
     fn parameter_types_known(
-        &self,
         mut params: AstChildren<'a, FormalParam<'a>>,
         state: &SemanticState<'_>,
     ) -> bool {
@@ -544,8 +551,12 @@ impl<'a> Collector<'a> {
             param
                 .param_type()
                 .is_some_and(|ty| !matches!(ty, DartType::Dynamic(_)))
-                || contextual_type
-                    .is_some_and(|ty| !matches!(ty.view(), ResolvedTypeView::Unknown | ResolvedTypeView::Dynamic))
+                || contextual_type.is_some_and(|ty| {
+                    !matches!(
+                        ty.view(),
+                        ResolvedTypeView::Unknown | ResolvedTypeView::Dynamic
+                    )
+                })
         })
     }
 
@@ -564,7 +575,7 @@ impl<'a> Collector<'a> {
         {
             return true;
         }
-        if !self.parameter_types_known(params, state) {
+        if !Self::parameter_types_known(params, state) {
             return false;
         }
         // A block body that discards the call returns `void` only under a
@@ -623,7 +634,7 @@ impl<'a> Collector<'a> {
     fn optional_parameters_fit(
         &self,
         invocation: Expr<'a>,
-        params: AstChildren<'a, FormalParam<'a>>,
+        params: &AstChildren<'a, FormalParam<'a>>,
         state: &SemanticState<'_>,
     ) -> bool {
         if params.clone().all(|param| {
@@ -722,7 +733,7 @@ impl<'a> Collector<'a> {
         let Some(invocation) = forwarded_invocation(body) else {
             return false;
         };
-        if !self.optional_parameters_fit(invocation, params.clone(), state) {
+        if !self.optional_parameters_fit(invocation, &params, state) {
             return false;
         }
         let arrow = matches!(body, FunctionBody::Arrow(_));
@@ -734,7 +745,7 @@ impl<'a> Collector<'a> {
                     .ctx
                     .language_version()
                     .supports(Feature::ConstructorTearoffs)
-                && self.parameter_types_known(params.clone(), state)
+                && Self::parameter_types_known(params.clone(), state)
         };
         match invocation.unparenthesized() {
             Expr::New(creation) if !creation.is_const() => {
@@ -743,9 +754,10 @@ impl<'a> Collector<'a> {
                 forwards_parameters(args, params.clone())
                     && args.named().is_empty()
                     && !matches!(dart_type, DartType::Named(named) if named.segments().count() > 1
-                    && named.segments().next().is_some_and(|prefix| {
-                        self.import_prefix(prefix.name()).is_some_and(|import| import.is_deferred())
-                    }))
+                    && named
+                        .segments()
+                        .next()
+                        .is_some_and(|prefix| self.import_prefix(prefix.name()).is_some_and(ImportDirective::is_deferred)))
                     && resolve_new_constructor(dart_type, creation.constructor_name(), &state.model)
                         .is_some()
                     && creation_fits()
@@ -831,7 +843,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             );
         }
         if self.is_unnecessary(node, state) {
-            self.diags.push(self.ctx.diagnostic("Closure should be a tearoff.", node.span()));
+            self.diags.push(
+                self.ctx
+                    .diagnostic("Closure should be a tearoff.", node.span()),
+            );
         }
     }
 }

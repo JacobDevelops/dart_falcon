@@ -82,7 +82,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         match node {
             Expr::Call(call) if self.sdk_regexp_name(call.callee()) => self.check(call.args()),
             Expr::New(construction) if matches!(self.model.resolve_type(construction.dart_type()).view(), ResolvedTypeView::Interface { identity: DeclarationIdentity::Sdk { library, name }, .. } if library == "dart:core" && name == "RegExp") => {
-                self.check(construction.args())
+                self.check(construction.args());
             }
             _ => {}
         }
@@ -154,7 +154,7 @@ fn extractable_pattern(expr: Expr<'_>) -> Option<Vec<u32>> {
             } else {
                 c as u32
             };
-            if value > 0x10ffff {
+            if value > 0x10_ffff {
                 return None;
             } else if value > 0xffff {
                 pattern.push(0xd800 + ((value - 0x10000) >> 10));

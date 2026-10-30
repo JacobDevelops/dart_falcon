@@ -92,7 +92,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 return StructuralTraversal::SkipChildren;
             };
             let mut found = library()
-                .flat_map(|program| program.declarations())
+                .flat_map(Program::declarations)
                 .filter_map(|candidate| match candidate {
                     TopLevelDecl::Class(node) if node.name().name() == super_name.name() => {
                         Some(Some(node.modifiers()))

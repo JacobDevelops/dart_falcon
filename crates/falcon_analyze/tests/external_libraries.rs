@@ -95,9 +95,9 @@ fn identity_variants(
     sources: &[IdentitySource<'_>],
     content: &[&str],
     external: ExternalSources<'_>,
-) -> (Arc<IdentityIndex>, [IdentityIndex; 2]) {
+) -> (Arc<IdentityIndex>, Vec<IdentityIndex>) {
     let base = Arc::new(IdentityIndex::build_external(external));
-    let variants = [
+    let variants = vec![
         IdentityIndex::build(sources, content, &[], Some(external)),
         IdentityIndex::with_external(sources, content, &[], external, Arc::clone(&base)),
     ];
@@ -647,7 +647,10 @@ fn assert_sdk_authority_member(
         .resolved_member(&receiver, "value", model)
         .unwrap();
     assert_eq!(signature.return_type, receiver);
-    assert!(signature.positional.is_empty());
+    assert_eq!(
+        signature.positional,
+        [] as [falcon_analyze::ResolvedType; 0]
+    );
     assert!(
         signatures
             .resolved_field(&receiver, "value", model)
@@ -739,7 +742,7 @@ fn environment_reports_malformed_and_unreadable_package_inputs() {
             let warnings = environment.take_warnings();
             assert_eq!(warnings.len(), 1, "{warnings:?}");
             assert!(warnings[0].contains(name), "{warnings:?}");
-            assert!(environment.take_warnings().is_empty());
+            assert_eq!(environment.take_warnings(), [] as [std::string::String; 0]);
         }
     }
 }
@@ -749,7 +752,7 @@ fn absent_optional_environment_inputs_are_silent() {
     let root = tempfile::tempdir().unwrap();
     let app = write(root.path(), "lib/main.dart", "void main() {}");
     let mut environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
-    assert!(environment.take_warnings().is_empty());
+    assert_eq!(environment.take_warnings(), [] as [std::string::String; 0]);
     write(
         root.path(),
         ".dart_tool/package_config.json",
@@ -757,7 +760,7 @@ fn absent_optional_environment_inputs_are_silent() {
     );
     environment.reset();
     environment.extend([app.as_path()]);
-    assert!(environment.take_warnings().is_empty());
+    assert_eq!(environment.take_warnings(), [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -792,7 +795,7 @@ fn external_source_read_and_parse_failures_warn_once() {
             &[(&app, parsed.tree.program(&source), &source)],
             |path| path == app,
         );
-        assert!(environment.take_warnings().is_empty());
+        assert_eq!(environment.take_warnings(), [] as [std::string::String; 0]);
     }
 }
 
@@ -850,7 +853,7 @@ fn pending_warnings_and_deduplication_survive_reset_in_sorted_order() {
     assert!(warnings.windows(2).all(|pair| pair[0] <= pair[1]));
     environment.reset();
     environment.extend([app.as_path()]);
-    assert!(environment.take_warnings().is_empty());
+    assert_eq!(environment.take_warnings(), [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -870,7 +873,7 @@ fn missing_external_imports_parts_and_harmless_body_errors_are_silent() {
         |path| path == app,
     );
     assert!(!external.libraries().is_empty());
-    assert!(environment.take_warnings().is_empty());
+    assert_eq!(environment.take_warnings(), [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -929,11 +932,11 @@ fn empty_uri_self_imports_resolve_project_and_external_declarations_without_warn
         model.resolve_name(QualifiedName::prefixed("self", "Generated")),
         Some(generated_identity),
     );
-    assert!(environment.take_warnings().is_empty());
+    assert_eq!(environment.take_warnings(), [] as [std::string::String; 0]);
     external.extend(&environment, &[(&app, parsed.program(), source)], |path| {
         path == app
     });
-    assert!(environment.take_warnings().is_empty());
+    assert_eq!(environment.take_warnings(), [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -955,13 +958,13 @@ fn directory_and_not_directory_external_imports_and_companions_are_silent() {
         &[(&app, parsed.tree.program(&source), &source)],
         |path| path == app,
     );
-    assert!(environment.take_warnings().is_empty());
+    assert_eq!(environment.take_warnings(), [] as [std::string::String; 0]);
     external.extend(
         &environment,
         &[(&app, parsed.tree.program(&source), &source)],
         |path| path == app,
     );
-    assert!(environment.take_warnings().is_empty());
+    assert_eq!(environment.take_warnings(), [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -986,7 +989,7 @@ fn unreadable_project_companion_still_warns_once() {
         &[(&app, parsed.tree.program(source), source)],
         |path| path == app,
     );
-    assert!(environment.take_warnings().is_empty());
+    assert_eq!(environment.take_warnings(), [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -1437,27 +1440,25 @@ fn reexports_keep_distinct_same_package_declarations_resolvable() {
         libraries: &externals,
         environment: &environment,
     }));
-    for identities in [
-        IdentityIndex::build(
-            &sources,
-            &[source],
-            &[],
-            Some(ExternalSources {
-                libraries: &externals,
-                environment: &environment,
-            }),
-        ),
-        IdentityIndex::with_external(
-            &sources,
-            &[source],
-            &[],
-            ExternalSources {
-                libraries: &externals,
-                environment: &environment,
-            },
-            base,
-        ),
-    ] {
+    for identities in std::iter::once(IdentityIndex::build(
+        &sources,
+        &[source],
+        &[],
+        Some(ExternalSources {
+            libraries: &externals,
+            environment: &environment,
+        }),
+    ))
+    .chain(std::iter::once(IdentityIndex::with_external(
+        &sources,
+        &[source],
+        &[],
+        ExternalSources {
+            libraries: &externals,
+            environment: &environment,
+        },
+        base,
+    ))) {
         let types = external_types([(app.as_path(), &parsed)], &externals, &identities);
         let signatures = SignatureIndex::build(
             &[(app.clone(), Arc::clone(&parsed))],
@@ -1487,7 +1488,7 @@ fn compact_external_facts_keep_body_errors_separate_from_header_errors() {
         errors,
     } = parse(&source);
     let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
+        source: source.clone().into_boxed_str(),
         tree: parsed_tree,
     });
     let program = parsed.program();
@@ -1837,7 +1838,7 @@ fn inherited_object_members_use_the_effective_superclass_and_mixins() {
     // Accepted without errors by the Dart analyzer. Covariance makes this a
     // valid override, but its function type is not a subtype of Object's:
     // its first parameter is narrower and it adds an optional parameter.
-    let source = r#"
+    let source = r"
 abstract class MyInvocation implements Invocation {}
 class A {
   @override
@@ -1869,7 +1870,7 @@ abstract class ConflictingDiamond implements Left, Right {}
 abstract class SameLeft implements Generic<FirstValue> {}
 abstract class SameRight implements Generic<FirstValue> {}
 abstract class EquivalentDiamond implements SameLeft, SameRight {}
-"#;
+";
     let falcon_dart_parser::ParseResult {
         tree: parsed_tree,
         errors,
@@ -2108,7 +2109,7 @@ fn opening_external_files_evicts_the_disk_copy_and_allows_reloading_after_close(
         tree: parsed_tree, ..
     } = parse(&source);
     let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
+        source: source.clone().into_boxed_str(),
         tree: parsed_tree,
     });
     let program = parsed.program();
@@ -2145,7 +2146,7 @@ fn external_snapshots_reload_dependency_edits_and_removal_explicitly() {
         tree: parsed_tree, ..
     } = parse(&source);
     let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
+        source: source.clone().into_boxed_str(),
         tree: parsed_tree,
     });
     let program = parsed.program();
@@ -2233,7 +2234,7 @@ fn explicit_reload_observes_same_time_same_size_rewrites_and_atomic_replacements
         tree: parsed_tree, ..
     } = parse(&source);
     let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
+        source: source.clone().into_boxed_str(),
         tree: parsed_tree,
     });
     let program = parsed.program();
@@ -2342,7 +2343,7 @@ fn external_documentation_imports_load_transitively_and_resolve_in_overlays() {
         tree: parsed_tree, ..
     } = parse(&source);
     let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
+        source: source.clone().into_boxed_str(),
         tree: parsed_tree,
     });
     let program = parsed.program();
@@ -2454,7 +2455,7 @@ fn replacing_package_directory_refreshes_facts_on_explicit_reload() {
         tree: parsed_tree, ..
     } = parse(&source);
     let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
+        source: source.clone().into_boxed_str(),
         tree: parsed_tree,
     });
     let program = parsed.program();
@@ -2935,7 +2936,8 @@ fn assert_contextless_shared_dependency(divergent: bool, configured_outside: boo
                     assert_eq!(
                         identity,
                         DeclarationIdentity::package("bar", "Shared"),
-                        "order={order:?}, incremental={incremental}, path={path:?}",
+                        "order={order:?}, incremental={incremental}, path={}",
+                        path.display(),
                     );
                     for index in [&identities, base.as_ref()] {
                         let library = index.declaration_library(&identity).unwrap();
@@ -2986,18 +2988,7 @@ fn different_entrypoints_of_one_nondivergent_package_keep_copyless_identities() 
             texts[index],
         ))
     });
-    let parseds = texts.map(|text| {
-        let falcon_dart_parser::ParseResult {
-            tree: parsed_tree,
-            errors,
-        } = parse(text);
-        let parsed = Arc::new(ParsedFile {
-            source: text.to_string().into_boxed_str(),
-            tree: parsed_tree,
-        });
-        assert!(errors.is_empty(), "{errors:?}");
-        parsed
-    });
+    let parseds = texts.map(parsed_fixture);
     for order in [[0, 1], [1, 0]] {
         let paths = order.map(|index| apps[index].as_path());
         let environment = AnalysisEnvironment::discover_with_sdk_locator(paths, fixture_sdk);
@@ -3028,10 +3019,19 @@ fn different_entrypoints_of_one_nondivergent_package_keep_copyless_identities() 
                 environment: &environment,
             };
             let base = std::sync::Arc::new(IdentityIndex::build_external(external));
-            for identities in [
-                IdentityIndex::build(&sources, &content, &[], Some(external)),
-                IdentityIndex::with_external(&sources, &content, &[], external, base),
-            ] {
+            for identities in std::iter::once(IdentityIndex::build(
+                &sources,
+                &content,
+                &[],
+                Some(external),
+            ))
+            .chain(std::iter::once(IdentityIndex::with_external(
+                &sources,
+                &content,
+                &[],
+                external,
+                base,
+            ))) {
                 for ((app, parsed), name) in
                     apps.iter().zip(&parseds).zip(["Entryfirst", "Entrysecond"])
                 {
@@ -3154,10 +3154,19 @@ fn documentation_imports_split_shared_dependency_instances() {
                 environment: &environment,
             };
             let base = std::sync::Arc::new(IdentityIndex::build_external(external));
-            for identities in [
-                IdentityIndex::build(&sources, &[source; 2], &[], Some(external)),
-                IdentityIndex::with_external(&sources, &[source; 2], &[], external, base),
-            ] {
+            for identities in std::iter::once(IdentityIndex::build(
+                &sources,
+                &[source; 2],
+                &[],
+                Some(external),
+            ))
+            .chain(std::iter::once(IdentityIndex::with_external(
+                &sources,
+                &[source; 2],
+                &[],
+                external,
+                base,
+            ))) {
                 let symbols = apps.each_ref().map(|app| {
                     SemanticModel::new(app, &parsed, &identities, None)
                         .resolve_name("Bar")

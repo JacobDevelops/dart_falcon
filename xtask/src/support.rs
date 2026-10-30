@@ -310,7 +310,7 @@ pub(crate) fn recursive_files(root: &Path) -> Vec<PathBuf> {
             entry.unwrap_or_else(|error| panic!("cannot walk {}: {error}", root.display()))
         })
         .filter(|entry| entry.file_type().is_file())
-        .map(|entry| entry.into_path())
+        .map(walkdir::DirEntry::into_path)
         .collect();
     files.sort_unstable();
     files
@@ -581,7 +581,7 @@ mod tests {
                             "performance",
                             "move-variable-closer-to-its-usage",
                         )
-                        .map(|options| options.value()),
+                        .map(falcon_config::RuleOptions::value),
                     Some(&json!({ "ignore-after-if": false })),
                 );
                 let good =
@@ -593,7 +593,7 @@ mod tests {
                             "performance",
                             "move-variable-closer-to-its-usage",
                         )
-                        .map(|options| options.value()),
+                        .map(falcon_config::RuleOptions::value),
                     target
                         .is_dir()
                         .then_some(&json!({ "ignore-after-if": true })),

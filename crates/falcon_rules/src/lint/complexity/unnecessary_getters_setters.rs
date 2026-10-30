@@ -104,7 +104,7 @@ fn setter_assigns_field(setter: SetterDecl<'_>) -> Option<&str> {
                 _ => return None,
             }
         }
-        _ => return None,
+        FunctionBody::Native(_) => return None,
     };
     if let Expr::Assign(assign) = assign.unparenthesized()
         && assign.op() == AssignOp::Eq

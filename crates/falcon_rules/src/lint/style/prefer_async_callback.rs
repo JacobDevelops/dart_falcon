@@ -60,7 +60,7 @@ fn is_future_void_function(t: DartType<'_>) -> bool {
     let Some(DartType::Named(nt)) = ft.return_type() else {
         return false;
     };
-    nt.segments().last().map(|s| s.name()) == Some("Future")
+    nt.segments().last().map(Identifier::name) == Some("Future")
         && nt.type_args().len() == 1
         && matches!(nt.type_args().next(), Some(DartType::Void(_)))
 }

@@ -38,28 +38,35 @@ fn nullable_dynamic_and_nested_type_arguments_are_reported() {
         run("dynamic? x; Map<String, dynamic?> y; Map<String, List<dynamic?>> z;"),
         vec!["avoid-dynamic", "avoid-dynamic"]
     );
-    assert!(run("Map<String, dynamic?> y;").is_empty());
+    assert_eq!(
+        run("Map<String, dynamic?> y;"),
+        [] as [std::string::String; 0]
+    );
 }
 
 #[test]
 fn same_line_suppresses() {
-    assert!(
-        run("dynamic x = 1; // falcon-ignore lint/suspicious/avoid-dynamic: legacy\n").is_empty()
+    assert_eq!(
+        run("dynamic x = 1; // falcon-ignore lint/suspicious/avoid-dynamic: legacy\n"),
+        [] as [std::string::String; 0]
     );
 }
 
 #[test]
 fn next_line_suppresses() {
-    assert!(
-        run("// falcon-ignore lint/suspicious/avoid-dynamic: legacy\ndynamic x = 1;\n").is_empty()
+    assert_eq!(
+        run("// falcon-ignore lint/suspicious/avoid-dynamic: legacy\ndynamic x = 1;\n"),
+        [] as [std::string::String; 0]
     );
 }
 
 #[test]
 fn all_file_suppresses() {
-    assert!(
-        run("// falcon-ignore-all lint/suspicious/avoid-dynamic: legacy\ndynamic x = 1;\ndynamic y = 2;\n")
-            .is_empty()
+    assert_eq!(
+        run(
+            "// falcon-ignore-all lint/suspicious/avoid-dynamic: legacy\ndynamic x = 1;\ndynamic y = 2;\n"
+        ),
+        [] as [std::string::String; 0]
     );
 }
 

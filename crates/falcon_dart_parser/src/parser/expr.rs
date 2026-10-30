@@ -10,7 +10,7 @@ pub(super) enum Brackets {
     Mixed,
 }
 
-impl<'src> Parser<'src> {
+impl Parser<'_> {
     pub(super) fn matching_close(
         &self,
         open: usize,
@@ -317,7 +317,10 @@ impl<'src> Parser<'src> {
     /// or `None` when some token means the `<` is really a comparison operator.
     /// Shared by generic-invocation, instantiation, and statement lookahead.
     pub(super) fn after_generic_type_args(&self, start: usize) -> Option<usize> {
-        use TokenKind::*;
+        use TokenKind::{
+            At, Comma, Dot, Extends, Gt, GtGt, GtGtGt, LBrace, LBracket, LParen, Lt, Qmark, RBrace,
+            RBracket, RParen, Void,
+        };
         debug_assert_eq!(self.kind_at(start), Lt);
         let mut depth = 0i32;
         // Angle depth captured at each open `(`/`[`/`{`. Records and function types
@@ -405,7 +408,10 @@ impl<'src> Parser<'src> {
     /// be a generic-instantiation type-argument list. `f(a < b, c > d)` stays a
     /// comparison because an identifier follows `>`, which is *not* in this set.
     pub(super) fn token_ends_generic_instantiation(&self, idx: usize) -> bool {
-        use TokenKind::*;
+        use TokenKind::{
+            AmpAmp, BangEq, Colon, Comma, DotDot, DotDotQmark, Eof, Eq, EqEq, PipePipe, Qmark,
+            QmarkQmark, RBrace, RBracket, RParen, Semicolon,
+        };
         matches!(
             self.tokens.get(idx).map(|t| &t.kind),
             Some(
@@ -560,75 +566,67 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_unary(&mut self) -> CompletedMarker {
-        self.guarded(
-            |p| p.skip_overflowed_expr(),
-            |p| {
-                if matches!(
-                    p.cur().kind,
-                    TokenKind::Minus
-                        | TokenKind::Bang
-                        | TokenKind::Tilde
-                        | TokenKind::PlusPlus
-                        | TokenKind::MinusMinus
-                ) {
+        self.guarded(Self::skip_overflowed_expr, |p| {
+            if matches!(
+                p.cur().kind,
+                TokenKind::Minus
+                    | TokenKind::Bang
+                    | TokenKind::Tilde
+                    | TokenKind::PlusPlus
+                    | TokenKind::MinusMinus
+            ) {
+                let marker = p.start();
+                p.advance();
+                p.parse_unary();
+                return marker.complete(p, NodeKind::UnaryExpr);
+            }
+            match p.cur().kind {
+                // Outside async and generator bodies `await` is an identifier,
+                // except where it plainly leads an operand (`await foo();`): the
+                // front end parses that as a misplaced await expression, and so do we.
+                TokenKind::Await if p.ctx.body != AsyncMarker::Sync || p.await_operand_ahead() => {
                     let marker = p.start();
                     p.advance();
                     p.parse_unary();
-                    return marker.complete(p, NodeKind::UnaryExpr);
+                    marker.complete(p, NodeKind::AwaitExpr)
                 }
-                match p.cur().kind {
-                    // Outside async and generator bodies `await` is an identifier,
-                    // except where it plainly leads an operand (`await foo();`): the
-                    // front end parses that as a misplaced await expression, and so do we.
-                    TokenKind::Await
-                        if p.ctx.body != AsyncMarker::Sync || p.await_operand_ahead() =>
-                    {
-                        let marker = p.start();
-                        p.advance();
-                        p.parse_unary();
-                        marker.complete(p, NodeKind::AwaitExpr)
-                    }
-                    TokenKind::Throw => {
-                        let marker = p.start();
-                        p.advance();
-                        p.parse_expr();
-                        marker.complete(p, NodeKind::ThrowExpr)
-                    }
-                    _ => p.parse_postfix(),
+                TokenKind::Throw => {
+                    let marker = p.start();
+                    p.advance();
+                    p.parse_expr();
+                    marker.complete(p, NodeKind::ThrowExpr)
                 }
-            },
-        )
+                _ => p.parse_postfix(),
+            }
+        })
     }
 
     fn parse_postfix(&mut self) -> CompletedMarker {
-        self.guarded(
-            |p| p.skip_overflowed_expr(),
-            |p| {
-                let mut expr = p.parse_primary();
-                loop {
-                    let kind = match p.cur().kind {
-                        TokenKind::PlusPlus | TokenKind::MinusMinus => {
-                            p.advance();
-                            NodeKind::PostfixIncDecExpr
-                        }
-                        TokenKind::Switch => {
-                            p.advance();
-                            p.parse_switch_expr_arms();
-                            NodeKind::SwitchExpr
-                        }
-                        _ => {
-                            let Some(kind) = p.parse_selector(true) else {
-                                break;
-                            };
-                            kind
-                        }
-                    };
-                    let marker = expr.precede(p);
-                    expr = marker.complete(p, kind);
-                }
-                expr
-            },
-        )
+        self.guarded(Self::skip_overflowed_expr, |p| {
+            let mut expr = p.parse_primary();
+            loop {
+                let kind = match p.cur().kind {
+                    TokenKind::PlusPlus | TokenKind::MinusMinus => {
+                        p.advance();
+                        NodeKind::PostfixIncDecExpr
+                    }
+                    TokenKind::Switch => {
+                        p.advance();
+                        p.parse_switch_expr_arms();
+                        NodeKind::SwitchExpr
+                    }
+                    _ => {
+                        let Some(kind) = p.parse_selector(true) else {
+                            break;
+                        };
+                        kind
+                    }
+                };
+                let marker = expr.precede(p);
+                expr = marker.complete(p, kind);
+            }
+            expr
+        })
     }
 
     /// Shared selector grammar; cascades cannot represent bare generic tear-offs.
@@ -784,97 +782,94 @@ impl<'src> Parser<'src> {
     }
 
     pub(super) fn parse_primary(&mut self) -> CompletedMarker {
-        self.guarded(
-            |p| p.skip_overflowed_expr(),
-            |p| {
-                let start = p.cur().offset();
-                match p.cur().kind {
-                    TokenKind::IntLit
-                    | TokenKind::DoubleLit
-                    | TokenKind::True
-                    | TokenKind::False
-                    | TokenKind::Null
-                    | TokenKind::This
-                    | TokenKind::Super => {
-                        let marker = p.start();
-                        let kind = match p.cur().kind {
-                            TokenKind::IntLit => NodeKind::IntLitExpr,
-                            TokenKind::DoubleLit => NodeKind::DoubleLitExpr,
-                            TokenKind::True | TokenKind::False => NodeKind::BoolLitExpr,
-                            TokenKind::Null => NodeKind::NullLitExpr,
-                            TokenKind::This => NodeKind::ThisExpr,
-                            TokenKind::Super => NodeKind::SuperExpr,
-                            _ => unreachable!(),
-                        };
-                        p.advance();
-                        marker.complete(p, kind)
-                    }
-                    TokenKind::StringLit => p.parse_adjacent_strings(),
-                    TokenKind::Switch => p.parse_switch_expr_primary(start),
-                    TokenKind::LParen => {
-                        if p.looks_like_function_expr() {
-                            let marker = p.start_at(start);
-                            p.parse_function_expr(marker)
-                        } else {
-                            p.parse_paren_or_record(start)
-                        }
-                    }
-                    TokenKind::Lt => p
-                        .speculate(|p| {
-                            let errors = p.errors.len();
-                            let marker = p.start_at(start);
-                            p.parse_type_params();
-                            if p.errors.len() != errors
-                                || !p.at(TokenKind::LParen)
-                                || !p.looks_like_function_expr()
-                            {
-                                return None;
-                            }
-                            Some(p.parse_function_expr(marker))
-                        })
-                        .unwrap_or_else(|| {
-                            let marker = p.start_at(start);
-                            p.parse_typed_collection(marker)
-                        }),
-                    TokenKind::LBracket => {
-                        let marker = p.start();
-                        p.parse_list_literal(marker)
-                    }
-                    TokenKind::LBrace => {
-                        let marker = p.start();
-                        p.parse_map_or_set_literal(0, marker)
-                    }
-                    // Dot shorthand (Dart 3.9): `.name` / `.new` in a context position.
-                    TokenKind::Dot => p.parse_dot_shorthand(start),
-                    TokenKind::Const => {
-                        let marker = p.start();
-                        p.advance();
-                        p.parse_const_expr(marker)
-                    }
-                    TokenKind::New => {
-                        let marker = p.start();
-                        p.advance();
-                        p.parse_type();
-                        if p.eat(TokenKind::Dot).is_some() {
-                            p.expect_ident();
-                        }
-                        p.parse_arg_list();
-                        marker.complete(p, NodeKind::NewExpr)
-                    }
-                    TokenKind::Hash => p.parse_symbol_literal(start),
-                    _ if p.cur().kind.is_identifier_like() => p.expect_ident(),
-                    _ => {
-                        let marker = p.start();
-                        p.error(format!(
-                            "unexpected token in expression: {:?}",
-                            p.cur().kind
-                        ));
-                        p.advance();
-                        marker.complete(p, NodeKind::ErrorExpr)
+        self.guarded(Self::skip_overflowed_expr, |p| {
+            let start = p.cur().offset();
+            match p.cur().kind {
+                TokenKind::IntLit
+                | TokenKind::DoubleLit
+                | TokenKind::True
+                | TokenKind::False
+                | TokenKind::Null
+                | TokenKind::This
+                | TokenKind::Super => {
+                    let marker = p.start();
+                    let kind = match p.cur().kind {
+                        TokenKind::IntLit => NodeKind::IntLitExpr,
+                        TokenKind::DoubleLit => NodeKind::DoubleLitExpr,
+                        TokenKind::True | TokenKind::False => NodeKind::BoolLitExpr,
+                        TokenKind::Null => NodeKind::NullLitExpr,
+                        TokenKind::This => NodeKind::ThisExpr,
+                        TokenKind::Super => NodeKind::SuperExpr,
+                        _ => unreachable!(),
+                    };
+                    p.advance();
+                    marker.complete(p, kind)
+                }
+                TokenKind::StringLit => p.parse_adjacent_strings(),
+                TokenKind::Switch => p.parse_switch_expr_primary(start),
+                TokenKind::LParen => {
+                    if p.looks_like_function_expr() {
+                        let marker = p.start_at(start);
+                        p.parse_function_expr(marker)
+                    } else {
+                        p.parse_paren_or_record(start)
                     }
                 }
-            },
-        )
+                TokenKind::Lt => p
+                    .speculate(|p| {
+                        let errors = p.errors.len();
+                        let marker = p.start_at(start);
+                        p.parse_type_params();
+                        if p.errors.len() != errors
+                            || !p.at(TokenKind::LParen)
+                            || !p.looks_like_function_expr()
+                        {
+                            return None;
+                        }
+                        Some(p.parse_function_expr(marker))
+                    })
+                    .unwrap_or_else(|| {
+                        let marker = p.start_at(start);
+                        p.parse_typed_collection(marker)
+                    }),
+                TokenKind::LBracket => {
+                    let marker = p.start();
+                    p.parse_list_literal(marker)
+                }
+                TokenKind::LBrace => {
+                    let marker = p.start();
+                    p.parse_map_or_set_literal(0, marker)
+                }
+                // Dot shorthand (Dart 3.9): `.name` / `.new` in a context position.
+                TokenKind::Dot => p.parse_dot_shorthand(start),
+                TokenKind::Const => {
+                    let marker = p.start();
+                    p.advance();
+                    p.parse_const_expr(marker)
+                }
+                TokenKind::New => {
+                    let marker = p.start();
+                    p.advance();
+                    p.parse_type();
+                    if p.eat(TokenKind::Dot).is_some() {
+                        p.expect_ident();
+                    }
+                    p.parse_arg_list();
+                    marker.complete(p, NodeKind::NewExpr)
+                }
+                TokenKind::Hash => p.parse_symbol_literal(start),
+                _ if p.cur().kind.is_identifier_like() => p.expect_ident(),
+                _ => {
+                    let marker = p.start();
+                    p.error(format!(
+                        "unexpected token in expression: {:?}",
+                        p.cur().kind
+                    ));
+                    p.advance();
+                    marker.complete(p, NodeKind::ErrorExpr)
+                }
+            }
+        })
     }
 
     pub(super) fn parse_paren_or_record(&mut self, start: usize) -> CompletedMarker {
@@ -1081,8 +1076,8 @@ impl<'src> Parser<'src> {
         is_map: &mut Option<bool>,
         ambiguous: &mut Vec<(usize, NodeKind)>,
     ) -> CompletedMarker {
-        if !self.at_any(&[TokenKind::If, TokenKind::For])
-            && !(self.at(TokenKind::Await) && self.peek(1).kind == TokenKind::For)
+        if !(self.at_any(&[TokenKind::If, TokenKind::For])
+            || self.at(TokenKind::Await) && self.peek(1).kind == TokenKind::For)
         {
             return self.parse_brace_element_inner(is_map, ambiguous);
         }
@@ -1186,8 +1181,8 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_collection_element(&mut self) -> CompletedMarker {
-        if !self.at_any(&[TokenKind::If, TokenKind::For])
-            && !(self.at(TokenKind::Await) && self.peek(1).kind == TokenKind::For)
+        if !(self.at_any(&[TokenKind::If, TokenKind::For])
+            || self.at(TokenKind::Await) && self.peek(1).kind == TokenKind::For)
         {
             return self.parse_collection_element_inner();
         }
@@ -1309,7 +1304,7 @@ impl<'src> Parser<'src> {
     /// dotted identifier chain (`#foo`, `#foo.bar.baz`) or a user-definable
     /// operator (`#+`, `#==`, `#[]`, `#[]=`, `#~`).
     pub(super) fn parse_symbol_literal(&mut self, start: usize) -> CompletedMarker {
-        use TokenKind::*;
+        use TokenKind::{Dot, Eq, LBracket, RBracket, Void};
         let marker = self.start_at(start);
         self.advance();
         if self.cur().kind.is_identifier_like() || self.at(Void) {

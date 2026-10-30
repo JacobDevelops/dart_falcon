@@ -4,7 +4,7 @@ use falcon_syntax::token::TokenKind;
 
 use super::{CompletedMarker, Parser};
 
-impl<'src> Parser<'src> {
+impl Parser<'_> {
     pub(super) fn parse_type(&mut self) -> CompletedMarker {
         self.parse_type_with_binding_name().0
     }
@@ -292,11 +292,10 @@ impl<'src> Parser<'src> {
                 // An optional/named group is the last in the list: `(a, [b], {c})`
                 // is a syntax error.
                 break;
-            } else {
-                self.parse_formal_param(ParamKind::Positional);
-                if self.eat(TokenKind::Comma).is_none() {
-                    break;
-                }
+            }
+            self.parse_formal_param(ParamKind::Positional);
+            if self.eat(TokenKind::Comma).is_none() {
+                break;
             }
         }
 

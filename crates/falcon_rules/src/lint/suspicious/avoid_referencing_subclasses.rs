@@ -1,5 +1,5 @@
 //! Keeps base classes independent from their transitive subclasses.
-//! `ignored-annotations` replaces the default ["freezed", "Freezed", "unfreezed"].
+//! `ignored-annotations` replaces the default `["freezed", "Freezed", "unfreezed"]`.
 //! Annotation names match the final name segment exactly, including case.
 
 use falcon_analyze::{
@@ -67,14 +67,14 @@ struct Collector<'a> {
 }
 
 impl Collector<'_> {
-    fn check(&mut self, identity: DeclarationIdentity, span: Span) {
+    fn check(&mut self, identity: &DeclarationIdentity, span: Span) {
         let Some(owner) = &self.owner else {
             return;
         };
-        if &identity != owner
+        if identity != owner
             && self
                 .signatures
-                .member_supertype_matches(&identity, &|parent| parent == owner)
+                .member_supertype_matches(identity, &|parent| parent == owner)
                 == Truth::Yes
         {
             self.diagnostics.push(self.ctx.diagnostic("Avoid referencing a subclass from its base class.", span));
@@ -138,7 +138,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             }
             _ => None,
         };
-        if let Some((identity, span)) = reference { self.check(identity, span); }
+        if let Some((identity, span)) = reference { self.check(&identity, span); }
         StructuralTraversal::Continue
     }
     fn exit_expr(&mut self, node: Expr<'a>) {
@@ -162,7 +162,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         if let DartType::Named(named) = node
             && let ResolvedTypeView::Interface { identity, .. } = self.model.resolve_type_in(node, &self.parameters).view()
             && let Some(name) = named.segments().last()
-        { self.check(identity.clone(), name.span()); }
+        { self.check(identity, name.span()); }
         StructuralTraversal::Continue
     }
     fn exit_dart_type(&mut self, node: DartType<'a>) {

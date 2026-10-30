@@ -371,7 +371,7 @@ mod tests {
         assert_eq!(diagnostics[0].rule, "max-lines-for-file");
     }
 
-    fn load_value(value: Value) -> Result<falcon_config::LoadedConfig, ConfigError> {
+    fn load_value(value: &Value) -> Result<falcon_config::LoadedConfig, ConfigError> {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("falcon.json");
         std::fs::write(&path, value.to_string()).unwrap();
@@ -405,7 +405,7 @@ mod tests {
                 } else {
                     json!({"linter": section})
                 };
-                let error = load_value(value).unwrap_err();
+                let error = load_value(&value).unwrap_err();
                 let mut expected = if in_override {
                     vec![
                         ConfigPathSegment::Key("overrides".into()),
@@ -429,7 +429,7 @@ mod tests {
 
     #[test]
     fn discarded_rule_and_option_aliases_do_not_fail_validation() {
-        let loaded = load_value(json!({
+        let loaded = load_value(&json!({
             "linter": {"rules": {
                 "style": {
                     "boolean_prefixes": {"level": "warn", "options": {"valid_prefixes": 42}},
@@ -450,7 +450,7 @@ mod tests {
 
     #[test]
     fn winning_higher_severity_alias_reports_its_original_path() {
-        let error = load_value(json!({
+        let error = load_value(&json!({
             "linter": {"rules": {"style": {
                 "boolean_prefixes": {"level": "error", "options": {"valid_prefixes": 42}},
                 "boolean-prefixes": {"level": "warn", "options": {"valid-prefixes": ["is"]}}

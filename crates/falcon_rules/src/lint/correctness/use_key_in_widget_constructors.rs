@@ -72,13 +72,13 @@ impl Collector<'_> {
         let primary = class.primary_constructor().into_iter().map(|constructor| {
             (
                 false,
-                primary_body.map(|body| body.annotations()),
+                primary_body.map(PrimaryConstructorBody::annotations),
                 constructor.constructor_name(),
                 constructor.params(),
-                primary_body.map(|body| body.initializers()),
+                primary_body.map(PrimaryConstructorBody::initializers),
                 constructor
                     .constructor_name()
-                    .map_or(constructor.name_span(), |name| name.span()),
+                    .map_or(constructor.name_span(), Identifier::span),
             )
         });
         let constructors = class.members().filter_map(|member| match member {
@@ -90,7 +90,7 @@ impl Collector<'_> {
                 Some(constructor.initializers()),
                 constructor
                     .constructor_name()
-                    .map_or(constructor.name().span(), |name| name.span()),
+                    .map_or(constructor.name().span(), Identifier::span),
             )),
             _ => None,
         });
@@ -121,11 +121,14 @@ impl Collector<'_> {
             {
                 continue;
             }
-            if self.has_resolved_super_key(params, initializers.clone(), supertype.as_ref()) {
+            if self.has_resolved_super_key(params, initializers.as_ref(), supertype.as_ref()) {
                 continue;
             }
-            let known_target =
-                self.initializer_requires_key(initializers, &class_type, supertype.as_ref());
+            let known_target = self.initializer_requires_key(
+                initializers.as_ref(),
+                &class_type,
+                supertype.as_ref(),
+            );
             if known_target {
                 self.diagnostics.push(self.ctx.diagnostic(
                     "Public widget constructors should accept and forward a named `key` parameter.",
@@ -159,12 +162,12 @@ impl Collector<'_> {
 
     fn initializer_requires_key(
         &self,
-        initializers: Option<AstChildren<'_, ConstructorInitializer<'_>>>,
+        initializers: Option<&AstChildren<'_, ConstructorInitializer<'_>>>,
         class_type: &ResolvedType,
         supertype: Option<&ResolvedType>,
     ) -> bool {
         let mut known_target = false;
-        for initializer in initializers.clone().into_iter().flatten() {
+        for initializer in initializers.into_iter().flat_map(AstChildren::clone) {
             let (target, name, args) = match initializer {
                 ConstructorInitializer::SuperCall(call) => (
                     supertype,
@@ -191,7 +194,7 @@ impl Collector<'_> {
                 return false;
             }
         }
-        if initializers.as_ref().is_none_or(AstChildren::is_empty) {
+        if initializers.is_none_or(AstChildren::is_empty) {
             let Some(supertype) = supertype else {
                 return false;
             };
@@ -221,22 +224,24 @@ impl Collector<'_> {
     fn has_resolved_super_key(
         &self,
         params: FormalParamList<'_>,
-        initializers: Option<AstChildren<'_, ConstructorInitializer<'_>>>,
+        initializers: Option<&AstChildren<'_, ConstructorInitializer<'_>>>,
         supertype: Option<&ResolvedType>,
     ) -> bool {
         let Some(supertype) = supertype else {
             return false;
         };
-        let constructor_name = initializers
-            .into_iter()
-            .flatten()
-            .find_map(|initializer| match initializer {
-                ConstructorInitializer::SuperCall(call) => {
-                    Some(call.call_name().map_or("new", |name| name.name()))
-                }
-                _ => None,
-            })
-            .unwrap_or("new");
+        let constructor_name = match initializers {
+            Some(initializers) => initializers
+                .clone()
+                .find_map(|initializer| match initializer {
+                    ConstructorInitializer::SuperCall(call) => {
+                        Some(call.call_name().map_or("new", |name| name.name()))
+                    }
+                    _ => None,
+                })
+                .unwrap_or("new"),
+            None => "new",
+        };
         let Some((signature, substitutions)) = self
             .signatures
             .resolved_constructor(supertype, constructor_name)

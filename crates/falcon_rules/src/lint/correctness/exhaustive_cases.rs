@@ -155,11 +155,11 @@ fn covered_constants<'a>(
             };
             match case {
                 SwitchCaseKind::Pattern(pattern) => {
-                    visit_case_constant(pattern.pattern(), &mut cover)
+                    visit_case_constant(pattern.pattern(), &mut cover);
                 }
                 SwitchCaseKind::Expr(expression) => match expression.expr().unparenthesized() {
                     Expr::DotShorthand(shorthand) => {
-                        cover(CaseConstant::Shorthand(shorthand.name()))
+                        cover(CaseConstant::Shorthand(shorthand.name()));
                     }
                     Expr::Ident(_) | Expr::Field(_) => cover(CaseConstant::Expr(expression.expr())),
                     _ => {}

@@ -21,8 +21,8 @@
 use std::collections::{HashMap, HashSet};
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, SemanticModel,
-    SignatureIndex, StructuralNode, StructuralRuleVisitor, StructuralTraversal,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
+    SemanticModel, SignatureIndex, StructuralNode, StructuralRuleVisitor, StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -87,7 +87,9 @@ impl<'a> Collector<'a> {
             .receiver
             .as_ref()
             .and_then(|receiver| match receiver.view() {
-                ResolvedTypeView::Interface { identity, .. } => self.signatures.superclass(identity),
+                ResolvedTypeView::Interface { identity, .. } => {
+                    self.signatures.superclass(identity)
+                }
                 _ => None,
             })
             .and_then(|superclass| match superclass.view() {
@@ -298,7 +300,7 @@ impl<'p> ConstructorScope<'p> {
         };
         let mut super_positional = super_params
             .into_iter()
-            .flat_map(|params| params.positional());
+            .flat_map(FormalParamList::positional);
         for param in params.params() {
             let name = &source[param.name().span().start..param.name().span().end];
             match param.initializing() {
@@ -362,7 +364,7 @@ impl<'a> AssertionFacts<'a> {
                 closure_params.extend(function.params().params().map(|param| name(param.name())));
             }
             Expr::Cascade(cascade) => {
-                for op in cascade.sections().flat_map(|section| section.ops()) {
+                for op in cascade.sections().flat_map(CascadeSection::ops) {
                     match op {
                         CascadeOp::Field(field) => properties.push(name(field.name())),
                         CascadeOp::Call(call) => properties.push(name(call.name())),

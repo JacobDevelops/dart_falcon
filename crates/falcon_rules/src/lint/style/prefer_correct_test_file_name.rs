@@ -1,4 +1,4 @@
-//! Requires entry-point files under package-root test/ or integration_test/ to use the _test.dart suffix.
+//! Requires entry-point files under package-root test/ or `integration_test`/ to use the _test.dart suffix.
 //!
 //! Files without main are test support libraries and do not need the suffix.
 

@@ -1,5 +1,9 @@
 use super::macros::DebugList;
-use super::*;
+use super::{
+    ArgList, AstChildren, AstNode, AsyncMarker, Block, ClassModifiers, ClassRestriction, DartType,
+    ErrorNode, Expr, FunctionType, Identifier, InitializingFormal, NodeKind, ParamKind, Span,
+    StringLitNode, SyntaxElement, SyntaxNode, TypeArgs, TypeParam, VarKeyword,
+};
 use crate::token::TokenKind;
 
 fn has(node: SyntaxNode<'_>, kind: TokenKind) -> bool {
@@ -123,12 +127,15 @@ impl<'a> AstNode<'a> for Program<'a> {
     }
 }
 impl<'a> Program<'a> {
+    #[must_use]
     pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         <Self as AstNode>::cast(node)
     }
+    #[must_use]
     pub fn syntax(self) -> SyntaxNode<'a> {
         self.0
     }
+    #[must_use]
     pub fn span(self) -> Span {
         Span::new(
             0,
@@ -138,21 +145,27 @@ impl<'a> Program<'a> {
                 .map_or(0, |t| t.span().end),
         )
     }
+    #[must_use]
     pub fn library_directive(self) -> Option<LibraryDirective<'a>> {
         self.0.child()
     }
+    #[must_use]
     pub fn part_of_directive(self) -> Option<PartOfDirective<'a>> {
         self.0.child()
     }
+    #[must_use]
     pub fn part_directives(self) -> AstChildren<'a, PartDirective<'a>> {
         AstChildren::new(self.0)
     }
+    #[must_use]
     pub fn imports(self) -> AstChildren<'a, ImportDirective<'a>> {
         AstChildren::new(self.0)
     }
+    #[must_use]
     pub fn exports(self) -> AstChildren<'a, ExportDirective<'a>> {
         AstChildren::new(self.0)
     }
+    #[must_use]
     pub fn declarations(self) -> AstChildren<'a, TopLevelDecl<'a>> {
         AstChildren::new(self.0)
     }
@@ -178,6 +191,7 @@ impl<'a> PartOfDirective<'a> {
     pub fn name(self) -> impl DoubleEndedIterator<Item = Identifier<'a>> + Clone {
         AstChildren::<Identifier>::new(self.0)
     }
+    #[must_use]
     pub fn uri(self) -> Option<StringLitNode<'a>> {
         self.0.child()
     }
@@ -223,6 +237,7 @@ view!(ExportDirective {
     span
 });
 impl<'a> PartDirective<'a> {
+    #[must_use]
     pub fn uri(self) -> StringLitNode<'a> {
         self.0.required()
     }
@@ -234,6 +249,7 @@ macro_rules! uri_directives { ($($name:ident),*) => { $(impl<'a> $name<'a> {
 })* }; }
 uri_directives!(ImportDirective, ExportDirective);
 impl<'a> ImportDirective<'a> {
+    #[must_use]
     pub fn as_name(self) -> Option<Identifier<'a>> {
         self.0.child::<Identifier>()
     }
@@ -244,11 +260,17 @@ impl<'a> ConfigurableUri<'a> {
     pub fn test(self) -> impl DoubleEndedIterator<Item = Identifier<'a>> + Clone {
         AstChildren::<Identifier>::new(self.0)
     }
+    #[must_use]
     pub fn value(self) -> Option<StringLitNode<'a>> {
         let mut strings = AstChildren::<StringLitNode>::new(self.0);
         let first = strings.next()?;
         strings.next().map(|_| first)
     }
+    #[must_use]
+    /// Returns the URI string literal emitted by the parser.
+    ///
+    /// # Panics
+    /// Panics if the parser did not emit a URI string literal.
     pub fn uri(self) -> StringLitNode<'a> {
         AstChildren::<StringLitNode>::new(self.0)
             .last()
@@ -299,12 +321,15 @@ impl<'a> AstNode<'a> for ImportCombinator<'a> {
     }
 }
 impl<'a> ImportCombinator<'a> {
+    #[must_use]
     pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         <Self as AstNode>::cast(node)
     }
+    #[must_use]
     pub fn syntax(self) -> SyntaxNode<'a> {
         <Self as AstNode>::syntax(self)
     }
+    #[must_use]
     pub fn span(self) -> Span {
         self.syntax().span()
     }
@@ -335,6 +360,7 @@ macro_rules! view_enum { ($name:ident { $($variant:ident($inner:ident)),* $(,)? 
 view_enum!(TopLevelDecl { Class(ClassDecl), ClassTypeAlias(ClassTypeAliasDecl), Mixin(MixinDecl), MixinClass(MixinClassDecl), Enum(EnumDecl), Extension(ExtensionDecl), ExtensionType(ExtensionTypeDecl), Function(FunctionDecl), Variable(TopLevelVarDecl), TypeAlias(TypeAliasDecl), Error(ErrorNode) });
 impl<'a> TopLevelDecl<'a> {
     /// The type parameters declared by this declaration, in source order.
+    #[must_use]
     pub fn type_params(self) -> AstChildren<'a, TypeParam<'a>> {
         match self {
             Self::Class(node) => node.type_params(),
@@ -429,9 +455,11 @@ modifiers!(ClassDecl, ClassTypeAliasDecl);
 macro_rules! optional_primary { ($($name:ident),*) => { $(impl<'a> $name<'a> { pub fn primary_constructor(self) -> Option<PrimaryConstructor<'a>> { self.0.child() } })* }; }
 optional_primary!(ClassDecl, MixinClassDecl, EnumDecl);
 impl<'a> ExtensionTypeDecl<'a> {
+    #[must_use]
     pub fn primary_constructor(self) -> PrimaryConstructor<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn representation(self) -> Option<FormalParam<'a>> {
         self.primary_constructor().params().params().first()
     }
@@ -439,6 +467,11 @@ impl<'a> ExtensionTypeDecl<'a> {
 macro_rules! extends { ($($name:ident),*) => { $(impl<'a> $name<'a> { pub fn extends(self) -> Option<DartType<'a>> { clause(self.0, NodeKind::ExtendsClause).next() } })* }; }
 extends!(ClassDecl, MixinClassDecl);
 impl<'a> ClassTypeAliasDecl<'a> {
+    #[must_use]
+    /// Returns the superclass of this class alias.
+    ///
+    /// # Panics
+    /// Panics if the parser did not emit a superclass type.
     pub fn superclass(self) -> DartType<'a> {
         clause(self.0, NodeKind::ExtendsClause)
             .next()
@@ -446,14 +479,21 @@ impl<'a> ClassTypeAliasDecl<'a> {
     }
 }
 impl<'a> MixinDecl<'a> {
+    #[must_use]
     pub fn on_clause(self) -> AstChildren<'a, DartType<'a>> {
         clause(self.0, NodeKind::OnClause)
     }
 }
 impl<'a> ExtensionDecl<'a> {
+    #[must_use]
     pub fn name(self) -> Option<Identifier<'a>> {
         self.0.child::<Identifier>()
     }
+    #[must_use]
+    /// Returns this extension's `on` type.
+    ///
+    /// # Panics
+    /// Panics if the parser did not emit an `on` type.
     pub fn on_type(self) -> DartType<'a> {
         clause(self.0, NodeKind::OnClause)
             .next()
@@ -461,6 +501,7 @@ impl<'a> ExtensionDecl<'a> {
     }
 }
 impl<'a> EnumDecl<'a> {
+    #[must_use]
     pub fn variants(self) -> AstChildren<'a, EnumVariant<'a>> {
         AstChildren::new(self.0)
     }
@@ -474,12 +515,15 @@ view!(EnumVariant {
     span
 });
 impl<'a> EnumVariant<'a> {
+    #[must_use]
     pub fn type_args(self) -> AstChildren<'a, DartType<'a>> {
         TypeArgs::of(self.0)
     }
+    #[must_use]
     pub fn constructor_name(self) -> Option<Identifier<'a>> {
         AstChildren::<Identifier>::new(self.0).nth(1)
     }
+    #[must_use]
     pub fn args(self) -> Option<ArgList<'a>> {
         self.0.child()
     }
@@ -502,21 +546,27 @@ impl<'a> PrimaryConstructor<'a> {
     fn declaration(self) -> SyntaxNode<'a> {
         self.0.parent().expect("primary constructor declaration")
     }
+    #[must_use]
     pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         <Self as AstNode>::cast(node)
     }
+    #[must_use]
     pub fn syntax(self) -> SyntaxNode<'a> {
         self.0
     }
+    #[must_use]
     pub fn name_span(self) -> Span {
         self.declaration().required::<Identifier>().span()
     }
+    #[must_use]
     pub fn is_const(self) -> bool {
         has(self.declaration(), TokenKind::Const)
     }
+    #[must_use]
     pub fn constructor_name(self) -> Option<Identifier<'a>> {
         AstChildren::<Identifier>::new(self.0).find(|name| !name.is_missing())
     }
+    #[must_use]
     pub fn span(self) -> Span {
         let mut names = AstChildren::<Identifier>::new(self.0);
         if let Some(missing) = names.find(|name| name.is_missing()) {
@@ -547,6 +597,11 @@ view!(PrimaryConstructorBody {
     span
 });
 impl PrimaryConstructorBody<'_> {
+    #[must_use]
+    /// Returns the span of the `this` keyword in the primary constructor body.
+    ///
+    /// # Panics
+    /// Panics if the parser did not emit the `this` token.
     pub fn this_span(self) -> Span {
         self.0
             .child_token(TokenKind::This)
@@ -572,17 +627,21 @@ view!(VarDeclarator {
     span
 });
 impl<'a> VarDeclarator<'a> {
+    #[must_use]
     pub fn initializer(self) -> Option<Expr<'a>> {
         assigned_value(self.0)
     }
 }
 impl<'a> FieldDecl<'a> {
+    #[must_use]
     pub fn keyword(self) -> VarKeyword {
         keyword(self.0)
     }
+    #[must_use]
     pub fn field_type(self) -> Option<DartType<'a>> {
         self.0.child()
     }
+    #[must_use]
     pub fn declarators(self) -> AstChildren<'a, VarDeclarator<'a>> {
         AstChildren::new(self.0)
     }
@@ -624,13 +683,16 @@ impl<'a> ConstructorDecl<'a> {
                 .is_some_and(|n| n.is_missing() || n.name() == enclosing.name());
         (!explicit).then_some(enclosing.with_span(keyword.span()))
     }
+    #[must_use]
     pub fn name(self) -> Identifier<'a> {
         self.implicit_name()
             .unwrap_or_else(|| self.0.required::<Identifier>())
     }
+    #[must_use]
     pub fn constructor_name(self) -> Option<Identifier<'a>> {
         AstChildren::<Identifier>::new(self.0).nth(usize::from(self.implicit_name().is_none()))
     }
+    #[must_use]
     pub fn redirect(self) -> Option<RedirectedConstructor<'a>> {
         self.0.child()
     }
@@ -641,9 +703,11 @@ view!(RedirectedConstructor {
     span
 });
 impl<'a> RedirectedConstructor<'a> {
+    #[must_use]
     pub fn type_(self) -> DartType<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn constructor_name(self) -> Option<Identifier<'a>> {
         self.0.child::<Identifier>()
     }
@@ -657,9 +721,15 @@ typed_node!(AssertInitializer, AssertInitializer);
 macro_rules! call_init { ($($name:ident),*) => { $(impl<'a> $name<'a> { pub fn call_name(self) -> Option<Identifier<'a>> { self.0.child::<Identifier>() } pub fn args(self) -> ArgList<'a> { self.0.required() } })* }; }
 call_init!(SuperCallInitializer, ThisCallInitializer);
 impl<'a> FieldInitializer<'a> {
+    #[must_use]
     pub fn field(self) -> Identifier<'a> {
         self.0.required::<Identifier>()
     }
+    #[must_use]
+    /// Returns the field initializer's value expression.
+    ///
+    /// # Panics
+    /// Panics if the parser did not emit a value expression.
     pub fn value(self) -> Expr<'a> {
         AstChildren::<Expr>::new(self.0)
             .next_back()
@@ -667,9 +737,11 @@ impl<'a> FieldInitializer<'a> {
     }
 }
 impl<'a> AssertInitializer<'a> {
+    #[must_use]
     pub fn condition(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn message(self) -> Option<Expr<'a>> {
         AstChildren::<Expr>::new(self.0).nth(1)
     }
@@ -705,12 +777,15 @@ impl<'a> AstNode<'a> for ConstructorInitializer<'a> {
     }
 }
 impl<'a> ConstructorInitializer<'a> {
+    #[must_use]
     pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         <Self as AstNode>::cast(node)
     }
+    #[must_use]
     pub fn syntax(self) -> SyntaxNode<'a> {
         <Self as AstNode>::syntax(self)
     }
+    #[must_use]
     pub fn span(self) -> Span {
         self.syntax().span()
     }
@@ -786,17 +861,25 @@ impl<'a> SetterDecl<'a> {
             .map(DartType::Function)
             .or_else(|| p.child())
     }
+    #[must_use]
     pub fn param_annotations(self) -> AstChildren<'a, Annotation<'a>> {
         AstChildren::new(self.parameter())
     }
+    #[must_use]
     pub fn is_covariant(self) -> bool {
         has(self.parameter(), TokenKind::Covariant)
     }
+    #[must_use]
     pub fn param(self) -> Identifier<'a> {
         self.parameter().required::<Identifier>()
     }
 }
 impl<'a> OperatorDecl<'a> {
+    #[must_use]
+    /// Returns the declared operator's source spelling.
+    ///
+    /// # Panics
+    /// Panics if the parser did not emit both the `operator` keyword and operator symbol.
     pub fn op(self) -> &'a str {
         let token = self
             .0
@@ -821,6 +904,7 @@ impl<'a> OperatorDecl<'a> {
             "[]"
         }
     }
+    #[must_use]
     pub fn lookup_name(self) -> &'a str {
         if self.op() == "-" && self.params().params().is_empty() {
             "unary-"
@@ -830,6 +914,7 @@ impl<'a> OperatorDecl<'a> {
     }
 }
 impl MethodDecl<'_> {
+    #[must_use]
     pub fn is_abstract(self) -> bool {
         has(self.0, TokenKind::Abstract) || self.body().is_none()
     }
@@ -854,6 +939,7 @@ pub enum FunctionKind<'a> {
     Setter(FormalParamList<'a>),
 }
 impl<'a> FunctionDecl<'a> {
+    #[must_use]
     pub fn kind(self) -> FunctionKind<'a> {
         if has(self.0, TokenKind::Get) {
             FunctionKind::Getter
@@ -863,6 +949,7 @@ impl<'a> FunctionDecl<'a> {
             FunctionKind::Function(self.0.required())
         }
     }
+    #[must_use]
     pub fn params(self) -> Option<FormalParamList<'a>> {
         match self.kind() {
             FunctionKind::Getter => None,
@@ -880,6 +967,7 @@ top_view!(TopLevelVarDecl {
     span
 });
 impl<'a> TopLevelVarDecl<'a> {
+    #[must_use]
     pub fn keyword(self) -> VarKeyword {
         if has(self.0, TokenKind::Const) {
             VarKeyword::Const
@@ -889,9 +977,11 @@ impl<'a> TopLevelVarDecl<'a> {
             VarKeyword::Var
         }
     }
+    #[must_use]
     pub fn var_type(self) -> Option<DartType<'a>> {
         self.0.child()
     }
+    #[must_use]
     pub fn declarators(self) -> AstChildren<'a, VarDeclarator<'a>> {
         AstChildren::new(self.0)
     }
@@ -910,12 +1000,15 @@ impl<'a> TypeAliasDecl<'a> {
             .children()
             .find(|n| n.kind() == NodeKind::LegacyTypedef)
     }
+    #[must_use]
     pub fn name(self) -> Identifier<'a> {
         self.legacy().unwrap_or(self.0).required()
     }
+    #[must_use]
     pub fn type_params(self) -> AstChildren<'a, TypeParam<'a>> {
         AstChildren::new(self.legacy().unwrap_or(self.0))
     }
+    #[must_use]
     pub fn aliased(self) -> DartType<'a> {
         if let Some(legacy) = self.legacy() {
             DartType::Function(FunctionType(legacy))
@@ -942,17 +1035,21 @@ impl<'a> AstNode<'a> for FormalParamList<'a> {
 }
 debug_node!(FormalParamList { params, span });
 impl<'a> FormalParamList<'a> {
+    #[must_use]
     pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         <Self as AstNode>::cast(node)
     }
+    #[must_use]
     pub fn syntax(self) -> SyntaxNode<'a> {
         self.0
     }
+    #[must_use]
     pub fn span(self) -> Span {
         AstChildren::<Identifier>::new(self.0)
             .find(|name| name.is_missing())
-            .map_or(self.0.span(), |name| name.span())
+            .map_or(self.0.span(), Identifier::span)
     }
+    #[must_use]
     pub fn params(self) -> AstChildren<'a, FormalParam<'a>> {
         AstChildren::new(self.0)
     }
@@ -982,9 +1079,11 @@ debug_node!(FormalParam {
     span
 });
 impl<'a> FormalParam<'a> {
+    #[must_use]
     pub fn kind(self) -> ParamKind {
         self.0.param_kind()
     }
+    #[must_use]
     pub fn initializing(self) -> Option<InitializingFormal> {
         if has(self.0, TokenKind::This) {
             Some(InitializingFormal::This)
@@ -994,24 +1093,29 @@ impl<'a> FormalParam<'a> {
             None
         }
     }
+    #[must_use]
     pub fn param_type(self) -> Option<DartType<'a>> {
         self.0.child()
     }
+    #[must_use]
     pub fn default_value(self) -> Option<Expr<'a>> {
         assigned_value(self.0)
     }
+    #[must_use]
     pub fn function_params(self) -> Option<FormalParamList<'a>> {
         self.0.child()
     }
 }
 typed_node!(ArrowBody, ArrowBody);
 impl<'a> ArrowBody<'a> {
+    #[must_use]
     pub fn expr(self) -> Expr<'a> {
         self.0.required()
     }
 }
 typed_node!(NativeBody, NativeBody);
 impl<'a> NativeBody<'a> {
+    #[must_use]
     pub fn literal(self) -> Option<StringLitNode<'a>> {
         self.0.child()
     }
@@ -1046,12 +1150,15 @@ impl<'a> AstNode<'a> for FunctionBody<'a> {
     }
 }
 impl<'a> FunctionBody<'a> {
+    #[must_use]
     pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         <Self as AstNode>::cast(node)
     }
+    #[must_use]
     pub fn syntax(self) -> SyntaxNode<'a> {
         <Self as AstNode>::syntax(self)
     }
+    #[must_use]
     pub fn span(self) -> Span {
         match self {
             Self::Block(body) => body.span(),
@@ -1088,9 +1195,11 @@ impl<'a> Annotation<'a> {
         AstChildren::<Identifier>::new(self.0)
             .filter(move |n| limit.is_none_or(|end| n.span().start < end))
     }
+    #[must_use]
     pub fn type_args(self) -> AstChildren<'a, DartType<'a>> {
         TypeArgs::of(self.0)
     }
+    #[must_use]
     pub fn constructor_name(self) -> Option<Identifier<'a>> {
         let end = self
             .0
@@ -1100,6 +1209,7 @@ impl<'a> Annotation<'a> {
             .end;
         AstChildren::<Identifier>::new(self.0).find(|n| n.span().start >= end)
     }
+    #[must_use]
     pub fn args(self) -> Option<ArgList<'a>> {
         self.0.child()
     }
@@ -1187,11 +1297,13 @@ implements!(
 );
 with_clause!(ClassDecl, ClassTypeAliasDecl, MixinClassDecl, EnumDecl);
 impl MixinDecl<'_> {
+    #[must_use]
     pub fn is_base(self) -> bool {
         restriction(self.0) == Some(ClassRestriction::Base)
     }
 }
 impl MixinClassDecl<'_> {
+    #[must_use]
     pub fn is_base(self) -> bool {
         restriction(self.0) == Some(ClassRestriction::Base)
     }
@@ -1225,6 +1337,7 @@ pub struct EffectiveMembers<'a> {
     pub representation: bool,
 }
 impl<'a> EffectiveMembers<'a> {
+    #[must_use]
     pub fn declared(members: AstChildren<'a, ClassMember<'a>>) -> Self {
         Self {
             declared: members,
@@ -1272,22 +1385,30 @@ impl<'a> EffectiveMembers<'a> {
                 }
             })
             .chain(self.primary.map(|p| ConstructorRef {
-                annotations: AstChildren::new(body.map_or(p.syntax(), |b| b.syntax())),
+                annotations: AstChildren::new(
+                    body.map_or(p.syntax(), PrimaryConstructorBody::syntax),
+                ),
                 is_const: p.is_const(),
                 is_factory: false,
                 is_external: false,
                 is_primary: true,
                 constructor_name: p.constructor_name(),
                 params: p.params(),
-                initializers: AstChildren::new(body.map_or(p.syntax(), |b| b.syntax())),
+                initializers: AstChildren::new(
+                    body.map_or(p.syntax(), PrimaryConstructorBody::syntax),
+                ),
                 redirect: None,
-                body: body.and_then(|b| b.body()),
+                body: body.and_then(PrimaryConstructorBody::body),
                 name_span: p.name_span(),
                 span: p.span(),
             }))
     }
 }
 #[derive(Clone)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent flags preserve the public constructor view's source modifiers and kind"
+)]
 pub struct ConstructorRef<'a> {
     pub annotations: AstChildren<'a, Annotation<'a>>,
     pub is_const: bool,
@@ -1305,6 +1426,7 @@ pub struct ConstructorRef<'a> {
 macro_rules! elements { ($($name:ident),*) => { $(impl<'a> $name<'a> { pub fn element_members(self) -> EffectiveMembers<'a> { EffectiveMembers { declared: self.members(), primary: self.primary_constructor(), representation: false } } })* }; }
 elements!(ClassDecl, MixinClassDecl, EnumDecl);
 impl<'a> ExtensionTypeDecl<'a> {
+    #[must_use]
     pub fn element_members(self) -> EffectiveMembers<'a> {
         EffectiveMembers {
             declared: self.members(),

@@ -66,7 +66,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 &mut self.diags,
             ),
             Pattern::Record(record) => self.order.check_names(
-                self.ctx, record.fields().map(|field| field.name()), &mut self.diags,
+                self.ctx, record.fields().map(RecordPatternField::name), &mut self.diags,
             ),
             _ => {}
         }

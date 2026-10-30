@@ -36,16 +36,18 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if !matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq) {
             return;
         }
-        let operand = match (
+        let ((Expr::BoolLit(_), operand) | (operand, Expr::BoolLit(_))) = (
             binary.left().unparenthesized(),
             binary.right().unparenthesized(),
-        ) {
-            (Expr::BoolLit(_), operand) | (operand, Expr::BoolLit(_)) => operand,
-            _ => return,
+        ) else {
+            return;
         };
         let ty = state.infer(operand);
         if ty.interface("dart:core", "bool") && !ty.nullable() {
-            self.diags.push(self.ctx.diagnostic("Avoid comparing boolean values to boolean literals.", binary.span()));
+            self.diags.push(self.ctx.diagnostic(
+                "Avoid comparing boolean values to boolean literals.",
+                binary.span(),
+            ));
         }
     }
 }

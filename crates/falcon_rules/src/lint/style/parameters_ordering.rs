@@ -10,7 +10,6 @@ use falcon_syntax::cst::*;
 
 use crate::lint::support::ordering::Order;
 
-
 #[derive(Default)]
 pub struct ParametersOrdering;
 
@@ -53,7 +52,7 @@ impl Collector<'_> {
     }
 
     fn check(&mut self, params: FormalParamList<'_>) {
-        self.check_names(params.named().map(|param| param.name()));
+        self.check_names(params.named().map(FormalParam::name));
     }
 }
 
@@ -108,7 +107,12 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
     fn visit_dart_type(&mut self, node: DartType<'a>) -> StructuralTraversal {
         if let DartType::Function(function) = node {
-            self.check_names(function.params().filter(|param| param.is_named()).filter_map(|param| param.name()));
+            self.check_names(
+                function
+                    .params()
+                    .filter(|param| param.is_named())
+                    .filter_map(FunctionTypeParam::name),
+            );
         }
         StructuralTraversal::Continue
     }

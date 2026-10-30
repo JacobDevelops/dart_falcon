@@ -108,12 +108,12 @@ pub enum RuleKind {
 /// original to falcon.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuleSource {
-    /// Ported from dart_code_linter; carries the upstream rule/command id.
+    /// Ported from `dart_code_linter`; carries the upstream rule/command id.
     DartCodeLinter(&'static str),
-    /// Ported from pyramid_lint; carries the upstream rule id.
+    /// Ported from `pyramid_lint`; carries the upstream rule id.
     PyramidLint(&'static str),
     /// Adopted from the official `package:lints` / `package:flutter_lints`
-    /// rule sets; carries the official (snake_case) lint id.
+    /// rule sets; carries the official (`snake_case`) lint id.
     Lints(&'static str),
     /// Original to falcon — no upstream equivalent.
     Falcon,
@@ -216,10 +216,12 @@ impl RuleMeta {
     }
 
     /// Whether this rule declares a configurable options payload.
+    #[must_use]
     pub const fn has_options(&self) -> bool {
         self.options.is_some()
     }
 
+    #[must_use]
     pub const fn is_cross_file(&self) -> bool {
         matches!(self.kind, RuleKind::CrossFile { .. })
     }
@@ -255,6 +257,10 @@ const RULE_COUNT: usize = {
 };
 
 const fn combine_metadata() -> [RuleMeta; RULE_COUNT] {
+    #[expect(
+        clippy::large_stack_arrays,
+        reason = "only evaluated at compile time to build RULE_METADATA"
+    )]
     let mut metadata = [GROUP_METADATA[0][0]; RULE_COUNT];
     let mut output = 0;
     let mut group = 0;
@@ -275,7 +281,7 @@ pub const RULE_METADATA: &[RuleMeta] = &combine_metadata();
 
 /// Legacy rule ids mapped to their canonical id. Covers the pre-1.0
 /// `snake_case` → `kebab-case` renames and the removed twin rules (whose
-/// pyramid_lint-derived variants were merged into the surviving dart_code_linter
+/// pyramid_lint-derived variants were merged into the surviving `dart_code_linter`
 /// rule). Keeps old `falcon.json` rule keys and old `// falcon-ignore
 /// lint/<group>/<id>` suppression paths resolving after the id normalization.
 pub const RULE_ALIASES: &[(&str, &str)] = &[
@@ -370,20 +376,20 @@ pub const RULE_ALIASES: &[(&str, &str)] = &[
 
 /// Resolve a possibly-legacy rule id to its canonical id. Returns the input
 /// unchanged when it is already canonical (or simply unknown).
+#[must_use]
 pub fn canonical_rule_name(name: &str) -> &str {
     RULE_ALIASES
         .iter()
         .find(|(old, _)| *old == name)
-        .map(|&(_, canonical)| canonical)
-        .unwrap_or(name)
+        .map_or(name, |&(_, canonical)| canonical)
 }
 
 /// Look up metadata for a rule by its registered name, resolving legacy aliases
 /// first so an old id still finds its canonical rule.
 pub fn meta_for(name: &str) -> Option<&'static RuleMeta> {
-    let canonical = canonical_rule_name(name);
     static BY_NAME: LazyLock<HashMap<&'static str, &'static RuleMeta>> =
         LazyLock::new(|| RULE_METADATA.iter().map(|meta| (meta.name, meta)).collect());
+    let canonical = canonical_rule_name(name);
     BY_NAME.get(canonical).copied()
 }
 
@@ -392,6 +398,7 @@ pub fn meta_for(name: &str) -> Option<&'static RuleMeta> {
 /// `// falcon-ignore` path — and record the *canonical* id, so a suppression
 /// written with an old id still matches the diagnostic's canonical rule — without
 /// depending on this crate. Matches [`falcon_analyze::RuleLookup`].
+#[must_use]
 pub fn suppression_lookup(name: &str) -> Option<(&'static str, &'static str, bool)> {
     meta_for(name).map(|m| (m.name, m.group.as_str(), m.is_cross_file()))
 }
@@ -503,8 +510,7 @@ pub fn canonicalize_rule_entries(
                 .or_else(|| value.get("level").and_then(|v| v.as_str()));
             level
                 .and_then(|level| falcon_config::level_from_str::<serde_json::Error>(level).ok())
-                .map(rule_level_rank)
-                .unwrap_or(0)
+                .map_or(0, rule_level_rank)
         },
         path,
         &mut warnings,
@@ -583,6 +589,7 @@ pub(crate) fn rule_priority(name: &str, severity: u8) -> (u8, bool, std::cmp::Re
 }
 
 /// Shared collision ordering: higher severity wins; `on` and `warn` tie.
+#[must_use]
 pub fn rule_level_rank(level: RulePlainConfiguration) -> u8 {
     match level {
         RulePlainConfiguration::Off => 1,

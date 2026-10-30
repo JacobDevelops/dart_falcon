@@ -1,4 +1,4 @@
-//! Flags handler-free Flutter GestureDetectors and tap-only wrappers around
+//! Flags handler-free Flutter `GestureDetectors` and tap-only wrappers around
 //! enabled Flutter buttons. Explicit hit-test behavior is retained. The button
 //! case requires an inline onPressed callback, so nullable handlers stay unflagged.
 

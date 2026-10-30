@@ -111,11 +111,11 @@ fn fallback_commands_require_negotiated_apply_edit_support() {
             "capabilities": {"workspace": workspace}
         }));
         for kind in [SAFE_FIX_ALL, UNSAFE_FIX_ALL] {
-            assert!(
+            assert_eq!(
                 state
                     .code_actions(&params(&uri, Some(kind)), &|| false)
-                    .unwrap()
-                    .is_empty()
+                    .unwrap(),
+                [] as [lsp_types::CodeAction; 0]
             );
         }
         // Quick fixes still return ordinary edits without server application.
@@ -149,11 +149,11 @@ fn lazy_safe_fix_all_requires_an_effective_safe_fix() {
         .as_mut()
         .unwrap()
         .kind = FixKind::Unsafe;
-    assert!(
+    assert_eq!(
         state
             .code_actions(&params(&uri, Some(SAFE_FIX_ALL)), &|| false)
-            .unwrap()
-            .is_empty()
+            .unwrap(),
+        [] as [lsp_types::CodeAction; 0]
     );
     let actions = state.code_actions(&params(&uri, None), &|| false).unwrap();
     assert!(actions.iter().any(|action| {
@@ -209,21 +209,19 @@ fn dirty_requests_wait_for_publish_without_reanalyzing() {
     let builds = state.semantic_snapshot_build_count;
     let analyses = state.documents[&uri].analyze_count;
     for _ in 0..3 {
-        assert!(
-            state
-                .code_actions(&params(&uri, None), &|| false)
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            state.code_actions(&params(&uri, None), &|| false).unwrap(),
+            [] as [lsp_types::CodeAction; 0]
         );
     }
     assert_eq!(state.semantic_snapshot_build_count, builds);
     assert_eq!(state.documents[&uri].analyze_count, analyses);
     state.analyze(&uri);
-    assert!(
-        !state
+    assert_ne!(
+        state
             .code_actions(&params(&uri, Some("quickfix")), &|| false)
-            .unwrap()
-            .is_empty()
+            .unwrap(),
+        [] as [lsp_types::CodeAction; 0]
     );
 }
 
@@ -274,11 +272,11 @@ fn resolving_rejects_changed_cancelled_and_syntax_error_documents() {
             .unwrap_err()
             .contains("syntax errors")
     );
-    assert!(
+    assert_eq!(
         state
             .code_actions(&params(&uri, Some("quickfix")), &|| false)
-            .unwrap()
-            .is_empty()
+            .unwrap(),
+        [] as [lsp_types::CodeAction; 0]
     );
     let actions = state
         .code_actions(&params(&uri, Some(SAFE_FIX_ALL)), &|| false)

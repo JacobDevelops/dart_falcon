@@ -36,7 +36,7 @@ fn analyze_file(
     let span = info_span!("analyze_file", file = %path.display());
     let _enter = span.enter();
     let package_version = workspace.package_language_version(path);
-    let Parsed {
+    let SourceParse {
         parsed,
         parse_errors,
         ..
@@ -62,6 +62,7 @@ fn analyze_file(
 /// linted as if valid. Public so other analyze consumers (e.g. the LSP server)
 /// surface the same diagnostics. Positions are resolved later, once source is at
 /// hand at the output boundary.
+#[must_use]
 pub fn syntax_error_diagnostics(path: &Path, errors: &[ParseError]) -> Vec<Diagnostic> {
     errors
         .iter()
@@ -81,6 +82,7 @@ pub fn syntax_error_diagnostics(path: &Path, errors: &[ParseError]) -> Vec<Diagn
 }
 
 /// Report unsupported source sizes through the same error channel as syntax errors.
+#[must_use]
 pub fn source_size_diagnostic(path: &Path, bytes: u64) -> Option<Diagnostic> {
     let error = crate::source::check_source_size(bytes).err()?;
     Some(Diagnostic::new(
@@ -93,7 +95,7 @@ pub fn source_size_diagnostic(path: &Path, bytes: u64) -> Option<Diagnostic> {
 }
 
 /// A parsed file retained until shared semantic indexes are built.
-struct Parsed<'src> {
+struct SourceParse<'src> {
     path: &'src Path,
     parsed: Arc<ParsedFile>,
     parse_errors: Vec<ParseError>,
@@ -101,11 +103,11 @@ struct Parsed<'src> {
 
 /// Reject oversized inputs once, before source ownership or parser work, for
 /// both execution modes and both analysis paths.
-fn parse_one<'src>(
-    path: &'src Path,
+fn parse_one(
+    path: &Path,
     source: impl AsRef<str> + Into<Box<str>>,
     package_version: Option<LanguageVersion>,
-) -> Result<Parsed<'src>, Box<Diagnostic>> {
+) -> Result<SourceParse<'_>, Box<Diagnostic>> {
     if let Some(diagnostic) = source_size_diagnostic(path, source.as_ref().len() as u64) {
         return Err(Box::new(diagnostic));
     }
@@ -115,7 +117,7 @@ fn parse_one<'src>(
         tree,
     } = try_parse_for_package(&source, package_version)
         .map_err(|error| Box::new(crate::rules_thread_diagnostic(path, &error)))?;
-    Ok(Parsed {
+    Ok(SourceParse {
         path,
         parsed: Arc::new(ParsedFile { source, tree }),
         parse_errors,
@@ -124,7 +126,7 @@ fn parse_one<'src>(
 
 /// Retain the parsed programs as [`ProjectFile`]s for the cross-file pass, or drop
 /// them when the caller does not need them.
-fn retain(parsed: Vec<Parsed<'_>>, collect_programs: bool) -> Vec<ProjectFile> {
+fn retain(parsed: Vec<SourceParse<'_>>, collect_programs: bool) -> Vec<ProjectFile> {
     if !collect_programs {
         return Vec::new();
     }
@@ -141,7 +143,7 @@ fn retain(parsed: Vec<Parsed<'_>>, collect_programs: bool) -> Vec<ProjectFile> {
 /// Build shared semantic indexes, then run parallel or sequential per-file rules.
 fn analyze_indexed(
     registry: &RuleRegistry,
-    parsed: &[Parsed<'_>],
+    parsed: &[SourceParse<'_>],
     config: &FalconConfig,
     parallel: bool,
     workspace: Workspace<'_>,
@@ -166,7 +168,7 @@ fn analyze_indexed(
         })
         .collect();
     let mut companion_diagnostics = Vec::new();
-    let companions: Vec<Parsed<'_>> = companion_sources
+    let companions: Vec<SourceParse<'_>> = companion_sources
         .iter_mut()
         .filter_map(|(path, source)| {
             match parse_one(
@@ -182,7 +184,7 @@ fn analyze_indexed(
             }
         })
         .collect();
-    let semantic_parsed: Vec<&Parsed<'_>> = parsed.iter().chain(&companions).collect();
+    let semantic_parsed: Vec<&SourceParse<'_>> = parsed.iter().chain(&companions).collect();
     let identity_sources: Vec<IdentitySource<'_>> = semantic_parsed
         .iter()
         .map(|p| IdentitySource {
@@ -216,7 +218,7 @@ fn analyze_indexed(
         .map(|i| library_unit(&grouping, &parsed_files, i))
         .collect();
 
-    let run_one = |(i, p): (usize, &Parsed<'_>)| {
+    let run_one = |(i, p): (usize, &SourceParse<'_>)| {
         let span = info_span!("analyze_file", file = %p.path.display());
         let _enter = span.enter();
         let ctx = AnalyzeContext::new(p.path, config, &p.parsed)
@@ -247,7 +249,7 @@ fn analyze_indexed(
 }
 
 fn load_indexed_externals<'a>(
-    parsed: &[Parsed<'_>],
+    parsed: &[SourceParse<'_>],
     workspace: Workspace<'a>,
 ) -> Option<(ExternalLibraries, &'a AnalysisEnvironment, HashSet<PathBuf>)> {
     workspace
@@ -296,6 +298,7 @@ impl Workspace<'_> {
 /// Analyze files in parallel, optionally retaining parsed programs for cross-file
 /// analysis and building shared semantic indexes before per-file rules run.
 /// Without resolution, each file is parsed and analyzed in one step.
+#[must_use]
 pub fn analyze_parallel_collecting_resolving(
     registry: &RuleRegistry,
     files: &[(PathBuf, String)],
@@ -348,7 +351,7 @@ fn analyze_parallel_inner(
         );
     }
     let mut diagnostics = Vec::new();
-    let parsed: Vec<Result<Parsed<'_>, Box<Diagnostic>>> = files
+    let parsed: Vec<Result<SourceParse<'_>, Box<Diagnostic>>> = files
         .par_iter()
         .map(|(path, source)| {
             parse_one(
@@ -385,6 +388,7 @@ fn analyze_parallel_inner(
 }
 
 /// Sequential counterpart of [`analyze_parallel_collecting_resolving`].
+#[must_use]
 pub fn analyze_sequential_collecting_resolving(
     registry: &RuleRegistry,
     files: &[(PathBuf, String)],
@@ -435,7 +439,7 @@ fn analyze_sequential_inner(
         return (diagnostics, retained, None);
     }
     let mut diagnostics = Vec::new();
-    let parsed: Vec<Parsed<'_>> = files
+    let parsed: Vec<SourceParse<'_>> = files
         .iter()
         .filter_map(|(path, source)| {
             match parse_one(

@@ -16,6 +16,7 @@ fn no_lookup(_name: &str) -> Option<(&'static str, &'static str, bool)> {
 /// Run rules on the same large-stack workers used by parsing and parallel analysis.
 pub use falcon_dart_parser::with_stack as with_rules_stack;
 
+#[must_use]
 pub fn rules_thread_diagnostic(path: &std::path::Path, error: &std::io::Error) -> Diagnostic {
     Diagnostic::new(
         falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID,
@@ -51,6 +52,7 @@ impl Default for RuleRegistry {
 }
 
 impl RuleRegistry {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             rules: Vec::new(),
@@ -70,6 +72,7 @@ impl RuleRegistry {
         self.rules.push((name, rule));
     }
 
+    #[must_use]
     pub fn rules(&self) -> &[(&'static str, Box<dyn Rule>)] {
         &self.rules
     }

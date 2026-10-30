@@ -29,6 +29,7 @@ pub enum Feature {
 
 impl Feature {
     /// The first language version enabling the feature.
+    #[must_use]
     pub const fn since(self) -> LanguageVersion {
         let (major, minor) = match self {
             Self::ConstructorTearoffs => (2, 15),
@@ -48,16 +49,19 @@ impl LanguageVersion {
     /// analyzer applies to files outside any package and to SDK libraries.
     pub const CURRENT: Self = Self::new(3, 13);
 
+    #[must_use]
     pub const fn new(major: u32, minor: u32) -> Self {
         Self { major, minor }
     }
 
     /// Whether code at this version may use `feature`.
+    #[must_use]
     pub fn supports(self, feature: Feature) -> bool {
         self >= feature.since()
     }
 
     /// Parse `major.minor` (as in `package_config.json`'s `languageVersion`).
+    #[must_use]
     pub fn parse(text: &str) -> Option<Self> {
         let (major, minor) = text.trim().split_once('.')?;
         let digits = |part: &str| {
@@ -75,6 +79,7 @@ impl LanguageVersion {
     /// `@dart = X.Y`: only spaces (no tabs) may surround `@dart`, `=` and the
     /// version, and nothing but spaces may follow it on the line. Versions
     /// newer than [`Self::CURRENT`] are invalid and ignored.
+    #[must_use]
     pub fn file_override(source: &str) -> Option<Self> {
         let mut rest = source.strip_prefix('\u{feff}').unwrap_or(source);
         if rest.starts_with("#!") {

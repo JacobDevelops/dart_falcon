@@ -22,7 +22,7 @@ dart_code_linter:
     - check-unused-files
 ";
     let (value, unrecognized, count) = parse(yaml);
-    assert!(unrecognized.is_empty());
+    assert_eq!(unrecognized, [] as [std::string::String; 0]);
     assert_eq!(count, 1);
     assert_eq!(
         value["cross-file"]["rules"]["correctness"]["unused-files"],
@@ -33,7 +33,7 @@ dart_code_linter:
 #[test]
 fn secure_pubspec_urls_migrates_to_cross_file_security() {
     let (value, unrecognized, count) = parse("linter:\n  rules:\n    - secure_pubspec_urls\n");
-    assert!(unrecognized.is_empty());
+    assert_eq!(unrecognized, [] as [std::string::String; 0]);
     assert_eq!(count, 1);
     assert_eq!(
         value["cross-file"]["rules"]["security"]["secure-pubspec-urls"],
@@ -61,7 +61,7 @@ custom_lint:
         max_lines: 200
 ";
     let (value, unrecognized, count) = parse(yaml);
-    assert!(unrecognized.is_empty());
+    assert_eq!(unrecognized, [] as [std::string::String; 0]);
     assert_eq!(count, 1);
     // The upstream pyramid id keeps working; it maps to the canonical falcon id.
     let cfg = &value["linter"]["rules"]["complexity"]["max-lines-for-file"];
@@ -310,7 +310,7 @@ fn upgrade_leaves_canonical_config_unchanged() {
     }"#;
     let result = migrate_existing_config(input).expect("upgrade succeeds");
     assert_eq!(result.migrated_count, 0);
-    assert!(result.unrecognized.is_empty());
+    assert_eq!(result.unrecognized, [] as [std::string::String; 0]);
     let value: Value = serde_json::from_str(&result.json).expect("valid JSON");
     assert_eq!(
         value["linter"]["rules"]["style"]["no-magic-number"],
@@ -460,7 +460,7 @@ fn run_migrate_converts_yaml_to_explicit_output_without_changing_input() {
     );
     assert_eq!(std::fs::read_to_string(input).unwrap(), yaml);
     let loaded = falcon_rules::load_config(&output).expect("written migration output loads");
-    assert!(loaded.warnings.is_empty());
+    assert_eq!(loaded.warnings, [] as [std::string::String; 0]);
     let value: Value = serde_json::from_str(&std::fs::read_to_string(output).unwrap()).unwrap();
     assert_eq!(
         value["linter"]["rules"]["suspicious"]["avoid-print"],
@@ -531,7 +531,7 @@ fn yaml_collisions_keep_highest_severity_across_upstream_linters() {
              custom_lint:\n  rules:\n    - avoid_empty_blocks: {pyramid}\n"
         );
         let (value, unrecognized, count) = parse(&yaml);
-        assert!(unrecognized.is_empty());
+        assert_eq!(unrecognized, [] as [std::string::String; 0]);
         assert_eq!(count, 2);
         assert_eq!(
             value["linter"]["rules"]["suspicious"]["no-empty-block"],
@@ -546,7 +546,7 @@ fn yaml_collision_keeps_canonical_options_on_equal_severity() {
         "dart_code_linter:\n  rules:\n    - no-magic-number:\n        allowed: [1]\n\
          custom_lint:\n  rules:\n    - no_magic_number:\n        allowed: [2]\n",
     );
-    assert!(unrecognized.is_empty());
+    assert_eq!(unrecognized, [] as [std::string::String; 0]);
     assert_eq!(count, 2);
     assert_eq!(
         value["linter"]["rules"]["style"]["no-magic-number"],
@@ -558,7 +558,7 @@ fn yaml_collision_keeps_canonical_options_on_equal_severity() {
 fn yaml_duplicate_rule_entries_do_not_let_off_replace_warn() {
     let (value, unrecognized, count) =
         parse("dart_code_linter:\n  rules:\n    - no-empty-block\n    - no-empty-block: false\n");
-    assert!(unrecognized.is_empty());
+    assert_eq!(unrecognized, [] as [std::string::String; 0]);
     assert_eq!(count, 2);
     assert_eq!(
         value["linter"]["rules"]["suspicious"]["no-empty-block"],
@@ -613,7 +613,7 @@ fn upgrade_normalizes_option_keys_in_base_and_override_sections() {
         }
         let again = migrate_existing_config(&result.json).unwrap();
         assert_eq!(again.json, result.json);
-        assert!(again.option_key_rewrites.is_empty());
+        assert_eq!(again.option_key_rewrites, [] as [std::string::String; 0]);
         assert!(again.warnings.is_empty(), "{:?}", again.warnings);
     }
 }
@@ -658,7 +658,7 @@ fn yaml_drops_unusable_options_with_original_full_path_warning() {
         "{:?}",
         result.warnings
     );
-    assert!(result.option_key_rewrites.is_empty());
+    assert_eq!(result.option_key_rewrites, [] as [std::string::String; 0]);
     let value: Value = serde_json::from_str(&result.json).unwrap();
     assert_eq!(
         value["cross-file"]["rules"]["correctness"]["unused-files"],
@@ -684,11 +684,9 @@ fn run_migrate_writes_yaml_output_despite_unusable_options() {
         value["cross-file"]["rules"]["correctness"]["unused-files"],
         serde_json::json!({"level": "warn"})
     );
-    assert!(
-        falcon_rules::load_config(&output)
-            .unwrap()
-            .warnings
-            .is_empty()
+    assert_eq!(
+        falcon_rules::load_config(&output).unwrap().warnings,
+        [] as [std::string::String; 0]
     );
 }
 
@@ -708,7 +706,7 @@ fn upgrade_drops_unknown_option_with_exact_original_override_path() {
         "{:?}",
         result.warnings
     );
-    assert!(result.option_key_rewrites.is_empty());
+    assert_eq!(result.option_key_rewrites, [] as [std::string::String; 0]);
     let value: Value = serde_json::from_str(&result.json).unwrap();
     assert_eq!(
         value["overrides"][0]["linter"]["rules"]["complexity"]["max-lines-for-file"]["options"],
@@ -817,7 +815,7 @@ fn yaml_drops_unsupported_options_with_full_paths_and_values() {
         );
     }
     assert_eq!(result.migrated_count, 3);
-    assert!(result.unrecognized.is_empty());
+    assert_eq!(result.unrecognized, [] as [std::string::String; 0]);
     assert_migrated_config_loads(&result.json);
 }
 
@@ -976,7 +974,7 @@ fn upgrade_drops_bad_list_entries_and_preserves_original_warning_indices() {
             );
         }
     }
-    assert!(result.option_key_rewrites.is_empty());
+    assert_eq!(result.option_key_rewrites, [] as [std::string::String; 0]);
     assert_migrated_config_loads(&result.json);
 }
 
@@ -1323,7 +1321,7 @@ fn optionless_rule_migration_reports_each_discarded_key_and_removes_the_payload(
                 result.warnings
             );
         }
-        assert!(result.option_key_rewrites.is_empty());
+        assert_eq!(result.option_key_rewrites, [] as [std::string::String; 0]);
         assert_migrated_config_loads(&result.json);
     }
 }
@@ -1727,7 +1725,7 @@ fn yaml_rule_exclusion_emits_grouped_scoped_off_override() {
             "linter": {"rules": {"style": {"avoid-late-keyword": "off"}}}
         }])
     );
-    assert!(result.unrecognized.is_empty());
+    assert_eq!(result.unrecognized, [] as [std::string::String; 0]);
     assert_migrated_config_loads(&result.json);
 }
 
@@ -1830,7 +1828,7 @@ fn yaml_empty_rule_exclusions_do_not_emit_an_unscoped_off_override() {
         value.get("overrides").is_none()
             || value["overrides"].as_array().is_some_and(Vec::is_empty)
     );
-    assert!(result.unrecognized.is_empty());
+    assert_eq!(result.unrecognized, [] as [std::string::String; 0]);
     assert_migrated_config_loads(&result.json);
 }
 
@@ -2108,11 +2106,11 @@ fn upgrade_legacy_defaults_warns_for_only_unlisted_disabled_rules() {
         };
         match meta.name {
             "avoid-late-keyword" => {
-                assert_eq!(resolved, Some(falcon_config::ResolvedSeverity::Warn))
+                assert_eq!(resolved, Some(falcon_config::ResolvedSeverity::Warn));
             }
             "avoid-dynamic" => assert_eq!(resolved, None),
             "max-lines-for-file" => {
-                assert_eq!(resolved, Some(falcon_config::ResolvedSeverity::Error))
+                assert_eq!(resolved, Some(falcon_config::ResolvedSeverity::Error));
             }
             _ if resolved.is_none() => affected += 1,
             _ => {}
@@ -2136,7 +2134,7 @@ fn upgrade_legacy_defaults_warns_for_only_unlisted_disabled_rules() {
             .rules
             .groups
             .values()
-            .map(|group| group.len())
+            .map(std::collections::BTreeMap::len)
             .sum::<usize>(),
         3
     );

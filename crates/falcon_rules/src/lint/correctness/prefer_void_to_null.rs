@@ -185,7 +185,7 @@ impl<'a> StructuralRuleVisitor<'a> for NullTypes<'a> {
                 self.exempt(
                     extension_type
                         .representation()
-                        .and_then(|representation| representation.param_type()),
+                        .and_then(falcon_syntax::cst::FormalParam::param_type),
                 );
                 let enclosing = Enclosing {
                     owner: owner(extension_type.name()),

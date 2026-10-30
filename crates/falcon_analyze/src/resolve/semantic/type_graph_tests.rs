@@ -1,3 +1,5 @@
+use super::types::SharedIdentity;
+
 use super::*;
 
 fn parsed() -> &'static Arc<crate::ParsedFile> {
@@ -15,7 +17,7 @@ fn fanout(depth: usize, leaf: ResolvedType) -> ResolvedType {
     for _ in 0..depth {
         ty = ResolvedType {
             kind: ResolvedTypeKind::Record {
-                occurrence: Default::default(),
+                occurrence: FunctionTypeAlias::default(),
                 positional: vec![ty.clone(), ty.clone(), ty].into(),
                 named: Arc::from([]),
                 nullable: false,
@@ -31,7 +33,7 @@ fn unshared(depth: usize) -> ResolvedType {
     }
     ResolvedType {
         kind: ResolvedTypeKind::Record {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             positional: (0..3).map(|_| unshared(depth - 1)).collect(),
             named: Arc::from([]),
             nullable: false,
@@ -74,7 +76,7 @@ fn independent_deep_graphs_compare_and_hash_once_per_node() {
     let mut hashes = FxHashMap::default();
     left.structural_hash(&mut hashes);
     assert!(hashes.len() <= 3 * 17);
-    assert!(left == right);
+    assert_eq!(left, right);
     assert_eq!(hash(&left), hash(&right));
 }
 
@@ -82,7 +84,7 @@ fn independent_deep_graphs_compare_and_hash_once_per_node() {
 fn structural_equality_and_hash_ignore_sharing_topology() {
     let shared = fanout(4, ResolvedType::DYNAMIC);
     let expanded = unshared(4);
-    assert!(shared == expanded);
+    assert_eq!(shared, expanded);
     assert_eq!(hash(&shared), hash(&expanded));
     let mut pairs = FxHashSet::default();
     assert!(shared.eq_memoized(&shared, &mut pairs));
@@ -192,7 +194,7 @@ fn substitution_interns_independently_allocated_equal_siblings() {
     };
     let source = ResolvedType {
         kind: ResolvedTypeKind::Record {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             positional: (0..3).map(|_| fanout(17, parameter.clone())).collect(),
             named: empty_named_types(),
             nullable: false,
@@ -220,7 +222,7 @@ fn substitution_interns_independently_allocated_equal_siblings() {
         .collect();
     assert!(Arc::ptr_eq(children[0], children[1]));
     assert!(Arc::ptr_eq(children[1], children[2]));
-    assert!(positional[0] == fanout(17, ResolvedType::VOID));
+    assert_eq!(positional[0], fanout(17, ResolvedType::VOID));
 }
 
 #[test]
@@ -246,7 +248,7 @@ fn substitution_memos_shared_sources_and_skips_irrelevant_subgraphs() {
     assert_eq!(memo.sources.len(), 24);
     assert_eq!(memo.relevant.len(), 23);
     assert!(memo.hashes.len() <= 3 * 24 + 1);
-    assert!(result == fanout(24, ResolvedType::VOID));
+    assert_eq!(result, fanout(24, ResolvedType::VOID));
 
     let source = fanout(24, ResolvedType::DYNAMIC);
     let mut memo = SubstitutionMemo::default();
@@ -304,7 +306,7 @@ fn flat_irrelevant_substitution_roots_do_not_allocate_memos() {
         },
         ResolvedType {
             kind: ResolvedTypeKind::Interface {
-                occurrence: Default::default(),
+                occurrence: FunctionTypeAlias::default(),
                 identity: DeclarationIdentity::sdk("dart:core", "List"),
                 arguments: vec![integer].into(),
                 nullable: false,
@@ -335,7 +337,7 @@ fn substitution_memoizes_shared_irrelevant_children_after_relevant_siblings() {
     let substitutions = FxHashMap::from_iter([(id.clone(), ResolvedType::VOID)]);
     let record = |positional: Vec<ResolvedType>| ResolvedType {
         kind: ResolvedTypeKind::Record {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             positional: positional.into(),
             named: empty_named_types(),
             nullable: false,
@@ -390,7 +392,7 @@ fn substitution_keys_preserve_distinct_function_origins() {
     };
     let left = fanout(17, function(1));
     let right = fanout(17, function(2));
-    assert!(left == right);
+    assert_eq!(left, right);
     assert!(SubstitutionKey(&left) != SubstitutionKey(&right));
     assert!(SubstitutionKey(&left) == SubstitutionKey(&left.clone()));
 }
@@ -415,7 +417,7 @@ fn substitution_source_keys_preserve_scalar_context_and_alias_origins() {
     let named = empty_named_types();
     let interface = ResolvedType {
         kind: ResolvedTypeKind::Interface {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             identity: DeclarationIdentity::sdk("dart:core", "List"),
             arguments: Arc::clone(&positional),
             nullable: false,
@@ -424,7 +426,7 @@ fn substitution_source_keys_preserve_scalar_context_and_alias_origins() {
     };
     let record = ResolvedType {
         kind: ResolvedTypeKind::Record {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             positional: Arc::clone(&positional),
             named: Arc::clone(&named),
             nullable: false,
@@ -477,7 +479,7 @@ fn substitution_source_keys_preserve_scalar_context_and_alias_origins() {
         .collect();
     let source = ResolvedType {
         kind: ResolvedTypeKind::Record {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             positional: cases.into(),
             named: empty_named_types(),
             nullable: false,
@@ -660,7 +662,7 @@ fn inference_join_memoizes_contextual_record_fanout() {
     for _ in 0..24 {
         graph = ResolvedType {
             kind: ResolvedTypeKind::Record {
-                occurrence: Default::default(),
+                occurrence: FunctionTypeAlias::default(),
                 positional: vec![graph.clone(), graph.clone(), graph].into(),
                 named: empty_named_types(),
                 nullable: false,
@@ -706,7 +708,7 @@ fn inference_join_memoizes_interface_fanout() {
         for _ in 0..24 {
             ty = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: DeclarationIdentity::OBJECT,
                     arguments: vec![ty.clone(), ty.clone(), ty].into(),
                     nullable: false,
@@ -746,7 +748,7 @@ fn ordinary_composite_projections_do_not_add_occurrence_context() {
     let function = ResolvedType {
         kind: ResolvedTypeKind::Function {
             shape: Some(FunctionTypeShape::empty()),
-            alias: Default::default(),
+            alias: FunctionTypeAlias::default(),
             return_type: Arc::new(ResolvedType::VOID),
             positional: empty_type_arguments(),
             named: empty_named_types(),
@@ -758,7 +760,7 @@ fn ordinary_composite_projections_do_not_add_occurrence_context() {
         function.clone(),
         ResolvedType {
             kind: ResolvedTypeKind::Interface {
-                occurrence: Default::default(),
+                occurrence: FunctionTypeAlias::default(),
                 identity: DeclarationIdentity::OBJECT,
                 arguments: vec![function.clone()].into(),
                 nullable: false,
@@ -767,7 +769,7 @@ fn ordinary_composite_projections_do_not_add_occurrence_context() {
         },
         ResolvedType {
             kind: ResolvedTypeKind::Record {
-                occurrence: Default::default(),
+                occurrence: FunctionTypeAlias::default(),
                 positional: vec![function].into(),
                 named: empty_named_types(),
                 nullable: false,
@@ -844,17 +846,17 @@ fn separate_member_substitution_joins_drop_function_alias_annotations() {
 #[test]
 fn graph_equality_preserves_leaf_nullability_and_named_fields() {
     let ty = fanout(17, ResolvedType::DYNAMIC);
-    assert!(ty != fanout(17, ResolvedType::VOID));
-    assert!(ty != ty.with_nullable(true));
+    assert_ne!(ty, fanout(17, ResolvedType::VOID));
+    assert_ne!(ty, ty.with_nullable(true));
     let named = |name: &str| ResolvedType {
         kind: ResolvedTypeKind::Record {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             positional: Arc::from([]),
             named: vec![(name.to_owned(), ty.clone())].into(),
             nullable: false,
         },
     };
-    assert!(named("left") != named("right"));
+    assert_ne!(named("left"), named("right"));
 }
 
 #[test]
@@ -918,7 +920,7 @@ fn persistent_hashes_preserve_sharing_independent_container_hashes() {
     let shared = fanout(4, ResolvedType::DYNAMIC);
     let expanded = |ty: &ResolvedType| ResolvedType {
         kind: ResolvedTypeKind::Record {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             positional: vec![ty.clone()].into(),
             named: vec![("value".to_owned(), ty.clone())].into(),
             nullable: false,
@@ -948,7 +950,7 @@ fn persistent_provenance_memo_misses_after_source_roots_drop() {
     })));
     let record = |child| ResolvedType {
         kind: ResolvedTypeKind::Record {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             positional: vec![child].into(),
             named: empty_named_types(),
             nullable: false,
@@ -1053,7 +1055,7 @@ fn persistent_hashes_cache_function_shapes_and_shared_bounds() {
     };
     let ty = ResolvedType {
         kind: ResolvedTypeKind::Function {
-            alias: Default::default(),
+            alias: FunctionTypeAlias::default(),
             return_type: Arc::clone(&bound),
             positional: vec![parameter.clone()].into(),
             named: vec![("value".to_owned(), parameter.clone())].into(),
@@ -1126,7 +1128,7 @@ fn nested_raw_joins_share_provenance_queries_but_standalone_roots_release_storag
     };
     let outer = |name: &'static str, child| ResolvedType {
         kind: ResolvedTypeKind::Interface {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             identity: DeclarationIdentity::sdk("test:raw-join", name),
             arguments: vec![child].into(),
             nullable: false,

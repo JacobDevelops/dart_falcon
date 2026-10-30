@@ -53,7 +53,7 @@ impl Rule for DeprecatedConsistency {
             diagnostics: Vec::new(),
             deprecated: false,
             fields: Vec::new(),
-            declarations: program.declarations(),
+            pending: program.declarations(),
         };
         RulePreparation::Structural(Box::new(visitor))
     }
@@ -64,7 +64,7 @@ struct Declarations<'a> {
     model: SemanticModel<'a>,
     diagnostics: Vec<Diagnostic>,
     deprecated: bool,
-    declarations: AstChildren<'a, TopLevelDecl<'a>>,
+    pending: AstChildren<'a, TopLevelDecl<'a>>,
     fields: Vec<(&'a str, AstChildren<'a, Annotation<'a>>, Option<Span>)>,
 }
 
@@ -76,7 +76,7 @@ impl<'a> StructuralRuleVisitor<'a> for Declarations<'a> {
 
     fn visit_top_level_decl(&mut self, _node: TopLevelDecl<'a>) -> StructuralTraversal {
         // Top-level callbacks follow the program's declaration order.
-        let Some(node) = self.declarations.next() else {
+        let Some(node) = self.pending.next() else {
             return StructuralTraversal::SkipChildren;
         };
         let (annotations, elements) = match node {

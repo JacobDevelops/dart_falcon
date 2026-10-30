@@ -189,7 +189,7 @@ mod tests {
         // `Foo` is in the *custom* order (methods -> constructors -> fields) and out
         // of the *default* order; `Bar` is the reverse. This lets one source assert
         // that the `order` option (parity with `member-ordering`) drives the check.
-        let src = r#"
+        let src = r"
     class Foo {
       void run() {}
       Foo();
@@ -199,7 +199,7 @@ mod tests {
       Bar();
       void run() {}
     }
-    "#;
+    ";
         let falcon_dart_parser::ParseResult { tree, .. } = parse(src);
         let parsed = Arc::new(ParsedFile {
             source: src.into(),

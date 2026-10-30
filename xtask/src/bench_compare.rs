@@ -3,13 +3,14 @@ use clap::Args;
 use falcon_rules::meta::{RULE_METADATA, RuleKind, RuleSource};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 use walkdir::WalkDir;
 
-const MAX_RSS_KB: u64 = 8 * 1024 * 1024;
+const MAX_RSS_KB: u32 = 8 * 1024 * 1024;
 const EXCLUDED: &[&str] = &["**/.dart_tool/**", "**/build/**", "**/.?*/**", "**/.?*"];
 type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
 
@@ -223,7 +224,7 @@ fn guarded_output(command: &mut Command, capture: &Path, limit_kb: u64) -> Resul
             Ok(_) => {}
             Err(error) => break Err(error.to_string()),
         }
-        if start.elapsed() > Duration::from_secs(900) {
+        if start.elapsed() > Duration::from_mins(15) {
             break Err("benchmark invocation exceeded the 15-minute safety limit".to_owned());
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -590,17 +591,15 @@ fn benchmark_corpus(
         });
     restore_dependency_locks(&project, &lock_archive, &lock_gzip, baseline)?;
     let (excluded, setup_failures) = resolve_dependencies(&project, flutter, baseline)?;
-    let yaml = format!(
-        "analyzer:\n  exclude:\n{}linter:\n  rules:\n{}",
-        excluded
-            .iter()
-            .map(|path| format!("    - '{path}'\n"))
-            .collect::<String>(),
-        names
-            .iter()
-            .map(|name| format!("    {name}: true\n"))
-            .collect::<String>()
-    );
+    let mut excluded_yaml = String::new();
+    for path in &excluded {
+        writeln!(excluded_yaml, "    - '{path}'").expect("writing to a string cannot fail");
+    }
+    let mut names_yaml = String::new();
+    for name in names {
+        writeln!(names_yaml, "    {name}: true").expect("writing to a string cannot fail");
+    }
+    let yaml = format!("analyzer:\n  exclude:\n{excluded_yaml}linter:\n  rules:\n{names_yaml}");
     let mut project_config = config.clone();
     project_config["files"] = json!({"includes": falcon_includes(&excluded)});
     let CorpusInventory {
@@ -746,7 +745,7 @@ impl Invocation<'_, '_> {
                 "DART_SDK",
                 dart.parent().and_then(Path::parent).ok_or("SDK path")?,
             );
-        let captured = guarded_output(&mut capture, &capture_path, MAX_RSS_KB)?;
+        let captured = guarded_output(&mut capture, &capture_path, u64::from(MAX_RSS_KB))?;
         let peak_rss_mb =
             fs::read_to_string(&rss_path)?.trim().parse::<f64>()? * 1024.0 / 1_000_000.0;
         if !matches!(captured.status.code(), Some(code) if if tool == "falcon" { code == 0 } else { (0..=3).contains(&code) })
@@ -840,7 +839,7 @@ impl Invocation<'_, '_> {
             timing.args(["--prepare", &format!("rm -rf -- {}", quote(state))]);
         }
         let swap_before = swap_counts()?;
-        let timed = guarded_output(timing.arg(&command), &export, MAX_RSS_KB)?;
+        let timed = guarded_output(timing.arg(&command), &export, u64::from(MAX_RSS_KB))?;
         let swap_after = swap_counts()?;
         if !timed.status.success() {
             return Err(format!(
@@ -926,23 +925,22 @@ pub fn run(options: &Options) -> Result<()> {
     let root = std::env::current_dir()?;
     let cache = root.join("target/bench-corpora");
     fs::create_dir_all(&cache)?;
-    let dart = match &options.dart {
-        Some(path) => fs::canonicalize(path)?,
-        None => {
-            let wrapper = PathBuf::from(text(Command::new("mise").args([
-                "x",
-                "flutter@3.47.7-stable",
-                "--",
-                "which",
-                "dart",
-            ]))?);
-            fs::canonicalize(
-                wrapper
-                    .parent()
-                    .ok_or("Dart wrapper parent")?
-                    .join("cache/dart-sdk/bin/dart"),
-            )?
-        }
+    let dart = if let Some(path) = &options.dart {
+        fs::canonicalize(path)?
+    } else {
+        let wrapper = PathBuf::from(text(Command::new("mise").args([
+            "x",
+            "flutter@3.47.7-stable",
+            "--",
+            "which",
+            "dart",
+        ]))?);
+        fs::canonicalize(
+            wrapper
+                .parent()
+                .ok_or("Dart wrapper parent")?
+                .join("cache/dart-sdk/bin/dart"),
+        )?
     };
     let flutter = dart
         .ancestors()
@@ -1009,7 +1007,7 @@ pub fn run(options: &Options) -> Result<()> {
     let report = json!({"generatedAt": text(Command::new("date").args(["-u", "+%Y-%m-%dT%H:%M:%SZ"]))?,
         "machine": {"cpu": cpu, "cores": std::thread::available_parallelism()?.get(), "memoryGb": memory_kb * 1024.0 / 1_000_000_000.0, "os": text(Command::new("uname").args(["-srm"]))?},
         "tools": [{"id": "falcon", "name": "falcon", "version": falcon_version, "binarySha256": binary_hash}, {"id": "dart-analyze", "name": "dart analyze", "version": "3.13.5"}],
-        "harness": {"hyperfine": text(Command::new(&hyperfine).arg("--version"))?, "warmups": options.warmups, "coldRuns": options.cold_runs, "warmRuns": options.runs, "rssLimitMb": MAX_RSS_KB as f64 * 1024.0 / 1_000_000.0, "rules": names},
+        "harness": {"hyperfine": text(Command::new(&hyperfine).arg("--version"))?, "warmups": options.warmups, "coldRuns": options.cold_runs, "warmRuns": options.runs, "rssLimitMb": f64::from(MAX_RSS_KB) * 1024.0 / 1_000_000.0, "rules": names},
         "corpora": corpora,
         "scenarios": [{"id": "same-rules-cold", "title": "Same rules, cold analyzer cache", "description": "Identical enabled lint names; isolated analyzer state removed before each invocation; OS file cache remains warm."}, {"id": "same-rules-warm", "title": "Same rules, warm analyzer cache", "description": "Identical enabled lint names; analyzer state retained after warmups; each sample starts a new process."}],
         "results": results});
@@ -1024,7 +1022,7 @@ mod tests {
     #[test]
     fn config_enables_only_official_sources() {
         let (config, names) = configuration();
-        assert!(!names.is_empty());
+        assert_ne!(names, [] as [&str; 0]);
         assert_eq!(config["linter"]["rules"]["recommended"], false);
         assert_eq!(config["cross-file"]["rules"]["recommended"], false);
         let enabled = ["linter", "cross-file"]
@@ -1063,7 +1061,7 @@ mod tests {
         assert_eq!(count, 2);
         assert_eq!(rules["avoid-print"], 2);
         assert!(diagnostics("falcon", b"{}").is_err());
-        assert!(diagnostics("falcon", br#"[{}]"#).is_err());
+        assert!(diagnostics("falcon", br"[{}]").is_err());
     }
 
     #[test]
@@ -1093,7 +1091,7 @@ mod tests {
         let output = guarded_output(
             Command::new("sh").args(["-c", "printf diagnostics; printf warning >&2; exit 3"]),
             &directory.path().join("capture"),
-            MAX_RSS_KB,
+            u64::from(MAX_RSS_KB),
         )
         .unwrap();
         assert_eq!(output.status.code(), Some(3));
@@ -1185,11 +1183,11 @@ mod tests {
     fn exclusions_preserve_normal_relative_paths_and_match_source_counts() {
         let excluded: Vec<_> = EXCLUDED.iter().map(|path| (*path).to_owned()).collect();
         let filter = serde_json::from_value(json!(falcon_includes(&excluded))).unwrap();
-        assert!(
+        assert_eq!(
             falcon_project::walk_project(&[], &filter, false)
                 .unwrap()
-                .files
-                .is_empty()
+                .files,
+            [] as [(std::path::PathBuf, std::string::String); 0]
         );
         assert!(filter.admits("./lib/a.dart"));
         assert!(!filter.admits("./pkg/.agents/a.dart"));
@@ -1283,7 +1281,7 @@ mod tests {
         let captured = guarded_output(
             Command::new("sh").args(["-c", "cat /proc/$$/stat"]),
             &directory.path().join("capture"),
-            MAX_RSS_KB,
+            u64::from(MAX_RSS_KB),
         )
         .unwrap();
         let group = |stat: &str| {

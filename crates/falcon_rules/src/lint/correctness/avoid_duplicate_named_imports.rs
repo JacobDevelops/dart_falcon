@@ -29,7 +29,7 @@ impl Rule for AvoidDuplicateNamedImports {
 }
 
 fn without_prefix(directive: cst::ImportDirective<'_>) -> impl Iterator<Item = (TokenKind, &str)> {
-    let prefix = directive.as_name().map(|name| name.span());
+    let prefix = directive.as_name().map(cst::Identifier::span);
     let uri = directive.uri().span();
     directive
         .syntax()

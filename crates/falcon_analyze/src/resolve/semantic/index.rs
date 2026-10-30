@@ -1,4 +1,10 @@
-use super::*;
+use super::{
+    Arc, AstChildren, Borrow, ClassRestriction, DeclarationIdentity, DefaultSyntaxKey, Deref,
+    DerefMut, FileId, FormalParamList, FunctionTypeAlias, FunctionTypeShape, FxHashMap, FxHashSet,
+    Hash, HashMap, HashSet, Hasher, LibraryId, MemberKind, ParamKind, ResolvedType, SemanticModel,
+    SignatureContext, Truth, TypeKind, TypeParam, TypeParameterId, TypeParameterScope,
+    collect_parameter_ids, inherited, mentions_any, signature,
+};
 use crate::resolve::semantic::ResolvedTypeKind;
 
 /// Declaration spelling facts that are not part of a parameter's resolved type.
@@ -74,6 +80,7 @@ impl ResolvedSignature {
     }
 
     /// The callable type, with named parameters in deterministic name order.
+    #[must_use]
     pub fn function_type(&self) -> ResolvedType {
         let mut named: Vec<_> = self
             .named
@@ -122,6 +129,7 @@ impl ResolvedSignature {
     }
 
     /// Preserve declared shape while instantiating supplied call or owner parameters.
+    #[must_use]
     pub fn substituted_shape(
         &self,
         model: &SemanticModel<'_>,
@@ -136,6 +144,7 @@ impl ResolvedSignature {
 
     /// The signature of a local function or function literal declared with
     /// `type_params` and `params` in `scope` (which binds `type_params`).
+    #[must_use]
     pub fn local_callable(
         scope: &TypeParameterScope,
         type_params: AstChildren<'_, TypeParam<'_>>,
@@ -156,6 +165,7 @@ impl ResolvedSignature {
     /// directly or through a bound of its own type parameters. The analyzer
     /// substitutes such a member's function type for every invocation,
     /// rebuilding its parameters without their default values.
+    #[must_use]
     pub fn mentions_owner_parameters(&self) -> bool {
         !self.owner_parameters.is_empty()
             && (mentions_any(&self.return_type, &self.owner_parameters)

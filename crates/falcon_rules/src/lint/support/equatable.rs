@@ -135,7 +135,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     }
                 }
             }
-            _ => {}
+            Check::Props => {}
         }
         StructuralTraversal::SkipChildren
     }
@@ -162,7 +162,7 @@ fn returned_expression(body: Option<FunctionBody<'_>>) -> Option<Expr<'_>> {
                 _ => None,
             }
         }
-        _ => None,
+        FunctionBody::Native(_) => None,
     }
 }
 

@@ -7,7 +7,7 @@
 //! This conservative analysis follows straight-line statements directly in a
 //! try body with at least one catch. It tracks resolved Future-returning calls
 //! and constructors assigned to locals, and reports the later awaited local,
-//! not discarded futures. Unknown base types and FutureOr are excluded. Early
+//! not discarded futures. Unknown base types and `FutureOr` are excluded. Early
 //! catchError, onError, and then(onError:) calls are exempt, including handlers
 //! attached in a separate statement or initializer. Parentheses are transparent.
 //! Branches, loops, nested blocks, local declarations of functions, and other

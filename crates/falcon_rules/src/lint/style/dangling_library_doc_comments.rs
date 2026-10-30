@@ -58,15 +58,14 @@ fn dangling_starts(
             return Vec::new();
         }
         return attached_comment(ctx, comments, offset)
-            .map(|(comment, _)| vec![comment.start])
-            .unwrap_or_default();
+            .map_or_default(|(comment, _)| vec![comment.start]);
     }
 
     let Some(keyword) = program.declarations().map(|decl| decl.span().start).min() else {
         return ctx
             .tokens()
             .filter(|token| token.kind() == falcon_syntax::TokenKind::DocComment)
-            .map(|token| token.offset())
+            .map(falcon_syntax::cst::SyntaxToken::offset)
             .collect();
     };
     let Some((comment, offset)) = attached_comment(ctx, comments, keyword) else {

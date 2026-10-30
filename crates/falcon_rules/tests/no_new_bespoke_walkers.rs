@@ -12,6 +12,7 @@
 mod support;
 
 use std::collections::BTreeSet;
+use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -144,7 +145,7 @@ fn no_new_hand_rolled_syntax_walkers() {
              bound_names), which is exhaustive:\n",
         );
         for entry in added {
-            problems.push_str(&format!("  + {entry}\n"));
+            writeln!(problems, "  + {entry}").unwrap();
         }
     }
     if !removed.is_empty() {
@@ -153,7 +154,7 @@ fn no_new_hand_rolled_syntax_walkers() {
              (re-run with UPDATE_BESPOKE_WALKER_BASELINE=1):\n",
         );
         for entry in removed {
-            problems.push_str(&format!("  - {entry}\n"));
+            writeln!(problems, "  - {entry}").unwrap();
         }
     }
 

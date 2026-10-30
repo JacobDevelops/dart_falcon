@@ -405,9 +405,16 @@ fn server_capabilities() -> ServerCapabilities {
 
 /// Start the LSP server on stdio. Blocks until the client disconnects or
 /// completes the shutdown/exit sequence.
+///
+/// # Errors
+///
+/// Returns an error if the connection, server loop, or I/O threads fail.
 pub fn run_server() -> Result<(), ServerError> {
-    let (connection, io_threads) = Connection::stdio();
-    run_with_connection(connection, ServerOptions::default())?;
+    let io_threads = {
+        let (connection, io_threads) = Connection::stdio();
+        run_with_connection(&connection, &ServerOptions::default())?;
+        io_threads
+    };
     io_threads.join()?;
     info!("LSP server stopped");
     Ok(())
@@ -415,17 +422,21 @@ pub fn run_server() -> Result<(), ServerError> {
 
 /// Run the server loop over an arbitrary connection (stdio in production,
 /// `Connection::memory()` in tests).
+///
+/// # Errors
+///
+/// Returns an error if initialization or the server loop fails.
 pub fn run_with_connection(
-    connection: Connection,
-    options: ServerOptions,
+    connection: &Connection,
+    options: &ServerOptions,
 ) -> Result<(), ServerError> {
     let state = LspState::new(options.config_path.clone());
     run_with_state(connection, options, state)
 }
 
 fn run_with_state(
-    connection: Connection,
-    options: ServerOptions,
+    connection: &Connection,
+    options: &ServerOptions,
     mut state: LspState,
 ) -> Result<(), ServerError> {
     // Initialize handshake (JSON-RPC request id is echoed by initialize_finish).
@@ -443,14 +454,17 @@ fn run_with_state(
     };
     connection.initialize_finish(initialize_id, serde_json::to_value(initialize_result)?)?;
     info!("LSP server initialized");
-    publish_config_messages(&connection, &mut state)?;
+    publish_config_messages(connection, &mut state)?;
 
     let (input, receiver) = crossbeam_channel::unbounded();
     let (sender, output) = crossbeam_channel::unbounded();
+    let worker_options = options.clone();
     let worker = std::thread::Builder::new()
         .name("falcon-lsp-analysis".to_string())
-        .spawn(move || analysis_worker(options, state, watching, receiver, sender))?;
-    let result = relay(&connection, input, output);
+        .spawn(move || {
+            analysis_worker_with(&worker_options, state, watching, &receiver, &sender, |_| {})
+        })?;
+    let result = relay(connection, input, &output);
     let worker_result = worker.join().map_err(|_| "LSP analysis worker panicked")?;
     worker_result.and(result)
 }
@@ -462,10 +476,14 @@ struct AnalysisRound {
 }
 
 /// The transport owns publication and cancellation; the worker alone owns state.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the relay must own this sender so it disconnects the worker before joining it"
+)]
 fn relay(
     connection: &Connection,
     input: crossbeam_channel::Sender<WorkerMessage>,
-    output: crossbeam_channel::Receiver<AnalysisRound>,
+    output: &crossbeam_channel::Receiver<AnalysisRound>,
 ) -> Result<(), ServerError> {
     let mut generation = 0;
     let mut pending_requests = HashMap::<RequestId, Arc<AtomicBool>>::new();
@@ -627,22 +645,12 @@ fn next_idle_poll_delay(current: Duration, changed: bool) -> Duration {
     }
 }
 
-fn analysis_worker(
-    options: ServerOptions,
-    state: LspState,
-    watching: FileWatching,
-    receiver: crossbeam_channel::Receiver<WorkerMessage>,
-    output: crossbeam_channel::Sender<AnalysisRound>,
-) -> Result<(), ServerError> {
-    analysis_worker_with(options, state, watching, receiver, output, |_| {})
-}
-
 fn analysis_worker_with(
-    options: ServerOptions,
+    options: &ServerOptions,
     mut state: LspState,
     mut watching: FileWatching,
-    receiver: crossbeam_channel::Receiver<WorkerMessage>,
-    output: crossbeam_channel::Sender<AnalysisRound>,
+    receiver: &crossbeam_channel::Receiver<WorkerMessage>,
+    output: &crossbeam_channel::Sender<AnalysisRound>,
     mut before_message: impl FnMut(&Message),
 ) -> Result<(), ServerError> {
     // Buffer a complete round so preliminary per-file results never reach the
@@ -843,7 +851,7 @@ fn handle_notification(
             if is_environment_document(&params.text_document.uri) {
                 return Ok(false);
             }
-            close_and_publish(connection, state, debounce, params)?;
+            close_and_publish(connection, state, debounce, &params)?;
         }
         DidChangeWatchedFiles::METHOD => {
             let params: DidChangeWatchedFilesParams = parse_params!();
@@ -889,7 +897,7 @@ fn close_and_publish(
     connection: &Connection,
     state: &mut LspState,
     debounce: &mut Debounce,
-    params: DidCloseTextDocumentParams,
+    params: &DidCloseTextDocumentParams,
 ) -> Result<(), ServerError> {
     let uri = params.text_document.uri.as_str().to_string();
     state.close(&uri);

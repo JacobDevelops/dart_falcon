@@ -130,7 +130,7 @@ fn quote_fixes_preserve_existing_exclusions() {
         r#"var text = 'contains " quote';"#,
         r#"var text = '${value ? "yes" : "no"}';"#,
         r#"var text = "${'nested'}";"#,
-        r#"var text = '\u0022';"#,
+        r"var text = '\u0022';",
     ] {
         assert!(diagnostics("prefer-double-quotes", &PreferDoubleQuotes, source).is_empty());
     }

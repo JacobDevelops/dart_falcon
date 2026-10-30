@@ -5,7 +5,7 @@ use falcon_syntax::cst::*;
 mod common;
 
 struct Walk;
-impl<'a> Visitor<'a> for Walk {}
+impl Visitor<'_> for Walk {}
 
 fn assert_depth_limited(source: &str) {
     let parsed = parse(source);

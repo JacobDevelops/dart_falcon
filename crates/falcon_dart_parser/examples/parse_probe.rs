@@ -1,5 +1,5 @@
 //! Parse a Dart file and print parse errors. Usage:
-//!   cargo run -p falcon_dart_parser --example parse_probe -- <file.dart>
+//!   cargo run -p `falcon_dart_parser` --example `parse_probe` -- <file.dart>
 fn main() {
     let mut args = std::env::args().skip(1);
     let path = args.next().expect("usage: parse_probe <file.dart>");

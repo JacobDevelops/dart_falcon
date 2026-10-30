@@ -78,7 +78,7 @@ fn visibility<'a>(combinators: cst::AstChildren<'a, cst::ImportCombinator<'a>>) 
     for combinator in combinators {
         match combinator {
             cst::ImportCombinator::Show(show) => {
-                let names: HashSet<_> = show.names().map(|name| name.name()).collect();
+                let names: HashSet<_> = show.names().map(cst::Identifier::name).collect();
                 result = Visibility::Only(match result {
                     Visibility::Only(previous) => previous.intersection(&names).copied().collect(),
                     Visibility::Except(hidden) => names.difference(&hidden).copied().collect(),

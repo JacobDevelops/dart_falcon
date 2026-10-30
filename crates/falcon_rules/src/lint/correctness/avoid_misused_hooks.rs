@@ -2,7 +2,7 @@
 //!
 //! Widget ancestry must resolve. HookWidget/HookConsumerWidget builds and State
 //! builds for StatefulHookWidget/StatefulHookConsumerWidget are excluded, as is
-//! unknown ancestry. Custom useX functions must compose resolved flutter_hooks
+//! unknown ancestry. Custom useX functions must compose resolved `flutter_hooks`
 //! calls; spelling alone is insufficient. Nested callbacks belong to
 //! avoid-hooks-outside-build instead.
 

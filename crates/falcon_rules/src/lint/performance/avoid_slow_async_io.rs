@@ -19,7 +19,8 @@
 //! Adopted from the official `avoid_slow_async_io` lint.
 
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth,
+    AnalyzeContext, DeclarationIdentity, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
+    Truth,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -46,7 +47,10 @@ struct Collector<'a> {
 
 impl Collector<'_> {
     fn report(&mut self, span: Span) {
-        self.diagnostics.push(self.ctx.diagnostic("Avoid using asynchronous `dart:io` methods here.", span));
+        self.diagnostics.push(
+            self.ctx
+                .diagnostic("Avoid using asynchronous `dart:io` methods here.", span),
+        );
     }
 }
 
@@ -112,21 +116,18 @@ fn slow_instance_method(receiver: &ResolvedType, method: &str, state: &SemanticS
         return false;
     }
     let signatures = &state.signatures;
-    match signatures.resolved_member_owner(receiver, method, &state.model) {
+    if let Some(owner) = signatures.resolved_member_owner(receiver, method, &state.model) {
         // A declaration of the receiver's own hierarchy, or a loaded SDK one.
-        Some(owner) => slow_sdk_method(&owner, method).unwrap_or(false),
-        // The member is inherited from an SDK type whose source is not loaded.
-        None => {
-            let implements =
-                |name| signatures.implements_sdk(receiver, "dart:io", name) == Truth::Yes;
-            if method == "lastModified" {
-                implements("File")
-            } else {
-                ["File", "Directory", "Link", "FileSystemEntity"]
-                    .into_iter()
-                    .any(implements)
-            }
-        }
+        return slow_sdk_method(&owner, method).unwrap_or(false);
+    }
+    // The member is inherited from an SDK type whose source is not loaded.
+    let implements = |name| signatures.implements_sdk(receiver, "dart:io", name) == Truth::Yes;
+    if method == "lastModified" {
+        implements("File")
+    } else {
+        ["File", "Directory", "Link", "FileSystemEntity"]
+            .into_iter()
+            .any(implements)
     }
 }
 

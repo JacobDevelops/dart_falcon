@@ -1,6 +1,6 @@
 //! Warn about unlabeled interactive gesture targets.
 //!
-//! Checks resolved Flutter GestureDetector, InkWell, and InkResponse constructors.
+//! Checks resolved Flutter `GestureDetector`, `InkWell`, and `InkResponse` constructors.
 //! Direct Text children, Icon semanticLabel, or Semantics/Tooltip ancestors with
 //! plain or rich labels supply labels. Inert/excluded gestures and unknown/custom
 //! children are skipped. Dynamic labels are accepted; null and empty literals are not.

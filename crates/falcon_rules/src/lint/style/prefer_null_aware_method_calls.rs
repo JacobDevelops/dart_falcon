@@ -37,7 +37,7 @@ struct Collector<'a> {
 
 impl<'a> Collector<'a> {
     /// The tested expression of `<expr> != null`, without a wrapped null.
-    fn not_null_operand(&self, condition: Expr<'a>) -> Option<Expr<'a>> {
+    fn not_null_operand(condition: Expr<'a>) -> Option<Expr<'a>> {
         match condition {
             Expr::Binary(binary)
                 if binary.op() == BinaryOp::NotEq
@@ -77,7 +77,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && statement.else_branch().is_none()
             && let IfCondition::Expr(condition) = statement.condition()
             && !matches!(condition, Expr::Paren(_))
-            && let Some(tested) = self.not_null_operand(condition)
+            && let Some(tested) = Self::not_null_operand(condition)
         {
             let then = match statement.then_branch() {
                 Stmt::Block(block) => {
@@ -101,7 +101,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && matches!(conditional.else_expr(), Expr::NullLit(_))
             && !is_parenthesized(conditional.else_expr())
             && !is_parenthesized(conditional.condition())
-            && let Some(tested) = self.not_null_operand(conditional.condition())
+            && let Some(tested) = Self::not_null_operand(conditional.condition())
         {
             self.check(conditional.then_expr(), tested);
         }

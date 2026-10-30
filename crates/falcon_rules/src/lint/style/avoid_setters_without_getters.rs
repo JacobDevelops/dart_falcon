@@ -77,7 +77,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             };
             check_members(
                 name.name(),
-                members,
+                &members,
                 self.program,
                 matches!(declaration, TopLevelDecl::ExtensionType(_)),
                 &self.state,
@@ -110,7 +110,7 @@ fn declares_getter<'a>(mut members: AstChildren<'a, ClassMember<'a>>, name: &str
 
 fn check_members<'a>(
     owner: &str,
-    members: AstChildren<'a, ClassMember<'a>>,
+    members: &AstChildren<'a, ClassMember<'a>>,
     program: Program<'a>,
     extension_type: bool,
     state: &SemanticState<'_>,

@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    fmt::Write,
+    path::{Path, PathBuf},
+};
 
 use falcon_dart_parser::parse;
 
@@ -643,7 +646,7 @@ fn sdk_identities_remain_canonical_across_plain_and_embedded_contexts() {
 #[test]
 fn single_file_and_project_inference_share_converged_headers_and_values() {
     with_model(
-        r#"
+        r"
 class Root { final int value; Root(this.value); }
 class Middle extends Root { Middle(super.value); }
 class Leaf extends Middle { Leaf(super.value); }
@@ -656,7 +659,7 @@ final first = second;
 final second = third;
 final third = Child().value;
 final partial = [first, unresolved];
-"#,
+",
         |program, model| {
             let single = SignatureIndex::from_program(program, model);
             let project = SignatureIndex::from_project_files(
@@ -1492,7 +1495,7 @@ fn unknown_generic_arguments_poison_constraints_in_either_order_and_nested() {
                 let hole = if function.name().name() == "inside" {
                     ResolvedType {
                         kind: ResolvedTypeKind::Interface {
-                            occurrence: Default::default(),
+                            occurrence: FunctionTypeAlias::default(),
                             identity: DeclarationIdentity::sdk("dart:core", "List"),
                             arguments: vec![ResolvedType::UNKNOWN].into(),
                             nullable: false,
@@ -1600,7 +1603,7 @@ fn partial_downward_schemas_leave_whole_variables_for_upward_inference() {
             let signatures = SignatureIndex::from_program(program, model);
             let partial = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: DeclarationIdentity::sdk("dart:async", "FutureOr"),
                     arguments: vec![ResolvedType::UNKNOWN].into(),
                     nullable: false,
@@ -1609,7 +1612,7 @@ fn partial_downward_schemas_leave_whole_variables_for_upward_inference() {
             };
             let partial_pair = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: model.resolve_name("Pair").unwrap(),
                     arguments: vec![model.core_type("num", false), ResolvedType::UNKNOWN].into(),
                     nullable: false,
@@ -1664,7 +1667,7 @@ fn partial_contexts_remain_fallbacks_for_calls_and_tearoffs_without_evidence() {
             let signatures = SignatureIndex::from_program(program, model);
             let partial = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: DeclarationIdentity::sdk("dart:core", "List"),
                     arguments: vec![ResolvedType::UNKNOWN].into(),
                     nullable: false,
@@ -1961,7 +1964,7 @@ fn nullable_extensions_shadow_members_of_the_non_null_branch() {
 #[test]
 fn null_shorting_preserves_declared_nullable_member_receivers() {
     with_model(
-        r#"
+        r"
 class Value {}
 class Items { Value? operator [](int index) => throw 0; }
 class Holder {
@@ -1994,7 +1997,7 @@ final parenthesizedAssertion = (holder?.maybe)!.size;
 final assertedIndex = holder?.items[0]!.size;
 final ownIndexShorting = items?[0]!.size;
 final parenthesizedIndex = (items?[0])!.size;
-"#,
+",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
             for (name, expected, nullable) in [
@@ -2126,7 +2129,7 @@ fn unresolved_property_chains_infer_in_linear_work() {
 #[test]
 fn member_parameter_covariance_includes_overridden_interfaces() {
     with_model(
-        r#"
+        r"
 class Leaf extends Middle {
   void run(Object renamed, [Object? extra]) {}
 }
@@ -2162,7 +2165,7 @@ class StaticChild extends StaticBase {
 class Explicit {
   void accept(covariant Object value) {}
 }
-"#,
+",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
             for (owner, name, expected) in [
@@ -2207,7 +2210,7 @@ class Explicit {
 #[test]
 fn setter_parameter_covariance_stays_accessor_specific() {
     with_model(
-        r#"
+        r"
 abstract class Setters {
   set value(covariant Object input);
   covariant Object field = 0;
@@ -2233,7 +2236,7 @@ class OtherKind {
 class DifferentKind extends OtherKind {
   set value(Object input) {}
 }
-"#,
+",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
             for (owner, name, expected) in [
@@ -2251,7 +2254,7 @@ class DifferentKind extends OtherKind {
                 let contracts = signatures
                     .effective_parameter_contracts(&receiver, name, true, model)
                     .unwrap();
-                assert_eq!(contracts[0].is_covariant, expected, "{owner}.{name}",);
+                assert_eq!(contracts[0].is_covariant, expected, "{owner}.{name}");
                 for getter in facts
                     .iter()
                     .filter(|facts| facts.kind == MemberKind::Getter)
@@ -2266,7 +2269,7 @@ class DifferentKind extends OtherKind {
 #[test]
 fn covariance_distinguishes_interface_signatures_from_contextual_implementations() {
     with_model(
-        r#"
+        r"
 class CovariantBase {
   void run(covariant num value) {}
 }
@@ -2340,7 +2343,7 @@ class Conflict implements CovariantInterface {
 class ConflictChild extends Conflict {
   void run(num value) {}
 }
-"#,
+",
         assert_covariance_implementation_contracts,
     );
 }
@@ -2442,7 +2445,7 @@ fn assert_covariance_implementation_contracts(program: Program<'_>, model: &Sema
 #[test]
 fn super_contracts_skip_abstract_mixin_declarations() {
     with_model(
-        r#"
+        r"
 class ConstraintBase { void run([int value = 1]) {} }
 class ActualBase extends ConstraintBase { void run([int value = 2]) {} }
 mixin AbstractConstraint on ConstraintBase { void run([int value = 1]); }
@@ -2462,7 +2465,7 @@ class SetterApplication extends SetterBase with AbstractSetter {}
 class SetterChild extends SetterApplication {
   set value(num input) => super.value = input;
 }
-"#,
+",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
             for (owner, base, name, write, equal) in [
@@ -2717,7 +2720,7 @@ fn non_nullable_respects_future_or_bounds_and_extension_interfaces() {
 
 #[test]
 fn nested_alias_projections_retain_occurrence_provenance_without_copying_types() {
-    let source = r#"
+    let source = r"
 typedef G<T> = Future<T> Function();
 typedef F<T> = G<T> Function();
 class Items<T> { T get first => throw 0; }
@@ -2793,7 +2796,7 @@ final sharedNested = condition ? nested.$1()() : nested.$1()();
 final joinedNested = (condition ? nested.$1() : nested.$2())();
 final sharedJoinedNested = (condition ? nested.$1() : nested.$1())();
 final intermediate = nested.$1();
-"#;
+";
     with_model(source, assert_nested_alias_projection_provenance);
 }
 
@@ -2860,7 +2863,7 @@ fn assert_nested_alias_projection_provenance(program: Program<'_>, model: &Seman
 #[test]
 fn callable_record_fields_precede_extension_methods() {
     with_model(
-        r#"
+        r"
 class Token {}
 class Wrong {}
 Token callback() => Token();
@@ -2878,7 +2881,7 @@ final positionalResult = positionalRecord.$1();
 final namedResult = namedRecord.action();
 final positionalExtension = positionalRecord.extra();
 final namedExtension = namedRecord.extra();
-"#,
+",
         |program, model| {
             let signatures = SignatureIndex::from_program(program, model);
             let token = model.resolve_name("Token").unwrap();
@@ -2904,7 +2907,7 @@ final namedExtension = namedRecord.extra();
 #[test]
 fn sdk_iterable_getters_preserve_projected_alias_origins() {
     with_parsed_core(
-        r#"
+        r"
 class Result<T> {}
 typedef G<T> = Result<T> Function();
 typedef I<T> = List<G<T>> Function();
@@ -2926,7 +2929,7 @@ final aliasedSiblings = condition ? aliases.$1.first : aliases.$2.first;
 final sharedAlias = condition ? aliases.$1.first : aliases.$1.first;
 final sharedDirect = condition ? direct.first : direct.first;
 final integer = integers.first;
-"#,
+",
         "library dart.core; class Object {} abstract class int {} \
          abstract class bool {} abstract class Iterable<E> { E get first; } \
          abstract class List<E> implements Iterable<E> {}",
@@ -3068,7 +3071,7 @@ fn concrete_property_chain_readiness_reuses_receiver_results() {
                     .unwrap();
                 let receiver = ResolvedType {
                     kind: ResolvedTypeKind::Interface {
-                        occurrence: Default::default(),
+                        occurrence: FunctionTypeAlias::default(),
                         identity: model.resolve_name("Link").unwrap(),
                         arguments: Vec::new().into(),
                         nullable: false,
@@ -3108,7 +3111,7 @@ fn root_dependencies_preserve_partial_progress_and_dynamic_roots() {
                 signatures.value_type(&model.resolve_value("rows").unwrap()),
                 Some(&ResolvedType {
                     kind: ResolvedTypeKind::Interface {
-                        occurrence: Default::default(),
+                        occurrence: FunctionTypeAlias::default(),
                         identity: DeclarationIdentity::sdk("dart:core", "List"),
                         arguments: vec![model.core_type("String", false)].into(),
                         nullable: false,
@@ -3150,7 +3153,7 @@ fn root_dependency_scopes_do_not_create_shadowing_cycles() {
                     signatures.value_type(&model.resolve_value("items").unwrap()),
                     Some(&ResolvedType {
                         kind: ResolvedTypeKind::Interface {
-                            occurrence: Default::default(),
+                            occurrence: FunctionTypeAlias::default(),
                             identity: DeclarationIdentity::sdk("dart:core", "List"),
                             arguments: vec![model.core_type("int", false)].into(),
                             nullable: false,
@@ -3180,7 +3183,7 @@ fn field_readiness_respects_closure_parameters() {
                     .1,
                 ResolvedType {
                     kind: ResolvedTypeKind::Interface {
-                        occurrence: Default::default(),
+                        occurrence: FunctionTypeAlias::default(),
                         identity: DeclarationIdentity::sdk("dart:core", "List"),
                         arguments: vec![model.core_type("int", false)].into(),
                         nullable: false,
@@ -3208,7 +3211,7 @@ fn inherited_getter_dependencies_wait_for_declaration_inference() {
             let signatures = SignatureIndex::from_program(program, model);
             let packet = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: model.resolve_name("Packet").unwrap(),
                     arguments: Vec::new().into(),
                     nullable: false,
@@ -3249,10 +3252,12 @@ fn interface_diamonds_preserve_substitution_in_bounded_lookup() {
     );
     for level in 1..24 {
         let previous = level - 1;
-        source.push_str(&format!(
+        write!(
+            source,
             "class A{level}<T> implements A{previous}<T>, B{previous}<T> {{}} \
              class B{level}<T> implements A{previous}<T>, B{previous}<T> {{}}",
-        ));
+        )
+        .unwrap();
     }
     source.push_str("class Child extends A23<Packet> implements Tail<Packet> {}");
     with_model(&source, |program, model| {
@@ -3260,7 +3265,7 @@ fn interface_diamonds_preserve_substitution_in_bounded_lookup() {
         assert!(signatures.cyclic_supertypes.is_some());
         let child = ResolvedType {
             kind: ResolvedTypeKind::Interface {
-                occurrence: Default::default(),
+                occurrence: FunctionTypeAlias::default(),
                 identity: model.resolve_name("Child").unwrap(),
                 arguments: Vec::new().into(),
                 nullable: false,
@@ -3277,7 +3282,7 @@ fn interface_diamonds_preserve_substitution_in_bounded_lookup() {
             model.substitute(&ty, &substitutions),
             ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: model.resolve_name("Packet").unwrap(),
                     arguments: Vec::new().into(),
                     nullable: false,
@@ -3304,7 +3309,7 @@ fn missing_declaration_types_use_completed_signatures() {
             let box_identity = model.resolve_name("Box").unwrap();
             let box_of = |argument| ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: box_identity.clone(),
                     arguments: vec![argument].into(),
                     nullable: false,
@@ -3918,7 +3923,7 @@ fn collection_scopes_and_record_contexts_infer_without_sdk_sources() {
                         actual,
                         ResolvedType {
                             kind: ResolvedTypeKind::Record {
-                                occurrence: Default::default(),
+                                occurrence: FunctionTypeAlias::default(),
                                 positional: vec![int].into(),
                                 named: vec![("name".into(), string)].into(),
                                 nullable: false,
@@ -4200,7 +4205,7 @@ fn generic_closure_inputs_complete_before_upward_bound_inference() {
                 let substitutions = environment.infer_signature_substitutions_with_result(
                     invocation.inference_signature(),
                     args,
-                    type_args,
+                    &type_args,
                     &context,
                     None,
                     Some(&mut argument_contexts),
@@ -4271,7 +4276,7 @@ fn sibling_closure_results_contextualize_positional_and_named_inputs() {
                 let substitutions = environment.infer_signature_substitutions_with_result(
                     invocation.inference_signature(),
                     args,
-                    type_args,
+                    &type_args,
                     &context,
                     None,
                     Some(&mut argument_contexts),
@@ -4789,7 +4794,7 @@ fn generated_mixin_application_constructors_drop_superclass_annotations() {
             );
             let alias = model.resolve_name("Alias").unwrap();
             let facts = &signatures.declaration(&alias).unwrap().constructors[0];
-            assert!(facts.annotations.is_empty());
+            assert_eq!(facts.annotations, [] as [DeclarationIdentity; 0]);
             assert!(facts.is_const);
         },
     );
@@ -5245,7 +5250,7 @@ fn block_closures_preserve_private_field_promotion_mode() {
             let expression = expression.expr();
             let receiver = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: model.resolve_name("Promoted").unwrap(),
                     arguments: Vec::new().into(),
                     nullable: false,
@@ -5896,10 +5901,12 @@ fn expression_inference_regression_table() {
         "class Box { Box.named(); int field = 0; int method() => 0; Never fail() => throw 0; Box operator /(num s) => this; }",
     );
     for (index, (expression, expected)) in cases.iter().enumerate() {
-        source.push_str(&format!(
+        write!(
+            source,
             "{} f{index}(Box box, dynamic x, int i, double d, num n, String s, bool flag, int Function() callback) => {expression};",
             expected.unwrap_or("dynamic"),
-        ));
+        )
+        .unwrap();
     }
     with_model(&source, |program, model| {
         let signatures = SignatureIndex::from_program(program, model);
@@ -5984,7 +5991,7 @@ fn never_returning_calls_are_acceptable_in_void_contexts() {
             );
             assert_eq!(actual, ResolvedType::NEVER);
             assert_eq!(
-                model.acceptable_for_void_context(&ResolvedType::VOID, &actual),
+                SemanticModel::acceptable_for_void_context(&ResolvedType::VOID, &actual),
                 Truth::Yes,
             );
         },
@@ -6057,7 +6064,7 @@ fn core_never_resolves_as_bottom_but_project_never_does_not() {
                     }
                 );
                 assert_eq!(
-                    model.acceptable_for_void_context(&ResolvedType::VOID, &ty),
+                    SemanticModel::acceptable_for_void_context(&ResolvedType::VOID, &ty),
                     Truth::Yes
                 );
             }
@@ -6204,7 +6211,7 @@ fn resolves_canonical_generic_and_special_types() {
                     .param_type()
                     .unwrap(),
             );
-            assert!(model.void_context(&future));
+            assert!(SemanticModel::void_context(&future));
         },
     );
 }
@@ -6439,19 +6446,22 @@ fn declaration_contracts_preserve_names_kinds_defaults_and_optional_arity() {
                 cloned_facts.parameter_contracts.as_ref().unwrap(),
             ));
             let facts = &signatures.declared_member_facts(&identity, "n")[0];
-            assert!(facts.positional_parameter_names.is_empty());
+            assert_eq!(facts.positional_parameter_names, [] as [String; 0]);
             let contracts = facts.parameter_contracts.as_ref().unwrap();
             assert_eq!(contracts[0].name, "named");
             assert_eq!(contracts[0].kind, ParamKind::Named { required: true });
             assert_eq!(contracts[1].name, "optional");
             assert!(contracts[1].default_value_code.is_some());
             let empty = signatures.member(&identity, "empty").unwrap();
-            assert!(empty.positional.is_empty());
-            assert!(empty.named.is_empty());
-            assert!(empty.defaults.is_empty());
+            assert_eq!(empty.positional, [] as [ResolvedType; 0]);
+            assert_eq!(empty.named, std::collections::HashMap::default());
+            assert_eq!(empty.defaults.keys().next(), None);
             let facts = &signatures.declared_member_facts(&identity, "empty")[0];
-            assert!(facts.positional_parameter_names.is_empty());
-            assert!(facts.parameter_contracts.as_ref().unwrap().is_empty());
+            assert_eq!(facts.positional_parameter_names, [] as [String; 0]);
+            assert_eq!(
+                facts.parameter_contracts.as_deref().unwrap(),
+                [] as [ParameterContract; 0]
+            );
             let operator = signatures.member(&identity, "+").unwrap();
             assert_eq!(operator.positional, [model.core_type("int", false)]);
             assert_eq!(operator.optional_positional, 0);
@@ -6469,7 +6479,10 @@ fn declaration_contracts_preserve_names_kinds_defaults_and_optional_arity() {
                 .iter()
                 .find(|facts| facts.kind == MemberKind::Getter)
                 .unwrap();
-            assert!(getter.parameter_contracts.as_ref().unwrap().is_empty());
+            assert_eq!(
+                getter.parameter_contracts.as_deref().unwrap(),
+                [] as [ParameterContract; 0]
+            );
             let setter = accessors
                 .iter()
                 .find(|facts| facts.kind == MemberKind::Setter)
@@ -6508,7 +6521,10 @@ fn signature_collection_preserves_default_slots_and_required_annotations() {
                 positional.defaults.get("third"),
                 Some(ParameterDefault::Null)
             ));
-            assert!(positional.non_optional_defaults.is_empty());
+            assert_eq!(
+                positional.non_optional_defaults,
+                std::collections::HashSet::default()
+            );
             let facts = &signatures.declared_member_facts(&identity, "m")[0];
             assert_eq!(
                 facts.positional_parameter_names,
@@ -6518,8 +6534,8 @@ fn signature_collection_preserves_default_slots_and_required_annotations() {
             assert!(contracts[1].default_value_code.is_some());
             assert!(contracts[2].default_value_code.is_none());
             let named = signatures.member(&identity, "n").unwrap();
-            assert!(named.positional_parameter_names.is_empty());
-            assert!(named.positional.is_empty());
+            assert_eq!(named.positional_parameter_names, [] as [String; 0]);
+            assert_eq!(named.positional, [] as [ResolvedType; 0]);
             assert_eq!(named.named.len(), 4);
             assert!(!named.defaults.contains_key("named"));
             assert!(matches!(
@@ -6540,7 +6556,7 @@ fn signature_collection_preserves_default_slots_and_required_annotations() {
             );
             let plain = signatures.member(&identity, "p").unwrap();
             assert_eq!(plain.positional.len(), 2);
-            assert!(plain.positional_parameter_names.is_empty());
+            assert_eq!(plain.positional_parameter_names, [] as [String; 0]);
             let required_positional = signatures.member(&identity, "r").unwrap();
             assert_eq!(
                 required_positional.positional_parameter_names,
@@ -6576,11 +6592,11 @@ fn signatures_preserve_type_parameters_for_void_substitution() {
         let expected = model.substitute(&signature.positional[0], &substitutions);
         assert_eq!(expected, ResolvedType::VOID);
         assert_eq!(
-            model.acceptable_for_void_context(&expected, &model.core_type("int", false)),
+            SemanticModel::acceptable_for_void_context(&expected, &model.core_type("int", false)),
             Truth::No
         );
         assert_eq!(
-            model.acceptable_for_void_context(&expected, &ResolvedType::NULL),
+            SemanticModel::acceptable_for_void_context(&expected, &ResolvedType::NULL),
             Truth::Yes
         );
     });
@@ -6819,7 +6835,7 @@ fn same_named_type_parameters_of_different_declarations_stay_distinct() {
             let signatures = SignatureIndex::from_program(program, model);
             let a = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: model.resolve_name("A").unwrap(),
                     arguments: vec![model.core_type("String", false)].into(),
                     nullable: false,
@@ -6845,7 +6861,7 @@ fn member_lookup_prefers_later_mixins_and_includes_interface_contracts() {
             let child_identity = model.resolve_name("Child").unwrap();
             let child = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: child_identity,
                     arguments: Vec::new().into(),
                     nullable: false,
@@ -6873,7 +6889,7 @@ fn member_lookup_prefers_later_mixins_and_includes_interface_contracts() {
             let contract = model.resolve_name("Contract").unwrap();
             let interface_only = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: model.resolve_name("InterfaceOnly").unwrap(),
                     arguments: Vec::new().into(),
                     nullable: false,
@@ -6912,7 +6928,7 @@ fn static_mixin_members_do_not_shadow_inherited_instance_members() {
             let signatures = SignatureIndex::from_program(program, model);
             let child = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: model.resolve_name("Child").unwrap(),
                     arguments: Vec::new().into(),
                     nullable: false,
@@ -6982,7 +6998,7 @@ fn legacy_function_typed_setter_has_a_nullable_function_write_type() {
             let signatures = SignatureIndex::from_program(program, model);
             let receiver = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: model.resolve_name("Value").unwrap(),
                     arguments: Vec::new().into(),
                     nullable: false,
@@ -7044,7 +7060,7 @@ fn only_uninitialized_late_final_fields_have_writable_owners() {
             for owner in ["Child", "View", "Init"] {
                 let child = ResolvedType {
                     kind: ResolvedTypeKind::Interface {
-                        occurrence: Default::default(),
+                        occurrence: FunctionTypeAlias::default(),
                         identity: model.resolve_name(owner).unwrap(),
                         arguments: Vec::new().into(),
                         nullable: false,
@@ -7094,7 +7110,7 @@ fn child_setter_does_not_hide_inherited_generic_getter() {
             let signatures = SignatureIndex::from_program(program, model);
             let child = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: model.resolve_name("Child").unwrap(),
                     arguments: Vec::new().into(),
                     nullable: false,
@@ -7132,7 +7148,7 @@ fn named_constructor_and_instance_method_signatures_do_not_collide() {
             let base = model.resolve_name("Base").unwrap();
             let receiver = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: base.clone(),
                     arguments: Vec::new().into(),
                     nullable: false,
@@ -7199,7 +7215,7 @@ fn later_mixin_getter_overrides_base_field_with_owner_substitution() {
             let signatures = SignatureIndex::from_program(program, model);
             let child = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: model.resolve_name("Child").unwrap(),
                     arguments: Vec::new().into(),
                     nullable: false,
@@ -7226,7 +7242,7 @@ fn later_mixin_getter_shadows_base_method_for_all_instance_lookup() {
             let signatures = SignatureIndex::from_program(program, model);
             let child = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: model.resolve_name("Child").unwrap(),
                     arguments: Vec::new().into(),
                     nullable: false,
@@ -7254,7 +7270,7 @@ fn later_mixin_method_shadows_base_read_for_all_instance_lookup() {
             let signatures = SignatureIndex::from_program(program, model);
             let child = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: model.resolve_name("Child").unwrap(),
                     arguments: Vec::new().into(),
                     nullable: false,
@@ -7346,17 +7362,19 @@ fn negative_supertype_queries_visit_each_diamond_declaration_once() {
         } else {
             format!("Join{}", level - 1)
         };
-        source.push_str(&format!(
+        write!(
+            source,
             "abstract class Left{level}<T> implements {base}<T> {{}} \
              abstract class Right{level}<T> implements {base}<T> {{}} \
              abstract class Join{level}<T> implements Left{level}<T>, Right{level}<T> {{}} "
-        ));
+        )
+        .unwrap();
     }
     with_model(&source, |program, model| {
         let signatures = SignatureIndex::from_program(program, model);
         let receiver = ResolvedType {
             kind: ResolvedTypeKind::Interface {
-                occurrence: Default::default(),
+                occurrence: FunctionTypeAlias::default(),
                 identity: model.resolve_name("Join23").unwrap(),
                 arguments: vec![model.core_type("int", false)].into(),
                 nullable: false,
@@ -7554,7 +7572,7 @@ fn object_fallback_does_not_beat_earlier_application_chain_members() {
             for (class_name, owner_name) in [("FromBase", "Base"), ("FromMixin", "First")] {
                 let receiver = ResolvedType {
                     kind: ResolvedTypeKind::Interface {
-                        occurrence: Default::default(),
+                        occurrence: FunctionTypeAlias::default(),
                         identity: model.resolve_name(class_name).unwrap(),
                         arguments: Vec::new().into(),
                         nullable: false,
@@ -7584,7 +7602,7 @@ fn super_owner_checks_mixin_constraints_before_object_and_superclasses() {
             ] {
                 let receiver = ResolvedType {
                     kind: ResolvedTypeKind::Interface {
-                        occurrence: Default::default(),
+                        occurrence: FunctionTypeAlias::default(),
                         identity: model.resolve_name(receiver).unwrap(),
                         arguments: Vec::new().into(),
                         nullable: false,
@@ -7609,11 +7627,11 @@ fn extension_owner_checks_concrete_arguments_and_preserves_unknowns() {
             for (element, owner) in [("IntElement", "General"), ("StringElement", "Strings")] {
                 let receiver = ResolvedType {
                     kind: ResolvedTypeKind::Interface {
-                        occurrence: Default::default(),
+                        occurrence: FunctionTypeAlias::default(),
                         identity: model.resolve_name("SourceList").unwrap(),
                         arguments: vec![ResolvedType {
                             kind: ResolvedTypeKind::Interface {
-                                occurrence: Default::default(),
+                                occurrence: FunctionTypeAlias::default(),
                                 identity: model.resolve_name(element).unwrap(),
                                 arguments: Vec::new().into(),
                                 nullable: false,
@@ -7632,7 +7650,7 @@ fn extension_owner_checks_concrete_arguments_and_preserves_unknowns() {
             }
             let receiver = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: model.resolve_name("IntList").unwrap(),
                     arguments: Vec::new().into(),
                     nullable: false,
@@ -7645,7 +7663,7 @@ fn extension_owner_checks_concrete_arguments_and_preserves_unknowns() {
             );
             let unknown = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: model.resolve_name("SourceList").unwrap(),
                     arguments: vec![ResolvedType::UNKNOWN].into(),
                     nullable: false,
@@ -8062,7 +8080,7 @@ fn project_extension_owner_beats_more_specific_platform_extension() {
                 .identity = Some(DeclarationIdentity::sdk("dart:core", "Platform"));
             let receiver = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: model.resolve_name("Receiver").unwrap(),
                     arguments: Vec::new().into(),
                     nullable: false,
@@ -8213,7 +8231,7 @@ fn private_inherited_members_are_visible_from_same_library_parts() {
     let model = SemanticModel::new(&part_path, &part_parsed, &identities, Some(&types));
     let child = ResolvedType {
         kind: ResolvedTypeKind::Interface {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             identity: model.resolve_name("Child").unwrap(),
             arguments: Vec::new().into(),
             nullable: false,
@@ -8301,7 +8319,7 @@ fn private_inherited_members_are_hidden_across_libraries() {
     );
     let child = ResolvedType {
         kind: ResolvedTypeKind::Interface {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             identity: model.resolve_name("Child").unwrap(),
             arguments: Vec::new().into(),
             nullable: false,
@@ -8386,7 +8404,7 @@ fn private_inherited_lookup_skips_invisible_override() {
     let base_identity = model.resolve_name("Base").unwrap();
     let child = ResolvedType {
         kind: ResolvedTypeKind::Interface {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             identity: model.resolve_name("Child").unwrap(),
             arguments: Vec::new().into(),
             nullable: false,
@@ -8452,7 +8470,7 @@ fn cyclic_supertypes_are_unknown() {
             let b = model.resolve_name("B").unwrap();
             let receiver = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: a,
                     arguments: Vec::new().into(),
                     nullable: false,
@@ -8734,7 +8752,7 @@ fn field_forwarders_check_private_getters_from_their_own_library() {
     let model = SemanticModel::new(&fake_path, &fake_parsed, &identities, Some(&types));
     let receiver = ResolvedType {
         kind: ResolvedTypeKind::Interface {
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             identity: model.resolve_name("Impl").unwrap(),
             arguments: Vec::new().into(),
             nullable: false,

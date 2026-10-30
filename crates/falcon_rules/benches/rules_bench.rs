@@ -9,7 +9,7 @@ use std::path::Path;
 // Copied from crates/falcon_dart_parser/benches/parser_bench.rs for consistency.
 static SNIPPETS: &[&str] = &[
     // 1. Class with fields, constructor, method
-    r#"
+    r"
 import 'dart:core';
 
 class User {
@@ -24,9 +24,9 @@ class User {
   @override
   String toString() => 'User(name: $name, age: $age)';
 }
-"#,
+",
     // 2. Sealed class + pattern matching
-    r#"
+    r"
 sealed class Shape {}
 class Circle extends Shape { final double radius; Circle(this.radius); }
 class Rect extends Shape { final double w, h; Rect(this.w, this.h); }
@@ -35,9 +35,9 @@ double area(Shape s) => switch (s) {
   Circle(:final radius) => 3.14159 * radius * radius,
   Rect(:final w, :final h) => w * h,
 };
-"#,
+",
     // 3. Async/await with generics
-    r#"
+    r"
 import 'dart:async';
 
 Future<List<T>> fetchAll<T>(List<Future<T>> futures) async {
@@ -54,9 +54,9 @@ Stream<int> countDown(int from) async* {
     yield i;
   }
 }
-"#,
+",
     // 4. Mixin + interface + enum
-    r#"
+    r"
 mixin Logging {
   void log(String msg) => print('[${runtimeType}] $msg');
 }
@@ -69,9 +69,9 @@ abstract interface class Repository<T> {
 enum Status { active, inactive, pending;
   bool get isActive => this == Status.active;
 }
-"#,
+",
     // 5. Collection comprehensions + typed literals
-    r#"
+    r"
 List<int> range(int n) => [for (var i = 0; i < n; i++) i];
 
 Map<String, int> wordCount(List<String> words) => {
@@ -85,9 +85,9 @@ const config = <String, dynamic>{
   'port': 5432,
   'ssl': true,
 };
-"#,
+",
     // 6. Extension methods + null safety
-    r#"
+    r"
 extension StringExt on String {
   String get capitalised => isEmpty ? this : '${this[0].toUpperCase()}${substring(1)}';
   String? get nullIfEmpty => isEmpty ? null : this;
@@ -98,9 +98,9 @@ extension IntExt on int {
   bool get isEven => this % 2 == 0;
   List<int> to(int end) => [for (var i = this; i <= end; i++) i];
 }
-"#,
+",
     // 7. Record types + destructuring
-    r#"
+    r"
 typedef Point = (double x, double y);
 
 (double, double) translate((double, double) p, double dx, double dy) {
@@ -109,9 +109,9 @@ typedef Point = (double x, double y);
 }
 
 ({String name, int age}) makeRecord(String n, int a) => (name: n, age: a);
-"#,
+",
     // 8. Factory constructor + static methods
-    r#"
+    r"
 class Result<T, E> {
   final T? _value;
   final E? _error;
@@ -133,9 +133,9 @@ class Result<T, E> {
     }
   }
 }
-"#,
+",
     // 9. Abstract class hierarchy + annotations
-    r#"
+    r"
 @immutable
 abstract class Widget {
   const Widget({this.key});
@@ -152,9 +152,9 @@ class StatelessWidget extends Widget {
 
   Widget build(BuildContext context);
 }
-"#,
+",
     // 10. Top-level getters/setters + late fields + typedef
-    r#"
+    r"
 typedef Callback<T> = void Function(T value);
 typedef AsyncCallback = Future<void> Function();
 
@@ -172,7 +172,7 @@ class AppConfig {
     _baseUrl = v;
   }
 }
-"#,
+",
 ];
 
 fn run_all_rules_on_source(rules: &[(&'static str, Box<dyn Rule>)], path: &Path, source: &str) {
@@ -197,7 +197,7 @@ fn bench_all_rules_synthetic(c: &mut Criterion) {
     c.bench_function("all_rules_synthetic_20", |b| {
         b.iter(|| {
             for (i, src) in files.iter().enumerate() {
-                let path = std::path::PathBuf::from(format!("synthetic_{}.dart", i));
+                let path = std::path::PathBuf::from(format!("synthetic_{i}.dart"));
                 run_all_rules_on_source(&rules, &path, src);
             }
         });

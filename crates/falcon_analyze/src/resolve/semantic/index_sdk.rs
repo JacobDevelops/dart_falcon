@@ -1,5 +1,9 @@
 use super::super::sdk_hierarchy::SDK_HIERARCHY;
-use super::*;
+use super::{
+    Arc, DeclarationFacts, DeclarationIdentity, FunctionTypeAlias, FunctionTypeShape, HashMap,
+    MemberFacts, MemberKind, ParamKind, ParameterContract, ParameterOwner, ResolvedSignature,
+    ResolvedType, SignatureIndex, TypeParameterId, empty_parameter_contracts,
+};
 use crate::resolve::semantic::ResolvedTypeKind;
 
 impl SignatureIndex {
@@ -130,7 +134,7 @@ impl SignatureIndex {
             let parameter = sdk_parameter_type(name, 0);
             let identity = DeclarationIdentity::sdk(library, name);
             let supertype = ResolvedType::from_kind(ResolvedTypeKind::Interface {
-                occurrence: Default::default(),
+                occurrence: FunctionTypeAlias::default(),
                 identity: DeclarationIdentity::sdk("dart:core", "Iterable"),
                 arguments: vec![parameter.clone()].into(),
                 nullable: false,
@@ -171,7 +175,7 @@ impl SignatureIndex {
                 },
             }],
             ..ResolvedSignature::returning(ResolvedType::from_kind(ResolvedTypeKind::Interface {
-                occurrence: Default::default(),
+                occurrence: FunctionTypeAlias::default(),
                 identity: DeclarationIdentity::sdk("dart:core", "Iterable"),
                 arguments: vec![map_type].into(),
                 nullable: false,
@@ -316,7 +320,7 @@ impl SignatureIndex {
                         Vec::new()
                     };
                     ResolvedType::from_kind(ResolvedTypeKind::Interface {
-                        occurrence: Default::default(),
+                        occurrence: FunctionTypeAlias::default(),
                         identity: identity.clone(),
                         arguments: arguments.into(),
                         nullable: false,
@@ -562,7 +566,7 @@ mod tests {
             .or_default()
             .supertypes = Some((Vec::new(), Vec::new()));
         signatures.add_sdk_signatures();
-        assert!(
+        assert_eq!(
             signatures
                 .type_facts
                 .get(&string)
@@ -570,8 +574,8 @@ mod tests {
                 .supertypes
                 .as_ref()
                 .unwrap()
-                .1
-                .is_empty()
+                .1,
+            [] as [ResolvedType; 0]
         );
         for name in ["List", "Set"] {
             let identity = DeclarationIdentity::sdk("dart:core", name);

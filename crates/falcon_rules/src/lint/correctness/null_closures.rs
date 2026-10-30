@@ -32,7 +32,9 @@ impl Rule for NullClosures {
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diagnostics) }
+    ) -> RulePreparation<'a> {
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diagnostics)
+    }
 }
 
 struct Collector<'a> {
@@ -42,7 +44,6 @@ struct Collector<'a> {
 
 impl Collector<'_> {
     fn is_sdk_instance(
-        &self,
         receiver: &ResolvedType,
         library: &str,
         name: &str,
@@ -55,7 +56,10 @@ impl Collector<'_> {
     }
 
     fn report(&mut self, span: Span) {
-        self.diagnostics.push(self.ctx.diagnostic("Pass a closure instead of `null`.", span));
+        self.diagnostics.push(
+            self.ctx
+                .diagnostic("Pass a closure instead of `null`.", span),
+        );
     }
 
     fn check_arguments(&mut self, args: ArgList<'_>, positional: &[usize], named: &[&str]) {
@@ -84,11 +88,7 @@ impl Collector<'_> {
         }
     }
 
-    fn sdk_type(
-        &self,
-        expression: Expr<'_>,
-        state: &SemanticState<'_>,
-    ) -> Option<DeclarationIdentity> {
+    fn sdk_type(expression: Expr<'_>, state: &SemanticState<'_>) -> Option<DeclarationIdentity> {
         let segments = match expression {
             Expr::Ident(identifier) if !state.environment.is_bound(identifier.name()) => {
                 vec![identifier.name().to_owned()]
@@ -109,7 +109,7 @@ impl Collector<'_> {
 
     fn check_call(&mut self, callee: Expr<'_>, args: ArgList<'_>, state: &SemanticState<'_>) {
         if let Expr::Ident(_) = callee {
-            if let Some(identity) = self.sdk_type(callee, state) {
+            if let Some(identity) = Self::sdk_type(callee, state) {
                 self.check_constructor(&identity, None, args);
             }
             return;
@@ -118,7 +118,7 @@ impl Collector<'_> {
             return;
         };
         let object = field.object();
-        if let Some(identity) = self.sdk_type(object, state) {
+        if let Some(identity) = Self::sdk_type(object, state) {
             if self.check_constructor(&identity, Some(field.field().name()), args) {
                 return;
             }
@@ -129,10 +129,11 @@ impl Collector<'_> {
             };
             if is_class {
                 match (identity.name(), field.field().name()) {
-                    ("Future", "doWhile") => self.check_arguments(args, &[0], &[]),
+                    ("Future", "doWhile") | ("Timer", "run") => {
+                        self.check_arguments(args, &[0], &[]);
+                    }
                     ("Future", "forEach") => self.check_arguments(args, &[1], &[]),
                     ("Future", "wait") => self.check_arguments(args, &[], &["cleanUp"]),
-                    ("Timer", "run") => self.check_arguments(args, &[0], &[]),
                     _ => {}
                 }
             }
@@ -144,19 +145,18 @@ impl Collector<'_> {
             state.infer(object)
         };
         let method = field.field().name();
-        if self.is_sdk_instance(&receiver, "dart:core", "Iterable", state) {
+        if Self::is_sdk_instance(&receiver, "dart:core", "Iterable", state) {
             match method {
                 "any" | "every" | "expand" | "map" | "reduce" | "skipWhile" | "takeWhile"
-                | "where" => self.check_arguments(args, &[0], &[]),
+                | "where" | "forEach" => self.check_arguments(args, &[0], &[]),
                 "firstWhere" | "lastWhere" | "singleWhere" => {
-                    self.check_arguments(args, &[0], &["orElse"])
+                    self.check_arguments(args, &[0], &["orElse"]);
                 }
-                "forEach" => self.check_arguments(args, &[0], &[]),
                 "fold" => self.check_arguments(args, &[1], &[]),
                 _ => {}
             }
         }
-        if self.is_sdk_instance(&receiver, "dart:core", "Map", state) {
+        if Self::is_sdk_instance(&receiver, "dart:core", "Map", state) {
             match method {
                 "forEach" => self.check_arguments(args, &[0], &[]),
                 "putIfAbsent" => self.check_arguments(args, &[1], &[]),
@@ -164,20 +164,20 @@ impl Collector<'_> {
             }
         }
         if matches!(method, "removeWhere" | "retainWhere")
-            && (self.is_sdk_instance(&receiver, "dart:core", "List", state)
-                || self.is_sdk_instance(&receiver, "dart:core", "Set", state)
-                || self.is_sdk_instance(&receiver, "dart:collection", "Queue", state))
+            && (Self::is_sdk_instance(&receiver, "dart:core", "List", state)
+                || Self::is_sdk_instance(&receiver, "dart:core", "Set", state)
+                || Self::is_sdk_instance(&receiver, "dart:collection", "Queue", state))
         {
             self.check_arguments(args, &[0], &[]);
         }
-        if self.is_sdk_instance(&receiver, "dart:core", "String", state) {
+        if Self::is_sdk_instance(&receiver, "dart:core", "String", state) {
             match method {
                 "replaceAllMapped" | "replaceFirstMapped" => self.check_arguments(args, &[1], &[]),
                 "splitMapJoin" => self.check_arguments(args, &[], &["onMatch", "onNonMatch"]),
                 _ => {}
             }
         }
-        if self.is_sdk_instance(&receiver, "dart:async", "Future", state) {
+        if Self::is_sdk_instance(&receiver, "dart:async", "Future", state) {
             match method {
                 "then" => self.check_arguments(args, &[0], &["onError"]),
                 "complete" => self.check_arguments(args, &[0], &[]),
@@ -196,15 +196,12 @@ impl Collector<'_> {
             return false;
         };
         match (library.as_str(), name.as_str(), constructor) {
-            ("dart:async", "Future", None | Some("microtask") | Some("sync")) => {
+            ("dart:async", "Future", None | Some("microtask" | "sync")) => {
                 self.check_arguments(args, &[0], &[]);
                 true
             }
-            ("dart:async", "Timer", None | Some("periodic")) => {
-                self.check_arguments(args, &[1], &[]);
-                true
-            }
-            ("dart:core", "List", Some("generate")) => {
+            ("dart:async", "Timer", None | Some("periodic"))
+            | ("dart:core", "List", Some("generate")) => {
                 self.check_arguments(args, &[1], &[]);
                 true
             }

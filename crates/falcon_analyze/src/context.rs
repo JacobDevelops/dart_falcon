@@ -114,6 +114,9 @@ impl<'a> AnalyzeContext<'a> {
     }
 
     /// Record a configuration error discovered by a lazy rule-options read.
+    ///
+    /// # Panics
+    /// Panics if the configuration-error cache mutex is poisoned.
     pub fn report_config_error(&self, message: String) {
         let mut errors = self.cache.config_errors.lock().unwrap();
         if errors
@@ -176,6 +179,9 @@ impl<'a> AnalyzeContext<'a> {
     }
 
     /// Compare declaration source ownership using the environment's package snapshot.
+    ///
+    /// # Panics
+    /// Panics if the same-package cache mutex is poisoned.
     pub fn in_same_package(&self, path: &std::path::Path) -> bool {
         let Some(own) = self.package() else {
             return false;
@@ -317,6 +323,7 @@ impl<'a> AnalyzeContext<'a> {
 
     /// Attach the run's analysis environment and cache the file's package
     /// language version from it.
+    #[must_use]
     pub fn with_environment(self, environment: Option<&'a AnalysisEnvironment>) -> Self {
         let package_version = environment
             .and_then(|environment| environment.package_language_version(self.file_path));
@@ -371,24 +378,28 @@ impl<'a> AnalyzeContext<'a> {
     }
 
     /// Attach a cross-file type index.
+    #[must_use]
     pub fn with_types(mut self, types: &'a TypeIndex) -> Self {
         self.types = Some(types);
         self
     }
 
     /// Attach the project declaration identity index.
+    #[must_use]
     pub fn with_identities(mut self, identities: &'a IdentityIndex) -> Self {
         self.identities = Some(identities);
         self
     }
 
     /// Attach project-wide resolved signatures.
+    #[must_use]
     pub fn with_signatures(mut self, signatures: &'a SignatureIndex) -> Self {
         self.signatures = Some(signatures);
         self
     }
 
     /// Attach this file's library context.
+    #[must_use]
     pub fn with_library(mut self, library: &'a LibraryUnit<'a>) -> Self {
         self.library = Some(library);
         self

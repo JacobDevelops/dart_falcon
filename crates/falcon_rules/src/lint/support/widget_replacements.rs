@@ -76,7 +76,7 @@ pub(crate) fn only_named(args: ArgList<'_>, allowed: &[&str]) -> bool {
 pub(crate) fn argument<'a>(args: ArgList<'a>, name: &str) -> Option<Expr<'a>> {
     args.named()
         .find(|argument| argument.name().name() == name)
-        .map(|argument| argument.value())
+        .map(NamedArg::value)
 }
 
 pub(crate) fn only_property(

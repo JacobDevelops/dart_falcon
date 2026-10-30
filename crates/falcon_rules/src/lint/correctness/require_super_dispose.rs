@@ -1,4 +1,4 @@
-//! Require super.dispose() in Flutter State dispose overrides. Presence is checked separately from the ordering rule; nested callbacks do not count.
+//! Require `super.dispose()` in Flutter State dispose overrides. Presence is checked separately from the ordering rule; nested callbacks do not count.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;

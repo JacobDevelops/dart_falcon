@@ -19,7 +19,7 @@ impl Rule for AvoidWebLibrariesInFlutter {
         if !program
             .imports()
             .any(|import| is_web_library(&import.uri().value()))
-            || !ctx.file_package().metadata().is_some_and(|package| package.checks_flutter_web_imports())
+            || !ctx.file_package().metadata().is_some_and(falcon_analyze::PackageMetadata::checks_flutter_web_imports)
         {
             return RulePreparation::Diagnostics(Vec::new());
         }

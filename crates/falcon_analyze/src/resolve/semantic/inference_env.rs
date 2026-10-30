@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    Arc, AstChildren, DartType, Expr, FormalParamList, FunctionBody, FxHashMap, HashMap,
+    ResolvedType, SemanticModel, SignatureIndex, Span, TypeParam, TypeParameterScope,
+};
 use crate::resolve::lexical_scope::{LexicalScopes, ScopeStorage};
 use crate::resolve::semantic::ResolvedTypeKind;
 
@@ -287,8 +290,7 @@ impl TypeEnvironment {
 
     pub fn declared_type(&self, name: &str) -> ResolvedType {
         self.binding(name)
-            .map(|binding| binding.declared.clone())
-            .unwrap_or(ResolvedType::UNKNOWN)
+            .map_or(ResolvedType::UNKNOWN, |binding| binding.declared.clone())
     }
 
     /// The promotion chain of `name`, most general first.
@@ -447,7 +449,7 @@ impl TypeEnvironment {
         }
     }
 
-    fn receiver_name<'syntax>(object: Expr<'syntax>) -> Option<&'syntax str> {
+    fn receiver_name(object: Expr<'_>) -> Option<&str> {
         match object {
             Expr::Ident(identifier) => Some(identifier.name()),
             _ => None,
@@ -567,9 +569,9 @@ impl TypeEnvironment {
     }
 
     pub fn lookup(&self, name: &str) -> ResolvedType {
-        self.binding(name)
-            .map(|binding| binding.promoted.last().unwrap_or(&binding.declared).clone())
-            .unwrap_or(ResolvedType::UNKNOWN)
+        self.binding(name).map_or(ResolvedType::UNKNOWN, |binding| {
+            binding.promoted.last().unwrap_or(&binding.declared).clone()
+        })
     }
 }
 

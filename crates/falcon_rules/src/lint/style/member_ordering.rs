@@ -22,8 +22,8 @@
 //! `dispose`, `build`, and `overridden-methods`.
 
 use falcon_analyze::{
-    AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,
-    StructuralTraversal, TypeParameterScope,
+    AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, SemanticModel,
+    StructuralRuleVisitor, StructuralTraversal, TypeParameterScope,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -44,7 +44,6 @@ crate::lint::options::impl_options!(Options);
 
 #[derive(Default)]
 pub struct MemberOrdering;
-
 
 impl Rule for MemberOrdering {
     fn prepare<'a>(
@@ -83,8 +82,8 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         }
             match decl {
                 TopLevelDecl::Class(c) => check_class(
-                    c.members(),
-                    c.extends().map(|ty| self.model.resolve_type_in(ty, &parameters)),
+                    &c.members(),
+                    c.extends().map(|ty| self.model.resolve_type_in(ty, &parameters)).as_ref(),
                     self.order,
                     self.widgets_order,
                     &mut self.diags,
@@ -92,11 +91,11 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     self.model,
                 ),
                 TopLevelDecl::Mixin(m) => {
-                    check_class(m.members(), None, self.order, self.widgets_order, &mut self.diags, self.ctx, self.model)
+                    check_class(&m.members(), None, self.order, self.widgets_order, &mut self.diags, self.ctx, self.model);
                 }
                 TopLevelDecl::MixinClass(mc) => check_class(
-                    mc.members(),
-                    mc.extends().map(|ty| self.model.resolve_type_in(ty, &parameters)),
+                    &mc.members(),
+                    mc.extends().map(|ty| self.model.resolve_type_in(ty, &parameters)).as_ref(),
                     self.order,
                     self.widgets_order,
                     &mut self.diags,
@@ -115,8 +114,8 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 }
 
 fn check_class(
-    members: AstChildren<'_, ClassMember<'_>>,
-    extends: Option<ResolvedType>,
+    members: &AstChildren<'_, ClassMember<'_>>,
+    extends: Option<&ResolvedType>,
     order: Option<&[MemberCategory]>,
     widgets_order: Option<&[WidgetCategory]>,
     diags: &mut Vec<Diagnostic>,
@@ -127,10 +126,10 @@ fn check_class(
     // lifecycle sequence; otherwise `order` (if any) drives the check; otherwise
     // the built-in default order.
     if let Some(seq) = widgets_order
-        && extends_state(extends.as_ref())
+        && extends_state(extends)
     {
         check_sequence(
-            members,
+            members.clone(),
             diags,
             ctx,
             |m| widget_rank(m, seq, model),
@@ -138,14 +137,14 @@ fn check_class(
         );
     } else if let Some(seq) = order {
         check_sequence(
-            members,
+            members.clone(),
             diags,
             ctx,
             |m| category_rank(m, seq),
             order_message(),
         );
     } else {
-        check_default(members, diags, ctx);
+        check_default(members.clone(), diags, ctx);
     }
 }
 
@@ -158,7 +157,10 @@ fn extends_state(extends: Option<&ResolvedType>) -> bool {
 /// Lifecycle token for a State member, for `widgets_order`. `overridden-methods`
 /// is a best-effort catch-all for any other `@override` method.
 fn widget_token(member: ClassMember<'_>, model: SemanticModel<'_>) -> Option<WidgetCategory> {
-    use WidgetCategory::*;
+    use WidgetCategory::{
+        Build, Constructor, DidChangeDependencies, DidUpdateWidget, Dispose, InitState,
+        OverriddenMethods,
+    };
     match member {
         ClassMember::Constructor(_) => Some(Constructor),
         ClassMember::Method(m) => match m.name().name() {
@@ -174,7 +176,11 @@ fn widget_token(member: ClassMember<'_>, model: SemanticModel<'_>) -> Option<Wid
     }
 }
 
-fn widget_rank(member: ClassMember<'_>, seq: &[WidgetCategory], model: SemanticModel<'_>) -> Option<usize> {
+fn widget_rank(
+    member: ClassMember<'_>,
+    seq: &[WidgetCategory],
+    model: SemanticModel<'_>,
+) -> Option<usize> {
     let token = widget_token(member, model)?;
     seq.iter().position(|t| *t == token)
 }

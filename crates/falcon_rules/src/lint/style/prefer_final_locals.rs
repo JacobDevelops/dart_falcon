@@ -207,7 +207,7 @@ impl<'a> Collector<'_, 'a> {
         };
         let span = declaration
             .keyword_span()
-            .or_else(|| declaration.var_type().map(|ty| ty.span()))
+            .or_else(|| declaration.var_type().map(DartType::span))
             .unwrap_or(first.name().span());
         self.report(span);
     }
@@ -467,7 +467,7 @@ mod tests {
 
     #[test]
     fn closure_write_counts_as_mutation() {
-        assert!(lines("void f() { var a = 1; void g() { a = 2; } g(); }").is_empty());
+        assert_eq!(lines("void f() { var a = 1; void g() { a = 2; } g(); }"), [] as [usize; 0]);
     }
 
     #[test]
@@ -480,7 +480,7 @@ mod tests {
 
     #[test]
     fn local_keyword_and_type_spans_ignore_var_in_documentation_and_metadata() {
-        let source = r#"void f() {
+        let source = r"void f() {
   /// var belongs to the documentation.
   @pragma('var')
   var inferred = 1;
@@ -491,7 +491,7 @@ mod tests {
   @pragma('var')
   var [first, second] = [inferred, typed];
   print(first + second);
-}"#;
+}";
         let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
         let parsed = Arc::new(ParsedFile {

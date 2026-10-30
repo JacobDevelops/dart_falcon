@@ -14,8 +14,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::visit::{Visitor, walk_expr_chain};
 use falcon_syntax::cst::*;
@@ -169,11 +169,11 @@ impl<'a> Collector<'a> {
                     }
                     // Core int/double operands keep +, -, and * numeric without inferring every prefix.
                     check.valid = match node {
-                        Expr::Paren(_) => true,
-                        Expr::IntLit(_) | Expr::DoubleLit(_) => true,
+                        Expr::Paren(_) | Expr::IntLit(_) | Expr::DoubleLit(_) => true,
                         Expr::Ident(identifier) if numeric(node, check.state) => {
                             check.has_dependency = true;
-                            check.collector
+                            check
+                                .collector
                                 .invariant_binding(identifier, check.loop_span, check.state)
                                 .is_some()
                         }
@@ -294,7 +294,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 })
             })
             .map(|candidate| {
-                self.ctx.diagnostic("This computation is loop-invariant. Move the final variable before the loop.", candidate.span)
+                self.ctx.diagnostic(
+                    "This computation is loop-invariant. Move the final variable before the loop.",
+                    candidate.span,
+                )
             })
             .collect()
     }

@@ -8,7 +8,7 @@ use common_files::collect_dart_files;
 // Cycled to reach the 50-file target required by the M1.5 performance gate.
 static SNIPPETS: &[&str] = &[
     // 1. Class with fields, constructor, method
-    r#"
+    r"
 import 'dart:core';
 
 class User {
@@ -23,9 +23,9 @@ class User {
   @override
   String toString() => 'User(name: $name, age: $age)';
 }
-"#,
+",
     // 2. Sealed class + pattern matching
-    r#"
+    r"
 sealed class Shape {}
 class Circle extends Shape { final double radius; Circle(this.radius); }
 class Rect extends Shape { final double w, h; Rect(this.w, this.h); }
@@ -34,9 +34,9 @@ double area(Shape s) => switch (s) {
   Circle(:final radius) => 3.14159 * radius * radius,
   Rect(:final w, :final h) => w * h,
 };
-"#,
+",
     // 3. Async/await with generics
-    r#"
+    r"
 import 'dart:async';
 
 Future<List<T>> fetchAll<T>(List<Future<T>> futures) async {
@@ -53,9 +53,9 @@ Stream<int> countDown(int from) async* {
     yield i;
   }
 }
-"#,
+",
     // 4. Mixin + interface + enum
-    r#"
+    r"
 mixin Logging {
   void log(String msg) => print('[${runtimeType}] $msg');
 }
@@ -68,9 +68,9 @@ abstract interface class Repository<T> {
 enum Status { active, inactive, pending;
   bool get isActive => this == Status.active;
 }
-"#,
+",
     // 5. Collection comprehensions + typed literals
-    r#"
+    r"
 List<int> range(int n) => [for (var i = 0; i < n; i++) i];
 
 Map<String, int> wordCount(List<String> words) => {
@@ -84,9 +84,9 @@ const config = <String, dynamic>{
   'port': 5432,
   'ssl': true,
 };
-"#,
+",
     // 6. Extension methods + null safety
-    r#"
+    r"
 extension StringExt on String {
   String get capitalised => isEmpty ? this : '${this[0].toUpperCase()}${substring(1)}';
   String? get nullIfEmpty => isEmpty ? null : this;
@@ -97,9 +97,9 @@ extension IntExt on int {
   bool get isEven => this % 2 == 0;
   List<int> to(int end) => [for (var i = this; i <= end; i++) i];
 }
-"#,
+",
     // 7. Record types + destructuring
-    r#"
+    r"
 typedef Point = (double x, double y);
 
 (double, double) translate((double, double) p, double dx, double dy) {
@@ -108,9 +108,9 @@ typedef Point = (double x, double y);
 }
 
 ({String name, int age}) makeRecord(String n, int a) => (name: n, age: a);
-"#,
+",
     // 8. Factory constructor + static methods
-    r#"
+    r"
 class Result<T, E> {
   final T? _value;
   final E? _error;
@@ -132,9 +132,9 @@ class Result<T, E> {
     }
   }
 }
-"#,
+",
     // 9. Abstract class hierarchy + annotations
-    r#"
+    r"
 @immutable
 abstract class Widget {
   const Widget({this.key});
@@ -151,9 +151,9 @@ class StatelessWidget extends Widget {
 
   Widget build(BuildContext context);
 }
-"#,
+",
     // 10. Top-level getters/setters + late fields + typedef
-    r#"
+    r"
 typedef Callback<T> = void Function(T value);
 typedef AsyncCallback = Future<void> Function();
 
@@ -171,7 +171,7 @@ class AppConfig {
     _baseUrl = v;
   }
 }
-"#,
+",
 ];
 
 fn bench_parse_50_files(c: &mut Criterion) {
@@ -197,10 +197,10 @@ fn bench_parse_single_snippets(c: &mut Criterion) {
 
 fn bench_parse_corpus(c: &mut Criterion) {
     // If the jfit corpus is present, benchmark against real files.
-    let corpus_root = std::env::var("JFIT_PATH")
-        .ok()
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("/home/jacob/Documents/Developer/jfit"));
+    let corpus_root = std::env::var("JFIT_PATH").ok().map_or_else(
+        || std::path::PathBuf::from("/home/jacob/Documents/Developer/jfit"),
+        std::path::PathBuf::from,
+    );
     let mobile_lib = corpus_root.join("apps/mobile/lib");
     let search_root = if mobile_lib.exists() {
         mobile_lib

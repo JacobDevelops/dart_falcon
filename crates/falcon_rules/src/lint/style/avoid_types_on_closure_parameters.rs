@@ -107,31 +107,31 @@ impl ReturnedClosures<'_, '_> {
 impl<'a> Visitor<'a> for ReturnedClosures<'_, '_> {
     fn visit_function_decl(&mut self, node: FunctionDecl<'a>) {
         self.declared(node.async_marker(), node.return_type(), |v| {
-            visitor::walk_function_decl(v, node)
+            visitor::walk_function_decl(v, node);
         });
     }
 
     fn visit_method_decl(&mut self, node: MethodDecl<'a>) {
         self.declared(node.async_marker(), node.return_type(), |v| {
-            visitor::walk_method_decl(v, node)
+            visitor::walk_method_decl(v, node);
         });
     }
 
     fn visit_getter_decl(&mut self, node: GetterDecl<'a>) {
         self.declared(node.async_marker(), node.return_type(), |v| {
-            visitor::walk_getter_decl(v, node)
+            visitor::walk_getter_decl(v, node);
         });
     }
 
     fn visit_setter_decl(&mut self, node: SetterDecl<'a>) {
         self.with_frame(ReturnFrame::Declared(false), |v| {
-            visitor::walk_setter_decl(v, node)
+            visitor::walk_setter_decl(v, node);
         });
     }
 
     fn visit_constructor_decl(&mut self, node: ConstructorDecl<'a>) {
         self.with_frame(ReturnFrame::Declared(false), |v| {
-            visitor::walk_constructor_decl(v, node)
+            visitor::walk_constructor_decl(v, node);
         });
     }
 
@@ -139,7 +139,7 @@ impl<'a> Visitor<'a> for ReturnedClosures<'_, '_> {
         match node {
             ClassMember::Operator(operator) => {
                 self.declared(operator.async_marker(), operator.return_type(), |v| {
-                    visitor::walk_class_member(v, node)
+                    visitor::walk_class_member(v, node);
                 });
             }
             _ => visitor::walk_class_member(self, node),
@@ -150,7 +150,7 @@ impl<'a> Visitor<'a> for ReturnedClosures<'_, '_> {
         match node {
             Stmt::LocalFunc(function) => {
                 self.declared(function.async_marker(), function.return_type(), |v| {
-                    visitor::walk_stmt(v, node)
+                    visitor::walk_stmt(v, node);
                 });
             }
             Stmt::Return(statement) => {

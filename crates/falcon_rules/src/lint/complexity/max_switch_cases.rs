@@ -53,7 +53,7 @@ impl Rule for MaxSwitchCases {
 fn count_non_default_cases(switch_stmt: SwitchStmt<'_>) -> usize {
     switch_stmt
         .cases()
-        .flat_map(|case| case.cases())
+        .flat_map(SwitchCase::cases)
         .filter(|kind| matches!(kind, SwitchCaseKind::Pattern(..) | SwitchCaseKind::Expr(..)))
         .count()
 }

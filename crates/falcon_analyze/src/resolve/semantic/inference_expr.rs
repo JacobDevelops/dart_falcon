@@ -1,4 +1,11 @@
-use super::*;
+use super::{
+    AstChildren, BinaryOp, ClosureReturns, CollectionTypes, Cow, DartType, DeclarationIdentity,
+    Expr, FunctionSyntax, FxHashMap, FxHashSet, InferenceContext, QualifiedName, ResolvedType,
+    SemanticModel, SignatureIndex, TypeEnvironment, TypeParameterScope, UnaryOp, Visitor,
+    binary_result, contextual_join, expression_has_dot_shorthand_base, expression_qualified_name,
+    has_inference_holes, inference_join, null_shorted, numeric, operator_parameter_type,
+    operator_return_type, queries, resolve_call_constructor, resolve_new_constructor,
+};
 use crate::resolve::semantic::ResolvedTypeKind;
 use falcon_syntax::cst::{BinaryExpr, ConditionalExpr};
 use std::ops::ControlFlow;
@@ -65,7 +72,7 @@ impl TypeEnvironment {
             lookup,
             argument_fallback: None,
         };
-        self.infer_in_context(expr, context, expected, None)
+        self.infer_in_context(expr, &context, expected, None)
     }
 
     /// Reuses branch results only when their promotion state matches the caller.
@@ -263,7 +270,7 @@ impl TypeEnvironment {
             } else {
                 (&nested, nullable.as_ref())
             };
-            let left = self.contextual_callable_type(ty.non_null(), context, expected);
+            let left = Self::contextual_callable_type(ty.non_null(), context, expected);
             let right = self.infer_with_context(
                 binary.right(),
                 context.model,
@@ -276,7 +283,7 @@ impl TypeEnvironment {
             );
             ty = contextual_join(&[left, right], expected, context.signatures, context.model);
             if depth != 0 {
-                ty = self.contextual_callable_type(ty, context, expected);
+                ty = Self::contextual_callable_type(ty, context, expected);
             }
             publish(Expr::Binary(binary), &ty);
         }
@@ -347,7 +354,7 @@ impl TypeEnvironment {
                         .then(|| if child_shorted { reached } else { ty.clone() });
                     self.infer_unshorted(
                         selector.expression,
-                        queries::context_copy(&context),
+                        &context,
                         selector.expected.as_ref(),
                         receiver,
                     )
@@ -370,7 +377,7 @@ impl TypeEnvironment {
                 Expr::NullAssert(_) => ty.non_null(),
                 _ => unreachable!("selector spine"),
             };
-            ty = self.contextual_callable_type(
+            ty = Self::contextual_callable_type(
                 reached.clone(),
                 &context,
                 selector.expected.as_ref(),
@@ -401,12 +408,7 @@ impl TypeEnvironment {
         let model = context.model;
         let signatures = context.signatures;
         let unshadowed = self.invocation_unshadowed(Expr::Ident(first), context);
-        let mut ty = self.infer_in_context(
-            Expr::Ident(first),
-            queries::context_copy(context),
-            None,
-            None,
-        );
+        let mut ty = self.infer_in_context(Expr::Ident(first), context, None, None);
         if names.is_empty() {
             return ty;
         }
@@ -444,7 +446,7 @@ impl TypeEnvironment {
             {
                 ty.with_nullable(false)
             } else {
-                self.infer_constant_member(ty, &segments, unshadowed, context)
+                self.infer_constant_member(&ty, &segments, unshadowed, context)
             };
         }
         ty
@@ -455,7 +457,7 @@ impl TypeEnvironment {
     pub(super) fn infer_in_context(
         &self,
         expr: Expr<'_>,
-        context: InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
+        context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
         expected: Option<&ResolvedType>,
         receiver: Option<ResolvedType>,
     ) -> ResolvedType {
@@ -463,11 +465,11 @@ impl TypeEnvironment {
             && matches!(expr, Expr::Field(_) | Expr::Index(_) | Expr::NullAssert(_))
         {
             return self
-                .infer_selector_chain(expr, &context, expected, |_| None, |_, _, _| {})
+                .infer_selector_chain(expr, context, expected, |_| None, |_, _, _| {})
                 .0;
         }
-        let ty = self.infer_unshorted(expr, queries::context_copy(&context), expected, receiver);
-        let ty = self.contextual_callable_type(ty, &context, expected);
+        let ty = self.infer_unshorted(expr, context, expected, receiver);
+        let ty = Self::contextual_callable_type(ty, context, expected);
         if null_shorted(expr) {
             ty.with_nullable(true)
         } else {
@@ -478,7 +480,6 @@ impl TypeEnvironment {
     /// Non-null callable values in a function context denote their `call` tear-off.
     /// Nullable values must first reach a non-null branch, as on the left of `??`.
     fn contextual_callable_type(
-        &self,
         ty: ResolvedType,
         context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
         expected: Option<&ResolvedType>,
@@ -499,7 +500,7 @@ impl TypeEnvironment {
                     .signatures
                     .resolved_member(&ty, "call", context.model)
         {
-            self.tearoff_type(signature, &owner, AstChildren::empty(), context, expected)
+            Self::tearoff_type(signature, &owner, AstChildren::empty(), context, expected)
         } else {
             ty
         }
@@ -510,7 +511,7 @@ impl TypeEnvironment {
     pub(super) fn infer_unshorted(
         &self,
         expr: Expr<'_>,
-        context: InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
+        context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
         expected: Option<&ResolvedType>,
         mut receiver: Option<ResolvedType>,
     ) -> ResolvedType {
@@ -518,12 +519,12 @@ impl TypeEnvironment {
             return self.infer_in_context(paren.expr(), context, expected, receiver);
         }
         if let Expr::Field(access) = expr
-            && let Some(ty) = self.infer_field_access(access, &mut receiver, &context, expected)
+            && let Some(ty) = self.infer_field_access(access, &mut receiver, context, expected)
         {
             return ty;
         }
         if let Expr::Call(call) = expr {
-            return self.infer_call_expression(call, &mut receiver, &context, expected);
+            return self.infer_call_expression(call, &mut receiver, context, expected);
         }
         self.infer_non_call(expr, context, expected)
     }
@@ -532,17 +533,20 @@ impl TypeEnvironment {
     fn infer_non_call(
         &self,
         expr: Expr<'_>,
-        context: InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
+        context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
         expected: Option<&ResolvedType>,
     ) -> ResolvedType {
         let model = context.model;
         let signatures = context.signatures;
         let type_parameters = context.type_parameters;
         let lookup = context.lookup;
+        if matches!(expr, Expr::Is(_))
+            || matches!(expr, Expr::Unary(unary) if unary.op() == UnaryOp::Bang)
+        {
+            return model.core_type("bool", false);
+        }
         match expr {
-            Expr::FuncExpr(function) => self.infer_function_literal(function, &context, expected),
-            Expr::Is(_) => model.core_type("bool", false),
-            Expr::Unary(unary) if unary.op() == UnaryOp::Bang => model.core_type("bool", false),
+            Expr::FuncExpr(function) => self.infer_function_literal(function, context, expected),
             Expr::Unary(unary)
                 if unary.op() == UnaryOp::Minus
                     && matches!(unary.operand(), Expr::IntLit(_))
@@ -550,7 +554,7 @@ impl TypeEnvironment {
             {
                 model.core_type("double", false)
             }
-            Expr::Unary(unary) => self.infer_unary_expression(unary, &context),
+            Expr::Unary(unary) => self.infer_unary_expression(unary, context),
             Expr::PostfixIncDec(postfix) => {
                 let ty = self.infer_with_signatures_using_lookup(
                     postfix.operand(),
@@ -577,16 +581,16 @@ impl TypeEnvironment {
             Expr::NullLit(_) => ResolvedType::NULL,
             Expr::SymbolLit(_) => model.core_type("Symbol", false),
             Expr::GenericInstantiation(generic) => {
-                self.infer_generic_expression(generic, &context, expected)
+                self.infer_generic_expression(generic, context, expected)
             }
             Expr::DotShorthand(shorthand) => {
-                self.infer_dot_shorthand(shorthand, &context, expected)
+                Self::infer_dot_shorthand(shorthand, context, expected)
             }
             Expr::This(_) => self.receiver(),
-            Expr::Ident(identifier) => self.infer_identifier(identifier, &context, expected),
+            Expr::Ident(identifier) => self.infer_identifier(identifier, context, expected),
             Expr::As(cast) => model.resolve_type_in(cast.dart_type(), type_parameters),
-            Expr::NullAssert(assertion) => self.infer_null_assertion(assertion, &context, expected),
-            Expr::New(creation) => self.infer_creation(creation, &context, expected),
+            Expr::NullAssert(assertion) => self.infer_null_assertion(assertion, context, expected),
+            Expr::New(creation) => self.infer_creation(creation, context, expected),
             Expr::Cascade(cascade) => self.infer_with_context(
                 cascade.object(),
                 model,
@@ -595,17 +599,17 @@ impl TypeEnvironment {
                 expected,
                 lookup,
             ),
-            Expr::Await(awaited) => self.infer_awaited_expression(awaited, &context, expected),
-            Expr::Record(record) => self.infer_record_literal(record, &context, expected),
-            Expr::List(_) | Expr::Set(_) => self.infer_sequence_literal(expr, &context, expected),
-            Expr::Map(map) => self.infer_map_literal(map, &context, expected),
-            Expr::Binary(binary) => self.infer_binary_expression(binary, &context, expected),
+            Expr::Await(awaited) => self.infer_awaited_expression(awaited, context, expected),
+            Expr::Record(record) => self.infer_record_literal(record, context, expected),
+            Expr::List(_) | Expr::Set(_) => self.infer_sequence_literal(expr, context, expected),
+            Expr::Map(map) => self.infer_map_literal(map, context, expected),
+            Expr::Binary(binary) => self.infer_binary_expression(binary, context, expected),
             Expr::Conditional(conditional) => {
-                self.infer_conditional_context(conditional, &context, expected, |_| None, |_, _| {})
+                self.infer_conditional_context(conditional, context, expected, |_| None, |_, _| {})
             }
-            Expr::Switch(switch) => self.infer_switch_expression(switch, &context, expected),
-            Expr::Index(index) => self.infer_index_expression(index, &context),
-            Expr::Assign(assignment) => self.infer_assignment(assignment, &context),
+            Expr::Switch(switch) => self.infer_switch_expression(switch, context, expected),
+            Expr::Index(index) => self.infer_index_expression(index, context),
+            Expr::Assign(assignment) => self.infer_assignment(assignment, context),
             Expr::Throw(_) => ResolvedType::NEVER,
             _ => ResolvedType::UNKNOWN,
         }
@@ -699,7 +703,9 @@ impl TypeEnvironment {
                     return None;
                 }
                 let (signature, owner) = signatures.resolved_member(&receiver, "call", model)?;
-                Some(self.tearoff_type(signature, &owner, type_args, context, expected))
+                Some(Self::tearoff_type(
+                    signature, &owner, type_args, context, expected,
+                ))
             })
             .unwrap_or_else(|| {
                 if expression_qualified_name(target, true)
@@ -713,7 +719,6 @@ impl TypeEnvironment {
     }
 
     fn infer_dot_shorthand(
-        &self,
         shorthand: falcon_syntax::cst::DotShorthandExpr<'_>,
         context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
         expected: Option<&ResolvedType>,
@@ -759,7 +764,7 @@ impl TypeEnvironment {
         {
             return model.substitute(ty, &owner);
         }
-        self.constructor_tearoff(
+        Self::constructor_tearoff(
             identity.clone(),
             name.name(),
             AstChildren::empty(),
@@ -768,7 +773,7 @@ impl TypeEnvironment {
         )
         .or_else(|| {
             signatures.member(identity, name.name()).map(|signature| {
-                self.tearoff_type(signature, &owner, AstChildren::empty(), context, expected)
+                Self::tearoff_type(signature, &owner, AstChildren::empty(), context, expected)
             })
         })
         .unwrap_or(ResolvedType::UNKNOWN)
@@ -852,7 +857,7 @@ impl TypeEnvironment {
             && let Some((identity, name)) =
                 resolve_new_constructor(dart_type, constructor_name, model)
         {
-            self.infer_constructor(identity, name, named.type_args(), args, context, expected)
+            self.infer_constructor(identity, name, &named.type_args(), args, context, expected)
         } else {
             model
                 .resolve_type_in(dart_type, type_parameters)
@@ -876,7 +881,7 @@ impl TypeEnvironment {
             .filter(|context| !has_inference_holes(context))
             .map(|context| ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: super::FunctionTypeAlias::default(),
                     identity: DeclarationIdentity::sdk("dart:async", "FutureOr"),
                     arguments: vec![context.clone()].into(),
                     nullable: false,
@@ -907,8 +912,9 @@ impl TypeEnvironment {
         match future {
             Some(future) => future
                 .type_argument(0)
-                .map(|argument| argument.with_nullable(argument.nullable() || ty.nullable()))
-                .unwrap_or(ResolvedType::DYNAMIC),
+                .map_or(ResolvedType::DYNAMIC, |argument| {
+                    argument.with_nullable(argument.nullable() || ty.nullable())
+                }),
             None => ty,
         }
     }
@@ -927,7 +933,7 @@ impl TypeEnvironment {
         let expected = expected.filter(|ty| matches!(ty, ResolvedType { kind: ResolvedTypeKind::Record { positional, named, .. } }
             if positional.len() == fields.clone().filter(|field| field.name().is_none()).count()
                 && named.len() == fields.clone().filter(|field| field.name().is_some()).count()
-                && fields.clone().filter_map(|field| field.name()).all(|field| named.iter().any(|(name, _)| name == field.name()))));
+                && fields.clone().filter_map(falcon_syntax::cst::RecordField::name).all(|field| named.iter().any(|(name, _)| name == field.name()))));
         let positional_count = fields
             .clone()
             .filter(|field| field.name().is_none())
@@ -971,7 +977,7 @@ impl TypeEnvironment {
         named.sort_by(|left, right| left.0.cmp(&right.0));
         ResolvedType {
             kind: ResolvedTypeKind::Record {
-                occurrence: Default::default(),
+                occurrence: super::FunctionTypeAlias::default(),
                 positional: positional.into(),
                 named: named.into(),
                 nullable: false,
@@ -1069,7 +1075,7 @@ impl TypeEnvironment {
         {
             return ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: super::FunctionTypeAlias::default(),
                     identity: DeclarationIdentity::sdk("dart:core", "Set"),
                     arguments: vec![element].into(),
                     nullable: false,
@@ -1130,7 +1136,7 @@ impl TypeEnvironment {
             .collect();
         ResolvedType {
             kind: ResolvedTypeKind::Interface {
-                occurrence: Default::default(),
+                occurrence: super::FunctionTypeAlias::default(),
                 identity: DeclarationIdentity::sdk("dart:core", "Map"),
                 arguments,
                 nullable: false,
@@ -1391,7 +1397,7 @@ impl TypeEnvironment {
                     self.invocation_declaration(target, context, receiver, expected, true)
             {
                 let substitutions = self.infer_signature_substitutions(
-                    signature, args, explicit, context, expected, &owner,
+                    signature, args, &explicit, context, expected, &owner,
                 );
                 return model.substitute(&signature.return_type, &substitutions);
             }
@@ -1400,7 +1406,7 @@ impl TypeEnvironment {
                     || name == "new"
                     || model.identities.type_alias(&identity).is_some())
             {
-                return self.infer_constructor(identity, name, explicit, args, context, expected);
+                return self.infer_constructor(identity, name, &explicit, args, context, expected);
             }
         }
         if let Some(ty) = self.infer_numeric_clamp(target, args, receiver, context, expected) {
@@ -1411,7 +1417,7 @@ impl TypeEnvironment {
                 let substitutions = self.infer_signature_substitutions_with_result(
                     invocation.inference_signature(),
                     args,
-                    invocation.type_args.clone(),
+                    &invocation.type_args,
                     context,
                     expected,
                     None,
@@ -1442,7 +1448,7 @@ impl TypeEnvironment {
                 return ControlFlow::Break(self.infer_constructor(
                     identity.clone(),
                     name.name(),
-                    explicit,
+                    &explicit,
                     args,
                     context,
                     expected,
@@ -1457,7 +1463,7 @@ impl TypeEnvironment {
                 let substitutions = self.infer_signature_substitutions(
                     signature,
                     args,
-                    explicit,
+                    &explicit,
                     context,
                     expected,
                     &FxHashMap::default(),
@@ -1541,8 +1547,8 @@ impl TypeEnvironment {
         context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
         expected: Option<&ResolvedType>,
     ) -> (ResolvedType, ResolvedType, bool) {
-        let reached = self.infer_unshorted(operand, queries::context_copy(context), expected, None);
-        let ty = self.contextual_callable_type(reached.clone(), context, expected);
+        let reached = self.infer_unshorted(operand, context, expected, None);
+        let ty = Self::contextual_callable_type(reached.clone(), context, expected);
         (
             if operand_shorted {
                 ty.with_nullable(true)
@@ -1556,7 +1562,7 @@ impl TypeEnvironment {
 
     fn infer_constant_member(
         &self,
-        ty: ResolvedType,
+        ty: &ResolvedType,
         segments: &[&str],
         unshadowed: bool,
         context: &InferenceContext<'_, '_, '_, impl Fn(&str) -> Option<ResolvedType>>,
@@ -1567,7 +1573,7 @@ impl TypeEnvironment {
         let field = segments[segments.len() - 1];
         let constructor = if unshadowed && model.resolve_dotted(segments).is_none() {
             model.resolve_dotted(owner).and_then(|identity| {
-                self.constructor_tearoff(identity, field, AstChildren::empty(), context, None)
+                Self::constructor_tearoff(identity, field, AstChildren::empty(), context, None)
             })
         } else {
             None
@@ -1596,7 +1602,7 @@ impl TypeEnvironment {
             if ty.record_field(field).is_some() {
                 return None;
             }
-            signatures.resolved_member(&ty, field, model).or_else(|| {
+            signatures.resolved_member(ty, field, model).or_else(|| {
                 if !unshadowed {
                     return None;
                 }
@@ -1609,10 +1615,16 @@ impl TypeEnvironment {
         constructor
             .or_else(|| {
                 let (signature, owner) = prefixed().or_else(method)?;
-                Some(self.tearoff_type(signature, &owner, AstChildren::empty(), context, None))
+                Some(Self::tearoff_type(
+                    signature,
+                    &owner,
+                    AstChildren::empty(),
+                    context,
+                    None,
+                ))
             })
             .unwrap_or_else(|| {
-                if ty == ResolvedType::UNKNOWN
+                if ty == &ResolvedType::UNKNOWN
                     && !self.is_bound(segments[0])
                     && (context.lookup)(segments[0]).is_none()
                     && model.resolve_dotted(segments).is_some()
@@ -1639,7 +1651,7 @@ fn sequence_literal_type(
     if !components[1].is_empty() {
         return ResolvedType {
             kind: ResolvedTypeKind::Interface {
-                occurrence: Default::default(),
+                occurrence: super::FunctionTypeAlias::default(),
                 identity: DeclarationIdentity::sdk("dart:core", "Map"),
                 arguments: components
                     .into_iter()
@@ -1663,7 +1675,7 @@ fn sequence_literal_type(
     });
     ResolvedType {
         kind: ResolvedTypeKind::Interface {
-            occurrence: Default::default(),
+            occurrence: super::FunctionTypeAlias::default(),
             identity: DeclarationIdentity::sdk(
                 "dart:core",
                 if matches!(expr, Expr::List(_)) {

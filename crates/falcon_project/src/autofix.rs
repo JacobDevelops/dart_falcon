@@ -80,6 +80,7 @@ impl std::error::Error for FixStop {}
 /// Unknown rule IDs retain their declared kind; `none` suppresses the fix.
 /// This helper also supports cross-file diagnostic quick fixes, although the
 /// iterative file engine never runs or applies cross-file rules.
+#[must_use]
 pub fn effective_fix_kind(
     config: &FalconConfig,
     path: &Path,
@@ -739,7 +740,7 @@ mod tests {
     #[test]
     fn fix_payload_policy_uses_registered_group_and_cross_file_section() {
         let config: FalconConfig = serde_yaml::from_str(
-            r#"
+            r"
 linter:
   rules:
     style:
@@ -748,7 +749,7 @@ cross-file:
   rules:
     security:
       secure-pubspec-urls: { level: error, fix: unsafe }
-"#,
+",
         )
         .unwrap();
         let mut diagnostics = vec![
@@ -763,12 +764,12 @@ cross-file:
     #[test]
     fn safe_override_reclassifies_an_unsafe_fix() {
         let config: FalconConfig = serde_yaml::from_str(
-            r#"
+            r"
 linter:
   rules:
     style:
       unnecessary-new: { level: error, fix: safe }
-"#,
+",
         )
         .unwrap();
         assert_eq!(

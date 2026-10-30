@@ -112,7 +112,7 @@ impl<'a> Collector<'a> {
         dynamic
     }
 
-    fn is_function_typed(&self, expr: Expr<'a>, state: &SemanticState<'a>) -> bool {
+    fn is_function_typed(expr: Expr<'a>, state: &SemanticState<'a>) -> bool {
         state.infer(expr).interface("dart:core", "Function")
     }
 
@@ -128,11 +128,11 @@ impl<'a> Collector<'a> {
                     && !matches!(object.unparenthesized(), Expr::As(_))
                     && !self.report_if_dynamic(object, state)
                     && (self.is_dynamic(callee, state)
-                        || self.is_function_typed(callee, state)
-                        || (name.name() == "call" && self.is_function_typed(object, state)))
+                        || Self::is_function_typed(callee, state)
+                        || (name.name() == "call" && Self::is_function_typed(object, state)))
                 {
                     self.report(
-                        if name.name() == "call" && self.is_function_typed(object, state) {
+                        if name.name() == "call" && Self::is_function_typed(object, state) {
                             name.span()
                         } else {
                             callee.span()
@@ -143,12 +143,12 @@ impl<'a> Collector<'a> {
             other => {
                 if !matches!(other.unparenthesized(), Expr::As(_))
                     && (self.is_dynamic(other, state)
-                        || self.is_function_typed(other, state)
+                        || Self::is_function_typed(other, state)
                         || matches!(
                             other.unparenthesized(),
                             Expr::Field(field)
                                 if field.field().name() == "call"
-                                    && self.is_function_typed(field.object(), state)
+                                    && Self::is_function_typed(field.object(), state)
                         ))
                 {
                     self.report(callee.span());
@@ -313,11 +313,15 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     cascade
                         .sections()
                         .any(|section| match section.ops().next() {
-                            Some(CascadeOp::Call(_) | CascadeOp::Invoke(_)) => true,
+                            Some(
+                                CascadeOp::Call(_)
+                                | CascadeOp::Invoke(_)
+                                | CascadeOp::Index(_)
+                                | CascadeOp::IndexAssign(_),
+                            ) => true,
                             Some(CascadeOp::Field(field)) => {
                                 !ALLOWED_MEMBERS.contains(&field.name().name())
                             }
-                            Some(CascadeOp::Index(_) | CascadeOp::IndexAssign(_)) => true,
                             Some(CascadeOp::Assign(assignment)) => !matches!(
                                 assignment.target().unparenthesized(),
                                 Expr::Ident(name) if ALLOWED_MEMBERS.contains(&name.name())
@@ -328,7 +332,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     self.report_if_dynamic(object, state);
                 }
                 if !matches!(object.unparenthesized(), Expr::As(_))
-                    && self.is_function_typed(object, state)
+                    && Self::is_function_typed(object, state)
                 {
                     for section in cascade.sections() {
                         if let Some(CascadeOp::Call(call)) = section.ops().next()
@@ -471,6 +475,14 @@ void use(C c, I1 i) {
 
     #[test]
     fn dynamic_result_context_preserves_inferred_accumulator_type() {
+        struct AccumulatorTypes(Vec<ResolvedType>);
+        impl<'a> SemanticRuleVisitor<'a> for AccumulatorTypes {
+            fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+                if matches!(node, Expr::Ident(identifier) if identifier.name() == "sum") {
+                    self.0.push(state.infer(node));
+                }
+            }
+        }
         let source = r"
 import 'expect.dart';
 T fold<T>(T initial, T Function(T, int) combine) => initial;
@@ -504,14 +516,6 @@ void use(dynamic value) {
         let ctx = AnalyzeContext::new(path, &config, &parsed)
             .with_identities(&indexes.identities)
             .with_signatures(&indexes.signatures);
-        struct AccumulatorTypes(Vec<ResolvedType>);
-        impl<'a> SemanticRuleVisitor<'a> for AccumulatorTypes {
-            fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
-                if matches!(node, Expr::Ident(identifier) if identifier.name() == "sum") {
-                    self.0.push(state.infer(node));
-                }
-            }
-        }
         let mut accumulator = AccumulatorTypes(Vec::new());
         visit_program(
             &mut accumulator,
@@ -604,7 +608,7 @@ void use(dynamic value) {
 
     #[test]
     fn grouped_callable_and_cascade_getter_spans_match_analyzer() {
-        let source = r#"class SpanCallable {
+        let source = r"class SpanCallable {
   Function field;
   dynamic dynField;
   SpanCallable(this.field, this.dynField);
@@ -646,7 +650,7 @@ void groupedCallWitness(Function fn, dynamic d, SpanCallable o) {
   o..dynField.foo;
   o..field().foo;
 }
-"#;
+";
         let path = Path::new("/project/lib/test.dart");
         let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");
@@ -716,7 +720,7 @@ void groupedCallWitness(Function fn, dynamic d, SpanCallable o) {
 
     #[test]
     fn trailing_trivia_and_chained_cascade_invocations_match_analyzer_spans() {
-        let source = r#"class Holder {
+        let source = r"class Holder {
   dynamic method() => () {};
   Function get getter => () {};
   dynamic Function() get typed => () => () {};
@@ -735,7 +739,7 @@ void cases(dynamic d, Function fn, Holder h) {
   d..method()()();
   d..method()<int>();
 }
-"#;
+";
         let path = Path::new("/project/lib/test.dart");
         let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");

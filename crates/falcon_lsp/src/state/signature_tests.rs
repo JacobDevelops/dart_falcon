@@ -198,7 +198,7 @@ fn body_only_part_edits_refresh_open_library_warnings_without_importers_or_rebui
         );
         assert_eq!(state.semantic_snapshot_build_count, builds);
         state.close(&owner_uri);
-        assert!(state.affected_open_uris(&owner_uri).is_empty());
+        assert_eq!(state.affected_open_uris(&owner_uri), Vec::<String>::new());
     }
 }
 

@@ -1,4 +1,10 @@
-use super::*;
+use super::{
+    Arc, AstChildren, Cow, DartType, DeclarationIdentity, Expr, FunctionTypeAlias,
+    FunctionTypeShape, FxHashMap, HashMap, HashSet, MemberKind, QualifiedName, ResolvedSignature,
+    ResolvedType, SemanticModel, SignatureIndex, Truth, TypeAlias, TypeEnvironment, TypeKind,
+    TypeParameterId, TypeParameterScope, collect_parameter_ids, has_inference_holes,
+    inference_join, mentions_any, parameter_bound, queries,
+};
 use crate::resolve::semantic::ResolvedTypeKind;
 
 /// Whether a selector/call chain starts with an implicit dot-shorthand receiver.
@@ -71,10 +77,11 @@ pub(super) fn constructed_identity(
     }
 }
 
-pub fn expression_segments<'a>(
-    expression: Expr<'a>,
+#[must_use]
+pub fn expression_segments(
+    expression: Expr<'_>,
     allow_generic_instantiation: bool,
-) -> Option<Vec<&'a str>> {
+) -> Option<Vec<&str>> {
     let mut current = expression;
     let mut segments = Vec::new();
     loop {
@@ -97,10 +104,10 @@ pub fn expression_segments<'a>(
 }
 
 /// Borrow a declaration qualifier without flattening arbitrary receiver chains.
-pub(super) fn expression_qualified_name<'a>(
-    expression: Expr<'a>,
+pub(super) fn expression_qualified_name(
+    expression: Expr<'_>,
     allow_generic_instantiation: bool,
-) -> Option<QualifiedName<'a>> {
+) -> Option<QualifiedName<'_>> {
     let mut current = expression;
     let mut name = None;
     loop {
@@ -127,6 +134,7 @@ pub(super) fn expression_qualified_name<'a>(
 ///
 /// Constant evaluation permits generic-instantiation wrappers; lexical lint
 /// policies can keep rejecting those wrappers by passing `false`.
+#[must_use]
 pub fn resolve_call_constructor<'a>(
     callee: Expr<'a>,
     model: &SemanticModel<'_>,
@@ -166,6 +174,7 @@ pub fn resolve_call_constructor<'a>(
 
 /// Resolve an explicit `new`/`const` constructor without assuming a dotted
 /// type name denotes an import prefix rather than a named constructor.
+#[must_use]
 pub fn resolve_new_constructor<'a>(
     dart_type: DartType<'a>,
     constructor_name: Option<falcon_syntax::cst::Identifier<'a>>,
@@ -440,10 +449,13 @@ impl<'a, F: Fn(&str) -> Option<ResolvedType>> SignatureInference<'a, '_, '_, '_,
             for (parameter, argument) in signature
                 .positional
                 .iter()
-                .zip(args.into_iter().flat_map(|args| args.positional()))
+                .zip(
+                    args.into_iter()
+                        .flat_map(falcon_syntax::cst::ArgList::positional),
+                )
                 .chain(
                     args.into_iter()
-                        .flat_map(|args| args.named())
+                        .flat_map(falcon_syntax::cst::ArgList::named)
                         .filter_map(|argument| {
                             signature
                                 .named
@@ -567,8 +579,9 @@ impl<'a, F: Fn(&str) -> Option<ResolvedType>> SignatureInference<'a, '_, '_, '_,
                             .values()
                             .find_map(|ty| parameter_bound(ty, id))
                     })
-                    .map(|bound| self.context.model.substitute(bound, &self.substitutions))
-                    .unwrap_or(ResolvedType::UNKNOWN)
+                    .map_or(ResolvedType::UNKNOWN, |bound| {
+                        self.context.model.substitute(bound, &self.substitutions)
+                    })
             };
             self.substitutions.entry(id.clone()).or_insert(default);
         }
@@ -581,7 +594,7 @@ impl TypeEnvironment {
         &self,
         signature: &ResolvedSignature,
         args: impl Into<Option<falcon_syntax::cst::ArgList<'syntax>>>,
-        type_args: AstChildren<'_, DartType<'_>>,
+        type_args: &AstChildren<'_, DartType<'_>>,
         context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
         owner: &FxHashMap<TypeParameterId, ResolvedType>,
@@ -617,7 +630,7 @@ impl TypeEnvironment {
             &FxHashMap<TypeParameterId, ResolvedType>,
         ),
         args: impl Into<Option<falcon_syntax::cst::ArgList<'syntax>>>,
-        type_args: AstChildren<'_, DartType<'_>>,
+        type_args: &AstChildren<'_, DartType<'_>>,
         context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
         argument_contexts: Option<&mut HashMap<usize, ResolvedType>>,
@@ -652,9 +665,12 @@ impl TypeEnvironment {
             substitutions,
             inferred: FxHashMap::with_capacity_and_hasher(
                 call_parameters.len(),
-                Default::default(),
+                rustc_hash::FxBuildHasher,
             ),
-            upper: FxHashMap::with_capacity_and_hasher(call_parameters.len(), Default::default()),
+            upper: FxHashMap::with_capacity_and_hasher(
+                call_parameters.len(),
+                rustc_hash::FxBuildHasher,
+            ),
             partial: FxHashMap::default(),
             argument_context: FxHashMap::default(),
         };
@@ -686,7 +702,7 @@ impl TypeEnvironment {
         &self,
         identity: DeclarationIdentity,
         name: &str,
-        type_args: AstChildren<'_, DartType<'_>>,
+        type_args: &AstChildren<'_, DartType<'_>>,
         args: falcon_syntax::cst::ArgList<'_>,
         context: &InferenceContext<'_, '_, '_, F>,
         expected: Option<&ResolvedType>,
@@ -714,7 +730,7 @@ impl TypeEnvironment {
         else {
             return ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity,
                     arguments: type_args
                         .clone()
@@ -814,7 +830,7 @@ impl TypeEnvironment {
         let substitutions = self.infer_signature_substitutions(
             &signature,
             args,
-            AstChildren::empty(),
+            &AstChildren::empty(),
             context,
             expected,
             &FxHashMap::default(),
@@ -871,9 +887,9 @@ impl TypeEnvironment {
         } else {
             let inference = queries::context_copy(context);
             if null_shorted(object) {
-                self.infer_unshorted(object, inference, expected, None)
+                self.infer_unshorted(object, &inference, expected, None)
             } else {
-                self.infer_in_context(object, inference, expected, None)
+                self.infer_in_context(object, &inference, expected, None)
             }
         }
     }
@@ -893,10 +909,9 @@ impl TypeEnvironment {
         let this = self.receiver();
         let mut bound = &this;
         while let ResolvedType {
-            kind: ResolvedTypeKind::TypeParameter { bound: next, .. },
-        }
-        | ResolvedType {
-            kind: ResolvedTypeKind::NonNullTypeParameter { bound: next, .. },
+            kind:
+                ResolvedTypeKind::TypeParameter { bound: next, .. }
+                | ResolvedTypeKind::NonNullTypeParameter { bound: next, .. },
         } = bound
         {
             bound = next;
@@ -975,7 +990,6 @@ impl TypeEnvironment {
     }
 
     pub(super) fn tearoff_type<F: Fn(&str) -> Option<ResolvedType>>(
-        &self,
         signature: &ResolvedSignature,
         owner: &FxHashMap<TypeParameterId, ResolvedType>,
         explicit: AstChildren<'_, DartType<'_>>,
@@ -1009,11 +1023,11 @@ impl TypeEnvironment {
         {
             let mut lower = FxHashMap::with_capacity_and_hasher(
                 signature.call_parameters.len(),
-                Default::default(),
+                rustc_hash::FxBuildHasher,
             );
             let mut upper = FxHashMap::with_capacity_and_hasher(
                 signature.call_parameters.len(),
-                Default::default(),
+                rustc_hash::FxBuildHasher,
             );
             let mut partial = FxHashMap::default();
             infer_type_constraints(
@@ -1071,7 +1085,6 @@ impl TypeEnvironment {
     }
 
     pub(super) fn constructor_tearoff<F: Fn(&str) -> Option<ResolvedType>>(
-        &self,
         identity: DeclarationIdentity,
         name: &str,
         explicit: AstChildren<'_, DartType<'_>>,
@@ -1143,7 +1156,7 @@ impl TypeEnvironment {
             }),
             ..ResolvedSignature::returning(result)
         };
-        Some(self.tearoff_type(
+        Some(Self::tearoff_type(
             &signature,
             &FxHashMap::default(),
             explicit,
@@ -1166,13 +1179,15 @@ impl TypeEnvironment {
             && expression_segments(target, true)
                 .is_some_and(|segments| context.model.resolve_dotted(&segments).is_none())
             && let Some(ty) =
-                self.constructor_tearoff(identity, name, explicit.clone(), context, expected)
+                Self::constructor_tearoff(identity, name, explicit.clone(), context, expected)
         {
             return Some(ty);
         }
         let (signature, owner) =
             self.invocation_declaration(target, context, cached_receiver, None, false)?;
-        Some(self.tearoff_type(signature, &owner, explicit, context, expected))
+        Some(Self::tearoff_type(
+            signature, &owner, explicit, context, expected,
+        ))
     }
 }
 
@@ -1447,7 +1462,7 @@ fn infer_function_constraints(
                 context,
             );
         }
-        for (name, formal) in named.iter() {
+        for (name, formal) in named {
             if let Some((_, actual)) = actual_named
                 .iter()
                 .find(|(actual_name, _)| actual_name == name)
@@ -1489,7 +1504,7 @@ fn infer_record_constraints(
                 context,
             );
         }
-        for (name, formal) in named.iter() {
+        for (name, formal) in named {
             if let Some((_, actual)) = actual_named
                 .iter()
                 .find(|(actual_name, _)| actual_name == name)

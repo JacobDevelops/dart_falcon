@@ -36,7 +36,7 @@ fn contextual_parameter_modifiers_remain_expression_identifiers() {
 fn long_expression_chains_parse_and_walk_without_diagnostics() {
     use falcon_syntax::cst::visit::Visitor;
     struct Walker;
-    impl<'a> Visitor<'a> for Walker {}
+    impl Visitor<'_> for Walker {}
     for suffix in [" + x", ".field", " as T", " is T"] {
         let source = format!(
             "void f() {{ var value = [x{}, after()]; }} var after = 1;",

@@ -43,6 +43,7 @@ impl DartSdk {
 
     /// Load the SDK at `root`; `None` unless `root/lib/libraries.json` maps
     /// `dart:core`.
+    #[must_use]
     pub fn load(root: &Path) -> Option<Self> {
         Self::load_with_warnings(root, &super::AnalysisEnvironment::default())
     }
@@ -225,7 +226,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let environment = super::super::AnalysisEnvironment::default();
         assert!(DartSdk::load_with_warnings(dir.path(), &environment).is_none());
-        assert!(environment.take_warnings().is_empty());
+        assert_eq!(environment.take_warnings(), [] as [std::string::String; 0]);
         let manifest = dir.path().join("lib/libraries.json");
         std::fs::create_dir_all(manifest.parent().unwrap()).unwrap();
         for source in ["{", "{}"] {
@@ -252,7 +253,7 @@ mod tests {
         .unwrap();
         let environment = super::super::AnalysisEnvironment::default();
         assert!(DartSdk::load_with_warnings(dir.path(), &environment).is_some());
-        assert!(environment.take_warnings().is_empty());
+        assert_eq!(environment.take_warnings(), [] as [std::string::String; 0]);
         std::fs::create_dir(dir.path().join("version")).unwrap();
         let sdk = DartSdk::load_with_warnings(dir.path(), &environment).unwrap();
         assert!(sdk.library("dart:core").is_some());
@@ -307,7 +308,7 @@ mod tests {
         .unwrap();
         let environment = super::super::AnalysisEnvironment::default();
         assert!(Embedder::from_config_with_warnings(&config, &environment).is_none());
-        assert!(environment.take_warnings().is_empty());
+        assert_eq!(environment.take_warnings(), [] as [std::string::String; 0]);
         let manifest = dir.path().join("_embedder.yaml");
         std::fs::write(&manifest, "embedded_libs: [").unwrap();
         assert!(Embedder::from_config_with_warnings(&config, &environment).is_none());

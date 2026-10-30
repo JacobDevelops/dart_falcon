@@ -101,7 +101,7 @@ impl Declarations {
                 .clone()
                 .all(|declarator| declarator.initializer().is_some()),
         });
-        for initializer in declarators.filter_map(|declarator| declarator.initializer()) {
+        for initializer in declarators.filter_map(VarDeclarator::initializer) {
             self.initializers.insert(initializer.span().start, index);
         }
     }
@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn declaration_spans_preserve_modifiers_and_exclude_semicolons_and_trivia() {
-        let source = r#"
+        let source = r"
 @deprecated
 late /* prefix */ final top = 1 /* interior */, other = (2) /* trailing */ ;
 class C {
@@ -245,7 +245,7 @@ void f() {
   @deprecated
   late final documented = 6 /* trailing */ ;
 }
-"#;
+";
         let path = PathBuf::from("/project/lib/test.dart");
         let parsed = parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);

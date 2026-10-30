@@ -201,6 +201,10 @@ struct Unit<'a> {
 
 /// The analyzed file plus every sibling unit of its library, each with the
 /// source text it was parsed from. `None` when the library is incomplete.
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "LibraryUnit is not nameable outside falcon_analyze"
+)]
 fn library_units<'a>(program: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> Option<Vec<Unit<'a>>> {
     let current = Unit {
         program,
@@ -244,7 +248,7 @@ fn top_level_name(declaration: TopLevelDecl<'_>) -> Option<Identifier<'_>> {
         TopLevelDecl::Extension(x) => x.name(),
         TopLevelDecl::ExtensionType(x) => Some(x.name()),
         TopLevelDecl::Function(x) => Some(x.name()),
-        TopLevelDecl::Variable(x) => x.declarators().next().map(|declarator| declarator.name()),
+        TopLevelDecl::Variable(x) => x.declarators().next().map(VarDeclarator::name),
         TopLevelDecl::TypeAlias(x) => Some(x.name()),
         TopLevelDecl::Error(_) => None,
     }
@@ -817,7 +821,7 @@ impl<'a> Tables<'a> {
                 }
                 let name_span = constructor
                     .constructor_name()
-                    .map_or(constructor.name().span(), |name| name.span());
+                    .map_or(constructor.name().span(), Identifier::span);
                 let label = format!("{owner}.{key}");
                 entries.push((span.start, key, label, name_span, span));
             }
@@ -1127,7 +1131,7 @@ fn is_object(ty: DartType<'_>) -> bool {
     segments.next().is_some_and(|only| only.name() == "Object") && segments.next().is_none()
 }
 
-fn constructor_key<'a>(constructor: ConstructorDecl<'a>) -> &'a str {
+fn constructor_key(constructor: ConstructorDecl<'_>) -> &str {
     constructor
         .constructor_name()
         .map_or("new", |name| name.name())
@@ -1742,14 +1746,14 @@ impl<'t, 'a> RefWalker<'t, 'a> {
             let mut names = parsed.names.iter().map(|name| name.text);
             match (names.next(), names.next(), names.next()) {
                 (Some(name), None, _) if parsed.new_keyword => {
-                    self.constructor_reference(name, "new")
+                    self.constructor_reference(name, "new");
                 }
                 (Some(name), None, _) => self.reference(name),
                 (Some(type_name), Some(member), None) => {
                     self.reference(type_name);
                     match tables.container_for(type_name) {
                         Some(container) if matches!(self.lexical(type_name), Lexical::TopLevel) => {
-                            self.mark_static(container, member)
+                            self.mark_static(container, member);
                         }
                         _ => self.mark_any_member(member),
                     }
@@ -1764,7 +1768,7 @@ impl<'t, 'a> RefWalker<'t, 'a> {
 
     fn cascade_references(&mut self, cascade: CascadeExpr<'a>) {
         let object = cascade.object();
-        for operation in cascade.sections().flat_map(|section| section.ops()) {
+        for operation in cascade.sections().flat_map(CascadeSection::ops) {
             match operation {
                 CascadeOp::NullAssert(_) => {}
                 CascadeOp::Field(field) => self.instance_member(object, field.name().name()),
@@ -2028,7 +2032,7 @@ impl<'a> Visitor<'a> for RefWalker<'_, 'a> {
                 Expr::Set(set) => this.visit_type_arguments(set.type_arg()),
                 Expr::Map(map) => this.visit_type_arguments(map.type_args()),
                 Expr::GenericInstantiation(generic) => {
-                    this.visit_type_arguments(generic.type_args())
+                    this.visit_type_arguments(generic.type_args());
                 }
                 _ => {}
             }
@@ -2179,7 +2183,7 @@ mod tests {
             doc_start(source, &parsed.tree, source.find("void").unwrap()),
             5
         );
-        assert!(lint(source).is_empty());
+        assert_eq!(lint(source), [] as [std::string::String; 0]);
         assert_eq!(lint("/**/\nvoid main() {}\nclass C {}\n"), ["C"]);
     }
 
@@ -2225,7 +2229,10 @@ mod tests {
 
     #[test]
     fn attached_doc_references_reach_declarations() {
-        assert!(lint("/// See [Helper].\nvoid main() {}\nclass Helper {}\n").is_empty());
+        assert_eq!(
+            lint("/// See [Helper].\nvoid main() {}\nclass Helper {}\n"),
+            [] as [std::string::String; 0]
+        );
         assert_eq!(
             lint("/// See [Helper].\nvoid unused() {}\nvoid main() {}\nclass Helper {}\n"),
             ["unused", "Helper"]
@@ -2267,13 +2274,13 @@ mod tests {
             ["Helper"]
         );
         assert_eq!(references[0].offset, source.find("[Helper]").unwrap() + 1);
-        assert!(lint(source).is_empty());
+        assert_eq!(lint(source), [] as [std::string::String; 0]);
     }
 
     #[test]
     fn members_of_unknown_supertypes_are_never_candidates() {
         let source = "void main() { W(); }\nclass W extends External { void build() {} }\n";
-        assert!(lint(source).is_empty());
+        assert_eq!(lint(source), [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -2317,11 +2324,17 @@ mod tests {
 
     #[test]
     fn library_without_entry_point_is_not_analyzed() {
-        assert!(lint("class C {}\nvoid helper() {}\n").is_empty());
+        assert_eq!(
+            lint("class C {}\nvoid helper() {}\n"),
+            [] as [std::string::String; 0]
+        );
     }
 
     #[test]
     fn part_without_library_context_is_not_analyzed() {
-        assert!(lint("part of 'lib.dart';\nvoid main() {}\nclass C {}\n").is_empty());
+        assert_eq!(
+            lint("part of 'lib.dart';\nvoid main() {}\nclass C {}\n"),
+            [] as [std::string::String; 0]
+        );
     }
 }

@@ -21,7 +21,7 @@ pub(crate) fn arguments_potentially_constant<'a>(
     signatures: &SignatureIndex,
 ) -> bool {
     args.positional()
-        .chain(args.named().map(|argument| argument.value()))
+        .chain(args.named().map(NamedArg::value))
         .all(|argument| {
             potentially_constant_with_shadowed(
                 argument, allowed, shadowed, owner, fields, model, signatures,
@@ -208,7 +208,7 @@ impl<'tree> PotentiallyConstant<'_, '_, 'tree> {
                 }
             }
             Expr::New(construction) if construction.is_const() => {
-                self.visit_arguments(construction.args())
+                self.visit_arguments(construction.args());
             }
             Expr::Field(field) if field.field().name() == "length" => return true,
             // A constant type literal receiver does not make an unresolved
@@ -399,8 +399,8 @@ pub(crate) fn deferred_prefixes(program: Program<'_>) -> Vec<&str> {
     program
         .imports()
         .filter(|import| import.is_deferred())
-        .filter_map(|import| import.as_name())
-        .map(|prefix| prefix.name())
+        .filter_map(ImportDirective::as_name)
+        .map(Identifier::name)
         .collect()
 }
 
@@ -684,7 +684,7 @@ impl ConstantExpressions<'_, '_> {
             || !type_args.clone().all(|ty| self.type_constant(ty))
             || !args
                 .positional()
-                .chain(args.named().map(|argument| argument.value()))
+                .chain(args.named().map(NamedArg::value))
                 .all(|argument| self.constant(argument))
         {
             return false;

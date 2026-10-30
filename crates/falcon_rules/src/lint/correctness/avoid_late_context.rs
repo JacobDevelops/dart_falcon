@@ -1,4 +1,4 @@
-//! Avoid storing BuildContext in late fields or reading it in late initializers. Resolved Flutter context values are checked rather than identifier spelling.
+//! Avoid storing `BuildContext` in late fields or reading it in late initializers. Resolved Flutter context values are checked rather than identifier spelling.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;

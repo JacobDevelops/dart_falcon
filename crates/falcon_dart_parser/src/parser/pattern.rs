@@ -3,7 +3,7 @@ use falcon_syntax::token::TokenKind;
 
 use super::{CompletedMarker, Parser, expr::Brackets};
 
-impl<'src> Parser<'src> {
+impl Parser<'_> {
     /// Parses Dart 3 logical-or patterns.
     pub(super) fn parse_pattern(&mut self) -> CompletedMarker {
         self.parse_logical_or_pattern().0
@@ -221,8 +221,7 @@ impl<'src> Parser<'src> {
         if self.at(TokenKind::LBracket) {
             if type_args != 1 {
                 self.error(format!(
-                    "list pattern expects exactly one type argument, got {}",
-                    type_args
+                    "list pattern expects exactly one type argument, got {type_args}"
                 ));
             }
             return self.parse_list_pattern();
@@ -230,8 +229,7 @@ impl<'src> Parser<'src> {
         if self.at(TokenKind::LBrace) {
             if type_args != 2 {
                 self.error(format!(
-                    "map pattern expects exactly two type arguments, got {}",
-                    type_args
+                    "map pattern expects exactly two type arguments, got {type_args}"
                 ));
             }
             return self.parse_map_pattern();

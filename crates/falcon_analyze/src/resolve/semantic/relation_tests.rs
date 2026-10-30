@@ -346,7 +346,7 @@ fn malformed_type_parameter_supertype_preserves_instantiated_positive() {
             let identity = model.resolve_name("C").unwrap();
             let ty = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: identity.clone(),
                     arguments: vec![ResolvedType::interface_identity(base.clone())].into(),
                     nullable: false,

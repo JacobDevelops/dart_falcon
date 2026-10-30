@@ -7,8 +7,8 @@
 //! Only resolved SDK `Iterable.where` calls are checked. Length comparisons
 //! require the same simple receiver or explicit `this` field on both sides.
 
-use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, RulePreparation};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -40,21 +40,18 @@ fn is_where_is_empty<'a>(expr: Expr<'a>, state: &SemanticState<'a>) -> Option<Sp
             match node {
                 Expr::Paren(_) => {}
                 Expr::Unary(unary) if unary.op() == UnaryOp::Bang => negated = !negated,
-                Expr::Binary(binary)
-                    if matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq) =>
-                {
-                    let literal = match (
+                Expr::Binary(binary) if matches!(binary.op(), BinaryOp::EqEq | BinaryOp::NotEq) => {
+                    let ((Expr::BoolLit(literal), _) | (_, Expr::BoolLit(literal))) = (
                         binary.left().unparenthesized(),
                         binary.right().unparenthesized(),
-                    ) {
-                        (Expr::BoolLit(literal), _) | (_, Expr::BoolLit(literal)) => literal,
-                        _ => break,
+                    ) else {
+                        break;
                     };
                     negated ^= literal.value() == (binary.op() == BinaryOp::NotEq);
                 }
                 _ => break,
             }
-            parent = parent.and_then(|node| node.parent());
+            parent = parent.and_then(SyntaxNode::parent);
         }
         return (!negated).then_some(field.span());
     }
@@ -129,10 +126,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .or_else(|| is_where_length_eq_length(node, state)
                 .map(|span| (span, "Use `every(predicate)` instead of comparing the filtered and original iterable lengths.")));
         if let Some((span, message)) = matched {
-            self.diags.push(self.ctx.diagnostic(
-                message,
-                span,
-            ));
+            self.diags.push(self.ctx.diagnostic(message, span));
         }
     }
 }

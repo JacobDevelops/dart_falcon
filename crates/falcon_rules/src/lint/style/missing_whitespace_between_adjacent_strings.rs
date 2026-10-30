@@ -68,7 +68,7 @@ impl Seam {
 }
 
 /// Whether a call passes its positional arguments as a regular expression.
-fn is_pattern_call<'a>(node: Expr<'a>) -> Option<ArgList<'a>> {
+fn is_pattern_call(node: Expr<'_>) -> Option<ArgList<'_>> {
     match node.unparenthesized() {
         Expr::Call(call) => match call.callee().unparenthesized() {
             Expr::Ident(name) if matches!(name.name(), "RegExp" | "matches") => Some(call.args()),

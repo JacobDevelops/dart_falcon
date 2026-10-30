@@ -172,7 +172,7 @@ fn direct_statement(mut node: SyntaxNode<'_>, block: NodeId) -> Option<Span> {
     loop {
         let parent = node.parent()?;
         if parent.id() == block {
-            return Stmt::cast(node).map(|statement| statement.span());
+            return Stmt::cast(node).map(Stmt::span);
         }
         if matches!(parent.kind(), NodeKind::FuncExpr | NodeKind::LocalFuncDecl) {
             return None;

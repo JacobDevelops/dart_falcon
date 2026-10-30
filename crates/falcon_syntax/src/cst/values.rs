@@ -29,10 +29,12 @@ pub enum AsyncMarker {
 }
 
 impl AsyncMarker {
+    #[must_use]
     pub const fn is_async(self) -> bool {
         matches!(self, Self::Async | Self::AsyncStar)
     }
 
+    #[must_use]
     pub const fn is_generator(self) -> bool {
         matches!(self, Self::SyncStar | Self::AsyncStar)
     }
@@ -94,6 +96,7 @@ pub enum BinaryOp {
 impl BinaryOp {
     /// The name of the user-definable operator method this operator invokes;
     /// `None` for `&&`, `||` and `??`. `!=` invokes `==`.
+    #[must_use]
     pub fn operator_name(self) -> Option<&'static str> {
         Some(match self {
             Self::Add => "+",
@@ -138,6 +141,7 @@ pub enum AssignOp {
 
 impl AssignOp {
     /// The binary operator a compound assignment applies; `None` for `=`.
+    #[must_use]
     pub fn binary(self) -> Option<BinaryOp> {
         Some(match self {
             Self::Eq => return None,
@@ -186,6 +190,7 @@ pub struct StringDelimiter<'a> {
 }
 
 /// Split one source string literal (`r`, quotes, content) into its parts.
+#[must_use]
 pub fn parse_string_delimiter(raw: &str) -> Option<StringDelimiter<'_>> {
     let is_raw = raw.starts_with('r');
     let prefix = usize::from(is_raw);

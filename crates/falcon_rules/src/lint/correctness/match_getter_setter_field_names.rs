@@ -107,7 +107,7 @@ fn direct_expression(body: FunctionBody<'_>, getter: bool) -> Option<Expr<'_>> {
                 _ => None,
             }
         }
-        _ => None,
+        FunctionBody::Native(_) => None,
     }
 }
 

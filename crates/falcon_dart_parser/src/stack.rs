@@ -90,7 +90,7 @@ fn run_from_foreign_worker<T: Send>(
         thread::Builder::new()
             .stack_size(WAITER_STACK_SIZE)
             .spawn_scoped(scope, || pool.install(operation))
-            .map(|waiter| waiter.join())
+            .map(thread::ScopedJoinHandle::join)
             .map_err(|error| {
                 io::Error::new(error.kind(), format!("starting stack waiter: {error}"))
             })

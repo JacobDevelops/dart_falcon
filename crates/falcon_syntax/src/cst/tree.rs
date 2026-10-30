@@ -29,6 +29,7 @@ impl NodeLink {
 pub struct TokenId(pub u32);
 
 impl TokenId {
+    #[must_use]
     pub fn index(self) -> usize {
         self.0 as usize
     }
@@ -131,6 +132,12 @@ impl SyntaxTree {
         }
     }
 
+    /// Returns the typed program root.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the root is not a program, or in debug builds if `source` has
+    /// a different length from the source used to build this tree.
     pub fn program<'a>(&'a self, source: &'a str) -> super::Program<'a> {
         super::Program::cast(self.root(source)).expect("syntax tree root must be Program")
     }
@@ -169,6 +176,16 @@ impl SyntaxTree {
                 .is_some_and(|token| token.kind == TokenKind::Eof)
     }
 
+    /// Builds a lossless arena from parser events and lexical tokens.
+    ///
+    /// # Panics
+    ///
+    /// Panics if events are unbalanced, have invalid forward-parent links,
+    /// contain out-of-order or out-of-bounds tokens, refer to invalid source
+    /// boundaries, or do not consume the entire source. Also panics if a
+    /// recovery span has no enclosing node, there is more than one root, or
+    /// the node or token arena exceeds its 31-bit ID capacity.
+    #[must_use]
     pub fn build(source: &str, tokens: &[Token], mut events: Vec<Event>) -> Self {
         let node_capacity = events
             .iter()
@@ -321,11 +338,11 @@ struct Sink<'a> {
 impl Sink<'_> {
     /// Lossless: every pushed node and token was given an id by `arena_id`.
     fn node_count(&self) -> u32 {
-        self.nodes.len() as u32
+        u32::try_from(self.nodes.len()).expect("node count fits the 31-bit arena capacity")
     }
 
     fn token_count(&self) -> u32 {
-        self.tokens.len() as u32
+        u32::try_from(self.tokens.len()).expect("token count fits the 31-bit arena capacity")
     }
 
     fn start(&mut self, kind: NodeKind, offset: usize) {
@@ -653,7 +670,7 @@ mod tests {
         assert!(tree.is_lossless(source));
         assert_eq!(
             tree.tokens(source)
-                .map(|token| token.text())
+                .map(SyntaxToken::text)
                 .collect::<String>(),
             source
         );
@@ -736,7 +753,7 @@ mod tests {
         assert!(tree.is_lossless(source));
         assert_eq!(
             tree.significant_tokens(source)
-                .map(|token| token.kind())
+                .map(SyntaxToken::kind)
                 .collect::<Vec<_>>(),
             [TokenKind::Gt, TokenKind::Gt]
         );
@@ -775,10 +792,10 @@ mod tests {
 
     #[test]
     fn empty_and_deep_arenas_are_iterative() {
+        const DEPTH: usize = 16_384;
         let empty = SyntaxTree::build("", &[], vec![]);
         assert!(empty.is_lossless(""));
         assert_eq!(empty.root("").span(), Span::new(0, 0));
-        const DEPTH: usize = 16_384;
         let mut events = Vec::with_capacity(DEPTH * 2);
         events.push(start(NodeKind::Program, 0));
         events.extend((1..DEPTH).map(|_| start(NodeKind::Error, 0)));
@@ -862,7 +879,7 @@ mod interpolation_tests {
         assert!(tree.is_lossless(source));
         let names: Vec<_> = tree
             .identifier_tokens(source)
-            .map(|token| token.text())
+            .map(SyntaxToken::text)
             .collect();
         assert_eq!(names, ["é", "x"]);
         let open = tree

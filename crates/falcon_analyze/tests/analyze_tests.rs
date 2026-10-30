@@ -67,7 +67,7 @@ impl Rule for CountFunctionDeclsRule {
                     Diagnostic::new(
                         "count_functions",
                         Severity::Info,
-                        format!("function {}", i),
+                        format!("function {i}"),
                         "test.dart",
                         Span { start: 0, end: 1 },
                     )
@@ -281,7 +281,7 @@ fn test_analyze_parallel_ten_files() {
     let files: Vec<(PathBuf, String)> = (0..10)
         .map(|i| {
             (
-                PathBuf::from(format!("file_{}.dart", i)),
+                PathBuf::from(format!("file_{i}.dart")),
                 "void main() {}".to_string(),
             )
         })
@@ -303,7 +303,7 @@ fn test_analyze_parallel_result_correctness_multi_file() {
     let files: Vec<(PathBuf, String)> = (0..5)
         .map(|i| {
             (
-                PathBuf::from(format!("test_{}.dart", i)),
+                PathBuf::from(format!("test_{i}.dart")),
                 "class Foo {}".to_string(),
             )
         })
@@ -314,7 +314,10 @@ fn test_analyze_parallel_result_correctness_multi_file() {
     // Each diagnostic file_path should correspond to one of our input files
     for diag in &diagnostics {
         assert!(
-            diag.file_path.starts_with("test_") && diag.file_path.ends_with(".dart"),
+            diag.file_path.starts_with("test_")
+                && std::path::Path::new(&diag.file_path)
+                    .extension()
+                    .is_some_and(|ext| ext == "dart"),
             "unexpected file_path: {}",
             diag.file_path
         );
@@ -324,12 +327,12 @@ fn test_analyze_parallel_result_correctness_multi_file() {
 #[test]
 fn test_end_to_end_parse_analyze_serialize() {
     // Parse a Dart snippet, run a mock rule via RuleRegistry, collect diagnostics, serialize JSON.
-    let source = r#"
+    let source = r"
         class Foo {
             void bar() {}
             void baz() {}
         }
-    "#;
+    ";
 
     let falcon_dart_parser::ParseResult {
         tree,
@@ -337,8 +340,7 @@ fn test_end_to_end_parse_analyze_serialize() {
     } = falcon_dart_parser::parse(source);
     assert!(
         parse_errors.is_empty(),
-        "unexpected parse errors: {:?}",
-        parse_errors
+        "unexpected parse errors: {parse_errors:?}"
     );
 
     let mut registry = RuleRegistry::new();
@@ -374,7 +376,7 @@ fn test_context_diagnostic_uses_file_and_warning_default() {
     let ctx = AnalyzeContext::new(Path::new("foo.dart"), &config, &parsed);
     let span = falcon_syntax::cst::Span { start: 1, end: 3 };
     let diagnostic = ctx.diagnostic("message", span);
-    assert!(diagnostic.rule.is_empty());
+    assert_eq!(diagnostic.rule, "");
     assert_eq!(diagnostic.message, "message");
     assert_eq!(diagnostic.file_path, "foo.dart");
     assert_eq!(diagnostic.severity, Severity::Warning);
@@ -409,8 +411,12 @@ fn context_reuses_per_file_analysis_facts() {
     assert!(std::ptr::eq(ctx.globals(program), ctx.globals(program)));
     assert!(ctx.globals(program).contains_key("value"));
     assert_eq!(
-        ctx.tokens().map(|token| token.span()).collect::<Vec<_>>(),
-        ctx.tokens().map(|token| token.span()).collect::<Vec<_>>(),
+        ctx.tokens()
+            .map(falcon_syntax::cst::SyntaxToken::span)
+            .collect::<Vec<_>>(),
+        ctx.tokens()
+            .map(falcon_syntax::cst::SyntaxToken::span)
+            .collect::<Vec<_>>(),
     );
     assert!(ctx.tokens().next().is_some());
 
@@ -504,9 +510,10 @@ fn panicking_rules_report_worker_errors_and_leave_the_pool_usable() {
             _program: Program<'a>,
             ctx: &'a AnalyzeContext<'a>,
         ) -> RulePreparation<'a> {
-            if ctx.file_path() == Path::new("panic.dart") {
-                panic!("deliberate rule panic");
-            }
+            assert!(
+                ctx.file_path() != Path::new("panic.dart"),
+                "deliberate rule panic"
+            );
             RulePreparation::Diagnostics(vec![
                 ctx.diagnostic("healthy file survives", Span { start: 0, end: 0 }),
             ])

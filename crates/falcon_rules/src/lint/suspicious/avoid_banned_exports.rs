@@ -31,7 +31,7 @@ impl Rule for AvoidBannedExports {
                 for uri in std::iter::once(export.uri()).chain(
                     export
                         .configurable_uris()
-                        .map(|alternative| alternative.uri()),
+                        .map(ConfigurableUri::uri),
                 ) {
                     report(
                         ctx,

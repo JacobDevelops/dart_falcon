@@ -81,10 +81,10 @@ fn cross_file_stub(struct_name: &str) -> String {
 ///
 /// `cargo xtask codegen rule --group suspicious --name avoid-foo`
 ///
-/// The validated kebab-case id maps to a snake_case module under either
+/// The validated kebab-case id maps to a `snake_case` module under either
 /// `lint/<group>/` or `cross_file/`.
-pub(crate) fn run(group: String, rule_id: String, cross_file: bool) -> Result<(), String> {
-    generate(&workspace_root(), &group, &rule_id, cross_file)
+pub(crate) fn run(group: &str, rule_id: &str, cross_file: bool) -> Result<(), String> {
+    generate(&workspace_root(), group, rule_id, cross_file)
 }
 
 fn generate(root: &Path, group: &str, rule_id: &str, cross_file: bool) -> Result<(), String> {
@@ -120,7 +120,7 @@ fn generate(root: &Path, group: &str, rule_id: &str, cross_file: bool) -> Result
         format!("crates/falcon_rules/src/lint/{group}")
     };
     let rule_file = root.join(directory).join(format!("{module}.rs"));
-    let corpus_dir = root.join(format!("crates/falcon_rules/tests/corpus/{}", rule_id));
+    let corpus_dir = root.join(format!("crates/falcon_rules/tests/corpus/{rule_id}"));
 
     if rule_file.exists() {
         return Err(format!("{} already exists", rule_file.display()));

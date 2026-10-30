@@ -52,13 +52,13 @@ struct Collector<'a> {
 }
 
 impl Collector<'_> {
-    fn enter(&mut self, parameters: AstChildren<'_, TypeParam<'_>>) {
+    fn enter(&mut self, parameters: &AstChildren<'_, TypeParam<'_>>) {
         if !parameters.is_empty() {
-            self.parameters.push(parameters, &self.model);
+            self.parameters.push(parameters.clone(), &self.model);
         }
     }
 
-    fn exit(&mut self, parameters: AstChildren<'_, TypeParam<'_>>) {
+    fn exit(&mut self, parameters: &AstChildren<'_, TypeParam<'_>>) {
         if !parameters.is_empty() {
             self.parameters.pop();
         }
@@ -100,14 +100,14 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
     fn visit_top_level_decl(&mut self, node: TopLevelDecl<'a>) -> StructuralTraversal {
         if !matches!(node, TopLevelDecl::Function(_)) {
-            self.enter(node.type_params());
+            self.enter(&node.type_params());
         }
         StructuralTraversal::Continue
     }
 
     fn exit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
         if !matches!(node, TopLevelDecl::Function(_)) {
-            self.exit(node.type_params());
+            self.exit(&node.type_params());
         }
     }
 
@@ -127,7 +127,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
-        self.enter(node.type_params());
+        self.enter(&node.type_params());
         let is_void = self.is_void_return(node.return_type(), node.async_marker());
         self.check_arrow(node.body(), is_void);
         self.void_stack.push(is_void);
@@ -135,12 +135,12 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn exit_function_decl(&mut self, node: FunctionDecl<'a>) {
-        self.exit(node.type_params());
+        self.exit(&node.type_params());
         self.void_stack.pop();
     }
 
     fn visit_method_decl(&mut self, node: MethodDecl<'a>) -> StructuralTraversal {
-        self.enter(node.type_params());
+        self.enter(&node.type_params());
         let is_void = self.is_void_return(node.return_type(), node.async_marker());
         self.check_arrow(node.body(), is_void);
         self.void_stack.push(is_void);
@@ -148,7 +148,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn exit_method_decl(&mut self, node: MethodDecl<'a>) {
-        self.exit(node.type_params());
+        self.exit(&node.type_params());
         self.void_stack.pop();
     }
 
@@ -197,7 +197,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 }
             }
             Stmt::LocalFunc(lf) => {
-                self.enter(lf.type_params());
+                self.enter(&lf.type_params());
                 let is_void = self.is_void_return(lf.return_type(), lf.async_marker());
                 self.check_arrow(Some(lf.body()), is_void);
                 self.void_stack.push(is_void);
@@ -209,14 +209,14 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
     fn exit_stmt(&mut self, node: Stmt<'a>) {
         if let Stmt::LocalFunc(function) = node {
-            self.exit(function.type_params());
+            self.exit(&function.type_params());
             self.void_stack.pop();
         }
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         if let Expr::FuncExpr(function) = node {
-            self.enter(function.type_params());
+            self.enter(&function.type_params());
             // Function expressions have no written return type, so they can never
             // be declared `void`.
             self.check_arrow(Some(function.body()), false);
@@ -227,7 +227,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
     fn exit_expr(&mut self, node: Expr<'a>) {
         if let Expr::FuncExpr(function) = node {
-            self.exit(function.type_params());
+            self.exit(&function.type_params());
             self.void_stack.pop();
         }
     }

@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    AliasComparison, AliasPresenceKey, Arc, BinaryOp, Cow, DeclarationIdentity, FunctionTypeAlias,
+    FunctionTypeShape, FxHashMap, FxHashSet, ResolvedType, SemanticModel, SharedHashKey,
+    SignatureIndex, Truth, has_inference_holes,
+};
 use crate::resolve::semantic::ResolvedTypeKind;
 
 /// The position of a top type in Dart's `MORETOP` order, where `void` is above
@@ -73,9 +77,7 @@ pub(super) fn inference_join_memoized(
     let cacheable = matches!(
         left,
         ResolvedType {
-            kind: ResolvedTypeKind::Function { .. }
-        } | ResolvedType {
-            kind: ResolvedTypeKind::Record { .. }
+            kind: ResolvedTypeKind::Function { .. } | ResolvedTypeKind::Record { .. }
         }
     ) || matches!(left, ResolvedType { kind: ResolvedTypeKind::Interface { arguments, .. } } if !arguments.is_empty());
     let key = cacheable.then(|| (memo.hash(left), memo.hash(right)));
@@ -250,7 +252,7 @@ fn join_equal_records(
         }
         return ResolvedType {
             kind: ResolvedTypeKind::Record {
-                occurrence: Default::default(),
+                occurrence: FunctionTypeAlias::default(),
                 positional: left_positional
                     .iter()
                     .zip(right_positional.iter())
@@ -402,9 +404,7 @@ fn join_special_types(left: &ResolvedType, right: &ResolvedType) -> Option<Resol
     if matches!(
         left,
         ResolvedType {
-            kind: ResolvedTypeKind::Void
-        } | ResolvedType {
-            kind: ResolvedTypeKind::Dynamic
+            kind: ResolvedTypeKind::Void | ResolvedTypeKind::Dynamic
         }
     ) {
         return Some(left.clone());
@@ -412,9 +412,7 @@ fn join_special_types(left: &ResolvedType, right: &ResolvedType) -> Option<Resol
     if matches!(
         right,
         ResolvedType {
-            kind: ResolvedTypeKind::Void
-        } | ResolvedType {
-            kind: ResolvedTypeKind::Dynamic
+            kind: ResolvedTypeKind::Void | ResolvedTypeKind::Dynamic
         }
     ) {
         return Some(right.clone());
@@ -637,7 +635,7 @@ fn join_functions(
         named.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
         return ResolvedType {
             kind: ResolvedTypeKind::Function {
-                shape: join_function_shape(left_shape, right_shape, &named),
+                shape: join_function_shape(left_shape.as_ref(), right_shape.as_ref(), &named),
                 optional_positional: (*left_optional).min(*right_optional),
                 alias: FunctionTypeAlias::default(),
                 return_type: Arc::new(inference_join_memoized(
@@ -657,8 +655,8 @@ fn join_functions(
 }
 
 fn join_function_shape(
-    left: &Option<Arc<FunctionTypeShape>>,
-    right: &Option<Arc<FunctionTypeShape>>,
+    left: Option<&Arc<FunctionTypeShape>>,
+    right: Option<&Arc<FunctionTypeShape>>,
     named: &[(String, ResolvedType)],
 ) -> Option<Arc<FunctionTypeShape>> {
     match (left, right) {
@@ -713,7 +711,7 @@ fn join_interfaces(
         if left_identity == right_identity && left_args.len() == right_args.len() {
             return ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     identity: left_identity.clone(),
                     arguments: left_args
                         .iter()
@@ -887,15 +885,16 @@ pub(super) fn contextual_join(
     }
     match signatures.relation(&join, crate::TypeRelation::SubtypeOf(context), model) {
         Truth::Yes => join,
-        Truth::No
+        Truth::No => {
             if types.iter().all(|ty| {
                 signatures.relation(ty, crate::TypeRelation::SubtypeOf(context), model)
                     == Truth::Yes
-            }) =>
-        {
-            context.clone()
+            }) {
+                context.clone()
+            } else {
+                join
+            }
         }
-        Truth::No => join,
         Truth::Unknown => ResolvedType::UNKNOWN,
     }
 }

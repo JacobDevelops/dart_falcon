@@ -24,6 +24,7 @@ pub struct FlowContext<'a, 'model> {
 impl FlowContext<'_, '_> {
     /// Proves only spaces represented by the semantic index, never a guessed
     /// closed subtype set. Guards cannot contribute unconditional coverage.
+    #[must_use]
     pub fn switch_is_exhaustive(
         &self,
         statement: falcon_syntax::cst::SwitchStmt<'_>,
@@ -33,7 +34,7 @@ impl FlowContext<'_, '_> {
         let patterns = || {
             statement
                 .cases()
-                .flat_map(|case| case.cases())
+                .flat_map(falcon_syntax::cst::SwitchCase::cases)
                 .filter_map(|case| match case {
                     SwitchCaseKind::Pattern(label) if label.guard().is_none() => {
                         Some(label.pattern())
@@ -143,17 +144,16 @@ impl FlowContext<'_, '_> {
             if !completes {
                 continue;
             }
-            joined = Some(match joined {
-                Some(previous) => Cow::Owned(previous.join(&path)),
-                None => {
-                    if path.depth() > depth {
-                        let path = path.to_mut();
-                        while path.depth() > depth {
-                            path.pop_scope();
-                        }
+            joined = Some(if let Some(previous) = joined {
+                Cow::Owned(previous.join(&path))
+            } else {
+                if path.depth() > depth {
+                    let path = path.to_mut();
+                    while path.depth() > depth {
+                        path.pop_scope();
                     }
-                    path
                 }
+                path
             });
         }
         if let Some(joined) = joined {
@@ -268,10 +268,8 @@ impl FlowContext<'_, '_> {
                 value,
                 ResolvedType {
                     kind: ResolvedTypeKind::Dynamic
-                } | ResolvedType {
-                    kind: ResolvedTypeKind::Unknown
-                } | ResolvedType {
-                    kind: ResolvedTypeKind::Void
+                        | ResolvedTypeKind::Unknown
+                        | ResolvedTypeKind::Void
                 }
             );
         }
@@ -309,9 +307,7 @@ impl FlowContext<'_, '_> {
                 && !matches!(
                     value,
                     ResolvedType {
-                        kind: ResolvedTypeKind::Dynamic
-                    } | ResolvedType {
-                        kind: ResolvedTypeKind::Unknown
+                        kind: ResolvedTypeKind::Dynamic | ResolvedTypeKind::Unknown
                     }
                 )
             {
@@ -365,10 +361,7 @@ impl FlowContext<'_, '_> {
             (
                 _,
                 ResolvedType {
-                    kind: ResolvedTypeKind::Dynamic,
-                }
-                | ResolvedType {
-                    kind: ResolvedTypeKind::Void,
+                    kind: ResolvedTypeKind::Dynamic | ResolvedTypeKind::Void,
                 },
             ) => true,
             (
@@ -412,16 +405,11 @@ impl FlowContext<'_, '_> {
         }
         match value {
             ResolvedType {
-                kind: ResolvedTypeKind::Interface { nullable: true, .. },
-            }
-            | ResolvedType {
-                kind: ResolvedTypeKind::TypeParameter { nullable: true, .. },
-            }
-            | ResolvedType {
-                kind: ResolvedTypeKind::Function { nullable: true, .. },
-            }
-            | ResolvedType {
-                kind: ResolvedTypeKind::Record { nullable: true, .. },
+                kind:
+                    ResolvedTypeKind::Interface { nullable: true, .. }
+                    | ResolvedTypeKind::TypeParameter { nullable: true, .. }
+                    | ResolvedTypeKind::Function { nullable: true, .. }
+                    | ResolvedTypeKind::Record { nullable: true, .. },
             } => {
                 let remainder = self.factor(&value.with_nullable(false), excluded);
                 if self.subtype(&ResolvedType::NULL, excluded) {
@@ -540,9 +528,7 @@ impl FlowContext<'_, '_> {
         if matches!(
             ty,
             ResolvedType {
-                kind: ResolvedTypeKind::Dynamic
-            } | ResolvedType {
-                kind: ResolvedTypeKind::Unknown
+                kind: ResolvedTypeKind::Dynamic | ResolvedTypeKind::Unknown
             }
         ) {
             return;
@@ -555,9 +541,7 @@ impl FlowContext<'_, '_> {
             && !matches!(
                 current,
                 ResolvedType {
-                    kind: ResolvedTypeKind::Dynamic
-                } | ResolvedType {
-                    kind: ResolvedTypeKind::Unknown
+                    kind: ResolvedTypeKind::Dynamic | ResolvedTypeKind::Unknown
                 }
             )
         {
@@ -580,7 +564,7 @@ impl FlowContext<'_, '_> {
         }
         match expression.unparenthesized() {
             Expr::Ident(name) if environment.is_bound(name.name()) => {
-                environment.promote_without_test(name.name(), ty)
+                environment.promote_without_test(name.name(), ty);
             }
             Expr::Ident(name)
                 if self.field_promotions
@@ -590,7 +574,7 @@ impl FlowContext<'_, '_> {
                         self.model,
                     ) =>
             {
-                environment.promote_this_field(name.name(), ty)
+                environment.promote_this_field(name.name(), ty);
             }
             Expr::Field(field)
                 if !field.is_null_safe()
@@ -601,7 +585,7 @@ impl FlowContext<'_, '_> {
                         self.model,
                     ) =>
             {
-                environment.promote_field(field.object(), field.field().name(), ty)
+                environment.promote_field(field.object(), field.field().name(), ty);
             }
             _ => {}
         }
@@ -642,10 +626,10 @@ impl FlowContext<'_, '_> {
                             if let Expr::Ident(name) = expr.unparenthesized() {
                                 environment.record_tested_type(name.name(), tested.clone());
                             }
-                            let ty = if truth != test.negated() {
-                                tested
-                            } else {
+                            let ty = if truth == test.negated() {
                                 self.factor(&self.infer(environment, expr), &tested)
+                            } else {
+                                tested
                             };
                             // An impossible type-test branch does not change the
                             // variable's static type to Never.
@@ -690,7 +674,7 @@ impl FlowContext<'_, '_> {
     ) {
         match pattern {
             Pattern::ParenPattern(paren) => {
-                self.assume_pattern(environment, expression, paren.inner(), truth)
+                self.assume_pattern(environment, expression, paren.inner(), truth);
             }
             Pattern::Literal(literal) if matches!(literal.value(), LiteralPatternValue::Null) => {
                 if !truth {
@@ -754,13 +738,13 @@ impl FlowContext<'_, '_> {
             Pattern::Object(object) if truth => {
                 let ty =
                     self.object_pattern_type(object.type_(), &self.infer(environment, expression));
-                self.promote(environment, expression, ty)
+                self.promote(environment, expression, ty);
             }
             Pattern::List(_) if truth => {
-                self.promote(environment, expression, self.model.core_type("List", false))
+                self.promote(environment, expression, self.model.core_type("List", false));
             }
             Pattern::Map(_) if truth => {
-                self.promote(environment, expression, self.model.core_type("Map", false))
+                self.promote(environment, expression, self.model.core_type("Map", false));
             }
             Pattern::Record(_) if truth => self.promote(
                 environment,
@@ -771,6 +755,7 @@ impl FlowContext<'_, '_> {
         }
     }
 
+    #[must_use]
     pub fn statement_exits(&self, environment: &TypeEnvironment, statement: Stmt<'_>) -> bool {
         exits(
             statement,
@@ -781,6 +766,7 @@ impl FlowContext<'_, '_> {
     }
 
     /// The element type a `for`-in loop binds from `iterable`; `await for` iterates a `Stream`.
+    #[must_use]
     pub fn iterable_element(&self, iterable: &ResolvedType, is_await: bool) -> ResolvedType {
         let (library, name) = if is_await {
             ("dart:async", "Stream")
@@ -807,17 +793,16 @@ impl FlowContext<'_, '_> {
                 });
                 environment.declare(variable.name().name(), ty);
             }
-            Pattern::List(list) => self.declare_list_pattern(environment, list, matched),
+            Pattern::List(list) => self.declare_list_pattern(environment, list, &matched),
             Pattern::Record(record) => {
                 let mut positional = 0;
                 for field in record.fields() {
-                    let ty = match field.name() {
-                        Some(name) => matched.record_field(name.name()),
-                        None => {
-                            let ty = matched.record_positional(positional);
-                            positional += 1;
-                            ty
-                        }
+                    let ty = if let Some(name) = field.name() {
+                        matched.record_field(name.name())
+                    } else {
+                        let ty = matched.record_positional(positional);
+                        positional += 1;
+                        ty
                     };
                     self.declare_pattern(
                         environment,
@@ -841,7 +826,7 @@ impl FlowContext<'_, '_> {
                     self.declare_pattern(environment, entry.pattern(), value.clone());
                 }
             }
-            Pattern::Object(object) => self.declare_object_pattern(environment, object, matched),
+            Pattern::Object(object) => self.declare_object_pattern(environment, object, &matched),
             Pattern::LogicalAnd(_) | Pattern::LogicalOr(_) => {
                 let (left, right) = match pattern {
                     Pattern::LogicalAnd(logical) => (logical.left(), logical.right()),
@@ -863,10 +848,10 @@ impl FlowContext<'_, '_> {
                     Pattern::NullAssert(assertion) => assertion.inner(),
                     _ => unreachable!(),
                 };
-                self.declare_pattern(environment, inner, matched.non_null())
+                self.declare_pattern(environment, inner, matched.non_null());
             }
             Pattern::ParenPattern(paren) => {
-                self.declare_pattern(environment, paren.inner(), matched)
+                self.declare_pattern(environment, paren.inner(), matched);
             }
             Pattern::Wildcard(_)
             | Pattern::Literal(_)
@@ -880,21 +865,21 @@ impl FlowContext<'_, '_> {
         &self,
         environment: &mut TypeEnvironment,
         list: falcon_syntax::cst::ListPattern<'_>,
-        matched: ResolvedType,
+        matched: &ResolvedType,
     ) {
         let element = list
             .type_arg()
             .map(|ty| self.model.resolve_type_in(ty, self.type_parameters))
             .or_else(|| {
                 self.signatures
-                    .instantiated_supertype(&matched, "dart:core", "List", self.model)
+                    .instantiated_supertype(matched, "dart:core", "List", self.model)
                     .and_then(|ty| ty.type_argument(0))
             })
             .unwrap_or(ResolvedType::UNKNOWN);
         for child in list.elements() {
             match child {
                 ListPatternElement::Pattern(child) => {
-                    self.declare_pattern(environment, child, element.clone())
+                    self.declare_pattern(environment, child, element.clone());
                 }
                 ListPatternElement::Rest(rest) => {
                     if let Some(child) = rest.pattern() {
@@ -909,9 +894,9 @@ impl FlowContext<'_, '_> {
         &self,
         environment: &mut TypeEnvironment,
         object: falcon_syntax::cst::ObjectPattern<'_>,
-        matched: ResolvedType,
+        matched: &ResolvedType,
     ) {
-        let object_type = self.object_pattern_type(object.type_(), &matched);
+        let object_type = self.object_pattern_type(object.type_(), matched);
         for field in object.fields() {
             let ty = self
                 .signatures
@@ -936,6 +921,7 @@ impl FlowContext<'_, '_> {
     /// The type an object pattern matches: written type arguments, or else the
     /// matched value's instantiation of the named declaration (`Box(...)`
     /// matching a `Box<T>` is `Box<T>`), falling back to the raw type.
+    #[must_use]
     pub fn object_pattern_type(
         &self,
         written: DartType<'_>,
@@ -1056,16 +1042,11 @@ impl FlowContext<'_, '_> {
 fn non_null(ty: &ResolvedType) -> Option<ResolvedType> {
     match ty {
         ResolvedType {
-            kind: ResolvedTypeKind::Dynamic,
-        }
-        | ResolvedType {
-            kind: ResolvedTypeKind::Unknown,
-        }
-        | ResolvedType {
-            kind: ResolvedTypeKind::Void,
-        }
-        | ResolvedType {
-            kind: ResolvedTypeKind::Null,
+            kind:
+                ResolvedTypeKind::Dynamic
+                | ResolvedTypeKind::Unknown
+                | ResolvedTypeKind::Void
+                | ResolvedTypeKind::Null,
         } => None,
         ty => Some(ty.non_null()),
     }
@@ -1106,8 +1087,8 @@ fn same_shape(left: &ResolvedType, right: &ResolvedType) -> bool {
                         id: b, bound: bb, ..
                     },
             },
-        ) => a == b && ab == bb,
-        (
+        )
+        | (
             ResolvedType {
                 kind: ResolvedTypeKind::NonNullTypeParameter { id: a, bound: ab },
             },
@@ -1190,8 +1171,9 @@ impl<'tree> Visitor<'tree> for CompletedPromotions<'_, '_, '_> {
             }
             Expr::Conditional(conditional) => self.visit_expr(conditional.condition()),
             Expr::Switch(switch) => self.visit_expr(switch.subject()),
-            Expr::Call(call) if matches!(call.callee(), Expr::Field(field) if field.is_null_safe()) => {
-                self.visit_expr(call.callee())
+            Expr::Call(call) if matches!(call.callee(), Expr::Field(field) if field.is_null_safe()) =>
+            {
+                self.visit_expr(call.callee());
             }
             _ => walk_expr(self, expression),
         }
@@ -1309,8 +1291,10 @@ impl<'tree> Visitor<'tree> for Breaks<'_> {
             return;
         }
         match statement {
-            Stmt::Break(statement) if statement.label().map(|label| label.name()) == self.label => {
-                self.found = true
+            Stmt::Break(statement)
+                if statement.label().map(falcon_syntax::cst::Identifier::name) == self.label =>
+            {
+                self.found = true;
             }
             Stmt::Labeled(statement) if self.label == Some(statement.label().name()) => {}
             Stmt::For(_) | Stmt::While(_) | Stmt::DoWhile(_) | Stmt::Switch(_)
@@ -1350,10 +1334,10 @@ impl<'tree> Visitor<'tree> for Jumps {
         }
         match statement {
             Stmt::Break(jump) if !self.continues => {
-                self.found = jump.label().is_some() || self.shielded == 0
+                self.found = jump.label().is_some() || self.shielded == 0;
             }
             Stmt::Continue(jump) if self.continues => {
-                self.found = jump.label().is_some() || self.shielded == 0
+                self.found = jump.label().is_some() || self.shielded == 0;
             }
             Stmt::For(_) | Stmt::While(_) | Stmt::DoWhile(_) => {
                 self.shielded += 1;
@@ -1461,9 +1445,9 @@ mod tests {
         with_flow_context(|context| {
             let bound = ResolvedType {
                 kind: ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: crate::resolve::FunctionTypeAlias::default(),
                     identity: super::DeclarationIdentity::sdk("test", "IntBox"),
-                    arguments: Default::default(),
+                    arguments: std::sync::Arc::default(),
                     nullable: false,
                     extension_type: true,
                 },

@@ -18,6 +18,7 @@ impl SignatureIndex {
     ///
     /// A declaration-hierarchy miss is `No` only when every reachable edge is
     /// known; an unresolved edge or cyclic hierarchy remains `Unknown`.
+    #[must_use]
     pub fn relation(
         &self,
         ty: &ResolvedType,

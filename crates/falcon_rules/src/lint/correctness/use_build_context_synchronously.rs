@@ -1,4 +1,4 @@
-//! Flags BuildContext use after an asynchronous gap without a mounted guard.
+//! Flags `BuildContext` use after an asynchronous gap without a mounted guard.
 //!
 //! A mounted guard must check the same `BuildContext` used after the gap.
 //! Function bodies are checked independently; callbacks passed to SDK async APIs

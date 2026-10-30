@@ -141,7 +141,9 @@ fn test_extension_type_const_named_ctor() {
             assert!(e.primary_constructor().is_const());
             assert_eq!(e.name().name(), "Foo");
             assert_eq!(
-                e.primary_constructor().constructor_name().map(|i| i.name()),
+                e.primary_constructor()
+                    .constructor_name()
+                    .map(falcon_syntax::cst::Identifier::name),
                 Some("_")
             );
             assert_eq!(e.representation().map(|p| p.name().name()), Some("x"));
@@ -219,7 +221,9 @@ fn test_conditional_import() {
     assert_eq!(import.configurable_uris().len(), 1);
     let cu = import.configurable_uris().next().unwrap();
     assert_eq!(
-        cu.test().map(|i| i.name()).collect::<Vec<_>>(),
+        cu.test()
+            .map(falcon_syntax::cst::Identifier::name)
+            .collect::<Vec<_>>(),
         vec!["dart", "library", "io"]
     );
     assert_eq!(cu.uri().value(), "b.dart");
@@ -239,7 +243,12 @@ fn test_conditional_export_with_equality() {
         .configurable_uris()
         .next()
         .unwrap();
-    assert_eq!(cu.value().map(|s| s.value()).as_deref(), Some("true"));
+    assert_eq!(
+        cu.value()
+            .map(falcon_syntax::cst::StringLitNode::value)
+            .as_deref(),
+        Some("true")
+    );
 }
 
 #[test]
@@ -492,7 +501,7 @@ fn test_curried_function_type_in_type_args() {
     assert_eq!(ann.type_args().len(), 2);
     match ann.type_args().next().unwrap() {
         DartType::Function(outer) => {
-            assert!(matches!(outer.return_type(), Some(DartType::Function(_))))
+            assert!(matches!(outer.return_type(), Some(DartType::Function(_))));
         }
         other => panic!("expected curried function type, got {other:?}"),
     }
@@ -604,7 +613,7 @@ fn test_arrow_switch_body_with_semicolon_ok() {
     assert!(errors.is_empty(), "errors: {errors:?}");
 }
 
-fn for_init_decl<'a>(prog: Program<'a>) -> LocalVarDecl<'a> {
+fn for_init_decl(prog: Program<'_>) -> LocalVarDecl<'_> {
     let body = match prog.declarations().next().unwrap() {
         TopLevelDecl::Function(f) => f.body().expect("function body"),
         other => panic!("expected function, got {other:?}"),
@@ -864,7 +873,12 @@ fn test_primary_constructor_class() {
     let class = only_class(prog);
     let primary = class.primary_constructor().expect("primary constructor");
     assert!(primary.is_const());
-    assert_eq!(primary.constructor_name().map(|n| n.name()), Some("named"));
+    assert_eq!(
+        primary
+            .constructor_name()
+            .map(falcon_syntax::cst::Identifier::name),
+        Some("named")
+    );
     let declaring: Vec<_> = class
         .element_members()
         .declaring_params()

@@ -419,9 +419,9 @@ impl<'a> Collector<'a> {
                 // when the member exists on a nullable receiver, i.e. an
                 // extension on a nullable type (possibly imported). A null-aware
                 // access does not require the receiver's member to accept null.
-                !object_member
-                    && !(null_aware && !access_null_aware)
-                    && !self.nullable_extension_members.contains(name)
+                !(object_member
+                    || null_aware && !access_null_aware
+                    || self.nullable_extension_members.contains(name))
             }
             Parent::NullAssert => false,
             Parent::Conditional { then_branch: true } | Parent::MapKey
@@ -571,7 +571,7 @@ impl<'a> Collector<'a> {
                     CascadeOp::Invoke(call) => self.check_args(call.args()),
                     CascadeOp::Assign(assign) => self.check(assign.value(), Parent::AssignedValue),
                     CascadeOp::IndexAssign(assign) => {
-                        self.check(assign.value(), Parent::AssignedValue)
+                        self.check(assign.value(), Parent::AssignedValue);
                     }
                 }
             }
@@ -620,7 +620,6 @@ impl<'a> Collector<'a> {
                 };
                 self.check(field.object(), parent);
             }
-            Expr::Field(_) => {}
             Expr::Index(index) => {
                 self.check(index.object(), Parent::OtherExpression);
                 self.check(index.index(), Parent::OtherExpression);
@@ -644,7 +643,7 @@ impl<'a> Collector<'a> {
             Expr::Await(expression) => self.check(expression.expr(), Parent::OtherExpression),
             Expr::Throw(expression) => self.check(expression.expr(), Parent::OtherExpression),
             Expr::GenericInstantiation(expression) => {
-                self.check(expression.target(), Parent::OtherExpression)
+                self.check(expression.target(), Parent::OtherExpression);
             }
             Expr::Switch(expression) => {
                 self.check(expression.subject(), Parent::Condition);
@@ -660,8 +659,9 @@ impl<'a> Collector<'a> {
                     self.check(interpolation.expr(), Parent::Interpolation);
                 }
             }
-            Expr::Paren(_) => {}
-            Expr::IntLit(_)
+            Expr::Field(_)
+            | Expr::Paren(_)
+            | Expr::IntLit(_)
             | Expr::DoubleLit(_)
             | Expr::BoolLit(_)
             | Expr::NullLit(_)
@@ -912,8 +912,8 @@ fn directly_contains_whitespace(expression: Expr<'_>) -> bool {
             | Expr::Binary(_)
             | Expr::FuncExpr(_)
             | Expr::Is(_)
-            | Expr::Switch(_) => return true,
-            Expr::New(_) => return true,
+            | Expr::Switch(_)
+            | Expr::New(_) => return true,
             Expr::List(list) => return list.is_const(),
             Expr::Map(map) => return map.is_const(),
             Expr::Set(set) => return set.is_const(),

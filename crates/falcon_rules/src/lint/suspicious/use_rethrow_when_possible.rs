@@ -57,7 +57,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         self.targets.push(self.target.take());
         self.target = node.exception_var()
             .and_then(|var| self.ctx.tree().tokens_in(self.ctx.source(), var.span()).next())
-            .map(|token| token.text());
+            .map(SyntaxToken::text);
         StructuralTraversal::Continue
     }
 

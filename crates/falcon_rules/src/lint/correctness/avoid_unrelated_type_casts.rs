@@ -30,7 +30,6 @@ struct Collector<'a> {
 
 impl Collector<'_> {
     fn unrelated(
-        &self,
         source: &ResolvedType,
         target: &ResolvedType,
         state: &SemanticState<'_>,
@@ -70,7 +69,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 let target = state
                     .model
                     .resolve_type_in(cast.dart_type(), &state.type_parameters);
-                if self.unrelated(&state.infer(cast.expr()), &target, state) {
+                if Self::unrelated(&state.infer(cast.expr()), &target, state) {
                     self.report(cast.span());
                 }
             }
@@ -113,7 +112,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         continue;
                     };
                     let target = state.model.resolve_type_in(target, &state.type_parameters);
-                    if self.unrelated(&element, &target, state) {
+                    if Self::unrelated(&element, &target, state) {
                         self.report(call.span());
                         break;
                     }
@@ -135,7 +134,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             let target = state
                 .model
                 .resolve_type_in(cast.cast_type(), &state.type_parameters);
-            if self.unrelated(source, &target, state) {
+            if Self::unrelated(source, &target, state) {
                 self.report(cast.span());
             }
         }

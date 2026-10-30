@@ -89,16 +89,16 @@ fn declaration_body(node: SyntaxNode<'_>) -> Option<falcon_syntax::cst::Function
     match node.kind() {
         NodeKind::FunctionDecl => FunctionDecl::cast(node)
             .filter(|function| function.return_type().is_some())
-            .and_then(|function| function.body()),
+            .and_then(falcon_syntax::cst::FunctionDecl::body),
         NodeKind::MethodDecl => MethodDecl::cast(node)
             .filter(|method| method.return_type().is_some())
-            .and_then(|method| method.body()),
+            .and_then(falcon_syntax::cst::MethodDecl::body),
         NodeKind::GetterDecl => GetterDecl::cast(node)
             .filter(|getter| getter.return_type().is_some())
-            .and_then(|getter| getter.body()),
+            .and_then(falcon_syntax::cst::GetterDecl::body),
         NodeKind::OperatorDecl => OperatorDecl::cast(node)
             .filter(|operator| operator.return_type().is_some())
-            .and_then(|operator| operator.body()),
+            .and_then(falcon_syntax::cst::OperatorDecl::body),
         _ => None,
     }
 }
@@ -116,7 +116,7 @@ impl std::fmt::Debug for NodeRef {
             .field("id", &self.id)
             .field("kind", &node.kind())
             .field("span", &node.span())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -125,6 +125,10 @@ impl NodeRef {
         Self { file, id }
     }
 
+    #[must_use]
+    ///
+    /// # Panics
+    /// Panics if the retained node no longer belongs to its parsed file.
     pub fn view(&self) -> SyntaxNode<'_> {
         self.file
             .tree
@@ -132,10 +136,15 @@ impl NodeRef {
             .expect("retained node belongs to its parsed file")
     }
 
+    #[must_use]
+    ///
+    /// # Panics
+    /// Panics if the retained node has a different kind from `T`.
     pub fn cast<'a, T: AstNode<'a>>(&'a self) -> T {
         T::cast(self.view()).expect("retained node has its original kind")
     }
 
+    #[must_use]
     pub fn expr(&self) -> Expr<'_> {
         self.cast()
     }
@@ -149,14 +158,17 @@ pub struct ProjectFile {
 }
 
 impl ProjectFile {
+    #[must_use]
     pub fn program(&self) -> Program<'_> {
         self.parsed.program()
     }
 
+    #[must_use]
     pub fn source(&self) -> &str {
         &self.parsed.source
     }
 
+    #[must_use]
     pub fn tree(&self) -> &SyntaxTree {
         &self.parsed.tree
     }
@@ -214,6 +226,7 @@ pub struct CrossFileRuleRegistry {
 }
 
 impl CrossFileRuleRegistry {
+    #[must_use]
     pub fn new() -> Self {
         Self { rules: Vec::new() }
     }
@@ -222,10 +235,12 @@ impl CrossFileRuleRegistry {
         self.rules.push((name, rule));
     }
 
+    #[must_use]
     pub fn rules(&self) -> &[(&'static str, Box<dyn CrossFileRule>)] {
         &self.rules
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
     }
@@ -276,7 +291,10 @@ mod tests {
             NodeRef::new(Arc::clone(&file), expression.syntax().id())
         };
         assert_eq!(retained.expr().syntax().text(), "42");
-        assert!(std::ptr::eq(retained.view().tree(), &retained.file.tree));
+        assert!(std::ptr::eq(
+            retained.view().tree(),
+            &raw const retained.file.tree
+        ));
     }
 
     #[test]

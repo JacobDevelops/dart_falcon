@@ -39,6 +39,12 @@ pub struct Fix {
 }
 
 impl Fix {
+    /// Create a fix after checking that its edits are ordered and non-overlapping.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if there are no edits, an edit has an invalid span, or
+    /// edits are unsorted or overlapping.
     pub fn new(
         title: impl Into<String>,
         kind: FixKind,
@@ -64,11 +70,16 @@ impl Fix {
         })
     }
 
+    #[must_use]
     pub fn edits(&self) -> &[TextEdit] {
         &self.edits
     }
 
     /// Check the edit bounds and UTF-8 boundaries against the original source.
+    /// # Errors
+    ///
+    /// Returns an error if an edit extends beyond `source` or splits a UTF-8
+    /// character.
     pub fn validate(&self, source: &str) -> Result<(), ApplyFixError> {
         for (index, edit) in self.edits.iter().enumerate() {
             if !source.is_char_boundary(edit.span.start) || !source.is_char_boundary(edit.span.end)
@@ -85,6 +96,11 @@ impl Fix {
     /// boundaries. Empty spans insert text; empty replacements delete text.
     /// Adjacent edits are allowed, including insertions at the same offset, which
     /// are applied in their declared order. The caller decides which kinds to apply.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an edit extends beyond `source` or splits a UTF-8
+    /// character.
     pub fn apply(&self, source: &str) -> Result<String, ApplyFixError> {
         self.validate(source)?;
 

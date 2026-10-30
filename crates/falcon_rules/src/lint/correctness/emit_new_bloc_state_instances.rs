@@ -9,13 +9,13 @@
 //! excluded. Only direct `state`, `this.state`, `super.state`, parentheses and
 //! cascades rooted in those reads are checked; arbitrary aliases are not traced.
 
-use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
-use crate::lint::bloc::own_member;
 use crate::lint::bloc::BlocTypes;
+use crate::lint::bloc::own_member;
 
 #[derive(Default)]
 pub struct EmitNewBlocStateInstances;
@@ -96,9 +96,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 .binding_declaration(name.name())
                 .is_some_and(|declaration| {
                     self.emitters.contains(&declaration)
-                        || self
-                            .types
-                            .is_api_type(&state.infer(callee), &state.model, "Emitter")
+                        || BlocTypes::is_api_type(&state.infer(callee), &state.model, "Emitter")
                         || self
                             .types
                             .binding_has_api_syntax(callee, state, &["Emitter"])
@@ -114,7 +112,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && call.args().named().is_empty()
             && self.current_state(argument, state)
         {
-            self.diagnostics.push(self.ctx.diagnostic("Create a new state instance instead of emitting the current state.", argument.span()));
+            self.diagnostics.push(self.ctx.diagnostic(
+                "Create a new state instance instead of emitting the current state.",
+                argument.span(),
+            ));
         }
     }
 

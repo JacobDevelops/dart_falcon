@@ -15,6 +15,7 @@ pub enum InternedString {
 }
 
 impl InternedString {
+    #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
             Self::Static(value) => value,

@@ -1,8 +1,13 @@
-use super::flow::FlowContext;
-use crate::resolve::semantic::ResolvedTypeKind;
 use std::borrow::Cow;
 
-use super::*;
+use super::flow::FlowContext;
+use crate::resolve::semantic::ResolvedTypeKind;
+
+use super::{
+    Arc, BinaryOp, DeclarationIdentity, Expr, FunctionBody, FunctionSyntax, FunctionTypeAlias,
+    FunctionTypeShape, FxHashSet, ParamKind, ResolvedType, SemanticModel, SignatureIndex, Span,
+    TypeEnvironment, TypeParameterScope, UnaryOp, Visitor, inference_join, walk_expr, walk_stmt,
+};
 
 impl TypeEnvironment {
     /// Infers a function literal or local function. Its body is a lexical child of
@@ -245,7 +250,7 @@ fn function_body_context(
     if async_marker == AsyncMarker::Async && return_type.interface("dart:async", "Future") {
         ResolvedType {
             kind: ResolvedTypeKind::Interface {
-                occurrence: Default::default(),
+                occurrence: FunctionTypeAlias::default(),
                 identity: DeclarationIdentity::sdk("dart:async", "FutureOr"),
                 arguments: return_type.type_arguments().collect(),
                 nullable: false,

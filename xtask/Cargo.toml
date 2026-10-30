@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 falcon_analyze     = { path = "../crates/falcon_analyze" }
 falcon_cli         = { path = "../crates/falcon_cli" }
+falcon_config      = { path = "../crates/falcon_config" }
 falcon_diagnostics = { path = "../crates/falcon_diagnostics" }
 falcon_project     = { path = "../crates/falcon_project" }
 falcon_rules       = { path = "../crates/falcon_rules" }
@@ -22,3 +23,6 @@ tempfile           = { workspace = true }
 
 [dev-dependencies]
 toml = "0.9"
+
+[lints]
+workspace = true

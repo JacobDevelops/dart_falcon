@@ -71,7 +71,7 @@ impl<'a> FinallyContext<'a> {
             }
             Stmt::Switch(switch) => {
                 self.breakable += 1;
-                for label in switch.cases().flat_map(|case| case.labels()) {
+                for label in switch.cases().flat_map(SwitchCase::labels) {
                     self.loop_labels.insert(label.name());
                 }
             }
@@ -93,7 +93,7 @@ impl<'a> FinallyContext<'a> {
             }
             Stmt::Switch(switch) => {
                 self.breakable -= 1;
-                for label in switch.cases().flat_map(|case| case.labels()) {
+                for label in switch.cases().flat_map(SwitchCase::labels) {
                     self.loop_labels.remove(label.name());
                 }
             }
@@ -139,7 +139,7 @@ impl<'a> StructuralRuleVisitor<'a> for Finder<'_, 'a> {
         self.floors.push(self.floor);
         if matches!(node, Stmt::LocalFunc(_)) { self.floor = self.contexts.len(); }
         if let Stmt::TryCatch(try_catch) = node {
-            self.finally_blocks.push(try_catch.finally().map(|block| block.span()));
+            self.finally_blocks.push(try_catch.finally().map(Block::span));
         }
         for context in &mut self.contexts[self.floor..] {
             if let Some(span) = context.escaping_span(node) {

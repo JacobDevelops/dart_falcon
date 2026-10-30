@@ -60,6 +60,7 @@ pub enum MemberKind {
 
 impl MemberKind {
     /// Includes the implicit setter of an uninitialized `late final` declarator.
+    #[must_use]
     pub fn field(field: FieldDecl<'_>, declarator: VarDeclarator<'_>) -> Self {
         Self::Field {
             writable: field.keyword() == VarKeyword::Var
@@ -70,10 +71,12 @@ impl MemberKind {
         }
     }
 
+    #[must_use]
     pub fn has_getter(self) -> bool {
         matches!(self, Self::Getter | Self::Field { .. })
     }
 
+    #[must_use]
     pub fn has_setter(self) -> bool {
         matches!(self, Self::Setter | Self::Field { writable: true, .. })
     }
@@ -123,7 +126,15 @@ struct IdentityEntry {
     /// An unresolved marker may be an immutable annotation, so absence is not proven.
     annotations_unknown: bool,
     ancestors: Vec<Option<DeclarationIdentity>>,
-    superclass: Option<Option<DeclarationIdentity>>,
+    superclass: Superclass,
+}
+
+/// Keeps absent and unresolved `extends` clauses distinct for absence proofs.
+#[derive(Debug, Clone)]
+enum Superclass {
+    Absent,
+    Unresolved,
+    Resolved(DeclarationIdentity),
 }
 
 /// One name's slot in the user-declaration table.
@@ -313,7 +324,12 @@ impl TypeIndex {
                     has_unresolved_parts: shape.has_unresolved_parts,
                     annotations_unknown,
                     ancestors: resolved,
-                    superclass: superclass.map(resolve),
+                    superclass: match superclass {
+                        None => Superclass::Absent,
+                        Some(ty) => {
+                            resolve(ty).map_or(Superclass::Unresolved, Superclass::Resolved)
+                        }
+                    },
                 },
             );
         }
@@ -342,13 +358,14 @@ impl TypeIndex {
                     annotations_unknown |= annotation
                         .name()
                         .last()
-                        .is_some_and(|name| matches!(name.name(), "immutable" | "Immutable"))
+                        .is_some_and(|name| matches!(name.name(), "immutable" | "Immutable"));
                 }
             }
         }
         (is_immutable, annotations_unknown)
     }
 
+    #[must_use]
     pub fn type_kind_identity(&self, identity: &DeclarationIdentity) -> Option<TypeKind> {
         if self.external.is_none()
             && self.declarations.is_empty()
@@ -359,6 +376,7 @@ impl TypeIndex {
         self.declaration(identity).map(|entry| entry.kind)
     }
 
+    #[must_use]
     pub fn member_lookup_identity(
         &self,
         identity: &DeclarationIdentity,
@@ -427,6 +445,7 @@ impl TypeIndex {
         }
     }
 
+    #[must_use]
     pub fn is_immutable_type_identity(&self, identity: &DeclarationIdentity) -> Truth {
         if self.declarations.is_empty() && !self.types.is_empty() {
             return self.is_immutable_type(identity.name());
@@ -501,6 +520,7 @@ impl TypeIndex {
         })
     }
 
+    #[must_use]
     pub fn superclass_chain_is_immutable_identity(&self, identity: &DeclarationIdentity) -> Truth {
         if self.declarations.is_empty() && !self.types.is_empty() {
             return self.superclass_chain_is_immutable(identity.name());
@@ -521,9 +541,9 @@ impl TypeIndex {
             }
             uncertain |= entry.annotations_unknown || entry.has_unresolved_parts;
             match &entry.superclass {
-                Some(Some(identity)) => current = identity,
-                Some(None) => return Truth::Unknown,
-                None => return if uncertain { Truth::Unknown } else { Truth::No },
+                Superclass::Resolved(identity) => current = identity,
+                Superclass::Unresolved => return Truth::Unknown,
+                Superclass::Absent => return if uncertain { Truth::Unknown } else { Truth::No },
             }
         }
         Truth::Unknown
@@ -550,6 +570,7 @@ impl TypeIndex {
     /// Build a degraded, single-file index. A file that declares (or is) a `part`
     /// is treated as having unresolved parts, since the sibling files that could
     /// complete its types are not available in single-file mode.
+    #[must_use]
     pub fn from_program(program: Program<'_>) -> Self {
         let unresolved =
             !program.part_directives().is_empty() || program.part_of_directive().is_some();
@@ -560,6 +581,7 @@ impl TypeIndex {
 
     /// Whether `name` resolves to exactly one known type (user or core). An
     /// ambiguous or unknown name is not a "known type".
+    #[must_use]
     pub fn is_known_type(&self, name: &str) -> bool {
         matches!(
             self.resolve(name),
@@ -574,6 +596,7 @@ impl TypeIndex {
     /// declaration even when its name shadows a core type: the declaration is a
     /// real syntactic fact, independent of the import-ambiguity that poisons
     /// proofs *through* the type.
+    #[must_use]
     pub fn type_kind(&self, name: &str) -> Option<TypeKind> {
         match self.types.get(name) {
             Some(Slot::Unique(e)) => Some(e.kind),
@@ -587,6 +610,7 @@ impl TypeIndex {
     /// [`MemberResult::Absent`] only when the *entire* chain is resolved and
     /// none declares it, and [`MemberResult::Unknown`] whenever the chain has any
     /// unresolved edge (unknown ancestor, ambiguity, or unresolved part).
+    #[must_use]
     pub fn member_lookup(&self, type_name: &str, member: &str) -> MemberResult {
         match self.walk_ancestors(type_name, |_, resolved| match resolved {
             Some(Resolved::User(entry)) => entry.members.get(member).copied(),
@@ -613,6 +637,7 @@ impl TypeIndex {
     }
 
     /// Whether a type is directly or transitively immutable.
+    #[must_use]
     pub fn is_immutable_type(&self, type_name: &str) -> Truth {
         match self.walk_ancestors(type_name, |_, resolved| {
             matches!(resolved, Some(Resolved::User(entry)) if entry.is_immutable).then_some(())
@@ -653,6 +678,7 @@ impl TypeIndex {
     }
 
     /// Whether a named constructor is declared or implicitly available as const.
+    #[must_use]
     pub fn constructor_is_const(&self, type_name: &str, name: Option<&str>) -> Truth {
         let name = name.filter(|name| !name.is_empty()).unwrap_or("new");
         self.constructor_is_const_inner(type_name, name, &mut HashSet::new())
@@ -692,6 +718,7 @@ impl TypeIndex {
     /// Whether the class or a class on its superclass chain (`extends` only,
     /// not mixins or interfaces) is annotated `@immutable`. `No` only when the
     /// whole chain is resolved project code without the annotation.
+    #[must_use]
     pub fn superclass_chain_is_immutable(&self, type_name: &str) -> Truth {
         let mut visited = HashSet::new();
         let mut current = type_name;
@@ -799,7 +826,7 @@ impl TypeIndex {
             if syntactic && kind == TypeKind::Enum {
                 supertypes.push("Enum".to_string());
             }
-            let mut members = collect_members(element_members.clone());
+            let mut members = collect_members(&element_members);
             if let TopLevelDecl::Enum(e) = decl {
                 for variant in e.variants() {
                     members
@@ -823,12 +850,12 @@ impl TypeIndex {
                         None
                     },
                     constructors: if syntactic {
-                        collect_constructors(element_members.clone())
+                        collect_constructors(&element_members)
                     } else {
                         HashMap::new()
                     },
                     all_instance_fields_final: syntactic
-                        && all_instance_fields_final(element_members),
+                        && all_instance_fields_final(&element_members),
                     has_unresolved_parts,
                 },
             );
@@ -880,6 +907,7 @@ fn last_segment(ty: DartType<'_>) -> Option<String> {
 /// Whether `annotations` include package:meta's `@immutable` (imported, possibly
 /// with a prefix, from meta or a Flutter library re-exporting it) or
 /// `@Immutable(...)` (imported from meta).
+#[must_use]
 pub fn has_immutable_annotation<'a>(
     mut annotations: AstChildren<'a, Annotation<'a>>,
     program: Program<'a>,
@@ -895,7 +923,10 @@ pub fn has_immutable_annotation<'a>(
         };
         let mut names = annotation.name();
         let first = names.next();
-        let prefix = names.next().and(first).map(|name| name.name());
+        let prefix = names
+            .next()
+            .and(first)
+            .map(falcon_syntax::cst::Identifier::name);
         program.imports().any(|import| {
             (import.uri().value() == "package:meta/meta.dart"
                 || flutter_reexports
@@ -905,33 +936,32 @@ pub fn has_immutable_annotation<'a>(
                             | "package:flutter/widgets.dart"
                             | "package:flutter/material.dart"
                     ))
-                && import.as_name().map(|name| name.name()) == prefix
+                && import.as_name().map(falcon_syntax::cst::Identifier::name) == prefix
         })
     })
 }
 
-fn collect_constructors(members: EffectiveMembers<'_>) -> HashMap<String, bool> {
+fn collect_constructors(members: &EffectiveMembers<'_>) -> HashMap<String, bool> {
     members
         .constructors()
         .map(|constructor| {
             (
                 constructor
                     .constructor_name
-                    .map(|name| name.name().to_owned())
-                    .unwrap_or_else(|| "new".to_string()),
+                    .map_or_else(|| "new".to_string(), |name| name.name().to_owned()),
                 constructor.is_const,
             )
         })
         .collect()
 }
 
-fn all_instance_fields_final(members: EffectiveMembers<'_>) -> bool {
+fn all_instance_fields_final(members: &EffectiveMembers<'_>) -> bool {
     members.declared.clone().all(|member| {
         !matches!(member, ClassMember::Field(field) if !field.is_static() && field.keyword() == VarKeyword::Var)
     }) && members.declaring_params().all(|param| members.representation || param.is_final())
 }
 
-fn collect_members(members: EffectiveMembers<'_>) -> HashMap<String, MemberKind> {
+fn collect_members(members: &EffectiveMembers<'_>) -> HashMap<String, MemberKind> {
     let mut map = HashMap::new();
     for member in members.declared.clone() {
         match member {
@@ -1360,7 +1390,7 @@ mod tests {
             table["num"].supertypes,
             &[DeclarationIdentity::sdk("dart:core", "Comparable")],
         );
-        assert!(table["Object"].supertypes.is_empty());
+        assert_eq!(table["Object"].supertypes, [] as [DeclarationIdentity; 0]);
     }
 
     fn annotation_packages<'a>(

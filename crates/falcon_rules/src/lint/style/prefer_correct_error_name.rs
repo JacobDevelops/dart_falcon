@@ -97,11 +97,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             "then" if future => args
                 .named()
                 .find(|arg| arg.name().name() == "onError")
-                .map(|arg| arg.value()),
+                .map(NamedArg::value),
             "listen" if stream => args
                 .named()
                 .find(|arg| arg.name().name() == "onError")
-                .map(|arg| arg.value()),
+                .map(NamedArg::value),
             _ => None,
         };
         if let Some(Expr::FuncExpr(function)) = callback.map(Expr::unparenthesized)

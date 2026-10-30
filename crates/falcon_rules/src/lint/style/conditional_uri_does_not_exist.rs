@@ -26,7 +26,7 @@
 use std::path::{Path, PathBuf};
 
 use falcon_analyze::{AnalyzeContext, PackageConfig, Rule, RulePreparation, percent_decode};
-use falcon_syntax::cst::Program;
+use falcon_syntax::cst::{ExportDirective, ImportDirective, Program};
 
 use crate::lint::support::uri::uri_scheme;
 
@@ -42,11 +42,11 @@ impl Rule for ConditionalUriDoesNotExist {
     ) -> RulePreparation<'a> {
         let mut configurations = program
             .imports()
-            .flat_map(|import| import.configurable_uris())
+            .flat_map(ImportDirective::configurable_uris)
             .chain(
                 program
                     .exports()
-                    .flat_map(|export| export.configurable_uris()),
+                    .flat_map(ExportDirective::configurable_uris),
             )
             .peekable();
         if configurations.peek().is_none() {
@@ -125,23 +125,20 @@ impl Resolver<'_> {
                     // The containing library itself.
                     return Some(true);
                 }
-                match self.base() {
-                    Some(base) => {
-                        let path = merge(&base, rest);
-                        self.package_exists(&remove_dot_segments(&path), fragment)
+                if let Some(base) = self.base() {
+                    let path = merge(&base, rest);
+                    Some(self.package_exists(&remove_dot_segments(&path), fragment))
+                } else {
+                    if query || fragment {
+                        return Some(false);
                     }
-                    None => {
-                        if query || fragment {
-                            return Some(false);
-                        }
-                        let directory = self.file.parent().unwrap_or(Path::new(""));
-                        Some(directory.join(percent_decode(rest)?).is_file())
-                    }
+                    let directory = self.file.parent().unwrap_or(Path::new(""));
+                    Some(directory.join(percent_decode(rest)?).is_file())
                 }
             }
             "package" => {
                 let path = &rest["package:".len()..];
-                self.package_exists(&remove_dot_segments(path), fragment)
+                Some(self.package_exists(&remove_dot_segments(path), fragment))
             }
             "dart" => {
                 let library = &rest["dart:".len()..];
@@ -181,16 +178,16 @@ impl Resolver<'_> {
     }
 
     /// Whether `package:<path>` names an existing file.
-    fn package_exists(&self, path: &str, fragment: bool) -> Option<bool> {
+    fn package_exists(&self, path: &str, fragment: bool) -> bool {
         let Some(config) = self.config else {
-            return Some(false);
+            return false;
         };
         let (_, rest) = path.split_once('/').unwrap_or((path, ""));
         if fragment || rest.is_empty() {
-            return Some(false);
+            return false;
         }
         let target = config.resolve_package_uri(&format!("package:{path}"));
-        Some(target.is_some_and(|target| target.is_file()))
+        target.is_some_and(|target| target.is_file())
     }
 }
 

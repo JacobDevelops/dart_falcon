@@ -19,7 +19,10 @@ use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use falcon_syntax::cst::*;
 
-use super::{canonical_package_path, has_lib_component, is_under_lib, project_packages, resolve_directive_uri};
+use super::{
+    canonical_package_path, has_lib_component, is_under_lib, project_packages,
+    resolve_directive_uri,
+};
 
 #[derive(Default)]
 pub struct UnusedCode;
@@ -44,7 +47,10 @@ impl CrossFileRule for UnusedCode {
         _config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
     ) -> Vec<Diagnostic> {
-        let file_packages: Vec<_> = files.iter().map(|file| environment.file_package(&file.path)).collect();
+        let file_packages: Vec<_> = files
+            .iter()
+            .map(|file| environment.file_package(&file.path))
+            .collect();
         let packages = project_packages(&file_packages);
 
         // name → set of file indices that mention it. Usage is detected by a
@@ -149,24 +155,23 @@ fn candidates<'a>(program: Program<'a>) -> Vec<Candidate<'a>> {
             TopLevelDecl::ClassTypeAlias(x) => push(x.name(), "class", x.annotations(), decl_span),
             TopLevelDecl::Mixin(x) => push(x.name(), "mixin", x.annotations(), decl_span),
             TopLevelDecl::MixinClass(x) => {
-                push(x.name(), "mixin class", x.annotations(), decl_span)
+                push(x.name(), "mixin class", x.annotations(), decl_span);
             }
             TopLevelDecl::Enum(x) => push(x.name(), "enum", x.annotations(), decl_span),
             TopLevelDecl::ExtensionType(x) => {
-                push(x.name(), "extension type", x.annotations(), decl_span)
+                push(x.name(), "extension type", x.annotations(), decl_span);
             }
             TopLevelDecl::TypeAlias(x) => push(x.name(), "typedef", x.annotations(), decl_span),
             TopLevelDecl::Function(x) => push(x.name(), "declaration", x.annotations(), decl_span),
             // Extensions are invoked through their member names, not the
             // extension name, so a never-referenced name does not mean unused.
             // Without member-usage tracking they stay unflagged (low-FP).
-            TopLevelDecl::Extension(_) => {}
+            TopLevelDecl::Extension(_) | TopLevelDecl::Error(_) => {}
             TopLevelDecl::Variable(x) => {
                 for d in x.declarators() {
                     push(d.name(), "declaration", x.annotations(), decl_span);
                 }
             }
-            TopLevelDecl::Error(_) => {}
         }
     }
     out
@@ -182,7 +187,12 @@ fn collect_exported_files(
     for (index, f) in files.iter().enumerate() {
         let from = canonical_package_path(&f.path);
         for exp in f.program().exports() {
-            if let Some(r) = resolve_directive_uri(&from, &exp.uri().value(), file_packages[index].identity(), packages) {
+            if let Some(r) = resolve_directive_uri(
+                &from,
+                &exp.uri().value(),
+                file_packages[index].identity(),
+                packages,
+            ) {
                 refs.insert(r);
             }
         }
@@ -308,24 +318,33 @@ mod tests {
             std::fs::write(directory.join("pubspec.yaml"), format!("name: {name}\n")).unwrap();
         }
         let sources = [
-            (alpha.join("lib/alpha.dart"), "export 'package:beta/src/api.dart';"),
+            (
+                alpha.join("lib/alpha.dart"),
+                "export 'package:beta/src/api.dart';",
+            ),
             (beta.join("lib/src/api.dart"), "class ExportedApi {}"),
             (alpha.join("lib/src/dead.dart"), "class DeadAlpha {}"),
             (beta.join("lib/src/dead.dart"), "class DeadBeta {}"),
             (beta.join("bin/helper.dart"), "class PackageScriptHelper {}"),
-            (root.path().join("scripts/release.dart"), "class UnownedScriptHelper {}"),
+            (
+                root.path().join("scripts/release.dart"),
+                "class UnownedScriptHelper {}",
+            ),
         ];
-        let files: Vec<_> = sources.into_iter().map(|(path, source)| {
-            let parsed = falcon_dart_parser::parse(source);
-            ProjectFile {
-                path,
-                parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-                    source: source.into(),
-                    tree: parsed.tree,
-                }),
-                has_parse_errors: false,
-            }
-        }).collect();
+        let files: Vec<_> = sources
+            .into_iter()
+            .map(|(path, source)| {
+                let parsed = falcon_dart_parser::parse(source);
+                ProjectFile {
+                    path,
+                    parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
+                        source: source.into(),
+                        tree: parsed.tree,
+                    }),
+                    has_parse_errors: false,
+                }
+            })
+            .collect();
         let diagnostics = super::UnusedCode.analyze_project(
             "unused-code",
             &falcon_analyze::AnalysisEnvironment::default(),
@@ -333,11 +352,19 @@ mod tests {
             &falcon_config::FalconConfig::default(),
             None,
         );
-        let mut actual: Vec<_> = diagnostics.iter().map(|diagnostic| diagnostic.file_path.clone()).collect();
+        let mut actual: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.file_path.clone())
+            .collect();
         actual.sort();
         let mut expected = vec![
-            alpha.join("lib/src/dead.dart").to_string_lossy().into_owned(),
-            beta.join("lib/src/dead.dart").to_string_lossy().into_owned(),
+            alpha
+                .join("lib/src/dead.dart")
+                .to_string_lossy()
+                .into_owned(),
+            beta.join("lib/src/dead.dart")
+                .to_string_lossy()
+                .into_owned(),
         ];
         expected.sort();
         assert_eq!(actual, expected);
@@ -359,7 +386,7 @@ mod tests {
 
     #[test]
     fn contextual_identifiers_in_interpolations_count_as_references() {
-        let source = r#"final text = '${type} ${show} ${get} ${set} ${on} ${hide}';"#;
+        let source = r"final text = '${type} ${show} ${get} ${set} ${on} ${hide}';";
         let parsed = falcon_dart_parser::parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
         let names = collect_used_names(source, &parsed.tree);
@@ -379,7 +406,7 @@ mod tests {
 
     #[test]
     fn required_identifier_in_interpolation_counts_as_a_reference() {
-        let source = r#"const required = 1; final text = '${required}';"#;
+        let source = r"const required = 1; final text = '${required}';";
         let parsed = falcon_dart_parser::parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
         let names = collect_used_names(source, &parsed.tree);
@@ -388,7 +415,7 @@ mod tests {
 
     #[test]
     fn raw_and_escaped_dollars_do_not_reference_identifiers() {
-        let source = r#"final raw = r'$ghost'; final escaped = '\$other';"#;
+        let source = r"final raw = r'$ghost'; final escaped = '\$other';";
         let parsed = falcon_dart_parser::parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
         let names = collect_used_names(source, &parsed.tree);

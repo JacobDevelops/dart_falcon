@@ -21,7 +21,10 @@ fn invalid_secondary_root_edit_retains_last_good_rules() {
     .unwrap();
     let mut state = LspState::new_from(None, |_| None, first.clone());
     state.initialize_workspace_roots(vec![first.clone(), second.clone()]);
-    assert!(state.take_config_messages().is_empty());
+    assert_eq!(
+        state.take_config_messages(),
+        [] as [lsp_types::ShowMessageParams; 0]
+    );
     let source = "void main() { dynamic value = 1; print(value); }\n";
     let primary_uri = format!("file://{}", first.join("main.dart").display());
     let secondary_uri = format!("file://{}", second.join("main.dart").display());
@@ -62,7 +65,10 @@ fn invalid_secondary_root_edit_retains_last_good_rules() {
             && diagnostic.severity == falcon_diagnostics::Severity::Error
     }));
     state.watched_files_changed(&[config]);
-    assert!(state.take_config_messages().is_empty());
+    assert_eq!(
+        state.take_config_messages(),
+        [] as [lsp_types::ShowMessageParams; 0]
+    );
     assert!(state.analyze(&secondary_uri).iter().any(|diagnostic| {
         diagnostic.rule == "avoid-dynamic"
             && diagnostic.severity == falcon_diagnostics::Severity::Error
@@ -222,7 +228,10 @@ fn invalid_member_config_preserves_valid_workspace_and_member_rules() {
             .is_empty()
     );
     state.reload_config();
-    assert!(state.take_config_messages().is_empty());
+    assert_eq!(
+        state.take_config_messages(),
+        [] as [lsp_types::ShowMessageParams; 0]
+    );
     assert!(
         state
             .analyze(&good_uri)
@@ -304,7 +313,10 @@ fn initialized_roots_report_shared_ancestor_configuration_error_once() {
     assert_eq!(messages[0].typ, MessageType::ERROR);
     assert!(messages[0].message.contains(config.to_str().unwrap()));
     state.reload_config();
-    assert!(state.take_config_messages().is_empty());
+    assert_eq!(
+        state.take_config_messages(),
+        [] as [lsp_types::ShowMessageParams; 0]
+    );
     std::fs::write(&config, "{}").unwrap();
     state.reload_config();
     state.take_config_messages();
@@ -380,11 +392,17 @@ fn initialized_roots_replace_cwd_discovery_and_report_each_config_error() {
         assert!(files.iter().all(|file| !file.path.starts_with(&cwd)));
     }
     state.reload_config();
-    assert!(state.take_config_messages().is_empty());
+    assert_eq!(
+        state.take_config_messages(),
+        [] as [lsp_types::ShowMessageParams; 0]
+    );
     assert_eq!(state.workspace_roots.len(), 2);
     std::fs::write(&invalid, "{}").unwrap();
     state.watched_files_changed(std::slice::from_ref(&invalid));
-    assert!(state.take_config_messages().is_empty());
+    assert_eq!(
+        state.take_config_messages(),
+        [] as [lsp_types::ShowMessageParams; 0]
+    );
     std::fs::write(&invalid, "{").unwrap();
     state.watched_files_changed(&[invalid]);
     assert_eq!(state.take_config_messages().len(), 1);
@@ -1166,7 +1184,8 @@ fn unsupported_directory_entries_reuse_discovery() {
                 .unwrap()
                 .set_modified(modified + std::time::Duration::from_secs(2))
                 .unwrap();
-            let version = 2 + (index * 2 + usize::from(remove)) as i32;
+            let version =
+                2 + i32::try_from(index * 2 + usize::from(remove)).expect("test version fits i32");
             state.change(
                 &uri,
                 format!("void main() {{ print({version}); }}"),
@@ -1463,7 +1482,10 @@ fn ancestor_manifest_cross_file_findings_refresh_after_disk_change() {
     let uri = format!("file://{}", dart.display());
     let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
     assert!(state.open(&uri, source.to_owned(), Some(1)).is_empty());
-    assert!(state.take_config_messages().is_empty());
+    assert_eq!(
+        state.take_config_messages(),
+        [] as [lsp_types::ShowMessageParams; 0]
+    );
     let findings = state.cross_file_diagnostics();
     assert_eq!(findings.len(), 1, "{findings:#?}");
     let diagnostics = &findings[manifest.to_string_lossy().as_ref()];
@@ -2138,7 +2160,10 @@ mod config_tests {
         assert!(messages[0].message.contains(&path.display().to_string()));
         assert!(messages[0].message.contains("linter.enabledd"));
         state.reload_config();
-        assert!(state.take_config_messages().is_empty());
+        assert_eq!(
+            state.take_config_messages(),
+            [] as [lsp_types::ShowMessageParams; 0]
+        );
     }
 
     #[test]
@@ -2154,12 +2179,18 @@ mod config_tests {
                 .all(|message| message.message.contains(&path.display().to_string()))
         );
         state.reload_config();
-        assert!(state.take_config_messages().is_empty());
+        assert_eq!(
+            state.take_config_messages(),
+            [] as [lsp_types::ShowMessageParams; 0]
+        );
         let nested = dir.path().join("nested/falcon.json");
         std::fs::create_dir_all(nested.parent().unwrap()).unwrap();
         std::fs::write(&nested, "{}").unwrap();
         state.watched_files_changed(&[nested]);
-        assert!(state.take_config_messages().is_empty());
+        assert_eq!(
+            state.take_config_messages(),
+            [] as [lsp_types::ShowMessageParams; 0]
+        );
     }
 
     #[test]
@@ -2175,7 +2206,10 @@ mod config_tests {
                 .any(|message| message.typ == MessageType::WARNING
                     && message.message.contains("max_errors"))
         );
-        assert!(state.take_config_messages().is_empty());
+        assert_eq!(
+            state.take_config_messages(),
+            [] as [lsp_types::ShowMessageParams; 0]
+        );
         std::fs::write(&path, r#"{"overrides": [{"incldues": ["lib/**"]}]}"#).unwrap();
         state.reload_config();
         let messages = state.take_config_messages();
@@ -2185,7 +2219,10 @@ mod config_tests {
                 .any(|message| message.typ == MessageType::ERROR
                     && message.message.contains("overrides[0].incldues"))
         );
-        assert!(state.take_config_messages().is_empty());
+        assert_eq!(
+            state.take_config_messages(),
+            [] as [lsp_types::ShowMessageParams; 0]
+        );
     }
 }
 #[cfg(test)]
@@ -2296,7 +2333,7 @@ mod dependency_tests {
             .iter()
             .find(|package| package.lib_root == nested_lib)
             .expect("unreadable nested manifest must retain its package identity");
-        assert!(owner.name.is_empty());
+        assert_eq!(owner.name, "");
     }
 
     const VERSIONED_SWITCH: &str = "void f(Object o) { switch (o) { case 1 + 2: break; } }\n";
@@ -2543,7 +2580,7 @@ mod dependency_tests {
             manifest
                 .tree()
                 .identifier_tokens(manifest.source())
-                .map(|token| token.text())
+                .map(falcon_syntax::cst::SyntaxToken::text)
                 .collect::<Vec<_>>(),
             ["name", "workspace", "value", "Simple", "Braced"]
         );
@@ -3157,14 +3194,11 @@ mod dependency_tests {
 
         let (server, client) = Connection::memory();
         let worker = std::thread::spawn(move || {
-            crate::server::run_with_connection(
-                server,
-                crate::server::ServerOptions {
-                    debounce: Duration::from_secs(60),
-                    config_path: Some(config_path),
-                },
-            )
-            .unwrap();
+            let options = crate::server::ServerOptions {
+                debounce: Duration::from_secs(60),
+                config_path: Some(config_path),
+            };
+            crate::server::run_with_connection(&server, &options).unwrap();
         });
         (client, worker)
     }
@@ -3214,7 +3248,7 @@ mod dependency_tests {
                             .unwrap(),
                     );
                 }
-                other => panic!("unexpected server message: {other:?}"),
+                other @ Message::Request(_) => panic!("unexpected server message: {other:?}"),
             }
         }
         published
@@ -3249,7 +3283,10 @@ mod environment_regressions {
             "../dep/lib/api.dart",
         ] {
             let (directory, mut state, uri, _) = dependency_fixture(false);
-            assert!(state.take_config_messages().is_empty());
+            assert_eq!(
+                state.take_config_messages(),
+                [] as [lsp_types::ShowMessageParams; 0]
+            );
             let path = directory.path().join("app").join(name);
             std::fs::write(&path, "[").unwrap();
             state.watched_files_changed(&[path]);
@@ -3267,7 +3304,10 @@ mod environment_regressions {
                     .message
                     .contains(Path::new(name).file_name().unwrap().to_str().unwrap())
             );
-            assert!(state.take_config_messages().is_empty());
+            assert_eq!(
+                state.take_config_messages(),
+                [] as [lsp_types::ShowMessageParams; 0]
+            );
         }
     }
 
@@ -3836,7 +3876,7 @@ mod environment_regressions {
     #[test]
     fn immutable_hosted_sources_wait_for_resolution_input_events() {
         let (dir, mut state, uri, dependency) = dependency_fixture(true);
-        assert!(state.watched_dependency_roots().is_empty());
+        assert_eq!(state.watched_dependency_roots(), [] as [PathBuf; 0]);
         let identities = Arc::clone(&state.external_indexes.as_ref().unwrap().identities);
         std::fs::write(&dependency, "class Modified {}").unwrap();
         state.change(

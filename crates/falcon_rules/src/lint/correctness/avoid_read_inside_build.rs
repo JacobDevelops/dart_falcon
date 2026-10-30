@@ -2,8 +2,8 @@
 //!
 //! A read does not rebuild the widget when its value changes. This checks
 //! package:provider context extensions and `Provider.of(listen: false)` on a
-//! Flutter BuildContext. Nested callbacks are skipped: their execution phase
-//! depends on the receiving API, not their lexical position. BuildWithChild
+//! Flutter `BuildContext`. Nested callbacks are skipped: their execution phase
+//! depends on the receiving API, not their lexical position. `BuildWithChild`
 //! overrides on nested's single-child widgets are also build entry points;
 //! didChangeDependencies permits subscriptions but is not a build.
 

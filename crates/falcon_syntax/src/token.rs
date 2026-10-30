@@ -16,6 +16,7 @@ impl Token {
     ///
     /// Panics if either coordinate exceeds `u32::MAX`. Sources are limited to
     /// `u32::MAX` bytes, matching the syntax tree's source capacity.
+    #[must_use]
     pub fn new(kind: TokenKind, offset: usize, len: usize) -> Self {
         Self {
             kind,
@@ -24,22 +25,27 @@ impl Token {
         }
     }
 
+    #[must_use]
     pub fn offset(&self) -> usize {
         self.offset as usize
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.len as usize
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
+    #[must_use]
     pub fn text<'a>(&self, source: &'a str) -> &'a str {
         &source[self.offset()..self.offset() + self.len()]
     }
 
+    #[must_use]
     pub fn is_trivia(&self) -> bool {
         matches!(
             self.kind,
@@ -218,6 +224,7 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
+    #[must_use]
     pub fn is_comment(self) -> bool {
         matches!(
             self,
@@ -225,8 +232,14 @@ impl TokenKind {
         )
     }
 
+    #[must_use]
     pub fn is_identifier_like(self) -> bool {
-        use TokenKind::*;
+        use TokenKind::{
+            Abstract, As, Async, Await, Base, Covariant, Deferred, Dynamic, Export, Extension,
+            External, Factory, Function, Get, Hide, Ident, Implements, Import, Interface, Late,
+            Library, Mixin, On, Operator, Override, Part, Required, Sealed, Set, Show, Static,
+            Sync, Type, Typedef, When, Yield,
+        };
         matches!(
             self,
             Ident
@@ -269,8 +282,12 @@ impl TokenKind {
     }
 
     /// Single-token operators; `[]` and `[]=` require parsing multiple tokens.
+    #[must_use]
     pub fn is_user_definable_operator(self) -> bool {
-        use TokenKind::*;
+        use TokenKind::{
+            Amp, Caret, EqEq, Gt, GtEq, GtGt, GtGtGt, Lt, LtEq, LtLt, Minus, Percent, Pipe, Plus,
+            Slash, Star, Tilde, TildeSlash,
+        };
         matches!(
             self,
             Lt | Gt
@@ -294,6 +311,7 @@ impl TokenKind {
     }
 
     /// Returns the keyword kind for the given identifier text, if it is a keyword.
+    #[must_use]
     pub fn from_keyword(text: &str) -> Option<TokenKind> {
         let kind = match text {
             "assert" => TokenKind::Assert,
@@ -401,13 +419,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "token offset exceeds u32 source capacity")]
     fn compact_token_rejects_offset_overflow() {
-        Token::new(TokenKind::Eof, u32::MAX as usize + 1, 0);
+        let _ = Token::new(TokenKind::Eof, u32::MAX as usize + 1, 0);
     }
 
     #[cfg(target_pointer_width = "64")]
     #[test]
     #[should_panic(expected = "token length exceeds u32 source capacity")]
     fn compact_token_rejects_length_overflow() {
-        Token::new(TokenKind::StringLit, 0, u32::MAX as usize + 1);
+        let _ = Token::new(TokenKind::StringLit, 0, u32::MAX as usize + 1);
     }
 }

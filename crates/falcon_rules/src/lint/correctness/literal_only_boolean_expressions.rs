@@ -62,7 +62,7 @@ impl<'a> Collector<'_, 'a> {
                 .top_level_token_at(self.ctx.source(), guard.span().start)
                 .and_then(SyntaxToken::prev_significant)
                 .filter(|token| token.kind() == falcon_syntax::TokenKind::When)
-                .map_or(guard.span().start, |token| token.offset());
+                .map_or(guard.span().start, SyntaxToken::offset);
             self.report_if_literal(guard, Span::new(start, guard.span().end), state);
         }
     }
@@ -123,7 +123,7 @@ impl<'a> Collector<'_, 'a> {
                 Expr::StringLit(_) if constant_in_context(expression, &self.deferred, state) => {}
                 Expr::Unary(node) => pending.push(node.operand()),
                 Expr::Binary(node) if node.op() == BinaryOp::NullCoalesce => {
-                    pending.push(node.left())
+                    pending.push(node.left());
                 }
                 Expr::Binary(node) => {
                     pending.push(node.left());

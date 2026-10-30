@@ -1,6 +1,6 @@
 //! Warns when a widget's build method constructs the same widget again.
 //!
-//! Resolved Flutter StatelessWidget subclasses and State<T> subclasses are
+//! Resolved Flutter `StatelessWidget` subclasses and State<T> subclasses are
 //! checked in build only. Constructor identity, not spelling, is compared;
 //! unrelated factories, createState, and other methods are ignored.
 //! Deferred builders and conditional expressions are excluded because recursive
@@ -46,7 +46,7 @@ struct Collector<'a> {
     diagnostics: Vec<Diagnostic>,
 }
 impl<'a> Collector<'a> {
-    fn element<E: Element<'a>>(&mut self, node: E) -> StructuralTraversal {
+    fn element<E: Element<'a>>(node: E) -> StructuralTraversal {
         if matches!(
             node.syntax().kind(),
             NodeKind::IfElement
@@ -87,10 +87,10 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         } else { StructuralTraversal::Continue }
     }
     fn visit_collection_element(&mut self, node: CollectionElement<'a>) -> StructuralTraversal {
-        self.element(node)
+        Self::element(node)
     }
     fn visit_map_element(&mut self, node: MapElement<'a>) -> StructuralTraversal {
-        self.element(node)
+        Self::element(node)
     }
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         if matches!(node, Expr::FuncExpr(_) | Expr::Conditional(_)) {

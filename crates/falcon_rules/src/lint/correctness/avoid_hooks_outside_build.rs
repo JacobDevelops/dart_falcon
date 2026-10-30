@@ -1,6 +1,6 @@
 //! Flags confirmed Flutter hooks outside hook builds, custom hooks, and HookBuilder/HookConsumer builders.
 //!
-//! Only resolved flutter_hooks functions and useX/_useX functions that actually
+//! Only resolved `flutter_hooks` functions and useX/_useX functions that actually
 //! compose them count as hooks. Nested callbacks do not inherit the enclosing
 //! build or custom-hook permission. Confirmed non-hook widget builds are left
 //! to avoid-misused-hooks; unresolved calls, unresolved build ancestry, and shadowed names are ignored.

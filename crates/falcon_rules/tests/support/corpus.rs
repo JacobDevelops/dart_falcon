@@ -25,7 +25,7 @@ pub fn ordinary_fixture_files(rule_dir: &Path, resolver_dependent: bool) -> Vec<
             entry.unwrap_or_else(|error| panic!("cannot walk {}: {error}", rule_dir.display()))
         })
         .filter(|entry| entry.file_type().is_file())
-        .map(|entry| entry.into_path())
+        .map(walkdir::DirEntry::into_path)
         .filter(|path| {
             path.extension()
                 .is_some_and(|extension| extension == "dart")
@@ -102,7 +102,7 @@ pub fn contains_placeholder_marker(source: &str) -> bool {
 pub fn cross_file_project_roots(dir: &Path) -> Vec<PathBuf> {
     let mut projects: Vec<_> = fs::read_dir(dir)
         .unwrap_or_else(|error| panic!("cannot read {}: {error}", dir.display()))
-        .filter_map(|entry| entry.ok())
+        .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| {
             path.is_dir()

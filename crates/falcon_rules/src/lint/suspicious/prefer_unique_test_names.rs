@@ -83,7 +83,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         || matches!(Expr::cast(*ancestor), Some(Expr::FuncExpr(_)))
                         || matches!(Stmt::cast(*ancestor), Some(Stmt::LocalFunc(_)))
                 })
-                .map(|function| function.span());
+                .map(SyntaxNode::span);
             self.tests.push((value, description.span(), function));
         }
     }

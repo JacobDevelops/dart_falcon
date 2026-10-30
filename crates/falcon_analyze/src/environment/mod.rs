@@ -104,6 +104,7 @@ impl EnvironmentCacheKey {
     }
 
     /// File events also represent replacement or deletion of an input's parent.
+    #[must_use]
     pub fn affected_by(&self, path: &Path) -> bool {
         self.affected_by_lexical(path) || {
             let canonical = canonical_event_path(path);
@@ -209,6 +210,13 @@ struct EnvironmentWarnings {
     pending: Vec<String>,
 }
 
+/// Distinguishes an unattempted SDK lookup from a cached missing SDK.
+#[derive(Debug, Clone)]
+enum DefaultSdk {
+    NotLoaded,
+    Loaded(Option<DartSdk>),
+}
+
 /// Package configurations, SDKs and language versions for a set of files.
 ///
 /// Built once per run (or per LSP workspace state) from the analyzed paths;
@@ -221,7 +229,7 @@ pub struct AnalysisEnvironment {
     /// The context owning each analyzed directory (`None`: no configuration).
     directories: HashMap<PathBuf, Option<usize>>,
     /// The SDK for files outside any package configuration, once located.
-    default_sdk: Option<Option<DartSdk>>,
+    default_sdk: DefaultSdk,
     sdk_locator: Option<SdkLocator>,
     config_candidates: std::collections::BTreeSet<PathBuf>,
     /// Uncanonicalized package/SDK roots, so retargeted symlinks rediscover contexts.
@@ -253,7 +261,7 @@ impl AnalysisEnvironment {
         Self {
             contexts: Vec::new(),
             directories: HashMap::new(),
-            default_sdk: None,
+            default_sdk: DefaultSdk::NotLoaded,
             sdk_locator: locator,
             config_candidates: std::collections::BTreeSet::new(),
             root_candidates: std::collections::BTreeSet::new(),
@@ -277,6 +285,10 @@ impl AnalysisEnvironment {
     }
 
     /// Newly encountered environment failures, deduplicated for this environment.
+    #[must_use]
+    ///
+    /// # Panics
+    /// Panics if an environment cache mutex is poisoned.
     pub fn take_warnings(&self) -> Vec<String> {
         let mut pending = std::mem::take(&mut self.warnings.lock().unwrap().pending);
         pending.sort_unstable();
@@ -333,6 +345,9 @@ impl AnalysisEnvironment {
 
     /// Discover the configurations of paths in directories not seen before;
     /// known directories and contexts are kept, so context indices stay valid.
+    ///
+    /// # Panics
+    /// Panics if a package manifest has no parent directory or an environment cache mutex is poisoned.
     pub fn extend<'a>(&mut self, paths: impl IntoIterator<Item = &'a Path>) {
         for path in paths {
             let normalized = crate::canonical_or_lexical(&package_config::absolute(path));
@@ -366,9 +381,9 @@ impl AnalysisEnvironment {
             }
             let context = PackageConfig::discover(&directory)
                 .and_then(|config_path| self.discover_context(&config_path));
-            if context.is_none() && self.default_sdk.is_none() {
-                self.default_sdk = Some(self.locate_sdk(None));
-                if let Some(Some(sdk)) = &self.default_sdk {
+            if context.is_none() && matches!(self.default_sdk, DefaultSdk::NotLoaded) {
+                self.default_sdk = DefaultSdk::Loaded(self.locate_sdk(None));
+                if let DefaultSdk::Loaded(Some(sdk)) = &self.default_sdk {
                     self.config_candidates
                         .insert(sdk.root.join("lib/libraries.json"));
                     self.config_candidates.insert(sdk.root.join("version"));
@@ -525,6 +540,9 @@ impl AnalysisEnvironment {
     /// Capture exact resolution inputs, reusing bytes while file metadata is stable.
     /// Metadata-only changes still compare equal; replacements, restored-mtime
     /// writes and symlink retargeting refresh the contents and resolved paths.
+    ///
+    /// # Panics
+    /// Panics if an environment cache mutex is poisoned.
     pub fn config_stamps(&self) -> EnvironmentCacheKey {
         let mut roots = self.root_candidates.clone();
         roots.extend(sdk::discovery_inputs());
@@ -596,6 +614,7 @@ impl AnalysisEnvironment {
     }
 
     /// Match captured and lazily discovered inputs, preserving link event locations.
+    #[must_use]
     pub fn inputs_affected_by(&self, stamps: Option<&EnvironmentCacheKey>, path: &Path) -> bool {
         let affected = |event: &Path| {
             stamps.is_some_and(|key| key.affected_by_lexical(event))
@@ -608,6 +627,10 @@ impl AnalysisEnvironment {
     }
 
     /// Include lazily discovered package inputs in events arriving after a saved key.
+    #[must_use]
+    ///
+    /// # Panics
+    /// Panics if the package-discovery cache mutex is poisoned.
     pub fn package_inputs_affected_by(&self, path: &Path) -> bool {
         let discovery = self.package_discovery.lock().unwrap();
         discovery.directories.keys().any(|directory| {
@@ -635,6 +658,7 @@ impl AnalysisEnvironment {
     }
 
     /// Package metadata captured during discovery, without rule-time manifest I/O.
+    #[must_use]
     pub fn package(&self, path: &Path) -> Option<&PackageMetadata> {
         let path = crate::canonical_or_lexical(&package_config::absolute(path));
         let directory = path.parent().unwrap_or(Path::new(""));
@@ -643,6 +667,7 @@ impl AnalysisEnvironment {
 
     /// Bind cached package metadata to one file's normalized location.
     /// External directories are discovered lazily and shared across file contexts.
+    #[must_use]
     pub fn file_package(&self, path: &Path) -> FilePackage {
         let path = crate::canonical_or_lexical(&package_config::absolute(path));
         FilePackage::new(&path, self.package_metadata(&path))
@@ -715,6 +740,7 @@ impl AnalysisEnvironment {
     }
 
     /// The package configuration governing `path`, if any.
+    #[must_use]
     pub fn package_config(&self, path: &Path) -> Option<&PackageConfig> {
         self.config_in(self.context_index(path))
     }
@@ -733,11 +759,15 @@ impl AnalysisEnvironment {
     pub(crate) fn sdk_in(&self, context: Option<usize>) -> Option<&DartSdk> {
         match context {
             Some(index) => self.contexts[index].sdk.as_ref(),
-            None => self.default_sdk.as_ref()?.as_ref(),
+            None => match &self.default_sdk {
+                DefaultSdk::NotLoaded => None,
+                DefaultSdk::Loaded(sdk) => sdk.as_ref(),
+            },
         }
     }
 
     /// The SDK governing `path`.
+    #[must_use]
     pub fn sdk(&self, path: &Path) -> Option<&DartSdk> {
         self.sdk_in(self.context_index(path))
     }
@@ -745,6 +775,7 @@ impl AnalysisEnvironment {
     /// The language version of the file at `path` with contents `source`: a
     /// leading `// @dart = X.Y` comment, else its package's `languageVersion`,
     /// else [`LanguageVersion::CURRENT`] (the analyzer's default).
+    #[must_use]
     pub fn language_version(&self, path: &Path, source: &str) -> LanguageVersion {
         LanguageVersion::file_override(source)
             .or_else(|| self.package_config(path)?.language_version(path))
@@ -752,13 +783,15 @@ impl AnalysisEnvironment {
     }
 
     /// Whether any analyzed file has an SDK to load external libraries from.
+    #[must_use]
     pub fn has_sdk(&self) -> bool {
-        matches!(self.default_sdk, Some(Some(_)))
+        matches!(self.default_sdk, DefaultSdk::Loaded(Some(_)))
             || self.contexts.iter().any(|context| context.sdk.is_some())
     }
 
     /// The package language version of the file at `path`, or `None` when no
     /// package configuration covers it (see [`crate::AnalyzeContext`]).
+    #[must_use]
     pub fn package_language_version(&self, path: &Path) -> Option<LanguageVersion> {
         self.package_config(path)?.language_version(path)
     }

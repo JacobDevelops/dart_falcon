@@ -4,15 +4,16 @@
 
 use std::collections::HashMap;
 
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_analyze::{ResolvedType, ResolvedTypeView};
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
 #[derive(Default)]
 pub struct AvoidUnusedAfterNullCheck;
 
+use falcon_syntax::cst::NamedArg as Arg;
 impl Rule for AvoidUnusedAfterNullCheck {
     fn prepare<'a>(
         &self,
@@ -57,12 +58,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if check.op() != BinaryOp::NotEq {
             return;
         }
-        let checked = match (
+        let ((Expr::Ident(checked), Expr::NullLit(_)) | (Expr::NullLit(_), Expr::Ident(checked))) = (
             check.left().unparenthesized(),
             check.right().unparenthesized(),
-        ) {
-            (Expr::Ident(name), Expr::NullLit(_)) | (Expr::NullLit(_), Expr::Ident(name)) => name,
-            _ => return,
+        ) else {
+            return;
         };
         let Some(&declaration) = self.declarations.get(&checked.span().start) else {
             return;
@@ -87,7 +87,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         // the call itself so SDK stubs and unresolved callees work identically.
         if let Expr::Call(call) = expression {
             let args = call.args();
-            for argument in args.positional().chain(args.named().map(|arg| arg.value())) {
+            for argument in args.positional().chain(args.named().map(Arg::value)) {
                 let Expr::Ident(name) = argument.unparenthesized() else {
                     continue;
                 };
@@ -98,7 +98,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 let Some(declaration_span) = syntax
                     .tree()
                     .node(syntax.source(), *declaration)
-                    .map(|node| node.span())
+                    .map(SyntaxNode::span)
                 else {
                     continue;
                 };
@@ -147,4 +147,3 @@ impl Collector<'_> {
         }
     }
 }
-

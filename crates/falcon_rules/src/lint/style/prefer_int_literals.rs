@@ -32,7 +32,6 @@ use std::collections::HashMap;
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 
-
 #[derive(Default)]
 pub struct PreferIntLiterals;
 
@@ -63,17 +62,20 @@ impl Rule for PreferIntLiterals {
 /// The span of the double literal in `expr` (`1.0` or `-1.0`) when it holds a
 /// whole number an int literal can spell.
 fn replaceable_literal(expr: Expr<'_>) -> Option<Span> {
-    let (value, span) = match expr {
-        Expr::DoubleLit(literal) => (literal.value(), literal.span()),
+    let (value, span, is_negative) = match expr {
+        Expr::DoubleLit(literal) => (literal.value(), literal.span(), false),
         Expr::Unary(unary) if unary.op() == UnaryOp::Minus => match unary.operand() {
-            Expr::DoubleLit(literal) => (literal.value(), literal.span()),
+            Expr::DoubleLit(literal) => (literal.value(), literal.span(), true),
             _ => return None,
         },
         _ => return None,
     };
     let value: f64 = value.replace('_', "").parse().ok()?;
-    // Mirrors `value == value.truncate()` on a 64-bit int.
-    let whole = value.is_finite() && value.trunc() == value && value.abs() <= i64::MAX as f64;
+    let value = if is_negative { -value } else { value };
+    // The official bound `value.abs() <= i64::MAX as f64` rounds to 2^63.
+    let whole = value.is_finite()
+        && value.total_cmp(&value.trunc()).is_eq()
+        && (-9_223_372_036_854_775_808.0..=9_223_372_036_854_775_808.0).contains(&value);
     whole.then_some(span)
 }
 
@@ -98,8 +100,10 @@ impl<'a> DeclaredContexts<'a, '_> {
 
     fn check(&mut self, expr: Expr<'a>) {
         if let Some(span) = replaceable_literal(expr) {
-            self.diagnostics
-                .push(self.ctx.diagnostic("Use an integer literal instead of this unnecessary `double` literal.", span));
+            self.diagnostics.push(self.ctx.diagnostic(
+                "Use an integer literal instead of this unnecessary `double` literal.",
+                span,
+            ));
         }
     }
 
@@ -111,7 +115,7 @@ impl<'a> DeclaredContexts<'a, '_> {
         if !self.declares_double(ty) {
             return;
         }
-        for initializer in declarators.filter_map(|d| d.initializer()) {
+        for initializer in declarators.filter_map(VarDeclarator::initializer) {
             self.check(initializer);
         }
     }
@@ -153,19 +157,19 @@ impl<'a> Visitor<'a> for DeclaredContexts<'a, '_> {
 
     fn visit_function_decl(&mut self, node: FunctionDecl<'a>) {
         self.in_function(node.return_type(), node.body(), |this| {
-            walk_function_decl(this, node)
+            walk_function_decl(this, node);
         });
     }
 
     fn visit_method_decl(&mut self, node: MethodDecl<'a>) {
         self.in_function(node.return_type(), node.body(), |this| {
-            walk_method_decl(this, node)
+            walk_method_decl(this, node);
         });
     }
 
     fn visit_getter_decl(&mut self, node: GetterDecl<'a>) {
         self.in_function(node.return_type(), node.body(), |this| {
-            walk_getter_decl(this, node)
+            walk_getter_decl(this, node);
         });
     }
 
@@ -176,7 +180,7 @@ impl<'a> Visitor<'a> for DeclaredContexts<'a, '_> {
     fn visit_class_member(&mut self, node: ClassMember<'a>) {
         if let ClassMember::Operator(operator) = node {
             self.in_function(operator.return_type(), operator.body(), |this| {
-                walk_class_member(this, node)
+                walk_class_member(this, node);
             });
         } else {
             walk_class_member(self, node);
@@ -187,7 +191,7 @@ impl<'a> Visitor<'a> for DeclaredContexts<'a, '_> {
         match node {
             Stmt::LocalFunc(function) => {
                 self.in_function(function.return_type(), Some(function.body()), |this| {
-                    walk_stmt(this, node)
+                    walk_stmt(this, node);
                 });
                 return;
             }
@@ -235,8 +239,10 @@ impl<'a> ArgumentContexts<'a> {
             return;
         }
         if let Some(span) = replaceable_literal(argument) {
-            self.diagnostics
-                .push(self.ctx.diagnostic("Use an integer literal instead of this unnecessary `double` literal.", span));
+            self.diagnostics.push(self.ctx.diagnostic(
+                "Use an integer literal instead of this unnecessary `double` literal.",
+                span,
+            ));
         }
     }
 
@@ -280,7 +286,7 @@ mod tests {
 
     #[test]
     fn binary_operands_use_operator_parameters_not_the_result_context() {
-        let source = r#"
+        let source = r"
 T pick<T extends num>(T value) => value;
 class Numeric {
   double operator +(num value) => 0;
@@ -291,7 +297,7 @@ void run(Numeric number) {
   double narrow = number - pick(2.0);
   double direct = pick(3.0);
 }
-"#;
+";
         let path = std::path::Path::new("/project/lib/main.dart");
         let parsed = parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
@@ -302,7 +308,8 @@ void run(Numeric number) {
         let indexes = crate::lint::test_support::TestIndexes::new(&[(path, &parsed)]);
         let config = falcon_config::FalconConfig::default();
         let context = indexes.context(path, &config, &parsed);
-        let diagnostics = PreferIntLiterals.analyze(PreferIntLiterals::NAME, parsed.program(), &context);
+        let diagnostics =
+            PreferIntLiterals.analyze(PreferIntLiterals::NAME, parsed.program(), &context);
         let reported: Vec<_> = diagnostics
             .iter()
             .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])

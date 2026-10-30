@@ -4,7 +4,7 @@
 //! updates. Use read in initState, dispose, non-widget classes and deferred
 //! callbacks. didChangeDependencies may establish dependencies; buildWithChild
 //! on nested's SingleChildStatelessWidget/SingleChildState is a build entry.
-//! Only confirmed Flutter BuildContext receivers with provider imports match.
+//! Only confirmed Flutter `BuildContext` receivers with provider imports match.
 //! Widget helpers, unresolved bases and callback arguments with an unknown
 //! execution phase are skipped. Named on… callbacks are deferred events.
 

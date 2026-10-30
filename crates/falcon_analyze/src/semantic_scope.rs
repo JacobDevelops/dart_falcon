@@ -49,6 +49,7 @@ pub struct ReferencedDeclaration<'a> {
 /// The shared traversal owns scope and inference state for every observer.
 pub trait SemanticRuleVisitor<'a> {
     /// Consume this file's collector after the shared traversal.
+    #[must_use]
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         Vec::new()
     }
@@ -146,10 +147,10 @@ impl<'a> SemanticState<'a> {
     pub fn new(program: Program<'a>, ctx: &'a AnalyzeContext<'a>) -> Option<Self> {
         let identities = ctx.identities()?;
         let model = SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types());
-        let signatures = ctx
-            .signatures()
-            .map(Cow::Borrowed)
-            .unwrap_or_else(|| Cow::Owned(SignatureIndex::from_program(program, &model)));
+        let signatures = ctx.signatures().map_or_else(
+            || Cow::Owned(SignatureIndex::from_program(program, &model)),
+            Cow::Borrowed,
+        );
         let private_field_promotion = ctx
             .language_version()
             .supports(Feature::PrivateFieldPromotion);
@@ -771,6 +772,7 @@ impl<'a> SemanticState<'a> {
         )
     }
 
+    #[must_use]
     pub fn callable_return_type(callable: &ResolvedType) -> ResolvedType {
         if let Some(return_type) = callable.function_return_type() {
             return return_type;
@@ -787,15 +789,17 @@ impl<'a> SemanticState<'a> {
     pub fn cascade_invoke_return_type(
         &self,
         receiver: &ResolvedType,
-        type_args: AstChildren<'a, DartType<'a>>,
+        type_args: &AstChildren<'a, DartType<'a>>,
         args: ArgList<'a>,
     ) -> ResolvedType {
         self.signatures
             .resolved_member(receiver, "call", &self.model)
-            .map(|(signature, owner)| {
-                self.instantiate_return_type(signature, &owner, type_args, args, None)
-            })
-            .unwrap_or_else(|| Self::callable_return_type(receiver))
+            .map_or_else(
+                || Self::callable_return_type(receiver),
+                |(signature, owner)| {
+                    self.instantiate_return_type(signature, &owner, type_args, args, None)
+                },
+            )
     }
 
     /// The implicit `this` receiver of an unqualified instance method, unless shadowed.
@@ -854,7 +858,7 @@ impl<'a> SemanticState<'a> {
             return self
                 .signatures
                 .member(owner, name)
-                .map(|signature| signature.function_type())
+                .map(ResolvedSignature::function_type)
                 .or_else(|| self.signatures.field(owner, name).map(|(_, ty)| ty.clone()));
         }
         if let Some(ResolvedType {
@@ -991,13 +995,10 @@ impl<'a> SemanticState<'a> {
                 kind: ResolvedTypeKind::TypeParameter { bound, .. },
             } => self.has_call_method(bound),
             ResolvedType {
-                kind: ResolvedTypeKind::Function { .. },
-            }
-            | ResolvedType {
-                kind: ResolvedTypeKind::Unknown,
-            }
-            | ResolvedType {
-                kind: ResolvedTypeKind::Dynamic,
+                kind:
+                    ResolvedTypeKind::Function { .. }
+                    | ResolvedTypeKind::Unknown
+                    | ResolvedTypeKind::Dynamic,
             } => false,
             ResolvedType {
                 kind: ResolvedTypeKind::Interface { identity, .. },
@@ -1139,7 +1140,7 @@ impl<'a> SemanticState<'a> {
         let target = self.call_target(callee, type_args)?;
         let substitutions = self.signature_substitutions_with_result(
             target.inference_signature(),
-            target.type_args.clone(),
+            &target.type_args,
             args,
             expected,
             None,
@@ -1197,7 +1198,7 @@ impl<'a> SemanticState<'a> {
         let target = self.call_target(callee, type_args)?;
         let substitutions = self.signature_substitutions_with_result(
             target.inference_signature(),
-            target.type_args.clone(),
+            &target.type_args,
             args,
             expected,
             None,
@@ -1219,7 +1220,7 @@ impl<'a> SemanticState<'a> {
         let mut argument_contexts = HashMap::new();
         let substitutions = self.signature_substitutions_with_result(
             target.inference_signature(),
-            target.type_args.clone(),
+            &target.type_args,
             args,
             expected,
             Some(&mut argument_contexts),
@@ -1285,7 +1286,7 @@ impl<'a> SemanticState<'a> {
         &self,
         signature: &ResolvedSignature,
         owner: &FxHashMap<TypeParameterId, ResolvedType>,
-        type_args: AstChildren<'a, DartType<'a>>,
+        type_args: &AstChildren<'a, DartType<'a>>,
         args: ArgList<'a>,
         expected: Option<&ResolvedType>,
     ) -> FxHashMap<TypeParameterId, ResolvedType> {
@@ -1311,7 +1312,7 @@ impl<'a> SemanticState<'a> {
             &ResolvedType,
             &FxHashMap<TypeParameterId, ResolvedType>,
         ),
-        type_args: AstChildren<'a, DartType<'a>>,
+        type_args: &AstChildren<'a, DartType<'a>>,
         args: ArgList<'a>,
         expected: Option<&ResolvedType>,
         argument_contexts: Option<&mut HashMap<usize, ResolvedType>>,
@@ -1337,7 +1338,7 @@ impl<'a> SemanticState<'a> {
         &self,
         signature: &ResolvedSignature,
         owner: &FxHashMap<TypeParameterId, ResolvedType>,
-        type_args: AstChildren<'a, DartType<'a>>,
+        type_args: &AstChildren<'a, DartType<'a>>,
         args: ArgList<'a>,
         expected: Option<&ResolvedType>,
     ) -> ResolvedType {
@@ -1367,7 +1368,8 @@ impl<'a> SemanticState<'a> {
 }
 
 /// The receiver of one explicit `.call` access, without traversing other syntax.
-pub fn explicit_call_receiver<'a>(callee: Expr<'a>) -> Option<Expr<'a>> {
+#[must_use]
+pub fn explicit_call_receiver(callee: Expr<'_>) -> Option<Expr<'_>> {
     if let Expr::Field(field) = callee
         && field.field().name() == "call"
     {
@@ -1402,6 +1404,7 @@ pub fn visit_program<'a, V: SemanticRuleVisitor<'a> + ?Sized>(
 /// Named super parameters match by name; positional ones by their position
 /// among the positional super parameters (a super call cannot also pass
 /// positional arguments).
+#[must_use]
 pub fn resolved_super_param_type<'a>(
     param: FormalParam<'a>,
     params: FormalParamList<'a>,
@@ -1522,8 +1525,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                 Expr::NullAssert(_) => Some(
                     self.state
                         .expected()
-                        .map(|ty| ty.with_nullable(true))
-                        .unwrap_or(ResolvedType::UNKNOWN),
+                        .map_or(ResolvedType::UNKNOWN, |ty| ty.with_nullable(true)),
                 ),
                 _ => unreachable!("selector spine"),
             };
@@ -1591,7 +1593,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                 true
             } else {
                 (evaluated, effects) =
-                    walker.visit_binary_chain_operand(expression, result_needed, context);
+                    walker.visit_binary_chain_operand(expression, result_needed, context.as_ref());
                 false
             }
         });
@@ -1702,21 +1704,21 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         &mut self,
         expression: Expr<'a>,
         result_needed: bool,
-        context: Option<ResolvedType>,
+        context: Option<&ResolvedType>,
     ) -> (Option<ResolvedType>, bool) {
         let parenthesized_chain = matches!(expression, Expr::Paren(_))
             && matches!(expression.unparenthesized(), Expr::Binary(_));
         // Optional RHS typing depends on its outer context, unlike operator-chain results.
-        let contextual_optional = context.as_ref().is_some_and(|ty| {
+        let contextual_optional = context.is_some_and(|ty| {
             !matches!(
                 ty.kind,
                 ResolvedTypeKind::Unknown | ResolvedTypeKind::Dynamic
             )
         }) && matches!(expression.unparenthesized(), Expr::Binary(binary)
-                if binary.op() == BinaryOp::NullCoalesce);
+            if binary.op() == BinaryOp::NullCoalesce);
         let mut evaluated =
             (result_needed && (!parenthesized_chain || contextual_optional)).then(|| {
-                if let Some(context) = context.as_ref().filter(|ty| {
+                if let Some(context) = context.filter(|ty| {
                     !matches!(
                         ty.kind,
                         ResolvedTypeKind::Unknown | ResolvedTypeKind::Dynamic
@@ -2159,10 +2161,10 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                     kind: ResolvedTypeKind::Function {
                         shape: Some(crate::resolve::FunctionTypeShape::empty()),
                         optional_positional: 0,
-                        alias: Default::default(),
+                        alias: crate::resolve::FunctionTypeAlias::default(),
                         return_type: ResolvedType::VOID.into(),
                         positional: Arc::from([self.state.model.substitute(&ty, &substitutions)]),
-                        named: Default::default(),
+                        named: Arc::default(),
                         nullable: false,
                     },
                 });
@@ -2172,7 +2174,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         });
         if let Some(expected) = contextual {
             self.with_expected(expected, |walker| {
-                walker.visit_function_context(callable, true, true)
+                walker.visit_function_context(callable, true, true);
             });
         } else {
             self.visit_function(callable, false);
@@ -2279,14 +2281,14 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
 
     fn bind_callable_params(
         &mut self,
-        params: Option<CallableParams<'a>>,
+        params: Option<&CallableParams<'a>>,
         contextual: bool,
         substitutions: Option<&FxHashMap<TypeParameterId, ResolvedType>>,
     ) {
         match params {
             Some(CallableParams::List(params)) => {
-                self.bind_params(params, None, contextual, substitutions);
-                self.visit_param_constants(params);
+                self.bind_params(*params, None, contextual, substitutions);
+                self.visit_param_constants(*params);
             }
             Some(CallableParams::Setter(setter)) => {
                 let mut ty = setter.param_type().map_or(ResolvedType::DYNAMIC, |ty| {
@@ -2369,7 +2371,11 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         );
         self.state.return_type.push(resolved_return);
         self.with_scope(|walker| {
-            walker.bind_callable_params(params, contextual, contextual_substitutions.as_ref());
+            walker.bind_callable_params(
+                params.as_ref(),
+                contextual,
+                contextual_substitutions.as_ref(),
+            );
             if let Some(body) = body {
                 // The closure's own context only shapes its parameters and
                 // return type; its body statements have no context.
@@ -2495,10 +2501,9 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                                     &self.state.model,
                                 )
                             })
-                            .map(|(ty, substitutions)| {
+                            .map_or(ResolvedType::UNKNOWN, |(ty, substitutions)| {
                                 self.state.model.substitute(&ty, &substitutions)
-                            })
-                            .unwrap_or(ResolvedType::UNKNOWN);
+                            });
                     }
                 }
                 if contextual {
@@ -2718,7 +2723,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                 named.sort_by(|left, right| left.0.cmp(&right.0));
                 ResolvedType {
                     kind: ResolvedTypeKind::Record {
-                        occurrence: Default::default(),
+                        occurrence: crate::resolve::FunctionTypeAlias::default(),
                         positional: positional.into(),
                         named: named.into(),
                         nullable: false,
@@ -2782,14 +2787,11 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
 
     fn visit_matched_variable_pattern(&mut self, node: VariablePattern<'a>, matched: ResolvedType) {
         let name = node.name();
-        let ty = node
-            .type_()
-            .map(|ty| {
-                self.state
-                    .model
-                    .resolve_type_in(ty, &self.state.type_parameters)
-            })
-            .unwrap_or(matched);
+        let ty = node.type_().map_or(matched, |ty| {
+            self.state
+                .model
+                .resolve_type_in(ty, &self.state.type_parameters)
+        });
         if self.assigning_pattern {
             FlowContext {
                 model: &self.state.model,
@@ -2854,8 +2856,9 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                         &self.state.model,
                     )
                 })
-                .map(|(ty, substitutions)| self.state.model.substitute(&ty, &substitutions))
-                .unwrap_or(ResolvedType::UNKNOWN);
+                .map_or(ResolvedType::UNKNOWN, |(ty, substitutions)| {
+                    self.state.model.substitute(&ty, &substitutions)
+                });
             if let Some(child) = field.pattern() {
                 self.visit_matched_pattern(child, field_type);
             } else if self.assigning_pattern {
@@ -2957,14 +2960,14 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
             ForInit::ForIn(node) if node.declares_variable() => {
                 self.visit_declaration_annotations(node.annotations());
                 self.visit_expr(node.iterable());
-                let ty = node
-                    .var_type()
-                    .map(|ty| {
+                let ty = node.var_type().map_or_else(
+                    || self.iterable_element_type(node.iterable(), is_await),
+                    |ty| {
                         self.state
                             .model
                             .resolve_type_in(ty, &self.state.type_parameters)
-                    })
-                    .unwrap_or_else(|| self.iterable_element_type(node.iterable(), is_await));
+                    },
+                );
                 self.state.environment.declare_at(
                     node.name().name().to_owned(),
                     ty,
@@ -3060,31 +3063,31 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
     fn visit_element_with_context<E: Element<'a>>(
         &mut self,
         element: E,
-        key_type: &Option<ResolvedType>,
-        value_type: &Option<ResolvedType>,
+        key_type: Option<&ResolvedType>,
+        value_type: Option<&ResolvedType>,
     ) {
         match element.kind() {
             ElementKind::Expression(expression) => {
-                self.with_context(key_type.clone(), |walker| walker.visit_expr(expression));
+                self.with_context(key_type.cloned(), |walker| walker.visit_expr(expression));
             }
             ElementKind::NullAware(node) => {
-                self.with_context(key_type.clone(), |walker| walker.visit_expr(node.expr()));
+                self.with_context(key_type.cloned(), |walker| walker.visit_expr(node.expr()));
             }
             ElementKind::Entry(entry) => {
-                self.with_context(key_type.clone(), |walker| walker.visit_expr(entry.key()));
-                self.with_context(value_type.clone(), |walker| {
-                    walker.visit_expr(entry.value())
+                self.with_context(key_type.cloned(), |walker| walker.visit_expr(entry.key()));
+                self.with_context(value_type.cloned(), |walker| {
+                    walker.visit_expr(entry.value());
                 });
             }
             ElementKind::Spread { expression, .. } => {
                 if E::IS_MAP {
                     self.with_expected(ResolvedType::UNKNOWN, |walker| {
-                        walker.visit_expr(expression)
+                        walker.visit_expr(expression);
                     });
                 } else {
-                    let expected = key_type.as_ref().map(|element| ResolvedType {
+                    let expected = key_type.map(|element| ResolvedType {
                         kind: ResolvedTypeKind::Interface {
-                            occurrence: Default::default(),
+                            occurrence: crate::resolve::FunctionTypeAlias::default(),
                             identity: DeclarationIdentity::sdk("dart:core", "Iterable"),
                             arguments: Arc::from([element.clone()]),
                             nullable: false,
@@ -3164,7 +3167,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                     });
                     match parameters {
                         Some((positional, named)) => {
-                            self.visit_call_arguments(args, &positional, &named)
+                            self.visit_call_arguments(args, &positional, &named);
                         }
                         None => self.visit_call_arguments(args, &[], &HashMap::new()),
                     }
@@ -3183,8 +3186,9 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                                 &self.state.model,
                             )
                         })
-                        .map(|(ty, substitutions)| self.state.model.substitute(&ty, &substitutions))
-                        .unwrap_or(ResolvedType::UNKNOWN);
+                        .map_or(ResolvedType::UNKNOWN, |(ty, substitutions)| {
+                            self.state.model.substitute(&ty, &substitutions)
+                        });
                     self.with_expected(expected, |walker| walker.visit_expr(value));
                 }
                 ConstructorInitializer::Assert(node) => {
@@ -3201,14 +3205,13 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
     /// (an enum constant or an annotation) against its instantiated parameters.
     fn visit_constructor_arguments(
         &mut self,
-        identity: Option<DeclarationIdentity>,
+        identity: Option<&DeclarationIdentity>,
         name: &str,
-        type_args: AstChildren<'a, DartType<'a>>,
+        type_args: &AstChildren<'a, DartType<'a>>,
         args: ArgList<'a>,
     ) {
-        let signature = identity
-            .as_ref()
-            .and_then(|identity| self.state.signatures.constructor(identity, name));
+        let signature =
+            identity.and_then(|identity| self.state.signatures.constructor(identity, name));
         let Some(signature) = signature else {
             return self.visit_call_arguments(args, &[], &HashMap::new());
         };
@@ -3233,7 +3236,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
     fn visit_declaration_annotations(&mut self, annotations: AstChildren<'a, Annotation<'a>>) {
         for annotation in annotations {
             self.with_expected(ResolvedType::UNKNOWN, |walker| {
-                walker.visit_annotation(annotation)
+                walker.visit_annotation(annotation);
             });
         }
     }
@@ -3352,7 +3355,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
             self.with_scope(|walker| {
                 // Later heads start from the preceding head's failure.
                 unmatched.clone_from(&walker.state.environment);
-                let mut matches = matched_empty.take();
+                let mut matched_paths = matched_empty.take();
                 for kind in case.cases() {
                     walker.state.environment.clone_from(&unmatched);
                     match kind {
@@ -3367,13 +3370,13 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                         SwitchCaseKind::Expr(label) => walker.visit_expr(label.expr()),
                         SwitchCaseKind::Default(_) => {}
                     }
-                    matches = Some(match matches {
+                    matched_paths = Some(match matched_paths {
                         Some(previous) => walker.state.environment.join(&previous),
                         None => walker.state.environment.clone(),
                     });
                 }
-                if let Some(matches) = matches {
-                    walker.state.environment = matches;
+                if let Some(matched_paths) = matched_paths {
+                    walker.state.environment = matched_paths;
                 }
                 if falls_through {
                     matched_empty = Some(walker.state.environment.clone());
@@ -3457,15 +3460,15 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         if let (Some(finally), Some(before)) = (statement.finally(), before_finally) {
             // `finally` runs after the body and catches complete, or
             // after any of their writes when they leave early.
-            let completed = std::mem::replace(&mut self.state.environment, before);
+            let final_states = std::mem::replace(&mut self.state.environment, before);
             self.enter_region(statement.span().start);
             for catch in statement.catches() {
                 self.enter_region(catch.body().span().start);
             }
-            let entry = completed.join(&self.state.environment);
+            let entry = final_states.join(&self.state.environment);
             self.state.environment = entry.clone();
             self.with_scope(|walker| walker.visit_block(finally));
-            let end = std::mem::replace(&mut self.state.environment, completed);
+            let end = std::mem::replace(&mut self.state.environment, final_states);
             self.state.environment.attach_finally(&entry, &end);
         }
     }
@@ -3503,7 +3506,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                     .positional()
                     .filter(|param| param.kind() == ParamKind::OptionalPositional)
                     .count(),
-                alias: Default::default(),
+                alias: crate::resolve::FunctionTypeAlias::default(),
                 return_type: std::sync::Arc::new(
                     function
                         .return_type()
@@ -3600,23 +3603,22 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                 .resolve_type_in(extension.on_type(), &walker.state.type_parameters),
             _ => enclosing_name
                 .and_then(|name| walker.state.model.resolve_name(name))
-                .map(|identity| ResolvedType {
+                .map_or(ResolvedType::UNKNOWN, |identity| ResolvedType {
                     kind: ResolvedTypeKind::Interface {
-                        occurrence: Default::default(),
+                        occurrence: crate::resolve::FunctionTypeAlias::default(),
                         identity,
                         arguments: arguments.into(),
                         nullable: false,
                         extension_type: false,
                     },
-                })
-                .unwrap_or(ResolvedType::UNKNOWN),
+                }),
         }
     }
 
     fn prepare_declaration_members(
         &mut self,
-        effective_members: EffectiveMembers<'a>,
-        members: AstChildren<'a, ClassMember<'a>>,
+        effective_members: &EffectiveMembers<'a>,
+        members: &AstChildren<'a, ClassMember<'a>>,
     ) {
         let walker = self;
         walker.declare_fields(effective_members.clone());
@@ -3676,7 +3678,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         superclass: Option<DartType<'a>>,
         effective_members: Option<EffectiveMembers<'a>>,
         type_parameters: AstChildren<'a, TypeParam<'a>>,
-        members: AstChildren<'a, ClassMember<'a>>,
+        members: &AstChildren<'a, ClassMember<'a>>,
     ) {
         let walker = self;
         let previous_unnamed_members = std::mem::replace(
@@ -3716,10 +3718,10 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
             effective_members.unwrap_or_else(|| EffectiveMembers::declared(members.clone()));
         let previous_primary = walker.primary_environment.take();
         let previous_primary_body = walker.primary_body_environment.take();
-        walker.prepare_declaration_members(effective_members, members);
+        walker.prepare_declaration_members(&effective_members, members);
         if matches!(node, TopLevelDecl::Enum(_)) {
             walker.with_expected(ResolvedType::UNKNOWN, |walker| {
-                walk_top_level_decl(walker, node)
+                walk_top_level_decl(walker, node);
             });
         } else {
             walk_top_level_decl(walker, node);
@@ -3790,7 +3792,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                     superclass,
                     effective_members,
                     type_parameters,
-                    members,
+                    &members,
                 );
             });
         } else if matches!(node, TopLevelDecl::Function(_)) {
@@ -3837,7 +3839,12 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
             }
             if let Some(args) = variant.args() {
                 let name = variant.constructor_name().map_or("new", |name| name.name());
-                self.visit_constructor_arguments(identity.clone(), name, variant.type_args(), args);
+                self.visit_constructor_arguments(
+                    identity.as_ref(),
+                    name,
+                    &variant.type_args(),
+                    args,
+                );
             }
         }
         for member in node.members() {
@@ -3854,7 +3861,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
             self.visit_dart_type(ty);
         }
         let model = &self.state.model;
-        let segments: Vec<&str> = node.name().map(|segment| segment.name()).collect();
+        let segments: Vec<&str> = node.name().map(Identifier::name).collect();
         let target = match node.constructor_name() {
             Some(name) => model
                 .resolve_dotted(&segments)
@@ -3868,7 +3875,12 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                 }),
         };
         let (identity, name) = target.unzip();
-        self.visit_constructor_arguments(identity, name.unwrap_or("new"), node.type_args(), args);
+        self.visit_constructor_arguments(
+            identity.as_ref(),
+            name.unwrap_or("new"),
+            &node.type_args(),
+            args,
+        );
     }
 
     fn visit_function_decl(&mut self, node: FunctionDecl<'a>) {
@@ -4089,7 +4101,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
             Stmt::PatternAssign(assignment) => {
                 let context = self.assignment_pattern_context(assignment.pattern());
                 self.with_expected(context.clone(), |walker| {
-                    walker.visit_expr(assignment.value())
+                    walker.visit_expr(assignment.value());
                 });
                 let matched = self
                     .state
@@ -4116,7 +4128,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
                     }
                     walker.visit_expr(statement.condition());
                     walker.assume_condition(statement.condition(), false);
-                })
+                });
             }),
             Stmt::Switch(statement) => self.visit_switch_statement(statement),
             Stmt::TryCatch(statement) => self.visit_try_statement(statement),
@@ -4207,13 +4219,13 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
             Expr::List(n) => {
                 let context = self.element_context(n.type_arg());
                 for element in n.elements() {
-                    self.visit_element_with_context(element, &context, &None);
+                    self.visit_element_with_context(element, context.as_ref(), None);
                 }
             }
             Expr::Set(n) => {
                 let context = self.element_context(n.type_arg());
                 for element in n.elements() {
-                    self.visit_element_with_context(element, &context, &None);
+                    self.visit_element_with_context(element, context.as_ref(), None);
                 }
             }
             Expr::Map(n) => self.visit_map_expression(n),
@@ -4253,46 +4265,45 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
             })
             .cloned();
         self.with_context(expected, |walker| walker.visit_expr(callee));
-        match self
-            .state
-            .call_parameter_types(callee, type_args, args, self.state.expected())
+        if let Some((positional, named)) =
+            self.state
+                .call_parameter_types(callee, type_args, args, self.state.expected())
         {
-            Some((positional, named)) => self.visit_call_arguments(args, &positional, &named),
-            None => {
-                let callee_type = self.state.infer(callee);
-                let untyped_member = match callee {
-                    Expr::Field(field) => {
-                        let receiver = self.state.infer_receiver(field.object());
-                        matches!(
-                            receiver,
-                            ResolvedType {
-                                kind: ResolvedTypeKind::Dynamic
-                            }
-                        ) || (field.field().name() == "call"
-                            && receiver.interface("dart:core", "Function"))
-                    }
-                    _ => false,
-                };
-                let expected = if matches!(
-                    callee_type,
-                    ResolvedType {
-                        kind: ResolvedTypeKind::Dynamic
-                    }
-                ) || callee_type.interface("dart:core", "Function")
-                    || untyped_member
-                {
-                    ResolvedType::DYNAMIC
-                } else {
-                    ResolvedType::UNKNOWN
-                };
-                for argument in args.positional() {
-                    self.with_expected(expected.clone(), |walker| walker.visit_expr(argument));
+            self.visit_call_arguments(args, &positional, &named);
+        } else {
+            let callee_type = self.state.infer(callee);
+            let untyped_member = match callee {
+                Expr::Field(field) => {
+                    let receiver = self.state.infer_receiver(field.object());
+                    matches!(
+                        receiver,
+                        ResolvedType {
+                            kind: ResolvedTypeKind::Dynamic
+                        }
+                    ) || (field.field().name() == "call"
+                        && receiver.interface("dart:core", "Function"))
                 }
-                for argument in args.named() {
-                    self.with_expected(expected.clone(), |walker| {
-                        walker.visit_expr(argument.value())
-                    });
+                _ => false,
+            };
+            let expected = if matches!(
+                callee_type,
+                ResolvedType {
+                    kind: ResolvedTypeKind::Dynamic
                 }
+            ) || callee_type.interface("dart:core", "Function")
+                || untyped_member
+            {
+                ResolvedType::DYNAMIC
+            } else {
+                ResolvedType::UNKNOWN
+            };
+            for argument in args.positional() {
+                self.with_expected(expected.clone(), |walker| walker.visit_expr(argument));
+            }
+            for argument in args.named() {
+                self.with_expected(expected.clone(), |walker| {
+                    walker.visit_expr(argument.value());
+                });
             }
         }
     }
@@ -4385,7 +4396,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         let key_type = component_type(0);
         let value_type = component_type(1);
         for element in elements {
-            self.visit_element_with_context(element, &key_type, &value_type);
+            self.visit_element_with_context(element, key_type.as_ref(), value_type.as_ref());
         }
     }
 
@@ -4400,16 +4411,15 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         {
             let mut positional_index = 0;
             for field in fields {
-                let expected = match field.name() {
-                    Some(name) => expected.record_field(name.name()),
-                    None => {
-                        let ty = expected.record_positional(positional_index);
-                        positional_index += 1;
-                        ty
-                    }
+                let expected = if let Some(name) = field.name() {
+                    expected.record_field(name.name())
+                } else {
+                    let ty = expected.record_positional(positional_index);
+                    positional_index += 1;
+                    ty
                 };
                 self.with_expected(expected.unwrap_or(ResolvedType::UNKNOWN), |walker| {
-                    walker.visit_expr(field.value())
+                    walker.visit_expr(field.value());
                 });
             }
         } else {
@@ -4498,7 +4508,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         {
             let substitutions = self
                 .state
-                .signature_substitutions(signature, &owner, type_args, args, None);
+                .signature_substitutions(signature, &owner, &type_args, args, None);
             let (positional, named) = self.state.substituted_parameters(signature, &substitutions);
             let returned = self
                 .state
@@ -4512,7 +4522,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
             }
             for argument in args.named() {
                 self.with_expected(ResolvedType::UNKNOWN, |walker| {
-                    walker.visit_expr(argument.value())
+                    walker.visit_expr(argument.value());
                 });
             }
             current = self
@@ -4520,14 +4530,16 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                 .signatures
                 .instantiated_member_read(&current, name.name(), &self.state.model)
                 .as_ref()
-                .map(SemanticState::callable_return_type)
-                .unwrap_or_else(|| {
-                    if current == ResolvedType::DYNAMIC {
-                        ResolvedType::DYNAMIC
-                    } else {
-                        ResolvedType::UNKNOWN
-                    }
-                });
+                .map_or_else(
+                    || {
+                        if current == ResolvedType::DYNAMIC {
+                            ResolvedType::DYNAMIC
+                        } else {
+                            ResolvedType::UNKNOWN
+                        }
+                    },
+                    SemanticState::callable_return_type,
+                );
         }
         self.state.environment.demote_captured();
         current
@@ -4547,7 +4559,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         {
             let substitutions = self
                 .state
-                .signature_substitutions(signature, &owner, type_args, args, None);
+                .signature_substitutions(signature, &owner, &type_args, args, None);
             let (positional, named) = self.state.substituted_parameters(signature, &substitutions);
             let returned = self
                 .state
@@ -4589,8 +4601,9 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
             let expected = signature
                 .positional
                 .first()
-                .map(|ty| self.state.model.substitute(ty, &owner))
-                .unwrap_or(ResolvedType::UNKNOWN);
+                .map_or(ResolvedType::UNKNOWN, |ty| {
+                    self.state.model.substitute(ty, &owner)
+                });
             let returned = self.state.model.substitute(&signature.return_type, &owner);
             self.with_expected(expected, |walker| walker.visit_expr(index));
             current = returned;
@@ -4630,24 +4643,28 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
             self.state
                 .signatures
                 .resolved_member(current, "[]=", &self.state.model)
-                .map(|(signature, owner)| {
-                    let resolve = |position| {
-                        signature
-                            .positional
-                            .get(position)
-                            .map(|ty| self.state.model.substitute(ty, &owner))
-                            .unwrap_or(ResolvedType::UNKNOWN)
-                    };
-                    (resolve(0), resolve(1))
-                })
-                .unwrap_or((ResolvedType::UNKNOWN, ResolvedType::UNKNOWN))
+                .map_or(
+                    (ResolvedType::UNKNOWN, ResolvedType::UNKNOWN),
+                    |(signature, owner)| {
+                        let resolve = |position| {
+                            signature
+                                .positional
+                                .get(position)
+                                .map_or(ResolvedType::UNKNOWN, |ty| {
+                                    self.state.model.substitute(ty, &owner)
+                                })
+                        };
+                        (resolve(0), resolve(1))
+                    },
+                )
         } else if let Expr::Ident(identifier) = target {
             let expected = self
                 .state
                 .signatures
                 .resolved_writable_field(current, identifier.name(), &self.state.model)
-                .map(|(ty, owner)| self.state.model.substitute(&ty, &owner))
-                .unwrap_or(ResolvedType::UNKNOWN);
+                .map_or(ResolvedType::UNKNOWN, |(ty, owner)| {
+                    self.state.model.substitute(&ty, &owner)
+                });
             (ResolvedType::UNKNOWN, expected)
         } else {
             (ResolvedType::UNKNOWN, ResolvedType::UNKNOWN)
@@ -4717,7 +4734,8 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
     }
 }
 
-pub fn returned_expressions<'a>(body: FunctionBody<'a>) -> Vec<Expr<'a>> {
+#[must_use]
+pub fn returned_expressions(body: FunctionBody<'_>) -> Vec<Expr<'_>> {
     fn collect<'a>(statements: AstChildren<'a, Stmt<'a>>, expressions: &mut Vec<Expr<'a>>) {
         for statement in statements {
             collect_statement(statement, expressions);
@@ -4788,10 +4806,9 @@ fn collect_type_parameter_ids(
 ) {
     match ty {
         ResolvedType {
-            kind: ResolvedTypeKind::TypeParameter { id, bound, .. },
-        }
-        | ResolvedType {
-            kind: ResolvedTypeKind::NonNullTypeParameter { id, bound },
+            kind:
+                ResolvedTypeKind::TypeParameter { id, bound, .. }
+                | ResolvedTypeKind::NonNullTypeParameter { id, bound },
         } => {
             let parameters = by_owner.entry(id.owner).or_default();
             if !parameters.contains(id) {

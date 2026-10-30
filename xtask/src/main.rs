@@ -82,7 +82,7 @@ fn main() {
                     name,
                     cross_file,
                 },
-        } => codegen::run(group, name, cross_file),
+        } => codegen::run(&group, &name, cross_file),
         Task::ValidateRules(options) => validate_rules::run(options),
         Task::PerfLock(options) => {
             perf_lock::run(options);

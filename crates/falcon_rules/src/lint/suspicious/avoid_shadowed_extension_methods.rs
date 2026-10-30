@@ -35,9 +35,7 @@ impl Rule for AvoidShadowedExtensionMethods {
         };
         let model = SemanticModel::new(ctx.file_path(), ctx.parsed(), identities, ctx.types());
         let signatures = ctx
-            .signatures()
-            .map(Cow::Borrowed)
-            .unwrap_or_else(|| Cow::Owned(SignatureIndex::from_program(program, &model)));
+            .signatures().map_or_else(|| Cow::Owned(SignatureIndex::from_program(program, &model)), Cow::Borrowed);
         RulePreparation::Structural(Box::new(Collector {
             ctx,
             model,

@@ -3,9 +3,12 @@
 use std::sync::Arc;
 
 use falcon_dart_parser::lexer::Lexer;
+#[cfg(test)]
+use falcon_syntax::cst::TopLevelDecl;
 use falcon_syntax::cst::{
+    Annotation, ArgList, AssignOp, BinaryOp, DartType, Element, ElementKind, Expr, Identifier,
+    IfCondition, NodeKind, PostfixIncDec, StringLitNode, UnaryOp,
     visit::{self as visitor, Visitor},
-    *,
 };
 
 /// An exact syntax key, computed once when ingesting a parameter default.

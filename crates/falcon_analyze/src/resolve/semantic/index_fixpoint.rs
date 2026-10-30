@@ -1,4 +1,11 @@
-use super::*;
+use super::{
+    Arc, AstChildren, Borrow, ClassMember, DeclarationIdentity, Expr, FormalParam, FxHashMap,
+    FxHashSet, Hash, HashSet, Hasher, IdentityIndex, InferenceContext, InstanceAccess, LibraryId,
+    MemberKind, NodeId, Program, QualifiedName, ResolvedType, SemanticModel, SignatureIndex,
+    TopLevelDecl, TypeEnvironment, TypeIndex, TypeParameterScope, Visitor, empty_type_arguments,
+    has_inference_holes, index_build, inherited, inherits_method_types, refine_inferred_type,
+    walk_expr, walk_stmt,
+};
 use crate::resolve::semantic::ResolvedTypeKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,7 +180,7 @@ impl InferenceSettlement {
             }
         }
         let mut remaining = vec![0; reads.len()];
-        let mut ready = std::collections::VecDeque::new();
+        let mut available = std::collections::VecDeque::new();
         for (id, sources) in dependencies.iter().enumerate() {
             if pending.contains(&id) {
                 remaining[id] = sources
@@ -181,18 +188,18 @@ impl InferenceSettlement {
                     .filter(|source| pending.contains(source))
                     .count();
                 if remaining[id] == 0 {
-                    ready.push_back(id);
+                    available.push_back(id);
                 }
             }
         }
         let mut order = std::collections::VecDeque::new();
-        while let Some(source) = ready.pop_front() {
+        while let Some(source) = available.pop_front() {
             order.push_back(source);
             for &consumer in &dependents[source] {
                 if pending.contains(&consumer) {
                     remaining[consumer] -= 1;
                     if remaining[consumer] == 0 {
-                        ready.push_back(consumer);
+                        available.push_back(consumer);
                     }
                 }
             }
@@ -469,7 +476,7 @@ impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> Visitor<'a> for InitializerDepend
             Stmt::For(_) => self.scoped(|visitor| walk_stmt(visitor, statement)),
             Stmt::If(statement) => {
                 self.condition(statement.condition(), |visitor| {
-                    visitor.visit_stmt(statement.then_branch())
+                    visitor.visit_stmt(statement.then_branch());
                 });
                 if let Some(branch) = statement.else_branch() {
                     self.visit_stmt(branch);
@@ -538,7 +545,7 @@ impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> Visitor<'a> for InitializerDepend
         use falcon_syntax::cst::ElementKind;
         match element.kind() {
             kind @ ElementKind::For { .. } => {
-                self.scoped(|visitor| falcon_syntax::cst::visit::walk_element(visitor, kind))
+                self.scoped(|visitor| falcon_syntax::cst::visit::walk_element(visitor, kind));
             }
             ElementKind::If {
                 condition,
@@ -609,18 +616,20 @@ impl InferenceWork<'_> {
 
     fn name(&self) -> &str {
         match self {
-            Self::Constructor(index_build::ConstructorInferenceEntry::Alias { name, .. }) => name,
-            Self::Constructor(index_build::ConstructorInferenceEntry::Declaration {
-                constructor_name,
-                ..
-            }) => constructor_name,
+            Self::Constructor(
+                index_build::ConstructorInferenceEntry::Alias { name, .. }
+                | index_build::ConstructorInferenceEntry::Declaration {
+                    constructor_name: name,
+                    ..
+                },
+            )
+            | Self::Member { name, .. } => name,
             Self::Override(_, member) => match member {
                 ClassMember::Method(method) => method.name().name(),
                 ClassMember::Operator(operator) => operator.lookup_name(),
                 ClassMember::Setter(setter) => setter.name().name(),
                 _ => unreachable!("non-callable override inference entry"),
             },
-            Self::Member { name, .. } => name,
             Self::Value(..) => "initializer",
         }
     }
@@ -1143,7 +1152,7 @@ impl SignatureIndex {
                 let parameters = declaration.type_params();
                 scope.push(parameters.clone(), model);
                 let receiver = ResolvedType::from_kind(ResolvedTypeKind::Interface {
-                    occurrence: Default::default(),
+                    occurrence: super::FunctionTypeAlias::default(),
                     identity: identity.clone(),
                     arguments: parameters
                         .filter_map(|parameter| scope.lookup(parameter.name().name()))
@@ -1533,7 +1542,7 @@ impl SignatureIndex {
                     if let Some(receiver) = member_receivers.remove(&target.syntax().id()) {
                         let ty = environment.infer_unshorted(
                             expression,
-                            InferenceContext {
+                            &InferenceContext {
                                 model,
                                 signatures: self,
                                 type_parameters: scope,
@@ -1631,7 +1640,7 @@ impl SignatureIndex {
                 continue;
             }
             let receiver = ResolvedType::from_kind(ResolvedTypeKind::Interface {
-                occurrence: Default::default(),
+                occurrence: super::FunctionTypeAlias::default(),
                 identity: identity.clone(),
                 arguments: empty_type_arguments(),
                 nullable: false,

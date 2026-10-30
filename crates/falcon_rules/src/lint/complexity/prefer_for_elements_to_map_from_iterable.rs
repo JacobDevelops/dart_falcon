@@ -22,7 +22,9 @@ impl Rule for PreferForElementsToMapFromIterable {
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags) }
+    ) -> RulePreparation<'a> {
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
+    }
 }
 
 struct Collector<'a> {
@@ -58,7 +60,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             }
             // `new Map.fromIterable(...)`.
             Expr::New(construction) if matches!(construction.dart_type(), DartType::Named(nt)
-                    if nt.segments().last().map(|s| s.name()) == Some("Map"))
+                    if nt.segments().last().map(Identifier::name) == Some("Map"))
                 && construction.constructor_name().is_some_and(|ctor| ctor.name() == "fromIterable")
                 && !construction.args().positional().is_empty()
                 && has_named(construction.args(), "key")

@@ -62,7 +62,7 @@ fn own_field_initializers(program: Program<'_>) -> Vec<(&str, Span)> {
                 ranges.extend(
                     field
                         .declarators()
-                        .filter_map(|declarator| declarator.initializer())
+                        .filter_map(VarDeclarator::initializer)
                         .map(|initializer| (name, initializer.span())),
                 );
             }

@@ -6,7 +6,16 @@
 //! An unavailable signature remains uncertain through combination, rather than
 //! allowing a known candidate to hide it from downstream interfaces.
 
-use super::*;
+use super::index_members::Lookup;
+use super::{
+    Arc, DeclarationIdentity, FormalParamList, FunctionTypeAlias, FxHashMap, FxHashSet, HashSet,
+    InstanceAccess, MemberEntry, MemberFacts, MemberKind, ParamKind, ParameterContract,
+    ResolvedType, SDK_INTERFACE_MEMBERS, SemanticModel, SignatureIndex, Truth, TypeKind, TypeParam,
+    TypeParameterId, TypeParameterScope, empty_parameter_contracts, has_inference_holes,
+    index_fixpoint,
+};
+#[cfg(test)]
+use super::{IdentityIndex, TypeFacts, TypeIndex};
 use crate::resolve::semantic::ResolvedTypeKind;
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -68,6 +77,7 @@ impl SignatureIndex {
     /// The return type of an overridden getter/field or method on an already
     /// instantiated supertype. `None` means no resolved declaration, whereas
     /// `Some(Unknown)` retains a declaration whose return type is not known.
+    #[must_use]
     pub fn instantiated_override_return(
         &self,
         receiver: &ResolvedType,
@@ -87,6 +97,7 @@ impl SignatureIndex {
     /// Parameter declarations of the concrete implementation in receiver context.
     /// An inherited implementation can acquire covariance from the receiver's
     /// interfaces without changing the signature exposed by its interface map.
+    #[must_use]
     pub fn effective_parameter_contracts(
         &self,
         receiver: &ResolvedType,
@@ -115,10 +126,9 @@ impl SignatureIndex {
     ) -> Option<Arc<[ParameterContract]>> {
         let mut receiver = receiver;
         while let ResolvedType {
-            kind: ResolvedTypeKind::TypeParameter { bound, .. },
-        }
-        | ResolvedType {
-            kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+            kind:
+                ResolvedTypeKind::TypeParameter { bound, .. }
+                | ResolvedTypeKind::NonNullTypeParameter { bound, .. },
         } = receiver
         {
             receiver = bound;
@@ -180,6 +190,7 @@ impl SignatureIndex {
 
     /// Contracts of `super.name`: a mixin uses its combined `on` interface,
     /// whereas a class uses the superclass's contextual concrete copy.
+    #[must_use]
     pub fn super_parameter_contracts(
         &self,
         receiver: &ResolvedType,
@@ -315,10 +326,9 @@ impl SignatureIndex {
     ) -> Option<ResolvedType> {
         let mut receiver = receiver;
         while let ResolvedType {
-            kind: ResolvedTypeKind::TypeParameter { bound, .. },
-        }
-        | ResolvedType {
-            kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+            kind:
+                ResolvedTypeKind::TypeParameter { bound, .. }
+                | ResolvedTypeKind::NonNullTypeParameter { bound, .. },
         } = receiver
         {
             receiver = bound;
@@ -550,6 +560,7 @@ impl SignatureIndex {
     /// Getter and method conflicts, or signatures with no most-specific existing
     /// candidate, do not produce an inherited member even if the owner declares
     /// a signature that validly overrides all of them.
+    #[must_use]
     pub fn has_combined_inherited_member(
         &self,
         identity: &DeclarationIdentity,
@@ -695,7 +706,12 @@ impl SignatureIndex {
             };
         if visible {
             if let Some(entry) = self.member_entry(identity, name) {
-                self.declared_interface_members::<CONTRACTS>(entry, identity, setter, &mut members);
+                Self::declared_interface_members::<CONTRACTS>(
+                    entry,
+                    identity,
+                    setter,
+                    &mut members,
+                );
             } else if let DeclarationIdentity::Sdk {
                 library,
                 name: type_name,
@@ -792,9 +808,10 @@ impl SignatureIndex {
                     name,
                     matches_access,
                     &mut HashSet::from([identity.clone()]),
-                )? {
-                    Some((facts, parent)) => (facts, Some(parent)),
-                    None => (
+                ) {
+                    Lookup::Unknown => return None,
+                    Lookup::Found((facts, parent)) => (facts, Some(parent)),
+                    Lookup::Absent => (
                         self.declared_member(
                             identity,
                             &DeclarationIdentity::OBJECT,
@@ -858,7 +875,6 @@ impl SignatureIndex {
     }
 
     fn declared_interface_members<const CONTRACTS: bool>(
-        &self,
         entry: &MemberEntry,
         identity: &DeclarationIdentity,
         setter: bool,
@@ -1187,7 +1203,7 @@ mod tests {
         assert_eq!(members.len(), 1);
         assert_eq!(members[0].declaring_type, last);
 
-        assert_snapshot_isolation(index, &model, constrained, choice, last);
+        assert_snapshot_isolation(index, &model, &constrained, &choice, &last);
     }
 
     #[test]
@@ -1216,13 +1232,9 @@ mod tests {
         );
         let model = SemanticModel::new(&path, &parsed, &identities, Some(&types));
         let nullable = model.resolve_name("Nullable").unwrap();
-        assert!(
-            index.type_facts[&nullable]
-                .supertypes
-                .as_ref()
-                .unwrap()
-                .1
-                .is_empty()
+        assert_eq!(
+            index.type_facts[&nullable].supertypes.as_ref().unwrap().1,
+            [] as [ResolvedType; 0]
         );
         assert!(!index.has_combined_inherited_member(
             &nullable,
@@ -1392,9 +1404,9 @@ mod tests {
     fn assert_snapshot_isolation(
         mut index: SignatureIndex,
         model: &SemanticModel<'_>,
-        constrained: DeclarationIdentity,
-        choice: DeclarationIdentity,
-        last: DeclarationIdentity,
+        constrained: &DeclarationIdentity,
+        choice: &DeclarationIdentity,
+        last: &DeclarationIdentity,
     ) {
         let candidates = |index: &SignatureIndex, owner: &DeclarationIdentity| {
             index.inherited_candidates::<false>(
@@ -1406,7 +1418,7 @@ mod tests {
                 &mut FxHashMap::default(),
             )
         };
-        index.type_facts.get_mut(&constrained).unwrap().supertypes = Some((
+        index.type_facts.get_mut(constrained).unwrap().supertypes = Some((
             Vec::new(),
             vec![ResolvedType::interface_identity(constrained.clone())],
         ));
@@ -1427,24 +1439,30 @@ mod tests {
             members[0].declaring_type,
             model.resolve_name("Base").unwrap()
         );
-        assert_eq!(candidates(&snapshot, &child)[0].declaring_type, last);
-        assert_eq!(candidates(&overlay, &choice)[0].declaring_type, last);
+        assert_eq!(
+            candidates(&snapshot, &child)[0].declaring_type,
+            last.clone()
+        );
+        assert_eq!(candidates(&overlay, choice)[0].declaring_type, last.clone());
         assert_eq!(snapshot.type_facts[&child].mixin_applications.len(), 2);
         overlay
             .type_facts
             .insert(child.clone(), TypeFacts::default());
         assert!(candidates(&overlay, &child).is_empty());
-        assert_eq!(candidates(&snapshot, &child)[0].declaring_type, last);
+        assert_eq!(
+            candidates(&snapshot, &child)[0].declaring_type,
+            last.clone()
+        );
         let local = overlay.type_facts.get_mut(&child).unwrap();
         local.superclass = Some(model.core_type("Object", false));
         local.supertypes = Some((Vec::new(), vec![model.core_type("Object", false)]));
         local.inherited_object = Some(false);
         assert!(candidates(&overlay, &child).is_empty());
-        assert!(snapshot.has_cyclic_supertypes(&constrained));
+        assert!(snapshot.has_cyclic_supertypes(constrained));
         overlay
             .type_facts
             .insert(constrained.clone(), TypeFacts::default());
-        assert!(!overlay.has_cyclic_supertypes(&constrained));
+        assert!(!overlay.has_cyclic_supertypes(constrained));
     }
 
     fn assert_inferred_override_signatures(index: &SignatureIndex, model: &SemanticModel<'_>) {
@@ -1578,7 +1596,7 @@ mod tests {
                 kind: ResolvedTypeKind::Interface {
                     identity: DeclarationIdentity::sdk("dart:collection", "Unindexed"),
                     arguments: Vec::new().into(),
-                    occurrence: Default::default(),
+                    occurrence: FunctionTypeAlias::default(),
                     nullable: false,
                     extension_type: false,
                 },
@@ -1636,7 +1654,7 @@ mod tests {
             let p = ResolvedType::from_kind(ResolvedTypeKind::Interface {
                 identity: model.resolve_name("P").unwrap(),
                 arguments: Vec::new().into(),
-                occurrence: Default::default(),
+                occurrence: FunctionTypeAlias::default(),
                 nullable: false,
                 extension_type: false,
             });
@@ -1703,7 +1721,7 @@ mod tests {
         let leaf = ResolvedType::from_kind(ResolvedTypeKind::Interface {
             identity: model.resolve_name("Leaf").unwrap(),
             arguments: vec![model.core_type("int", false)].into(),
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             nullable: false,
             extension_type: false,
         });
@@ -1729,7 +1747,7 @@ mod tests {
         let second = ResolvedType::from_kind(ResolvedTypeKind::Interface {
             identity: model.resolve_name("Leaf").unwrap(),
             arguments: vec![model.core_type("String", false)].into(),
-            occurrence: Default::default(),
+            occurrence: FunctionTypeAlias::default(),
             nullable: false,
             extension_type: false,
         });

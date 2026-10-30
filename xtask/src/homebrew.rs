@@ -95,16 +95,16 @@ mod tests {
     const PLATFORMS: [&str; 3] = ["aarch64-darwin", "aarch64-linux", "x86_64-linux"];
 
     fn checksums() -> String {
-        PLATFORMS
-            .iter()
-            .enumerate()
-            .map(|(index, platform)| {
-                format!(
-                    "{}  falcon-{VERSION}-{platform}.tar.gz\n",
-                    (index + 1).to_string().repeat(64)
-                )
-            })
-            .collect()
+        let mut checksums = String::new();
+        for (index, platform) in PLATFORMS.iter().enumerate() {
+            writeln!(
+                checksums,
+                "{}  falcon-{VERSION}-{platform}.tar.gz",
+                (index + 1).to_string().repeat(64)
+            )
+            .unwrap();
+        }
+        checksums
     }
 
     #[test]

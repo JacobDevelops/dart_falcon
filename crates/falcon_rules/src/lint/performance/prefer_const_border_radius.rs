@@ -45,8 +45,7 @@ fn check_border_radius_only_call(
         } else {
             let opening_line_end = source[span.start..]
                 .find('\n')
-                .map(|off| span.start + off)
-                .unwrap_or(source.len());
+                .map_or(source.len(), |off| span.start + off);
             let opening_line_text = &source[span.start..opening_line_end];
 
             if opening_line_text.contains("*/") {

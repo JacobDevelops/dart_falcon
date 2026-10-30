@@ -101,7 +101,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         };
         if self.contexts.contains(&node.span())
             || invocation.identity == DeclarationIdentity::OBJECT
-            || self.is_literal(&invocation, state)
+            || Self::is_literal(&invocation, state)
             || self.inference_depends_on_context(node, &invocation, state)
         {
             return;
@@ -122,7 +122,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
 impl Collector<'_> {
     /// package:meta's `@literal` constructors are left to the analyzer's
     /// `non_const_call_to_literal_constructor` warning.
-    fn is_literal(&self, invocation: &Invocation<'_>, state: &SemanticState<'_>) -> bool {
+    fn is_literal(invocation: &Invocation<'_>, state: &SemanticState<'_>) -> bool {
         state
             .signatures
             .declaration(&invocation.identity)

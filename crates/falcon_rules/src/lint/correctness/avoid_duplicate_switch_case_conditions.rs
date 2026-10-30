@@ -51,7 +51,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             self.check(
                 switch
                     .cases()
-                    .flat_map(|case| case.cases())
+                    .flat_map(SwitchCase::cases)
                     .filter_map(|case| {
                         if let SwitchCaseKind::Pattern(pattern) = case {
                             pattern.guard().map(|guard| (pattern.pattern(), guard))
@@ -130,7 +130,7 @@ impl<'a> falcon_syntax::cst::visit::Visitor<'a> for GuardProof<'_, 'a> {
                 return false;
             }
             proof.repeatable = match expression {
-                Expr::Paren(_) => true,
+                Expr::Paren(_) | Expr::IntLit(_) | Expr::DoubleLit(_) | Expr::BoolLit(_) | Expr::NullLit(_) => true,
                 Expr::Ident(identifier) => {
                     proof
                         .state
@@ -141,7 +141,6 @@ impl<'a> falcon_syntax::cst::visit::Visitor<'a> for GuardProof<'_, 'a> {
                         && proof.state.is_variable_read(identifier.name())
                         && primitive(expression, proof.state)
                 }
-                Expr::IntLit(_) | Expr::DoubleLit(_) | Expr::BoolLit(_) | Expr::NullLit(_) => true,
                 Expr::StringLit(string) => string.interpolations().next().is_none(),
                 Expr::Field(field) if !field.is_null_safe() => {
                     matches!(field.field().name(), "length" | "isEmpty" | "isNotEmpty")

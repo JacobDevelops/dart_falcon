@@ -58,7 +58,7 @@ fn is_from_constructor(dart_type: DartType<'_>, constructor_name: Option<Identif
 /// Resolve the base type name of a receiver expression.
 /// `List`            -> `Expr::Ident("List")`
 /// `List<int>`       -> `Expr::GenericInstantiation { target: Ident("List"), type_args: [int], .. }`
-fn base_type_name<'a>(expr: Expr<'a>) -> Option<&'a str> {
+fn base_type_name(expr: Expr<'_>) -> Option<&str> {
     match expr.unparenthesized() {
         Expr::Ident(id) => Some(id.name()),
         Expr::Call(call) => base_type_name(call.callee()),

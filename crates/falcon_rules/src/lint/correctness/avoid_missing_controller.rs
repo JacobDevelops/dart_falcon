@@ -1,6 +1,6 @@
 //! Require Flutter text fields to expose their updated value.
 //!
-//! TextField, TextFormField, CupertinoTextField, and EditableText need a non-null
+//! `TextField`, `TextFormField`, `CupertinoTextField`, and `EditableText` need a non-null
 //! controller or a value callback supported by that API. Explicit readOnly:true
 //! and enabled:false fields are display-only and skipped. Dynamic expressions
 //! are accepted; unrelated classes and shadowed constructors are ignored.

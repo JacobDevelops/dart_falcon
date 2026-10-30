@@ -46,6 +46,7 @@ pub struct FunctionBodies<'a> {
 }
 
 impl<'a> FunctionBodies<'a> {
+    #[must_use]
     pub fn new(program: Program<'a>) -> Self {
         let mut collector = Self {
             bodies: Vec::new(),
@@ -66,12 +67,14 @@ impl<'a> FunctionBodies<'a> {
     }
 
     /// The innermost function body containing `span`.
+    #[must_use]
     pub fn enclosing(&self, span: &Span) -> Option<&FunctionBodyInfo<'a>> {
         innermost(&self.bodies, &self.body_parents, |info| info.span, span)
     }
 
     /// Whether a try-statement body or `finally` block lies between `span` and
     /// its innermost enclosing function body.
+    #[must_use]
     pub fn inside_try_block(&self, span: &Span) -> bool {
         let function_start = self.enclosing(span).map_or(0, |info| info.span.start);
         // Containing blocks nest, so the innermost one has the greatest start.
@@ -260,7 +263,7 @@ mod tests {
         for (text, index) in [("a + a", 0), ("return", 1), ("11", 2), ("22", 3)] {
             assert!(std::ptr::eq(
                 bodies.enclosing(&span(text)).unwrap(),
-                &bodies.bodies[index]
+                &raw const bodies.bodies[index]
             ));
         }
     }

@@ -153,8 +153,8 @@ fn lint_helper_imports_include_grouped_relative_and_direct_paths() {
         "use crate::{meta::RuleSource, lint::{options, riverpod}};",
         "use super::super::riverpod::is_identity;",
         "#[cfg(test)] mod tests { fn check() { use super::*; } } use crate::lint::riverpod;",
-        r##"let quote = '"'; let text = "unrelated"; use crate::lint::riverpod;"##,
-        r##"let quote = b'"'; let text = "unrelated"; use crate::lint::riverpod;"##,
+        r#"let quote = '"'; let text = "unrelated"; use crate::lint::riverpod;"#,
+        r#"let quote = b'"'; let text = "unrelated"; use crate::lint::riverpod;"#,
     ] {
         assert!(
             lint_helper_dependencies(&root, &module, source, &tokenizer)
@@ -185,7 +185,10 @@ fn lint_helper_imports_include_grouped_relative_and_direct_paths() {
         "#[cfg(test)] mod tests { fn check() { use crate::lint::riverpod; } }",
         "mod dcl { use super::Options; }",
     ] {
-        assert!(lint_helper_dependencies(&root, &module, source, &tokenizer).is_empty());
+        assert_eq!(
+            lint_helper_dependencies(&root, &module, source, &tokenizer),
+            [] as [std::path::PathBuf; 0]
+        );
     }
     assert!(
         lint_helper_dependencies(
@@ -1005,7 +1008,10 @@ fn canonicalization_preserves_collisions_unknown_keys_and_all_override_maps() {
         let warnings = canonicalize_config(&mut config);
         assert_eq!(warnings.len(), 16);
         let once = serde_json::to_value(&config).expect("serializable config");
-        assert!(canonicalize_config(&mut config).is_empty());
+        assert_eq!(
+            canonicalize_config(&mut config),
+            [] as [std::string::String; 0]
+        );
         assert_eq!(serde_json::to_value(&config).unwrap(), once);
         for rules in [
             &config.linter.rules,
@@ -1065,7 +1071,7 @@ fn registered_file_rules_choose_shared_collectors_or_whole_file_checks() {
         .iter()
         .copied()
         .map(|(name, reason)| {
-            assert!(!reason.is_empty());
+            assert_ne!(reason, "");
             name
         })
         .collect();
@@ -1279,7 +1285,7 @@ const WHOLE_FILE_CHECKS: &[(&str, &str)] = &[
 ];
 
 fn collector_probe_source() -> &'static str {
-    r#"
+    r"
 typedef _Callback = void Function();
 int? _deferred;
 class Probe {
@@ -1298,7 +1304,7 @@ void main() {
   const bool.fromEnvironment('COLLECTOR_PROBE');
 }
 // This deliberately long source line makes the line-length collector eligible for its shared callback traversal.
-"#
+"
 }
 
 fn check_collector_probe(
@@ -1531,7 +1537,10 @@ fn typed_and_json_canonicalization_share_severity_options_and_tie_policy() {
                     serde_json::Value::Object(entries.clone()),
                     "{alias_level}/{canonical_level}, alias first: {alias_first}"
                 );
-                assert!(canonicalize_rule_map(&mut entries, "linter.rules.suspicious").is_empty());
+                assert_eq!(
+                    canonicalize_rule_map(&mut entries, "linter.rules.suspicious"),
+                    [] as [std::string::String; 0]
+                );
             }
         }
     }

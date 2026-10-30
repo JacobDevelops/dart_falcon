@@ -1,4 +1,4 @@
-//! `falcon migrate`: convert a dart_code_linter / pyramid_lint
+//! `falcon migrate`: convert a `dart_code_linter` / `pyramid_lint`
 //! `analysis_options.yaml` into an equivalent biome-style `falcon.json`,
 //! mirroring `biome migrate eslint/prettier`.
 //!
@@ -21,9 +21,9 @@ use falcon_rules::schema::SCHEMA_URL;
 use falcon_rules::{canonicalize_loaded_config, canonicalize_option_keys};
 use serde_json::{Map, Value, json};
 
-/// Upstream pyramid_lint ids whose rules were merged into a surviving
-/// dart_code_linter rule during twin unification. Their metadata now carries the
-/// dart_code_linter `source`, so [`build_lookups`] would otherwise drop these
+/// Upstream `pyramid_lint` ids whose rules were merged into a surviving
+/// `dart_code_linter` rule during twin unification. Their metadata now carries the
+/// `dart_code_linter` `source`, so [`build_lookups`] would otherwise drop these
 /// upstream ids; they are re-added to the pyramid lookup so `falcon migrate`
 /// still maps a `custom_lint` config that used them.
 const MERGED_PYRAMID_UPSTREAM: &[(&str, &str)] = &[
@@ -578,8 +578,8 @@ fn migrate_flat_excludes(root: &mut Value) -> Result<(), String> {
                         index != 0
                             && pattern.as_bytes().get(index - 1) != Some(&b'*')
                             && pattern.as_bytes().get(index + 1) != Some(&b'*')
-                            && !(pattern[..index].ends_with("**/")
-                                && !pattern[index..].contains('/'))
+                            && (!pattern[..index].ends_with("**/")
+                                || pattern[index..].contains('/'))
                     })
                 {
                     return Err(format!(
@@ -1100,6 +1100,7 @@ fn discard_at(value: &mut Value, path: &[ConfigPathSegment]) -> Option<Value> {
 /// rule ids rewritten to their canonical form — while an upstream
 /// `analysis_options.yaml` (the default, `./analysis_options.yaml`) is
 /// *converted* into an equivalent falcon.json.
+#[must_use]
 pub fn run_migrate(input: Option<PathBuf>, write: bool, output: Option<PathBuf>) -> i32 {
     let input_path = input.unwrap_or_else(|| PathBuf::from("analysis_options.yaml"));
     let content = match std::fs::read_to_string(&input_path) {
@@ -1121,7 +1122,7 @@ pub fn run_migrate(input: Option<PathBuf>, write: bool, output: Option<PathBuf>)
     let result = match result {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("error: {}", e);
+            eprintln!("error: {e}");
             return 1;
         }
     };

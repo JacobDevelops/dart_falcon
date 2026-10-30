@@ -24,7 +24,7 @@ struct Collector<'a> {
     diags: Vec<Diagnostic>,
 }
 
-impl<'a> SemanticRuleVisitor<'a> for Collector<'_> {
+impl SemanticRuleVisitor<'_> for Collector<'_> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }

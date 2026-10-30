@@ -45,18 +45,22 @@ impl<'a> AstNode<'a> for DartType<'a> {
 }
 
 impl<'a> DartType<'a> {
+    #[must_use]
     pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         <Self as AstNode>::cast(node)
     }
+    #[must_use]
     pub fn syntax(self) -> SyntaxNode<'a> {
         <Self as AstNode>::syntax(self)
     }
+    #[must_use]
     pub fn span(self) -> Span {
         match self {
             Self::Function(node) => node.span(),
             _ => self.syntax().span(),
         }
     }
+    #[must_use]
     pub fn is_nullable(self) -> bool {
         match self {
             Self::Named(node) => node.is_nullable(),
@@ -124,11 +128,13 @@ typed_node!(DynamicType, DynamicType);
 typed_node!(TypeArgs, TypeArgs);
 
 impl<'a> TypeArgs<'a> {
+    #[must_use]
     pub fn args(self) -> AstChildren<'a, DartType<'a>> {
         AstChildren::new(self.0)
     }
 
     /// Returns types inside the owner's immediate type-argument role, or an empty iterator.
+    #[must_use]
     pub fn of(parent: SyntaxNode<'a>) -> AstChildren<'a, DartType<'a>> {
         let mut children = parent.children();
         match children.find(|node| node.kind() == NodeKind::TypeArgs) {
@@ -142,9 +148,11 @@ impl<'a> NamedType<'a> {
     pub fn segments(self) -> impl DoubleEndedIterator<Item = Identifier<'a>> + Clone {
         AstChildren::<Identifier>::new(self.0)
     }
+    #[must_use]
     pub fn type_args(self) -> AstChildren<'a, DartType<'a>> {
         TypeArgs::of(self.0)
     }
+    #[must_use]
     pub fn is_nullable(self) -> bool {
         self.0.child_token(TokenKind::Qmark).is_some()
     }
@@ -162,12 +170,15 @@ impl fmt::Debug for NamedType<'_> {
 }
 
 impl<'a> FunctionType<'a> {
+    #[must_use]
     pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         <Self as AstNode>::cast(node)
     }
+    #[must_use]
     pub fn syntax(self) -> SyntaxNode<'a> {
         self.0
     }
+    #[must_use]
     pub fn span(self) -> Span {
         if self.0.kind() == NodeKind::LegacyTypedef {
             let end = self.0.required::<FormalParamList>().span().end;
@@ -182,6 +193,7 @@ impl<'a> FunctionType<'a> {
             self.0.span()
         }
     }
+    #[must_use]
     pub fn return_type(self) -> Option<DartType<'a>> {
         self.0.child()
     }
@@ -192,6 +204,7 @@ impl<'a> FunctionType<'a> {
         }
         AstChildren::from_children(children)
     }
+    #[must_use]
     pub fn params(self) -> AstChildren<'a, FunctionTypeParam<'a>> {
         let parent = self
             .0
@@ -200,6 +213,7 @@ impl<'a> FunctionType<'a> {
             .unwrap_or(self.0);
         AstChildren::new(parent)
     }
+    #[must_use]
     pub fn is_nullable(self) -> bool {
         self.0.kind() != NodeKind::LegacyTypedef && self.0.child_token(TokenKind::Qmark).is_some()
     }
@@ -214,23 +228,29 @@ debug_node!(FunctionType {
 });
 
 impl<'a> FunctionTypeParam<'a> {
+    #[must_use]
     pub fn annotations(self) -> AstChildren<'a, Annotation<'a>> {
         AstChildren::new(self.0)
     }
+    #[must_use]
     pub fn name(self) -> Option<Identifier<'a>> {
         self.0.child::<Identifier>()
     }
+    #[must_use]
     pub fn param_type(self) -> DartType<'a> {
         self.0
             .child()
             .unwrap_or(DartType::Dynamic(DynamicType(self.0)))
     }
+    #[must_use]
     pub fn kind(self) -> super::ParamKind {
         self.0.param_kind()
     }
+    #[must_use]
     pub fn is_named(self) -> bool {
         matches!(self.kind(), super::ParamKind::Named { .. })
     }
+    #[must_use]
     pub fn is_required(self) -> bool {
         matches!(
             self.kind(),
@@ -248,6 +268,7 @@ debug_node!(FunctionTypeParam {
 });
 
 impl<'a> RecordType<'a> {
+    #[must_use]
     pub fn positional(self) -> AstChildren<'a, DartType<'a>> {
         AstChildren::new(self.0)
     }
@@ -262,9 +283,11 @@ impl<'a> RecordType<'a> {
             None
         })
     }
+    #[must_use]
     pub fn named(self) -> AstChildren<'a, NamedRecordField<'a>> {
         AstChildren::new(self.0)
     }
+    #[must_use]
     pub fn is_nullable(self) -> bool {
         self.0.child_token(TokenKind::Qmark).is_some()
     }
@@ -283,9 +306,11 @@ impl fmt::Debug for RecordType<'_> {
 }
 
 impl<'a> NamedRecordField<'a> {
+    #[must_use]
     pub fn name(self) -> Identifier<'a> {
         self.0.required::<Identifier>()
     }
+    #[must_use]
     pub fn field_type(self) -> DartType<'a> {
         self.0.required()
     }
@@ -294,21 +319,27 @@ impl<'a> NamedRecordField<'a> {
 debug_node!(NamedRecordField { name, field_type });
 
 impl<'a> TypeParam<'a> {
+    #[must_use]
     pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         <Self as AstNode>::cast(node)
     }
+    #[must_use]
     pub fn syntax(self) -> SyntaxNode<'a> {
         self.0
     }
+    #[must_use]
     pub fn span(self) -> Span {
         self.0.span()
     }
+    #[must_use]
     pub fn annotations(self) -> AstChildren<'a, Annotation<'a>> {
         AstChildren::new(self.0)
     }
+    #[must_use]
     pub fn name(self) -> Identifier<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn bound(self) -> Option<DartType<'a>> {
         self.0.child()
     }

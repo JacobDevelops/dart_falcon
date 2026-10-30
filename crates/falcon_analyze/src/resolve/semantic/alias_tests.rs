@@ -1,7 +1,8 @@
+use std::fmt::Write;
+
 use super::*;
 use crate::resolve::IdentitySource;
 use falcon_dart_parser::parse;
-
 fn with_model(source: &str, test: impl FnOnce(&SemanticModel<'_>)) {
     let parsed = parse(source);
     assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
@@ -370,12 +371,14 @@ fn function_shape_bounds_substitute_without_replacing_declared_binders() {
 fn deep_alias_fanout_shares_templates_without_a_depth_limit() {
     let mut source = String::with_capacity(2048);
     for level in 0..40 {
-        source.push_str(&format!(
-            "typedef A{level} = (A{}, A{}, A{});\n",
+        writeln!(
+            source,
+            "typedef A{level} = (A{}, A{}, A{});",
             level + 1,
             level + 1,
             level + 1
-        ));
+        )
+        .unwrap();
     }
     source.push_str("typedef A40 = int;");
     with_model(&source, |model| {
@@ -681,7 +684,7 @@ fn recursive_bounds_reverse_variance_in_function_parameters() {
         let bound = ResolvedType {
             kind: ResolvedTypeKind::Function {
                 shape: Some(FunctionTypeShape::empty()),
-                alias: Default::default(),
+                alias: FunctionTypeAlias::default(),
                 optional_positional: 0,
                 return_type: Arc::new(parameter.clone()),
                 positional: vec![parameter.clone()].into(),
@@ -752,12 +755,14 @@ fn cloned_type_parameters_share_their_bound() {
 fn generic_alias_fanout_substitution_retains_shared_nodes() {
     let mut source = String::with_capacity(2048);
     for level in 0..24 {
-        source.push_str(&format!(
-            "typedef A{level}<T> = (A{}<T>, A{}<T>, A{}<T>);\n",
+        writeln!(
+            source,
+            "typedef A{level}<T> = (A{}<T>, A{}<T>, A{}<T>);",
             level + 1,
             level + 1,
             level + 1
-        ));
+        )
+        .unwrap();
     }
     source.push_str("typedef A24<T> = T;");
     with_model(&source, |model| {
@@ -791,13 +796,17 @@ fn function_and_interface_alias_fanout_retains_shared_children() {
         for level in 0..24 {
             let next = level + 1;
             if function {
-                source.push_str(&format!(
-                    "typedef A{level} = A{next} Function(A{next}, A{next});\n"
-                ));
+                writeln!(
+                    source,
+                    "typedef A{level} = A{next} Function(A{next}, A{next});"
+                )
+                .unwrap();
             } else {
-                source.push_str(&format!(
-                    "typedef A{level} = Triple<A{next}, A{next}, A{next}>;\n"
-                ));
+                writeln!(
+                    source,
+                    "typedef A{level} = Triple<A{next}, A{next}, A{next}>;"
+                )
+                .unwrap();
             }
         }
         source.push_str("typedef A24 = int;");
@@ -824,9 +833,11 @@ fn generic_function_alias_fanout_preserves_origins_and_shared_descendants() {
     let mut source = String::with_capacity(2048);
     for level in 0..24 {
         let next = level + 1;
-        source.push_str(&format!(
-            "typedef A{level}<T> = A{next}<T> Function(A{next}<T>, A{next}<T>);\n"
-        ));
+        writeln!(
+            source,
+            "typedef A{level}<T> = A{next}<T> Function(A{next}<T>, A{next}<T>);"
+        )
+        .unwrap();
     }
     source.push_str("typedef A24<T> = T;");
     with_model(&source, |model| {
@@ -938,7 +949,7 @@ fn separate_generic_function_alias_uses_keep_distinct_origins() {
         let arguments = [model.core_type("int", false)];
         let first = model.expand_alias(&identity, alias, &arguments, false, Some((None, 1)));
         let second = model.expand_alias(&identity, alias, &arguments, false, Some((None, 2)));
-        assert!(first == second);
+        assert_eq!(first, second);
         assert!(SubstitutionKey(&first) != SubstitutionKey(&second));
     });
 }
@@ -965,7 +976,7 @@ fn mutually_recursive_bounds_replace_the_entire_component_by_variance() {
                 a.clone(),
                 ResolvedType {
                     kind: ResolvedTypeKind::Interface {
-                        occurrence: Default::default(),
+                        occurrence: FunctionTypeAlias::default(),
                         identity: DeclarationIdentity::sdk("dart:core", "List"),
                         arguments: vec![reference(&b)].into(),
                         nullable: false,
@@ -978,7 +989,7 @@ fn mutually_recursive_bounds_replace_the_entire_component_by_variance() {
                 ResolvedType {
                     kind: ResolvedTypeKind::Function {
                         shape: Some(FunctionTypeShape::empty()),
-                        alias: Default::default(),
+                        alias: FunctionTypeAlias::default(),
                         optional_positional: 0,
                         return_type: Arc::new(ResolvedType::VOID),
                         positional: vec![reference(&a)].into(),
@@ -1049,7 +1060,7 @@ fn external_parameter_bounds_are_instantiated_in_their_own_variance() {
                 a.clone(),
                 ResolvedType {
                     kind: ResolvedTypeKind::Interface {
-                        occurrence: Default::default(),
+                        occurrence: FunctionTypeAlias::default(),
                         identity: DeclarationIdentity::sdk("dart:core", "Comparable"),
                         arguments: vec![reference(&a)].into(),
                         nullable: false,
@@ -1062,7 +1073,7 @@ fn external_parameter_bounds_are_instantiated_in_their_own_variance() {
                 ResolvedType {
                     kind: ResolvedTypeKind::Function {
                         shape: Some(FunctionTypeShape::empty()),
-                        alias: Default::default(),
+                        alias: FunctionTypeAlias::default(),
                         optional_positional: 0,
                         return_type: Arc::new(ResolvedType::VOID),
                         positional: vec![reference(&a)].into(),
@@ -1123,7 +1134,7 @@ fn substitution_source_keys_preserve_live_storage_and_scalar_context() {
                 named: empty_named_types(),
                 optional_positional: 0,
                 nullable: false,
-                alias: Default::default(),
+                alias: FunctionTypeAlias::default(),
                 shape: None,
             },
         };
@@ -1146,7 +1157,7 @@ fn substitution_source_keys_preserve_live_storage_and_scalar_context() {
                 named: empty_named_types(),
                 optional_positional: 0,
                 nullable: false,
-                alias: Default::default(),
+                alias: FunctionTypeAlias::default(),
                 shape: None,
             },
         };

@@ -1,11 +1,11 @@
 //! Warn about explicitly undersized Flutter touch targets.
 //!
-//! SizedBox and Container are checked when their direct child is interactive.
-//! CupertinoButton needs 44 logical pixels; other supported targets need 48.
+//! `SizedBox` and Container are checked when their direct child is interactive.
+//! `CupertinoButton` needs 44 logical pixels; other supported targets need 48.
 //! Gestures without an active callback and explicitly disabled buttons are skipped.
 //! Dynamic dimensions, indirect constraints, and non-interactive children are not inferred.
-use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -104,39 +104,65 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        let minimum = if index.is_package_declaration(&child_identity, "flutter", "CupertinoButton")
-        {
-            44.0
-        } else {
-            48.0
-        };
+        let (minimum, integer_minimum, message) =
+            if index.is_package_declaration(&child_identity, "flutter", "CupertinoButton") {
+                (
+                    44.0,
+                    44,
+                    "Provide a touch target at least 44 logical pixels wide and high.",
+                )
+            } else {
+                (
+                    48.0,
+                    48,
+                    "Provide a touch target at least 48 logical pixels wide and high.",
+                )
+            };
         let undersized = args.named().any(|arg| {
             if !matches!(arg.name().name(), "width" | "height") {
                 return false;
             }
-            literal_dimension(arg.value()).is_some_and(|value| value < minimum)
+            literal_dimension(arg.value()).is_some_and(|value| match value {
+                Dimension::Integer(value) => value < integer_minimum,
+                Dimension::Double(value) => value < minimum,
+            })
         });
         if undersized {
-            self.diags.push(self.ctx.diagnostic(if minimum == 44.0 {
-                "Provide a touch target at least 44 logical pixels wide and high."
-            } else {
-                "Provide a touch target at least 48 logical pixels wide and high."
-            }, crate::lint::flutter::constructor_span(node)));
+            self.diags.push(
+                self.ctx
+                    .diagnostic(message, crate::lint::flutter::constructor_span(node)),
+            );
         }
     }
 }
 
-fn literal_dimension(expression: Expr<'_>) -> Option<f64> {
-    let (literal, sign) = match expression.unparenthesized() {
+enum Dimension {
+    Integer(i128),
+    Double(f64),
+}
+
+fn literal_dimension(expression: Expr<'_>) -> Option<Dimension> {
+    let (literal, negative) = match expression.unparenthesized() {
         Expr::Unary(unary) if unary.op() == UnaryOp::Minus => {
-            (unary.operand().unparenthesized(), -1.0)
+            (unary.operand().unparenthesized(), true)
         }
-        literal => (literal, 1.0),
+        literal => (literal, false),
     };
-    let value = match literal {
-        Expr::IntLit(value) => falcon_analyze::parse_int(value.value()).map(|value| value as f64),
-        Expr::DoubleLit(value) => value.value().parse().ok(),
+    match literal {
+        Expr::IntLit(value) => falcon_analyze::parse_int(value.value())
+            .and_then(|value| {
+                if negative {
+                    value.checked_neg()
+                } else {
+                    Some(value)
+                }
+            })
+            .map(Dimension::Integer),
+        Expr::DoubleLit(value) => value
+            .value()
+            .parse()
+            .ok()
+            .map(|value| Dimension::Double(if negative { -value } else { value })),
         _ => None,
-    };
-    value.map(|value| sign * value)
+    }
 }

@@ -30,7 +30,6 @@ use falcon_syntax::token::TokenKind;
 
 use crate::lint::tokens::significant_tokens_in;
 
-
 #[derive(Default)]
 pub struct PreferFinalParameters;
 
@@ -77,7 +76,10 @@ impl Collector<'_, '_> {
             start: doc.start,
             end: span.end,
         });
-        self.diagnostics.push(self.ctx.diagnostic(format!("The parameter `{}` should be `final`.", name.name()), span));
+        self.diagnostics.push(self.ctx.diagnostic(
+            format!("The parameter `{}` should be `final`.", name.name()),
+            span,
+        ));
     }
 
     fn check(&mut self, params: FormalParamList<'_>) {
@@ -128,7 +130,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a, 'a> {
         {
             let start = parameter_tokens
                 .next()
-                .map_or(name.span().start, |token| token.offset());
+                .map_or(name.span().start, SyntaxToken::offset);
             self.check_name(
                 name,
                 Span {

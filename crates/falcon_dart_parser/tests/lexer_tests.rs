@@ -509,7 +509,7 @@ fn test_malformed_multiple_errors_no_panic() {
     // Two back-to-back unterminated tokens — lexer must not panic and must
     // produce at least one Error token
     let tokens = Lexer::new("'open1 /* open2").tokenize();
-    assert!(!tokens.is_empty());
+    assert_ne!(tokens, [] as [falcon_syntax::Token; 0]);
     assert!(tokens.iter().any(|t| t.kind == TokenKind::Error));
 }
 

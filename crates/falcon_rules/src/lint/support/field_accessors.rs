@@ -24,6 +24,6 @@ pub(crate) fn getter_returns_field(getter: GetterDecl<'_>) -> Option<&str> {
                 _ => None,
             }
         }
-        _ => None,
+        FunctionBody::Native(_) => None,
     }
 }

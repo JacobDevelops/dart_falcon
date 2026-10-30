@@ -1,11 +1,11 @@
-//! Requires other owned disposable State fields to be released in dispose().
+//! Requires other owned disposable State fields to be released in `dispose()`.
 //!
 //! Fields initialized or assigned a resolved constructor with an instance dispose
-//! method must receive an eagerly evaluated dispose() call in the State's
-//! dispose() method, including calls wrapped in arguments or operands.
+//! method must receive an eagerly evaluated `dispose()` call in the State's
+//! `dispose()` method, including calls wrapped in arguments or operands.
 //! Borrowed fields, static fields, unresolved types, and conditional-only releases
-//! are not treated as proof of ownership or cleanup. TextEditingController,
-//! AnimationController, ScrollController, PageController, and TabController belong
+//! are not treated as proof of ownership or cleanup. `TextEditingController`,
+//! `AnimationController`, `ScrollController`, `PageController`, and `TabController` belong
 //! to proper-controller-dispose, FocusNode/Timer to dispose-focus-node-and-timer,
 //! subscriptions to cancel-subscriptions, and sinks
 //! to close-sinks. Unretained temporaries belong to avoid-undisposed-instances.

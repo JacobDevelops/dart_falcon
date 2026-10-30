@@ -79,7 +79,6 @@ impl Rule for AlwaysSpecifyTypes {
     }
 }
 
-
 /// Whether the resolved declaration opts out of explicit type arguments.
 fn optional_type_args(identity: &DeclarationIdentity, state: &SemanticState<'_>) -> bool {
     identity.is_package("flutter", "State")
@@ -249,7 +248,7 @@ impl<'a> Collector<'a> {
         annotations: AstChildren<'a, Annotation<'a>>,
         span: Span,
         var_type: Option<DartType<'a>>,
-        declarators: AstChildren<'a, VarDeclarator<'a>>,
+        declarators: &AstChildren<'a, VarDeclarator<'a>>,
     ) {
         if var_type.is_some() {
             return;
@@ -279,7 +278,7 @@ impl<'a> Collector<'a> {
                     .tree()
                     .token_at(self.ctx.source(), name.syntax().span().start)
             })
-            .and_then(|token| token.prev_significant())
+            .and_then(SyntaxToken::prev_significant)
             .filter(|token| matches!(token.kind(), TokenKind::Var | TokenKind::Final))
         {
             self.report(Span::new(token.offset(), token.offset() + token.len()));
@@ -301,7 +300,7 @@ impl<'a> Collector<'a> {
                 self.keyword(start, node.name().span().start)
                     .unwrap_or(node.span())
             } else {
-                documented_node_span(node.span(), node.annotations(), self.ctx)
+                documented_node_span(node.span(), &node.annotations(), self.ctx)
             };
             self.report(span);
         }
@@ -369,7 +368,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 variable.annotations(),
                 variable.span(),
                 variable.var_type(),
-                variable.declarators(),
+                &variable.declarators(),
             );
         }
         if self.state.is_some()
@@ -404,7 +403,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             node.annotations(),
             node.span(),
             node.field_type(),
-            node.declarators(),
+            &node.declarators(),
         );
         StructuralTraversal::Continue
     }
@@ -419,7 +418,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 node.annotations(),
                 node.span(),
                 node.var_type(),
-                node.declarators(),
+                &node.declarators(),
             );
         }
         StructuralTraversal::Continue

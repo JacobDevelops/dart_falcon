@@ -136,7 +136,7 @@ impl<'a> Collector<'a> {
                         let result = if callable {
                             state.cascade_invoke_return_type(
                                 &field_type(&previous, name.name(), state),
-                                call.type_args(),
+                                &call.type_args(),
                                 call.args(),
                             )
                         } else {
@@ -164,7 +164,7 @@ impl<'a> Collector<'a> {
                     CascadeOp::Invoke(invoke) => (
                         state.cascade_invoke_return_type(
                             &previous,
-                            invoke.type_args(),
+                            &invoke.type_args(),
                             invoke.args(),
                         ),
                         Some((
@@ -253,12 +253,11 @@ fn member_return_type(
     state
         .signatures
         .resolved_member(receiver, name, &state.model)
-        .map(|(signature, substitutions)| {
+        .map_or(ResolvedType::UNKNOWN, |(signature, substitutions)| {
             state
                 .model
                 .substitute(&signature.return_type, &substitutions)
         })
-        .unwrap_or(ResolvedType::UNKNOWN)
 }
 
 fn field_type(receiver: &ResolvedType, name: &str, state: &SemanticState<'_>) -> ResolvedType {
@@ -270,8 +269,9 @@ fn field_type(receiver: &ResolvedType, name: &str, state: &SemanticState<'_>) ->
                 .signatures
                 .resolved_extension_getter(receiver, name, &state.model)
         })
-        .map(|(ty, substitutions)| state.model.substitute(&ty, &substitutions))
-        .unwrap_or(ResolvedType::UNKNOWN)
+        .map_or(ResolvedType::UNKNOWN, |(ty, substitutions)| {
+            state.model.substitute(&ty, &substitutions)
+        })
 }
 
 fn callable_member(receiver: &ResolvedType, name: &str, state: &SemanticState<'_>) -> bool {

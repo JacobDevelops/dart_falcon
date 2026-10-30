@@ -1,4 +1,4 @@
-//! Prefer EquatableMixin to directly extending package:equatable's Equatable.
+//! Prefer `EquatableMixin` to directly extending package:equatable's Equatable.
 
 use falcon_analyze::{
     AnalyzeContext, ResolvedTypeView, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,

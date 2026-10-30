@@ -1,7 +1,7 @@
 //! Extract inline string literals into named variables or constants.
 //! Exempts direct literal initializers, defaults, annotations, constant collections,
 //! indices, asserts, and direct string arguments of regex/URI/error constructors,
-//! common string operations and `ignored-invocations` (default ["print", "debugPrint"]).
+//! common string operations and `ignored-invocations` (default `print`, `debugPrint`).
 //! `allow-only-once` (false) allows values occurring only once across expression/pattern literals.
 //! Literal patterns are exempt from diagnostics but still count; directive strings do not count.
 
@@ -108,7 +108,7 @@ impl Collector<'_> {
                         if call
                             .args()
                             .positional()
-                            .chain(call.args().named().map(|argument| argument.value()))
+                            .chain(call.args().named().map(NamedArg::value))
                             .any(|argument| {
                                 argument.unparenthesized().syntax() == literal.syntax()
                             }) =>
@@ -134,7 +134,7 @@ impl Collector<'_> {
                             || (new
                                 .args()
                                 .positional()
-                                .chain(new.args().named().map(|argument| argument.value()))
+                                .chain(new.args().named().map(NamedArg::value))
                                 .any(|argument| {
                                     argument.unparenthesized().syntax() == literal.syntax()
                                 })

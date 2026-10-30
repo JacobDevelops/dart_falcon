@@ -53,6 +53,9 @@ tracing-subscriber = { version = "0.3", features = [ "env-filter", "json" ] }
 insta     = "1"
 criterion = { version = "0.5", features = [ "html_reports" ] }
 
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
 [package]
 name                 = "dart_falcon"
 version.workspace    = true
@@ -90,6 +93,9 @@ falcon_project       = { path = "crates/falcon_project" }
 falcon_rules         = { path = "crates/falcon_rules" }
 serde_json.workspace = true
 tempfile.workspace   = true
+
+[lints]
+workspace = true
 
 [[bin]]
 name = "falcon"

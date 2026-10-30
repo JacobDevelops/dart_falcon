@@ -86,6 +86,7 @@ pub struct QualifiedName<'a> {
 }
 
 impl<'a> QualifiedName<'a> {
+    #[must_use]
     pub fn prefixed(prefix: &'a str, name: &'a str) -> Self {
         Self {
             prefix: Some(prefix),
@@ -127,15 +128,31 @@ impl<'a> From<&'a String> for QualifiedName<'a> {
     }
 }
 
+/// How much of a library's declaration set is known.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LibraryCompleteness {
+    Complete,
+    /// Project parts are missing, but the available files parsed successfully.
+    MissingParts,
+    /// Every missing project part is generated; annotation lookup may proceed.
+    MissingGeneratedParts,
+    /// Parse errors or incomplete external input prevent part-only recovery.
+    Incomplete,
+}
+
+impl LibraryCompleteness {
+    fn missing_parts_only(self) -> bool {
+        matches!(self, Self::MissingParts | Self::MissingGeneratedParts)
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Library {
     declarations: FxHashMap<InternedString, (NameIdentity, FileId)>,
     imports: Vec<Import>,
     exports: Vec<Export>,
     configurable: bool,
-    incomplete: bool,
-    missing_parts_only: bool,
-    missing_generated_parts_only: bool,
+    completeness: LibraryCompleteness,
     implicit_core: bool,
     /// `None` for project libraries.
     origin: Option<ExternalOrigin>,
@@ -197,6 +214,7 @@ pub enum DeclarationIdentity {
 impl DeclarationIdentity {
     pub const OBJECT: Self = Self::sdk("dart:core", "Object");
 
+    #[must_use]
     pub const fn sdk(library: &'static str, name: &'static str) -> Self {
         Self::Sdk {
             library: InternedString::Static(library),
@@ -204,6 +222,7 @@ impl DeclarationIdentity {
         }
     }
 
+    #[must_use]
     pub const fn package(package: &'static str, name: &'static str) -> Self {
         Self::Package {
             package: InternedString::Static(package),
@@ -212,22 +231,27 @@ impl DeclarationIdentity {
         }
     }
 
+    #[must_use]
     pub const fn flutter(name: &'static str) -> Self {
         Self::package("flutter", name)
     }
 
+    #[must_use]
     pub fn name(&self) -> &str {
         match self {
-            Self::Library { name, .. } => name,
-            Self::Sdk { name, .. } | Self::Package { name, .. } => name,
+            Self::Library { name, .. } | Self::Sdk { name, .. } | Self::Package { name, .. } => {
+                name
+            }
         }
     }
 
+    #[must_use]
     pub fn is_sdk(&self, library: &str, name: &str) -> bool {
         matches!(self, Self::Sdk { library: found_library, name: found_name }
             if *found_library == library && *found_name == name)
     }
 
+    #[must_use]
     pub fn is_package(&self, package: &str, name: &str) -> bool {
         matches!(self, Self::Package { package: found_package, name: found_name, .. }
             if *found_package == package && *found_name == name)
@@ -235,6 +259,7 @@ impl DeclarationIdentity {
 
     /// Whether `self` is `target`; a package `target` without a copy names
     /// the declaration in whichever copy of its package `self` is from.
+    #[must_use]
     pub fn matches(&self, target: &Self) -> bool {
         match target {
             Self::Package {
@@ -248,6 +273,7 @@ impl DeclarationIdentity {
 
     /// The analyzer's `ElementAnnotation.isImmutable`: meta's `immutable`
     /// getter or its `Immutable` constructor.
+    #[must_use]
     pub fn is_meta_immutable(&self) -> bool {
         self.is_package("meta", "immutable") || self.is_package("meta", "Immutable")
     }
@@ -293,6 +319,7 @@ pub struct MemberSelector<'a> {
 }
 
 impl<'a> MemberSelector<'a> {
+    #[must_use]
     pub const fn new(kind: MemberSelectorKind, is_static: bool, name: &'a str) -> Self {
         Self {
             kind,
@@ -558,12 +585,9 @@ fn assign_package_copies(
 ) {
     let mut split_roots = FxHashSet::default();
     if has_aliases {
-        let mut paths = FxHashMap::default();
+        let mut paths = FxHashSet::default();
         for instance in instances.iter() {
-            if paths
-                .insert((instance.path, instance.package, instance.root), ())
-                .is_some()
-            {
+            if !paths.insert((instance.path, instance.package, instance.root)) {
                 split_roots.insert((instance.package, instance.root));
             }
         }
@@ -610,7 +634,7 @@ impl<'a> IdentityBuild<'a> {
     fn new(
         files: &[IdentitySource<'a>],
         grouping: &super::LibraryGrouping,
-        reuse: &Option<(&mut IdentityIndex, &HashSet<LibraryId>)>,
+        reuse: Option<&(&mut IdentityIndex, &HashSet<LibraryId>)>,
     ) -> Self {
         // A project library occupies its minimum member FileId. Vacant part
         // slots keep every unrelated library ID stable when parts regroup.
@@ -619,7 +643,7 @@ impl<'a> IdentityBuild<'a> {
             .collect();
         let libraries: Vec<_> = (0..files.len())
             .map(|i| {
-                if let Some((previous, dirty)) = reuse.as_ref()
+                if let Some((previous, dirty)) = reuse
                     && !dirty.contains(&LibraryId(i))
                 {
                     return Arc::clone(&previous.libraries[i]);
@@ -629,9 +653,13 @@ impl<'a> IdentityBuild<'a> {
                     imports: Vec::new(),
                     exports: Vec::new(),
                     configurable: false,
-                    incomplete: grouping.is_unresolved(i),
-                    missing_parts_only: grouping.is_unresolved(i),
-                    missing_generated_parts_only: grouping.missing_generated_parts_only(i),
+                    completeness: if grouping.missing_generated_parts_only(i) {
+                        LibraryCompleteness::MissingGeneratedParts
+                    } else if grouping.is_unresolved(i) {
+                        LibraryCompleteness::MissingParts
+                    } else {
+                        LibraryCompleteness::Complete
+                    },
                     implicit_core: true,
                     origin: None,
                     doc_imports: Vec::new(),
@@ -705,18 +733,18 @@ impl<'a> IdentityBuild<'a> {
                 imports: Vec::new(),
                 exports: Vec::new(),
                 configurable: false,
-                incomplete: library.has_unresolved_parts,
-                missing_parts_only: false,
-                missing_generated_parts_only: false,
+                completeness: if library.has_unresolved_parts {
+                    LibraryCompleteness::Incomplete
+                } else {
+                    LibraryCompleteness::Complete
+                },
                 implicit_core: true,
                 origin: (!matches!(library.origin, ExternalOrigin::Project))
                     .then(|| library.origin.clone()),
                 doc_imports: Vec::new(),
                 extensions: HashSet::new(),
                 uri: external.and_then(|external| {
-                    external
-                        .libraries
-                        .package_uri(external.environment, library)
+                    ExternalLibraries::package_uri(external.environment, library)
                 }),
                 copy: None,
                 named: false,
@@ -726,9 +754,7 @@ impl<'a> IdentityBuild<'a> {
             }
             if let ExternalOrigin::Package(package) = &library.origin
                 && let Some(configured) = external.and_then(|external| {
-                    external
-                        .libraries
-                        .package_library(external.environment, library)
+                    ExternalLibraries::package_library(external.environment, library)
                 })
             {
                 package_copies.push(PackageInstance {
@@ -806,15 +832,15 @@ impl<'a> IdentityBuild<'a> {
             }
             let library_id = library;
             let library = Arc::make_mut(&mut libraries[library.0]);
-            library.incomplete |= has_parse_errors;
+            if has_parse_errors {
+                library.completeness = LibraryCompleteness::Incomplete;
+            }
             library.configurable |= program
                 .imports()
                 .any(|node| node.configurable_uris().next().is_some())
                 || program
                     .exports()
                     .any(|node| node.configurable_uris().next().is_some());
-            library.missing_parts_only &= !has_parse_errors;
-            library.missing_generated_parts_only &= !has_parse_errors;
             library.named |= program
                 .library_directive()
                 .is_some_and(|directive| directive.name().next().is_some());
@@ -833,7 +859,7 @@ impl<'a> IdentityBuild<'a> {
                         TopLevelDecl::Function(function) => match function.kind() {
                             FunctionKind::Getter => 1u8,
                             FunctionKind::Setter(_) => 2u8,
-                            _ => 0,
+                            FunctionKind::Function(_) => 0,
                         },
                         _ => 0,
                     };
@@ -995,7 +1021,7 @@ impl<'a> IdentityBuild<'a> {
                 }),
             declaration_libraries: FxHashMap::with_capacity_and_hasher(
                 declaration_capacity,
-                Default::default(),
+                rustc_hash::FxBuildHasher,
             ),
             memos: LookupMemos::default(),
             external: base,
@@ -1087,6 +1113,9 @@ impl IdentityIndex {
 
     /// Refresh source coordinates without changing declaration identities or templates.
     /// The caller must first establish an unchanged declaration signature.
+    ///
+    /// # Panics
+    /// Panics if `file` identifies an external declaration or an unindexed project file.
     pub fn refresh_file_body(&mut self, file: FileId, parsed: &Arc<ParsedFile>) {
         assert_eq!(file.0 & EXTERNAL_ID, 0, "cannot edit external declarations");
         self.type_occurrences[file.0].edited =
@@ -1123,6 +1152,7 @@ impl IdentityIndex {
             .unwrap_or(offset | (1 << (usize::BITS - 1)))
     }
 
+    #[must_use]
     pub fn from_project_files(files: &[IdentitySource<'_>], packages: &[PackageIdentity]) -> Self {
         Self::build(files, &[], packages, None)
     }
@@ -1133,6 +1163,7 @@ impl IdentityIndex {
     ///
     /// `sources` holds the text of each of `files`, in order, so `@docImport`s
     /// in library documentation can be indexed; pass `&[]` to skip them.
+    #[must_use]
     pub fn build(
         files: &[IdentitySource<'_>],
         sources: &[&str],
@@ -1143,6 +1174,7 @@ impl IdentityIndex {
     }
 
     /// Build the immutable external layer once, with edit-stable file/library IDs.
+    #[must_use]
     pub fn build_external(external: ExternalSources<'_>) -> Self {
         let mut index = Self::build(&[], &[], &[], Some(external));
         for library in &mut index.file_library {
@@ -1249,7 +1281,7 @@ impl IdentityIndex {
         };
         // A removed import or moved part invalidates its former dependents too.
         let mut reverse: FxHashMap<LibraryId, Vec<LibraryId>> =
-            FxHashMap::with_capacity_and_hasher(files.len(), Default::default());
+            FxHashMap::with_capacity_and_hasher(files.len(), rustc_hash::FxBuildHasher);
         for (file, source) in files.iter().enumerate() {
             let old = self.file_library[file];
             let new = current[file];
@@ -1373,6 +1405,7 @@ impl IdentityIndex {
     /// Build project facts using an optional immutable external index and grouping.
     /// `base` must come from `build_external`; `grouping` must describe `files`
     /// in the same order, including any promoted companions.
+    #[must_use]
     pub fn build_layer(
         files: &[IdentitySource<'_>],
         sources: &[&str],
@@ -1411,7 +1444,7 @@ impl IdentityIndex {
         debug_assert_eq!(grouping.len(), files.len());
 
         let dirty = reuse.as_ref().map(|(_, dirty)| *dirty);
-        let mut build = IdentityBuild::new(files, grouping, &reuse);
+        let mut build = IdentityBuild::new(files, grouping, reuse.as_ref());
         build.add_external(external, base.as_deref());
         let mut interner = StringInterner::default();
         build.collect_declarations(&packages, external, files.len(), dirty, &mut interner);
@@ -1520,7 +1553,7 @@ impl IdentityIndex {
                             file: FileId(file),
                             library,
                             node: self.node_ref(FileId(file), alias.syntax().id()),
-                            templates: Default::default(),
+                            templates: super::semantic::AliasTemplates::default(),
                         },
                     );
                 }
@@ -1898,12 +1931,13 @@ impl IdentityIndex {
     }
 
     fn complete(&self, library: LibraryId) -> Option<&Library> {
-        Some(self.get(library)).filter(|library| !library.incomplete)
+        Some(self.get(library))
+            .filter(|library| library.completeness == LibraryCompleteness::Complete)
     }
 
     fn missing_part_type(&self, library: LibraryId, name: &str) -> Option<DeclarationIdentity> {
         let unit = self.get(library);
-        (unit.missing_parts_only
+        (unit.completeness.missing_parts_only()
             && self.implicit_core(unit, name, NameIdentity::Type).is_none()
             && unit
                 .declarations
@@ -2037,7 +2071,7 @@ impl IdentityIndex {
                     self.target_doc_name(&import.target, name, &mut HashSet::new()),
                 )
             });
-        if found == DocName::Absent && unit.incomplete {
+        if found == DocName::Absent && unit.completeness != LibraryCompleteness::Complete {
             DocName::Unknown
         } else {
             found
@@ -2067,7 +2101,8 @@ impl IdentityIndex {
                     .fold(DocName::Absent, |found, export| {
                         join_doc_names(found, self.target_doc_name(&export.target, name, visited))
                     });
-                if exported == DocName::Absent && unit.incomplete {
+                if exported == DocName::Absent && unit.completeness != LibraryCompleteness::Complete
+                {
                     DocName::Unknown
                 } else {
                     exported
@@ -2179,7 +2214,7 @@ impl IdentityIndex {
             }
         }
         let mut candidate = None;
-        for import in self.visible_imports(unit, prefix, name) {
+        for import in Self::visible_imports(unit, prefix, name) {
             if self.target_may_hide_declaration(&import.target, name) {
                 return None;
             }
@@ -2238,7 +2273,9 @@ impl IdentityIndex {
         let declares_name = unit.declarations.contains_key(name) || unit.extensions.contains(name);
         // Incomplete external libraries invalidate matching bindings, but their
         // unrelated re-exports still participate in this namespace.
-        if unit.incomplete && (unit.origin.is_none() || declares_name) {
+        if unit.completeness != LibraryCompleteness::Complete
+            && (unit.origin.is_none() || declares_name)
+        {
             return Ok(None);
         }
         if unit.extensions.contains(name) {
@@ -2313,14 +2350,12 @@ impl IdentityIndex {
                 None => {}
             }
         }
-        if self
-            .visible_imports(unit, prefix, name)
+        if Self::visible_imports(unit, prefix, name)
             .any(|import| self.target_may_hide_declaration(&import.target, name))
         {
             return None;
         }
-        let mut candidates = self
-            .visible_imports(unit, prefix, name)
+        let mut candidates = Self::visible_imports(unit, prefix, name)
             .filter_map(|import| match import.target {
                 ImportTarget::Library(target) => self.exported_declaration(
                     target,
@@ -2359,7 +2394,10 @@ impl IdentityIndex {
         name: QualifiedName<'_>,
     ) -> Option<DeclarationIdentity> {
         let unit = self.get(library);
-        if unit.incomplete && !unit.missing_generated_parts_only {
+        if !matches!(
+            unit.completeness,
+            LibraryCompleteness::Complete | LibraryCompleteness::MissingGeneratedParts
+        ) {
             return None;
         }
         self.imported_member(unit, name)
@@ -2373,20 +2411,18 @@ impl IdentityIndex {
         if prefix.is_none() && unit.declarations.contains_key(name) {
             return None;
         }
-        if self
-            .visible_imports(unit, prefix, name)
+        if Self::visible_imports(unit, prefix, name)
             .any(|import| self.target_may_hide_declaration(&import.target, name))
         {
             return None;
         }
         let candidates =
-            self.visible_imports(unit, prefix, name)
-                .filter_map(|import| match &import.target {
-                    ImportTarget::Sdk(uri) => sdk_type(uri, name).or_else(|| sdk_member(uri, name)),
-                    ImportTarget::Package(package) => package_member(package, name),
-                    ImportTarget::Library(target) => self.exported_any(*target, name),
-                    ImportTarget::Unknown => None,
-                });
+            Self::visible_imports(unit, prefix, name).filter_map(|import| match &import.target {
+                ImportTarget::Sdk(uri) => sdk_type(uri, name).or_else(|| sdk_member(uri, name)),
+                ImportTarget::Package(package) => package_member(package, name),
+                ImportTarget::Library(target) => self.exported_any(*target, name),
+                ImportTarget::Unknown => None,
+            });
         match unique_declaration(candidates)? {
             DeclarationIdentity::Library { library, name } => {
                 let unit = self.get(library);
@@ -2419,21 +2455,19 @@ impl IdentityIndex {
         if prefix.is_none() && unit.declarations.contains_key(name) {
             return None;
         }
-        if self
-            .visible_imports(unit, prefix, name)
+        if Self::visible_imports(unit, prefix, name)
             .any(|import| self.target_may_hide_declaration(&import.target, name))
         {
             return None;
         }
         let candidates =
-            self.visible_imports(unit, prefix, name)
-                .filter_map(|import| match &import.target {
-                    ImportTarget::Sdk(uri) => sdk_member(uri, name),
-                    ImportTarget::Library(target) => self
-                        .exported_any(*target, name)
-                        .filter(|identity| matches!(identity, DeclarationIdentity::Sdk { .. })),
-                    _ => None,
-                });
+            Self::visible_imports(unit, prefix, name).filter_map(|import| match &import.target {
+                ImportTarget::Sdk(uri) => sdk_member(uri, name),
+                ImportTarget::Library(target) => self
+                    .exported_any(*target, name)
+                    .filter(|identity| matches!(identity, DeclarationIdentity::Sdk { .. })),
+                _ => None,
+            });
         let core = (prefix.is_none() && unit.implicit_core)
             .then(|| match self.core {
                 Some(core) => self.exported_any(core, name),
@@ -2478,7 +2512,6 @@ impl IdentityIndex {
     }
 
     fn visible_imports<'s>(
-        &self,
         unit: &'s Library,
         prefix: Option<&'s str>,
         name: &'s str,
@@ -2518,7 +2551,9 @@ impl IdentityIndex {
             return false;
         }
         let declares_name = unit.declarations.contains_key(name) || unit.extensions.contains(name);
-        if unit.incomplete && (unit.origin.is_none() || unit.missing_parts_only || declares_name) {
+        if unit.completeness != LibraryCompleteness::Complete
+            && (unit.origin.is_none() || unit.completeness.missing_parts_only() || declares_name)
+        {
             return true;
         }
         if declares_name || !visited.insert(library) {
@@ -2547,14 +2582,12 @@ impl IdentityIndex {
                 .then(|| self.declared(library, name))
                 .flatten();
         }
-        if self
-            .visible_imports(unit, None, name)
+        if Self::visible_imports(unit, None, name)
             .any(|import| self.target_may_hide_declaration(&import.target, name))
         {
             return None;
         }
-        let mut candidates = self
-            .visible_imports(unit, None, name)
+        let mut candidates = Self::visible_imports(unit, None, name)
             .filter_map(|import| self.target_declaration(&import.target, name))
             .peekable();
         if candidates.peek().is_none() {
@@ -2573,14 +2606,13 @@ impl IdentityIndex {
         if unit.declarations.contains_key(prefix) {
             return None;
         }
-        if self
-            .visible_imports(unit, Some(prefix), name)
+        if Self::visible_imports(unit, Some(prefix), name)
             .any(|import| self.target_may_hide_declaration(&import.target, name))
         {
             return None;
         }
         unique_declaration(
-            self.visible_imports(unit, Some(prefix), name)
+            Self::visible_imports(unit, Some(prefix), name)
                 .filter_map(|import| self.target_declaration(&import.target, name)),
         )
     }
@@ -2611,7 +2643,7 @@ impl IdentityIndex {
             return NameIdentity::Value;
         }
         let mut result = None;
-        for import in self.visible_imports(unit, None, name) {
+        for import in Self::visible_imports(unit, None, name) {
             combine(&mut result, self.target_identity(&import.target, name));
         }
         result.unwrap_or(NameIdentity::Unknown)
@@ -2635,7 +2667,7 @@ impl IdentityIndex {
             return NameIdentity::Value;
         }
         let mut result = None;
-        for import in self.visible_imports(unit, Some(prefix), name) {
+        for import in Self::visible_imports(unit, Some(prefix), name) {
             combine(&mut result, self.target_identity(&import.target, name));
         }
         result.unwrap_or(NameIdentity::Unknown)
@@ -2677,8 +2709,10 @@ impl IdentityIndex {
             return Some(identity);
         }
         if name.starts_with('_')
-            || (unit.incomplete
-                && (unit.origin.is_none() || unit.missing_parts_only || declares_name))
+            || (unit.completeness != LibraryCompleteness::Complete
+                && (unit.origin.is_none()
+                    || unit.completeness.missing_parts_only()
+                    || declares_name))
             || !visiting.insert(library)
         {
             return None;
@@ -2733,7 +2767,10 @@ impl IdentityIndex {
         visiting: &mut HashSet<LibraryId>,
     ) -> NameIdentity {
         let unit = self.get(library);
-        if name.starts_with('_') || unit.incomplete || !visiting.insert(library) {
+        if name.starts_with('_')
+            || unit.completeness != LibraryCompleteness::Complete
+            || !visiting.insert(library)
+        {
             return NameIdentity::Unknown;
         }
         if let Some((identity, _)) = unit.declarations.get(name) {
@@ -2912,7 +2949,10 @@ impl SourceAnnotationCollector<'_, '_> {
                     None,
                 ),
                 TopLevelDecl::Extension(n) => (
-                    n.name().into_iter().map(|name| name.name()).collect(),
+                    n.name()
+                        .into_iter()
+                        .map(falcon_syntax::cst::Identifier::name)
+                        .collect(),
                     n.annotations(),
                     Some(EffectiveMembers::declared(n.members())),
                     None,
@@ -3051,7 +3091,11 @@ fn deprecation_annotations(
     let annotations: Vec<_> = annotations
         .filter(|annotation| {
             let sdk_spelling = annotation.constructor_name().is_none()
-                && match annotation.name().last().map(|name| name.name()) {
+                && match annotation
+                    .name()
+                    .last()
+                    .map(falcon_syntax::cst::Identifier::name)
+                {
                     Some("deprecated") => annotation.args().is_none(),
                     Some("Deprecated") => annotation.args().is_some(),
                     _ => false,
@@ -3325,12 +3369,14 @@ fn resolve_uri(
     }
     import_path(from, uri, packages)
         .and_then(|target| by_path.get(&target))
-        .map(|file| ImportTarget::Library(file_library[file.0]))
-        .unwrap_or(ImportTarget::Unknown)
+        .map_or(ImportTarget::Unknown, |file| {
+            ImportTarget::Library(file_library[file.0])
+        })
 }
 
 /// Normalized path of the project library `uri` names when imported from
 /// `from`; `None` for SDK, unknown, ambiguous or escaping package URIs.
+#[must_use]
 pub fn import_path(from: &Path, uri: &str, packages: &[PackageIdentity]) -> Option<PathBuf> {
     if uri.starts_with("dart:") {
         return None;
@@ -3343,11 +3389,11 @@ pub fn import_path(from: &Path, uri: &str, packages: &[PackageIdentity]) -> Opti
     let mut matches = packages
         .iter()
         .filter(|candidate| candidate.name == package);
-    let matched = matches.next()?;
+    let package_match = matches.next()?;
     if matches.next().is_some() {
         return None;
     }
-    let lib_root = canonical_or_lexical(&matched.lib_root);
+    let lib_root = canonical_or_lexical(&package_match.lib_root);
     let target = canonical_or_lexical(&lib_root.join(subpath));
     target.starts_with(&lib_root).then_some(target)
 }
@@ -4191,7 +4237,10 @@ mod tests {
                 .unwrap();
             assert_eq!(dirty, HashSet::from([LibraryId(0), LibraryId(1)]));
             assert!(Arc::ptr_eq(&unchanged, &incremental.libraries[2]));
-            assert_eq!(incremental.get(LibraryId(0)).incomplete, has_parse_errors);
+            assert_eq!(
+                incremental.get(LibraryId(0)).completeness != LibraryCompleteness::Complete,
+                has_parse_errors
+            );
             for name in ["A", "Missing", "Object"] {
                 assert_eq!(
                     incremental.resolve(library(&incremental, inputs[1].0), name.into()),
@@ -4433,7 +4482,10 @@ mod tests {
             &[],
         );
         let box_library = library(&index, "/project/lib/box.dart");
-        assert!(index.get(box_library).incomplete);
+        assert_ne!(
+            index.get(box_library).completeness,
+            LibraryCompleteness::Complete
+        );
         let expected = index.declared(box_library, "Box").unwrap();
         assert_eq!(
             index.resolve_declaration(box_library, "Box".into()),
@@ -4522,7 +4574,8 @@ mod tests {
             &[],
         );
         let incomplete = library(&index, "/project/lib/incomplete.dart");
-        Arc::make_mut(&mut index.libraries[incomplete.0]).incomplete = true;
+        Arc::make_mut(&mut index.libraries[incomplete.0]).completeness =
+            LibraryCompleteness::Incomplete;
         Arc::make_mut(&mut index.libraries[incomplete.0]).origin =
             Some(ExternalOrigin::Sdk(InternedString::Static("dart:test")));
         let file = "/project/lib/main.dart";
@@ -4544,7 +4597,7 @@ mod tests {
             &[],
         );
         let core = library(&index, "/project/lib/core.dart");
-        Arc::make_mut(&mut index.libraries[core.0]).incomplete = true;
+        Arc::make_mut(&mut index.libraries[core.0]).completeness = LibraryCompleteness::Incomplete;
         Arc::make_mut(&mut index.libraries[core.0]).origin =
             Some(ExternalOrigin::Sdk(InternedString::Static("dart:core")));
         index.core = Some(core);
@@ -5181,7 +5234,7 @@ mod tests {
         );
         let broken = library(&index, "/project/lib/broken.dart");
         let broken = Arc::make_mut(&mut index.libraries[broken.0]);
-        broken.incomplete = true;
+        broken.completeness = LibraryCompleteness::Incomplete;
         broken.origin = Some(ExternalOrigin::Package(InternedString::Static("example")));
         index
     }

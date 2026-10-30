@@ -117,12 +117,11 @@ struct Targets<'a> {
 impl Targets<'_> {
     /// Redirecting factories bind defaults from the final target declaration.
     fn constructor_target<'s>(
-        &self,
-        identity: DeclarationIdentity,
+        identity: &DeclarationIdentity,
         name: &str,
         state: &'s SemanticState<'_>,
     ) -> Option<Target<'s>> {
-        let mut owner = &identity;
+        let mut owner = identity;
         let mut name = name;
         let mut visited = HashSet::new();
         loop {
@@ -159,7 +158,6 @@ impl Targets<'_> {
     /// parameter, the analyzer rebuilds every parameter as a synthetic element
     /// without its default value, so no argument binds to a known default.
     fn method_target<'s>(
-        &self,
         identity: DeclarationIdentity,
         name: &str,
         state: &'s SemanticState<'_>,
@@ -176,7 +174,6 @@ impl Targets<'_> {
     /// The class member, or else the applicable extension method, `name`
     /// invoked on `receiver`.
     fn instance_target<'s>(
-        &self,
         receiver: &ResolvedType,
         name: &str,
         state: &'s SemanticState<'_>,
@@ -185,7 +182,7 @@ impl Targets<'_> {
             .signatures
             .resolved_member_owner(receiver, name, &state.model)
         {
-            return self.method_target(owner, name, state);
+            return Self::method_target(owner, name, state);
         }
         let (owner, library, signature) =
             state
@@ -223,7 +220,6 @@ impl Targets<'_> {
 
     /// A local function or function literal's own declaration.
     fn literal_target(
-        &self,
         type_params: AstChildren<'_, cst::TypeParam<'_>>,
         params: cst::FormalParamList<'_>,
         state: &SemanticState<'_>,
@@ -232,7 +228,7 @@ impl Targets<'_> {
         scope.push(type_params.clone(), &state.model);
         let signature =
             ResolvedSignature::local_callable(&scope, type_params, params, &state.model);
-        let owner = self.enclosing_type(state);
+        let owner = state.constant_owner.clone();
         let locals = state.visible_local_constants();
         let defaults = signature
             .defaults
@@ -257,9 +253,6 @@ impl Targets<'_> {
         }
     }
 
-    fn enclosing_type(&self, state: &SemanticState<'_>) -> Option<DeclarationIdentity> {
-        state.constant_owner.clone()
-    }
 
     /// A decided lookup may be absent and must not fall through at this level.
     fn decided_level_target<'s>(
@@ -274,7 +267,7 @@ impl Targets<'_> {
             if state.environment.is_bound(name) {
                 return ControlFlow::Break(
                     self.local_target(name, state)
-                        .or_else(|| self.instance_target(&state.infer(callee), "call", state)),
+                        .or_else(|| Self::instance_target(&state.infer(callee), "call", state)),
                 );
             }
             if let Some(receiver) = state.enclosing_type.as_ref()
@@ -285,14 +278,14 @@ impl Targets<'_> {
                     .declared_member_facts(identity, name)
                     .is_empty()
                 {
-                    return ControlFlow::Break(self.method_target(identity.clone(), name, state));
+                    return ControlFlow::Break(Self::method_target(identity.clone(), name, state));
                 }
                 if let Some(owner) =
                     state
                         .signatures
                         .resolved_readable_member_owner(receiver, name, &state.model)
                 {
-                    return ControlFlow::Break(self.method_target(owner, name, state));
+                    return ControlFlow::Break(Self::method_target(owner, name, state));
                 }
             }
         }
@@ -324,7 +317,7 @@ impl Targets<'_> {
                 }));
             }
             if let Some((identity, name)) = resolve_call_constructor(callee, &state.model, true)
-                && let Some(target) = self.constructor_target(identity, name, state)
+                && let Some(target) = Self::constructor_target(&identity, name, state)
             {
                 return ControlFlow::Break(Some(target));
             }
@@ -333,7 +326,7 @@ impl Targets<'_> {
                     .and_then(|segments| state.model.resolve_dotted(&segments))
                 && state.signatures.type_kind(&identity).is_some()
             {
-                return ControlFlow::Break(self.method_target(
+                return ControlFlow::Break(Self::method_target(
                     identity,
                     field.field().name(),
                     state,
@@ -344,7 +337,6 @@ impl Targets<'_> {
     }
 
     fn member_level_target<'s>(
-        &'s self,
         callee: cst::Expr<'_>,
         state: &'s SemanticState<'_>,
     ) -> Option<Target<'s>> {
@@ -373,7 +365,7 @@ impl Targets<'_> {
             }
             _ => return None,
         };
-        self.instance_target(&receiver, name, state)
+        Self::instance_target(&receiver, name, state)
     }
 
     fn call_target<'s>(
@@ -387,7 +379,7 @@ impl Targets<'_> {
             if let ControlFlow::Break(target) = self.decided_level_target(callee, state) {
                 return target.or(fallback);
             }
-            let target = self.member_level_target(callee, state);
+            let target = Self::member_level_target(callee, state);
             // The closest callable target is only a fallback; a target found
             // by following an explicit receiver takes precedence.
             let Some(receiver) = explicit_call_receiver(callee) else {
@@ -559,7 +551,7 @@ impl Targets<'_> {
                 for variant in declaration.variants() {
                     let Some(args) = variant.args() else { continue };
                     let name = variant.constructor_name().map_or("new", |name| name.name());
-                    if let Some(target) = self.constructor_target(owner.clone(), name, state) {
+                    if let Some(target) = Self::constructor_target(owner, name, state) {
                         self.check(args, &target, state, Some(owner), diags);
                     }
                 }
@@ -576,7 +568,7 @@ impl Targets<'_> {
                 let constructor = annotation
                     .constructor_name()
                     .map_or("new", |name| name.name());
-                if let Some(target) = self.constructor_target(identity, constructor, state) {
+                if let Some(target) = Self::constructor_target(&identity, constructor, state) {
                     self.check(args, &target, state, owner.as_ref(), diags);
                 }
             };
@@ -674,8 +666,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         match node {
             cst::Stmt::LocalFunc(function) => {
                 let target =
-                    self.targets
-                        .literal_target(function.type_params(), function.params(), state);
+                    Targets::literal_target(function.type_params(), function.params(), state);
                 self.targets
                     .declare_local(function.name().span(), Some(target));
             }
@@ -684,7 +675,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     let initializer = declarator.initializer().map(cst::Expr::unparenthesized);
                     let target = match initializer {
                         _ if declaration.var_type().is_some() => None,
-                        Some(cst::Expr::FuncExpr(function)) => Some(self.targets.literal_target(
+                        Some(cst::Expr::FuncExpr(function)) => Some(Targets::literal_target(
                             function.type_params(),
                             function.params(),
                             state,
@@ -709,10 +700,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 .call_target(call.callee(), state)
                 .map(|target| (target, call.args())),
             cst::Expr::New(new) => match state.model.resolve_type(new.dart_type()).view() {
-                ResolvedTypeView::Interface { identity, .. } => self
-                    .targets
-                    .constructor_target(
-                        identity.clone(),
+                ResolvedTypeView::Interface { identity, .. } => Targets::constructor_target(
+                        identity,
                         new.constructor_name().map_or("new", |name| name.name()),
                         state,
                     )
@@ -721,14 +710,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             },
             cst::Expr::Cascade(cascade) => {
                 let receiver = state.infer(cascade.object());
-                let caller = self.targets.enclosing_type(state);
+                let caller = state.constant_owner.clone();
                 // The first operation identifies this section's selector;
                 // later cascade operations apply to its result.
                 for section in cascade.sections() {
                     if let Some(cst::CascadeOp::Call(call)) = section.ops().next()
                         && let Some(target) =
-                            self.targets
-                                .instance_target(&receiver, call.name().name(), state)
+                            Targets::instance_target(&receiver, call.name().name(), state)
                     {
                         self.targets.check(
                             call.args(),
@@ -744,7 +732,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             _ => None,
         };
         if let Some((target, args)) = target {
-            let caller = self.targets.enclosing_type(state);
+            let caller = state.constant_owner.clone();
             self.targets
                 .check(args, &target, state, caller.as_ref(), &mut self.diags);
         }
@@ -823,7 +811,7 @@ mod tests {
         .unwrap();
         std::fs::write(dep.join("lib/api.dart"), "export 'ext.dart' show Ex;").unwrap();
         let path = app.join("lib/main.dart");
-        let source = r#"
+        let source = r"
 import 'package:dep/api.dart' as p;
 const _limit = 9;
 void run() {
@@ -831,7 +819,7 @@ void run() {
   p.Ex(0).take(9);
   p.Ex(0).take(_limit);
 }
-"#;
+";
         std::fs::write(&path, source).unwrap();
         let parsed = parse(source);
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
@@ -890,7 +878,7 @@ void run() {
         assert_eq!(arguments, ["5"]);
     }
 
-    const IMPORTED: &str = r#"
+    const IMPORTED: &str = r"
 const seed = 7;
 enum Mode { on, off }
 void function({int value = seed}) {}
@@ -904,11 +892,11 @@ class Base {
 class Derived extends Base {
   static const seed = 99;
 }
-"#;
+";
 
     #[test]
     fn imported_functions_methods_and_constructors_use_indexed_defaults() {
-        let source = r#"
+        let source = r"
 import 'imported.dart';
 void run(Base base) {
   function(value: 7);
@@ -919,13 +907,13 @@ void run(Base base) {
   function(value: 8);
   base.method(value: 12);
 }
-"#;
+";
         assert_eq!(reports(source, IMPORTED), ["7", "11", "11", "11", "11"]);
     }
 
     #[test]
     fn prefixed_calls_and_inherited_methods_use_declaring_owner_constants() {
-        let source = r#"
+        let source = r"
 import 'imported.dart' as dep;
 const seed = 99;
 enum Mode { on, off }
@@ -940,7 +928,7 @@ class Caller {
     derived.method(value: seed, mode: Mode.on);
   }
 }
-"#;
+";
         assert_eq!(
             reports(source, IMPORTED),
             ["7", "11", "11", "11", "11", "dep.Mode.on"]
@@ -949,7 +937,7 @@ class Caller {
 
     #[test]
     fn caller_constants_are_evaluated_in_the_callers_lexical_context() {
-        let source = r#"
+        let source = r"
 import 'imported.dart' as dep;
 const seed = 7;
 class Caller {
@@ -961,13 +949,13 @@ class Caller {
   }
 }
 void run() { dep.function(value: seed); }
-"#;
+";
         assert_eq!(reports(source, IMPORTED), ["7", "seed", "seed"]);
     }
 
     #[test]
     fn only_last_optional_positional_argument_is_omittable() {
-        let source = r#"
+        let source = r"
 import 'imported.dart' as dep;
 void run() {
   dep.positional(1, 2);
@@ -976,36 +964,36 @@ void run() {
   dep.noLastDefault(1, null);
   dep.annotated(1, 2);
 }
-"#;
-        let imported = r#"
+";
+        let imported = r"
 void positional([int first = 1, int second = 2]) {}
 void noLastDefault([int first = 1, int? second]) {}
 void annotated([int first = 1, @required int second = 2]) {}
-"#;
+";
         // A missing default is `null`: `noLastDefault(1, null)` is redundant.
         assert_eq!(reports(source, imported), ["2", "1", "null"]);
     }
 
     #[test]
     fn abstract_method_defaults_remain_reportable_without_sdk_special_cases() {
-        let source = r#"
+        let source = r"
 import 'imported.dart';
 void run(Range range, Iterable<int> values) {
   range.setRange(0, 1, values, 0);
   range.setRange(0, 1, values, 1);
 }
-"#;
-        let imported = r#"
+";
+        let imported = r"
 abstract class Range {
   void setRange(int start, int end, Iterable<int> values, [int skipCount = 0]);
 }
-"#;
+";
         assert_eq!(reports(source, imported), ["0"]);
     }
 
     #[test]
     fn required_annotations_shadowed_callees_and_nonconstant_candidates_are_not_reported() {
-        let source = r#"
+        let source = r"
 import 'imported.dart' as dep;
 void run(dynamic dep, dynamic function) {
   dep.function(value: 7);
@@ -1016,19 +1004,19 @@ void other() {
   dep.annotated(value: 7);
   dep.collection(value: [1]);
 }
-"#;
-        let imported = r#"
+";
+        let imported = r"
 void function({int value = 7}) {}
 void requiredValue({required int value = 7}) {}
 void annotated({@required int value = 7}) {}
 void collection({List<int> value = const [1]}) {}
-"#;
-        assert!(reports(source, imported).is_empty());
+";
+        assert_eq!(reports(source, imported), [] as [std::string::String; 0]);
     }
 
     #[test]
     fn imported_and_local_redirecting_factories_follow_final_defaults() {
-        let source = r#"
+        let source = r"
 import 'imported.dart' as dep;
 abstract class LocalFactory {
   factory LocalFactory({int value}) = LocalTarget;
@@ -1043,8 +1031,8 @@ void run() {
   LocalFactory(value: 19);
   LocalFactory(value: 0);
 }
-"#;
-        let imported = r#"
+";
+        let imported = r"
 abstract class Factory {
   factory Factory({int value}) = Target;
 }
@@ -1052,13 +1040,13 @@ class Target implements Factory {
   static const seed = 23;
   Target({int value = seed});
 }
-"#;
+";
         assert_eq!(reports(source, imported), ["23", "19"]);
     }
 
     #[test]
     fn initializing_formal_double_type_preserves_numeric_candidate_semantics() {
-        let source = r#"
+        let source = r"
 class Box {
   final double value;
   Box([this.value = 0.0]);
@@ -1068,13 +1056,13 @@ void run() {
   Box(0);
   integer(0.0);
 }
-"#;
+";
         assert_eq!(reports(source, ""), ["0"]);
     }
 
     #[test]
     fn caller_parameters_and_receiver_roots_cannot_capture_static_constants() {
-        let source = r#"
+        let source = r"
 import 'imported.dart' as dep;
 class Caller {
   static const seed = 11;
@@ -1083,13 +1071,13 @@ class Caller {
     base.method(mode: dep.Mode.on);
   }
 }
-"#;
-        assert!(reports(source, IMPORTED).is_empty());
+";
+        assert_eq!(reports(source, IMPORTED), [] as [std::string::String; 0]);
     }
 
     #[test]
     fn annotations_and_enum_variants_keep_their_lexical_owner() {
-        let source = r#"
+        let source = r"
 import 'imported.dart' as dep;
 const seed = 99;
 class Annotated {
@@ -1103,14 +1091,14 @@ enum Choice {
   final int value;
   const Choice([this.value = seed]);
 }
-"#;
+";
         let imported = "class Mark { const Mark({int value = 0}); }";
         assert_eq!(reports(source, imported), ["seed", "seed"]);
     }
 
     #[test]
     fn indexed_getters_and_methods_shadow_top_level_names() {
-        let source = r#"
+        let source = r"
 import 'imported.dart' as dep;
 const seed = 11;
 void work([int value = 1]) {}
@@ -1136,13 +1124,13 @@ class Base {
 class Derived extends Base {
   void run() { work(1); work(2); }
 }
-"#;
+";
         assert_eq!(reports(source, IMPORTED), ["2"]);
     }
 
     #[test]
     fn double_aliases_and_explicit_collection_types_remain_distinct() {
-        let source = r#"
+        let source = r"
 const one = 1.0;
 void object([Object value = 1]) {}
 void typed([Object value = const <int>[1]]) {}
@@ -1156,13 +1144,13 @@ void run() {
   signed(-0);
   signed(0);
 }
-"#;
+";
         assert_eq!(reports(source, ""), ["1", "-0"]);
     }
 
     #[test]
     fn sibling_scope_bindings_never_inherit_a_closed_local_callable() {
-        let source = r#"
+        let source = r"
 class List<E> {
   void forEach(void Function(E) action) {}
 }
@@ -1180,13 +1168,13 @@ void run(bool d, List<void Function(int)> cbs, void Function(int) callback) {
   if (d) { void log([int l = 0]) {} }
   try {} on void Function(int) catch (log) { log(0); }
 }
-"#;
-        assert!(reports(source, "").is_empty());
+";
+        assert_eq!(reports(source, ""), [] as [std::string::String; 0]);
     }
 
     #[test]
     fn local_defaults_capture_enclosing_constants_at_their_declaration() {
-        let source = r#"
+        let source = r"
 const x = 2;
 void run() {
   const x = 1;
@@ -1217,13 +1205,13 @@ class Host {
     g(1);
   }
 }
-"#;
+";
         assert_eq!(reports(source, ""), ["1", "1", "1", "1", "1", "x", "1"]);
     }
 
     #[test]
     fn anonymous_extension_defaults_use_library_not_caller_class_constants() {
-        let source = r#"
+        let source = r"
 const limit = 1;
 class Receiver {}
 extension on Receiver {
@@ -1239,13 +1227,13 @@ class Caller {
     alias(1);
   }
 }
-"#;
+";
         assert_eq!(reports(source, ""), ["1", "1"]);
     }
 
     #[test]
     fn nullable_double_constants_coerce_integer_literals_without_sdk() {
-        let source = r#"
+        let source = r"
 const double? topOne = 1;
 const double? topNegativeZero = -0;
 class Defaults {
@@ -1266,7 +1254,7 @@ void run() {
   negative(localNegativeZero);
   nullable(-0);
 }
-"#;
+";
         assert_eq!(
             reports(source, ""),
             [
@@ -1283,7 +1271,7 @@ void run() {
 
     #[test]
     fn typed_constants_preserve_double_identity_and_negative_zero_without_sdk() {
-        let source = r#"
+        let source = r"
 const double topOne = 1;
 const double topNegativeZero = -0;
 class Defaults {
@@ -1317,7 +1305,7 @@ void run() {
   const integer = 1;
   one(integer);
 }
-"#;
+";
         assert_eq!(
             reports(source, ""),
             [
@@ -1337,7 +1325,7 @@ void run() {
 
     #[test]
     fn transitive_local_constants_retain_their_initializer_scope() {
-        let source = r#"
+        let source = r"
 void f([int a = 2]) {}
 void run() {
   const x = 1;
@@ -1353,13 +1341,13 @@ void run() {
     alias(1);
   }
 }
-"#;
+";
         assert_eq!(reports(source, ""), ["1", "1"]);
     }
 
     #[test]
     fn extension_local_defaults_and_arguments_do_not_use_on_type_statics() {
-        let source = r#"
+        let source = r"
 const limit = 1;
 void f([int a = 1]) {}
 class Receiver { static const limit = 2; }
@@ -1375,13 +1363,13 @@ extension on Receiver {
     h(1);
   }
 }
-"#;
+";
         assert_eq!(reports(source, ""), ["1", "limit", "1"]);
     }
 
     #[test]
     fn cli_environment_constants_preserve_unknown_web_values_without_sdk() {
-        let source = r#"
+        let source = r"
 const web = bool.fromEnvironment('dart.library.js_util');
 const interop = bool.fromEnvironment('dart.library.js_interop');
 const name = 'dart.library.js_util';
@@ -1407,7 +1395,7 @@ void run() {
   text(value: const String.fromEnvironment('dart.library.js_util'));
   number(value: const int.fromEnvironment('dart.library.js_interop'));
 }
-"#;
+";
         assert_eq!(
             reports(source, ""),
             [
@@ -1423,19 +1411,19 @@ void run() {
 
     #[test]
     fn environment_special_cases_require_core_constructor_provenance() {
-        let source = r#"
+        let source = r"
 import 'imported.dart' as dep;
 void accepts({dep.bool value = const dep.bool.fromEnvironment('dart.library.js_util')}) {}
 void run() {
   accepts(value: const dep.bool.fromEnvironment('dart.library.js_util'));
 }
-"#;
-        let imported = r#"
+";
+        let imported = r"
 class bool {
   final String name;
   const bool.fromEnvironment(this.name);
 }
-"#;
+";
         assert_eq!(
             reports(source, imported),
             ["const dep.bool.fromEnvironment('dart.library.js_util')"]

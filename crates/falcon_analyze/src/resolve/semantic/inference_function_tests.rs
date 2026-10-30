@@ -1,3 +1,5 @@
+use falcon_syntax::cst::TopLevelDecl;
+
 use super::super::tests::with_model;
 use super::*;
 use std::cell::Cell;

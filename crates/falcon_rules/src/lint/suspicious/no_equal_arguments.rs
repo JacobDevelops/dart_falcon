@@ -27,7 +27,7 @@ impl Rule for NoEqualArguments {
 }
 
 /// A literal argument, per dcl semantics, is compared by identity only, so two
-/// distinct literals never count as "equal". This mirrors dart_code_linter's
+/// distinct literals never count as "equal". This mirrors `dart_code_linter`'s
 /// `_bothLiterals` short-circuit (`argument == arg`): passing `Size(48, 48)` or
 /// `copyWith(isSaving: false, isSaved: false)` is intentional, never a bug.
 /// Matches the analyzer's `Literal` hierarchy: scalar literals, collection
@@ -113,7 +113,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             // A cascade call carries its own ArgList and is never rebuilt as an
             // Expr::Call, so the arm above never sees `a..f(x, x)`.
             Expr::Cascade(cascade) => {
-                for op in cascade.sections().flat_map(|s| s.ops()) {
+                for op in cascade.sections().flat_map(CascadeSection::ops) {
                     match op {
                         CascadeOp::Call(call) => check_args(call.args(), &mut self.diags, self.ctx),
                         CascadeOp::Invoke(invoke) => check_args(invoke.args(), &mut self.diags, self.ctx),

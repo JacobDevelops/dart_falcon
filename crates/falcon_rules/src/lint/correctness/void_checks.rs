@@ -111,16 +111,16 @@ impl<'a> Collector<'a> {
         reported_span: Span,
         return_statement: bool,
     ) {
-        if !matches!(expected.view(), ResolvedTypeView::Void)
-            && !(expected.interface("dart:async", "FutureOr")
+        let expected_void = matches!(expected.view(), ResolvedTypeView::Void)
+            || (expected.interface("dart:async", "FutureOr")
                 && matches!(
                     expected.arguments().first().map(ResolvedType::view),
                     Some(ResolvedTypeView::Void)
-                ))
-            && !(matches!(expected.view(), ResolvedTypeView::Function { .. })
-                && matches!(value, Expr::FuncExpr(function)
-                    if matches!(function.body(), FunctionBody::Block(_))))
-        {
+                ));
+        let void_function_block = matches!(expected.view(), ResolvedTypeView::Function { .. })
+            && matches!(value, Expr::FuncExpr(function)
+                if matches!(function.body(), FunctionBody::Block(_)));
+        if !(expected_void || void_function_block) {
             return;
         }
         // Static argument types include downward inference from their location,
@@ -276,7 +276,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 .resolved_member(receiver, name.name(), &state.model)
         {
             let substitutions =
-                state.signature_substitutions(signature, &owner, type_args, args, None);
+                state.signature_substitutions(signature, &owner, &type_args, args, None);
             let (positional, named) = state.substituted_parameters(signature, &substitutions);
             self.check_arguments(&positional, &named, args, state);
         } else if name.name() == "call"
@@ -551,6 +551,22 @@ void use(Value value) {
 
     #[test]
     fn generic_invocations_keep_their_downward_argument_context() {
+        struct ContextProbe {
+            calls: usize,
+        }
+        impl<'a> SemanticRuleVisitor<'a> for ContextProbe {
+            fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+                if let Expr::Call(call) = node
+                    && call.type_args().is_empty()
+                    && matches!(call.callee(), Expr::Ident(name) if name.name() == "make")
+                {
+                    let inferred = state.infer_with_context(node, state.expected());
+                    assert_eq!(inferred.type_argument(0), Some(ResolvedType::VOID));
+                    self.calls += 1;
+                }
+            }
+        }
+
         let source = r"
 class Box<T> {
   Box(T value);
@@ -581,26 +597,13 @@ void use() {
         let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
         let config = FalconConfig::default();
         let ctx = indexes.context(path, &config, &parsed);
-        struct ContextProbe(usize);
-        impl<'a> SemanticRuleVisitor<'a> for ContextProbe {
-            fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
-                if let Expr::Call(call) = node
-                    && call.type_args().is_empty()
-                    && matches!(call.callee(), Expr::Ident(name) if name.name() == "make")
-                {
-                    let inferred = state.infer_with_context(node, state.expected());
-                    assert_eq!(inferred.type_argument(0), Some(ResolvedType::VOID));
-                    self.0 += 1;
-                }
-            }
-        }
-        let mut probe = ContextProbe(0);
+        let mut probe = ContextProbe { calls: 0 };
         visit_program(
             &mut probe,
             program,
             SemanticState::new(program, &ctx).unwrap(),
         );
-        assert_eq!(probe.0, 1);
+        assert_eq!(probe.calls, 1);
         let diagnostics = VoidChecks.analyze(VoidChecks::NAME, program, &ctx);
         let mut actual: Vec<_> = diagnostics
             .iter()
@@ -743,7 +746,7 @@ void use() {
 
     #[test]
     fn cascade_result_invocation_is_distinct_from_explicit_call_method() {
-        let source = r#"class Callback {
+        let source = r"class Callback {
   void call(void value) {}
 }
 class Factory {
@@ -758,7 +761,7 @@ void cases(Factory owner, Object value) {
   owner..make().call(value);
   owner..object().call(value);
 }
-"#;
+";
         let path = Path::new("/project/lib/test.dart");
         let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
         assert!(errors.is_empty(), "{errors:?}");

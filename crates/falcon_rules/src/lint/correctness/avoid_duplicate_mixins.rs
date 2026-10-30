@@ -51,7 +51,7 @@ impl<'a> Collector<'a> {
             .map_or(&[][..], |library| library.siblings());
         let mut found = std::iter::once(self.program)
             .chain(siblings.iter().copied())
-            .flat_map(|program| program.declarations())
+            .flat_map(cst::Program::declarations)
             .filter(|candidate| match candidate {
                 cst::TopLevelDecl::Class(node) => node.name().name() == name.name(),
                 cst::TopLevelDecl::ClassTypeAlias(node) => node.name().name() == name.name(),
@@ -119,10 +119,10 @@ impl<'a> Collector<'a> {
             } else if !matches!(owner, cst::TopLevelDecl::ClassTypeAlias(_)) {
                 return false;
             }
-            let cst::DartType::Named(named) = type_ else {
+            let cst::DartType::Named(named_type) = type_ else {
                 return false;
             };
-            if named.type_args().next().is_some() {
+            if named_type.type_args().next().is_some() {
                 return false;
             }
             let (applied, generic) = match owner {

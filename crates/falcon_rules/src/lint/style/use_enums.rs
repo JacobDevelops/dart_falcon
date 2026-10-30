@@ -196,7 +196,7 @@ fn enum_candidate(class: ClassDecl<'_>) -> Option<Candidate<'_>> {
         if !field.is_static() || field.keyword() != VarKeyword::Const {
             continue;
         }
-        for initializer in field.declarators().filter_map(|d| d.initializer()) {
+        for initializer in field.declarators().filter_map(VarDeclarator::initializer) {
             if creation(initializer, name).is_some_and(|invoked| generative.contains(&invoked)) {
                 candidates.push(initializer.span().start);
             }

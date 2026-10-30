@@ -133,9 +133,9 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             extends,
             representation_const: members.primary
                 .filter(|_| members.representation)
-                .map(|primary| primary.is_const()),
+                .map(PrimaryConstructor::is_const),
             owner,
-            shadowed: class_lexical_value_names(type_params, members.clone()),
+            shadowed: class_lexical_value_names(type_params, &members),
             fields: class_field_initializers(members.declared.clone()),
             members,
         });
@@ -240,7 +240,7 @@ impl<'a> ClassChecker<'_, 'a> {
         let DartType::Named(named) = redirect.type_() else {
             return false;
         };
-        let segments: Vec<&str> = named.segments().map(|segment| segment.name()).collect();
+        let segments: Vec<&str> = named.segments().map(Identifier::name).collect();
         if let Some(identity) = self.model.resolve_dotted(&segments) {
             return self.is_const_identity(&identity, "new");
         }
@@ -342,12 +342,12 @@ impl<'a> ClassChecker<'_, 'a> {
             ConstructorInitializer::SuperCall(call) => call
                 .args()
                 .positional()
-                .chain(call.args().named().map(|argument| argument.value()))
+                .chain(call.args().named().map(NamedArg::value))
                 .all(constant),
             ConstructorInitializer::ThisCall(call) => call
                 .args()
                 .positional()
-                .chain(call.args().named().map(|argument| argument.value()))
+                .chain(call.args().named().map(NamedArg::value))
                 .all(constant),
         })
     }
@@ -355,7 +355,7 @@ impl<'a> ClassChecker<'_, 'a> {
 
 fn class_lexical_value_names<'a>(
     type_params: AstChildren<'a, TypeParam<'a>>,
-    members: EffectiveMembers<'a>,
+    members: &EffectiveMembers<'a>,
 ) -> HashSet<&'a str> {
     let mut names = member_names(members.declared.clone());
     names.extend(type_params.map(|parameter| parameter.name().name()));

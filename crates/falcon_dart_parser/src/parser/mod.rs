@@ -26,6 +26,7 @@ pub struct ParseResult {
 /// Parse Dart into a CST and recoverable errors at the language version of a
 /// file outside any package: its `// @dart` override, else
 /// [`LanguageVersion::CURRENT`].
+#[must_use]
 pub fn parse(source: &str) -> ParseResult {
     parse_for_package(source, None)
 }
@@ -36,6 +37,7 @@ pub fn parse(source: &str) -> ParseResult {
 /// nested input cannot exhaust the caller's stack. A worker failure yields an
 /// empty program with one error; use [`try_parse_for_package`] to tell that
 /// apart from a real parse.
+#[must_use]
 pub fn parse_for_package(source: &str, package_version: Option<LanguageVersion>) -> ParseResult {
     try_parse_for_package(source, package_version).unwrap_or_else(|error| {
         let tree = SyntaxTree::build("", &[], Vec::new());
@@ -441,7 +443,7 @@ impl<'src> Parser<'src> {
         if !self.at(TokenKind::Qmark) {
             return false;
         }
-        if self.ctx.suppress_conditional_qmark && self.token_starts_expr(&self.peek(1).kind) {
+        if self.ctx.suppress_conditional_qmark && Self::token_starts_expr(self.peek(1).kind) {
             // `T? Function(...)` / `T? Function<...>` is an unambiguous nullable
             // function type after an `is`/`as` type, not a conditional `?` — so the
             // `?` is still a nullable suffix here despite `Function` starting an expr.
@@ -457,8 +459,12 @@ impl<'src> Parser<'src> {
 
     /// True when `kind` can begin an expression — used to tell a conditional `?`
     /// apart from a nullable-type `?` after an `is`/`as` type.
-    pub(super) fn token_starts_expr(&self, kind: &TokenKind) -> bool {
-        use TokenKind::*;
+    pub(super) fn token_starts_expr(kind: TokenKind) -> bool {
+        use TokenKind::{
+            Await, Bang, Const, DoubleLit, False, IntLit, LBrace, LBracket, LParen, Lt, Minus,
+            MinusMinus, New, Null, PlusPlus, Rethrow, StringLit, Super, Switch, This, Throw, Tilde,
+            True,
+        };
         matches!(
             kind,
             IntLit
@@ -948,7 +954,7 @@ mod tests {
             assert_eq!(suffix.len(), tokens.len() - start);
             assert!(std::ptr::eq(
                 suffix.next().unwrap(),
-                &syntax[*canonical as usize]
+                &raw const syntax[*canonical as usize]
             ));
             assert_eq!(suffix.len(), tokens.len() - start - 1);
         }
@@ -990,7 +996,7 @@ mod tests {
         let parser = Parser::new(&syntax, source, LanguageVersion::CURRENT);
         assert_eq!(parser.cur().kind, TokenKind::Var);
         let index = parser.tokens.indices[0] as usize;
-        assert!(std::ptr::eq(parser.cur(), &syntax[index]));
+        assert!(std::ptr::eq(parser.cur(), &raw const syntax[index]));
         assert_eq!(
             syntax
                 .iter()
@@ -1097,7 +1103,7 @@ mod tests {
             let text: String = result
                 .tree
                 .tokens(source)
-                .map(|token| token.text())
+                .map(falcon_syntax::cst::SyntaxToken::text)
                 .collect();
             assert_eq!(text, source);
             assert_eq!(result.tree.root(source).kind(), NodeKind::Program);
@@ -1126,9 +1132,9 @@ mod tests {
         let right = parser.start();
         parser.advance();
         right.complete(&mut parser, NodeKind::Identifier);
-        let wrapped = wrapper.complete(&mut parser, NodeKind::BinaryExpr);
-        assert_eq!(wrapped.span, Span::new(0, source.len()));
-        assert_eq!(wrapped.text(&parser), source);
+        let completed = wrapper.complete(&mut parser, NodeKind::BinaryExpr);
+        assert_eq!(completed.span, Span::new(0, source.len()));
+        assert_eq!(completed.text(&parser), source);
         root.complete(&mut parser, NodeKind::Program);
         let tree = SyntaxTree::build(source, &syntax, parser.events);
         let binary = tree.root(source).children().next().unwrap();

@@ -356,14 +356,14 @@ fn test_null_aware_cascade_marks_first_section_only() {
             match sections.clone().next().unwrap().ops().next().unwrap() {
                 CascadeOp::Field(node) => {
                     let is_null_aware = node.is_null_aware();
-                    assert!(is_null_aware, "first section should be null-aware")
+                    assert!(is_null_aware, "first section should be null-aware");
                 }
                 other => panic!("expected Field, got {other:?}"),
             }
             match sections.clone().nth(1).unwrap().ops().next().unwrap() {
                 CascadeOp::Field(node) => {
                     let is_null_aware = node.is_null_aware();
-                    assert!(!is_null_aware, "second section is plain `..`")
+                    assert!(!is_null_aware, "second section is plain `..`");
                 }
                 other => panic!("expected Field, got {other:?}"),
             }
@@ -382,7 +382,7 @@ fn test_null_aware_cascade_index_section() {
             match sections.clone().next().unwrap().ops().next().unwrap() {
                 CascadeOp::Index(node) => {
                     let is_null_aware = node.is_null_aware();
-                    assert!(is_null_aware, "index section should be null-aware")
+                    assert!(is_null_aware, "index section should be null-aware");
                 }
                 other => panic!("expected Index, got {other:?}"),
             }
@@ -418,7 +418,7 @@ fn test_null_aware_index_selector_cascade_section() {
             match sections.clone().next().unwrap().ops().next().unwrap() {
                 CascadeOp::Index(node) => {
                     let is_null_aware = node.is_null_aware();
-                    assert!(is_null_aware, "`?[` index should be null-aware")
+                    assert!(is_null_aware, "`?[` index should be null-aware");
                 }
                 other => panic!("expected Index, got {other:?}"),
             }
@@ -479,7 +479,7 @@ fn test_collection_if_case_guard_retained() {
                     let guard = case.guard();
                     assert!(guard.is_some(), "when-guard must be retained");
                 }
-                other => panic!("expected IfCondition::Case, got {other:?}"),
+                other @ IfCondition::Expr(_) => panic!("expected IfCondition::Case, got {other:?}"),
             }
         }
         other => panic!("expected CollectionElement::If, got {other:?}"),
@@ -875,7 +875,7 @@ fn cascade_null_aware_selector_within_chain() {
                 ),
                 "ops: {:?}",
                 sections.clone().next().unwrap().ops()
-            )
+            );
         }
         other => panic!("expected Cascade, got {other:?}"),
     }
@@ -1086,7 +1086,7 @@ fn test_assignment_inside_parens() {
             assert!(
                 matches!(left.unparenthesized(), Expr::Assign(_)),
                 "left of ?? should be an assignment, got {left:?}"
-            )
+            );
         }
         other => panic!("expected `?? ` binary, got {other:?}"),
     }
@@ -1160,7 +1160,7 @@ fn test_cascade_index_assign_rhs_excludes_following_section() {
     match expr {
         Expr::Cascade(node) => {
             let sections = node.sections();
-            assert_eq!(sections.len(), 2, "expected two sections: {sections:?}")
+            assert_eq!(sections.len(), 2, "expected two sections: {sections:?}");
         }
         other => panic!("expected cascade, got {other:?}"),
     }

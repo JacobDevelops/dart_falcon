@@ -38,7 +38,7 @@ fn returned_field(body: FunctionBody<'_>) -> Option<&str> {
             }
             statement.value()?
         }
-        _ => return None,
+        FunctionBody::Native(_) => return None,
     };
     match expression.unparenthesized() {
         Expr::Ident(name) => Some(name.name()),

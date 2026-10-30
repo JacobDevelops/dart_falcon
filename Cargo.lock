@@ -1654,6 +1654,7 @@ dependencies = [
  "clap",
  "falcon_analyze",
  "falcon_cli",
+ "falcon_config",
  "falcon_diagnostics",
  "falcon_project",
  "falcon_rules",

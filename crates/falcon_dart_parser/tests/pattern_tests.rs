@@ -2,7 +2,7 @@
 //! `patterns` group: `when` guards after constant/dotted patterns, const
 //! patterns beyond dotted idents, typed collection patterns, map-pattern rest,
 //! and object-pattern getter shorthand binding. Also covers map-pattern
-//! assignment (`{'k': a} = e;`) and the LBrace statement-start disambiguation
+//! assignment (`{'k': a} = e;`) and the `LBrace` statement-start disambiguation
 //! between blocks and map/set literal expression statements.
 //!
 //! Each test asserts ZERO parse errors and the exact CST shape.
@@ -54,7 +54,7 @@ fn dynamic_typed_patterns_keep_their_bindings() {
         ("case dynamic value: break;", false),
         ("case dynamic _: break;", true),
     ] {
-        let source = format!("void f() {{ switch (x) {{ {} }} }}", source);
+        let source = format!("void f() {{ switch (x) {{ {source} }} }}");
         let parsed = parse(&source);
         let sw = parse_switch(parsed.tree.program(&source));
         let errs = parsed.errors.len();
@@ -93,7 +93,7 @@ fn guard_after_dotted_constant_pattern() {
             let ConstPatternValue::Name(name) = constant.value() else {
                 panic!("expected Name constant value")
             };
-            let segs: Vec<&str> = name.map(|i| i.name()).collect();
+            let segs: Vec<&str> = name.map(falcon_syntax::cst::Identifier::name).collect();
             assert_eq!(segs, ["State", "a"]);
         }
         other => panic!("expected Const pattern, got {other:?}"),
@@ -158,8 +158,7 @@ fn const_constructor_pattern() {
             };
             assert!(
                 matches!(expr, Expr::New(creation) if creation.is_const()),
-                "expected a const-constructor expr, got {:?}",
-                expr
+                "expected a const-constructor expr, got {expr:?}"
             );
         }
         other => panic!("expected Const pattern, got {other:?}"),
@@ -204,8 +203,7 @@ fn const_parenthesized_expression_pattern() {
             };
             assert!(
                 matches!(expr.unparenthesized(), Expr::Binary(_)),
-                "expected a binary expr, got {:?}",
-                expr
+                "expected a binary expr, got {expr:?}"
             );
         }
         other => panic!("expected Const pattern, got {other:?}"),
@@ -269,7 +267,7 @@ fn dotted_constant_reference_stays_name_form() {
             let ConstPatternValue::Name(name) = constant.value() else {
                 panic!("expected Name constant value")
             };
-            let segs: Vec<&str> = name.map(|i| i.name()).collect();
+            let segs: Vec<&str> = name.map(falcon_syntax::cst::Identifier::name).collect();
             assert_eq!(segs, ["Color", "red"]);
         }
         other => panic!("expected Const pattern, got {other:?}"),
@@ -292,7 +290,7 @@ fn typed_list_pattern() {
             assert_eq!(lp.elements().len(), 2);
             match lp.type_arg() {
                 Some(DartType::Named(nt)) => {
-                    assert_eq!(nt.segments().next().unwrap().name(), "int")
+                    assert_eq!(nt.segments().next().unwrap().name(), "int");
                 }
                 other => panic!("expected `int` type arg, got {other:?}"),
             }
@@ -766,9 +764,8 @@ fn symbol_literal_constant_pattern() {
             };
             assert!(
                 matches!(expr, Expr::SymbolLit(symbol) if symbol.raw() == "#add"),
-                "expected symbol-literal const pattern, got {:?}",
-                expr
-            )
+                "expected symbol-literal const pattern, got {expr:?}"
+            );
         }
         other => panic!("expected const pattern, got {other:?}"),
     }
@@ -793,9 +790,8 @@ fn const_parenthesised_expr_pattern_still_single() {
             };
             assert!(
                 matches!(expr.unparenthesized(), Expr::Binary(_)),
-                "expected single binary expr, got {:?}",
-                expr
-            )
+                "expected single binary expr, got {expr:?}"
+            );
         }
         other => panic!("expected const pattern, got {other:?}"),
     }
@@ -856,7 +852,7 @@ fn adjacent_string_in_list_pattern_folds() {
     match first_case(sw).0 {
         Pattern::List(lp) => match lp.elements().next().unwrap() {
             ListPatternElement::Pattern(pattern) => assert_eq!(string_value(pattern), "ab"),
-            other => panic!("expected string element, got {other:?}"),
+            other @ ListPatternElement::Rest(_) => panic!("expected string element, got {other:?}"),
         },
         other => panic!("expected list pattern, got {other:?}"),
     }
@@ -1008,7 +1004,9 @@ fn var_qualified_generic_object_pattern_declaration() {
         panic!("expected named type, got {:?}", object.type_());
     };
     assert_eq!(
-        ty.segments().map(|s| s.name()).collect::<Vec<_>>(),
+        ty.segments()
+            .map(falcon_syntax::cst::Identifier::name)
+            .collect::<Vec<_>>(),
         ["prefix", "Box"]
     );
     assert_eq!(ty.type_args().len(), 1);

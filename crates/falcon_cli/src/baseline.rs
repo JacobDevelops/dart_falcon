@@ -24,6 +24,9 @@ pub struct BaselineStats {
 
 impl Baseline {
     /// Capture lint findings; missing sources and invalid source spans are errors.
+    ///
+    /// # Errors
+    /// Returns an error for a missing source, invalid span, or invalid path.
     pub fn from_diagnostics<'a>(
         diagnostics: &[Diagnostic],
         root: &Path,
@@ -39,8 +42,10 @@ impl Baseline {
             entries,
         })
     }
-
     /// Load a baseline, rejecting unknown versions, fields, and invalid counts or hashes.
+    ///
+    /// # Errors
+    /// Returns an error when the file cannot be read or parsed, or contains invalid data.
     pub fn load(path: &Path) -> Result<Self, String> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -89,6 +94,9 @@ impl Baseline {
     }
 
     /// Write deterministic JSON with fingerprints in sorted order.
+    ///
+    /// # Errors
+    /// Returns an error if serialization or writing fails.
     pub fn write(&self, path: &Path) -> Result<(), String> {
         let mut bytes = serde_json::to_vec_pretty(self)
             .map_err(|error| format!("Cannot serialize baseline: {error}"))?;
@@ -101,6 +109,11 @@ impl Baseline {
     ///
     /// Operational and syntax diagnostics are never suppressed or counted as stale.
     /// Source lookup errors leave the input unchanged. Applying does not modify the baseline.
+    ///
+    /// # Errors
+    /// Returns an error if a source is missing or a diagnostic span or path is invalid.
+    /// # Panics
+    /// Panics only if internal suppress decisions stop matching diagnostic count.
     pub fn apply<'a>(
         &self,
         diagnostics: &mut Vec<Diagnostic>,
@@ -171,6 +184,7 @@ fn checked_fingerprint<'a>(
 ///
 /// # Panics
 /// Panics if absolute path resolution fails, for example when a relative path's cwd is unavailable.
+#[must_use]
 pub fn fingerprint(diagnostic: &Diagnostic, source: &str, root: &Path) -> String {
     fingerprint_with_path(
         diagnostic,
@@ -180,11 +194,11 @@ pub fn fingerprint(diagnostic: &Diagnostic, source: &str, root: &Path) -> String
 }
 
 fn fingerprint_with_path(diagnostic: &Diagnostic, source: &str, path: &str) -> String {
-    let mut hash = 0x6c62272e07bb014262b821756295c58du128;
+    let mut hash = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d_u128;
     let mut feed = |bytes: &[u8]| {
         for &byte in bytes {
             hash ^= u128::from(byte);
-            hash = hash.wrapping_mul(0x0000000001000000000000000000013b);
+            hash = hash.wrapping_mul(0x0000_0000_0100_0000_0000_0000_0000_013b);
         }
     };
     feed(diagnostic.rule.as_bytes());

@@ -191,7 +191,7 @@ impl<'a> Collector<'a> {
         let name = segments[index];
         if !self.program.imports().any(|import| {
             riverpod_uri(&import.uri().value())
-                && import.as_name().map(|name| name.name()) == prefix
+                && import.as_name().map(Identifier::name) == prefix
                 && import.combinators().all(|combinator| match combinator {
                     ImportCombinator::Show(show) => show.names().any(|item| item.name() == name),
                     ImportCombinator::Hide(hide) => hide.names().all(|item| item.name() != name),

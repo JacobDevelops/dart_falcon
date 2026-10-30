@@ -87,7 +87,7 @@ fn initialize_analyzes_all_folders_and_reports_secondary_configuration_errors() 
             debounce: Duration::ZERO,
         };
         let state = LspState::new_with_sdk_locator(None, |_| None);
-        run_with_state(server, options, state).unwrap();
+        run_with_state(&server, &options, state).unwrap();
     });
     let receive = || {
         client
@@ -228,7 +228,7 @@ fn fallback_fix_all_commands_are_lazy_and_execute_versioned_edits() {
     state.open(uri.as_str(), source.to_owned(), Some(7));
     let (server, client) = Connection::memory();
     for (index, kind) in [SAFE_FIX_ALL, UNSAFE_FIX_ALL].into_iter().enumerate() {
-        let id = RequestId::from(index as i32 + 1);
+        let id = RequestId::from(i32::try_from(index).expect("test request count fits i32") + 1);
         let polls = std::cell::Cell::new(0);
         handle_request(
             &server,
@@ -413,17 +413,17 @@ mod file_watching_tests {
 
     impl Client {
         fn start(dynamic: bool, relative: bool) -> Self {
-            Self::start_with_initialize(dynamic, relative, json!({}))
+            Self::start_with_initialize(dynamic, relative, &json!({}))
         }
 
-        fn start_with_initialize(dynamic: bool, relative: bool, extra: Value) -> Self {
+        fn start_with_initialize(dynamic: bool, relative: bool, extra: &Value) -> Self {
             Self::start_with_configuration(dynamic, relative, extra, CONFIG)
         }
 
         fn start_with_configuration(
             dynamic: bool,
             relative: bool,
-            extra: Value,
+            extra: &Value,
             config: &str,
         ) -> Self {
             let directory = tempfile::tempdir().unwrap();
@@ -444,7 +444,7 @@ mod file_watching_tests {
             };
             let worker = std::thread::spawn(move || {
                 let state = LspState::new_with_sdk_locator(options.config_path.clone(), |_| None);
-                run_with_state(server, options, state).unwrap();
+                run_with_state(&server, &options, state).unwrap();
             });
             let client = Self {
                 connection,
@@ -559,7 +559,7 @@ mod file_watching_tests {
         let client = Client::start_with_configuration(
             false,
             false,
-            json!({"capabilities": {
+            &json!({"capabilities": {
                 "textDocument": {"codeAction": {
                     "dataSupport": true,
                     "resolveSupport": {"properties": ["edit"]}
@@ -589,7 +589,7 @@ mod file_watching_tests {
             })
             .next_back()
             .unwrap();
-        assert!(!diagnostics.as_array().unwrap().is_empty());
+        assert_ne!(diagnostics.as_array().unwrap().as_slice(), [] as [Value; 0]);
         client
             .connection
             .sender
@@ -645,7 +645,10 @@ mod file_watching_tests {
         ] {
             let client = Client::start(false, false);
             let path = client.workspace.join(input);
-            let source = if input.ends_with(".dart") {
+            let source = if std::path::Path::new(input)
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("dart"))
+            {
                 "class Broken {"
             } else {
                 "["
@@ -809,7 +812,7 @@ mod file_watching_tests {
         let client = Client::start_with_configuration(
             true,
             false,
-            json!({}),
+            &json!({}),
             r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"correctness":{"depend-on-referenced-packages":"warn"}}}}"#,
         );
         client.drain();
@@ -1050,7 +1053,10 @@ mod file_watching_tests {
             &publications(&refreshed)[0],
             "omit-local-variable-types"
         ));
-        assert!(registrations(&refreshed).is_empty());
+        assert_eq!(
+            registrations(&refreshed),
+            [] as [lsp_types::DidChangeWatchedFilesRegistrationOptions; 0]
+        );
         client.finish();
     }
 
@@ -1130,7 +1136,10 @@ mod file_watching_tests {
                 json!({"changes": [{"uri": file_uri(&changed).unwrap(), "type": 2}]}),
             );
             let refreshed = client.drain();
-            assert!(registrations(&refreshed).is_empty());
+            assert_eq!(
+                registrations(&refreshed),
+                [] as [lsp_types::DidChangeWatchedFilesRegistrationOptions; 0]
+            );
             let published = publications(&refreshed);
             assert_eq!(published.len(), 1);
             assert!(!has_rule(&published[0], "omit-local-variable-types"));
@@ -1158,7 +1167,10 @@ mod file_watching_tests {
             ]}),
         );
         let changed = client.drain();
-        assert!(registrations(&changed).is_empty());
+        assert_eq!(
+            registrations(&changed),
+            [] as [lsp_types::DidChangeWatchedFilesRegistrationOptions; 0]
+        );
         let published = publications(&changed);
         assert_eq!(
             published.len(),
@@ -1248,10 +1260,13 @@ mod file_watching_tests {
                 );
                 changed = client.drain();
             }
-            assert!(registrations(&changed).is_empty());
+            assert_eq!(
+                registrations(&changed),
+                [] as [lsp_types::DidChangeWatchedFilesRegistrationOptions; 0]
+            );
             let published = publications(&changed);
             assert_eq!(published.len(), 1);
-            assert!(published[0].diagnostics.is_empty());
+            assert_eq!(published[0].diagnostics, [] as [lsp_types::Diagnostic; 0]);
             client.finish();
         }
     }
@@ -1275,7 +1290,10 @@ mod file_watching_tests {
             }}),
         );
         let changed = client.drain();
-        assert!(registrations(&changed).is_empty());
+        assert_eq!(
+            registrations(&changed),
+            [] as [lsp_types::DidChangeWatchedFilesRegistrationOptions; 0]
+        );
         let published = publications(&changed);
         assert_eq!(published.len(), 1);
         assert!(!has_rule(&published[0], "omit-local-variable-types"));
@@ -1287,7 +1305,7 @@ mod file_watching_tests {
         let client = Client::start_with_initialize(
             true,
             true,
-            json!({
+            &json!({
                 "processId": "ignored unrelated optional value",
                 "workspaceFolders": "malformed optional workspace roots",
                 "capabilities": {"workspace": {"didChangeWatchedFiles": {
@@ -1339,10 +1357,13 @@ mod file_watching_tests {
             json!({"textDocument": {"uri": file_uri(&config).unwrap()}}),
         );
         let saved = client.drain();
-        assert!(registrations(&saved).is_empty());
+        assert_eq!(
+            registrations(&saved),
+            [] as [lsp_types::DidChangeWatchedFilesRegistrationOptions; 0]
+        );
         let published = publications(&saved);
         assert_eq!(published.len(), 1);
-        assert!(published[0].diagnostics.is_empty());
+        assert_eq!(published[0].diagnostics, [] as [lsp_types::Diagnostic; 0]);
         client.finish();
     }
 

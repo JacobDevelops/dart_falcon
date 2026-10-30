@@ -220,7 +220,7 @@ fn text_changes_and_normal_ensure_never_scan_fallback_stamps() {
             "class Before {}"
         );
         if dynamic {
-            assert!(state.project_discovery_watches.is_empty());
+            assert_eq!(state.project_discovery_watches, []);
             assert!(state.fallback_stamps.is_empty());
             assert!(state.revalidate_disk().is_empty());
             assert_eq!(state.fallback_scan_count, 0);
@@ -270,7 +270,7 @@ fn rejected_dynamic_watching_discovers_sources_at_idle() {
     let closed = directory.path().join("closed.dart");
     std::fs::write(&closed, "class Before {}").unwrap();
     state.open(&uri, "void main() {}".into(), Some(1));
-    assert!(state.project_discovery_watches.is_empty());
+    assert_eq!(state.project_discovery_watches, []);
     state.set_dynamic_file_watching(false);
     std::fs::write(&closed, "class ChangedAfterRejection {}").unwrap();
     assert!(!state.revalidate_disk().is_empty());
@@ -278,7 +278,7 @@ fn rejected_dynamic_watching_discovers_sources_at_idle() {
         state.disk_files[&closed].parsed.source.as_ref(),
         "class ChangedAfterRejection {}"
     );
-    assert!(!state.project_discovery_watches.is_empty());
+    assert_ne!(state.project_discovery_watches, []);
     let nested = directory.path().join("new_directory");
     std::fs::create_dir(&nested).unwrap();
     let added = nested.join("added.dart");
@@ -414,7 +414,7 @@ fn fallback_repairs_rejected_closed_sources_without_directory_changes() {
 fn disabled_rules_do_not_repeat_changed_directory_publications() {
     let (directory, mut state, uri) = workspace(false);
     state.open(&uri, "void main() {}".into(), Some(1));
-    assert!(!state.project_discovery_watches.is_empty());
+    assert_ne!(state.project_discovery_watches, []);
     std::fs::write(
         directory.path().join("falcon.json"),
         r#"{"linter":{"enabled":false},"cross-file":{"enabled":false}}"#,
@@ -592,7 +592,7 @@ fn fallback_admits_lazy_package_inputs_without_hiding_known_changes() {
     state.open(&uri, "void main() {}".into(), Some(1));
     let external = tempfile::tempdir().unwrap();
     std::fs::write(external.path().join("pubspec.yaml"), "name: external\n").unwrap();
-    state
+    let _ = state
         .environment
         .file_package(&external.path().join("lib/api.dart"));
     let resets = state.external_reset_count;
@@ -600,7 +600,7 @@ fn fallback_admits_lazy_package_inputs_without_hiding_known_changes() {
     assert_eq!(state.external_reset_count, resets);
     assert!(state.revalidate_disk().is_empty());
     std::fs::write(&manifest, "name: example\nversion: 2.0.0\n").unwrap();
-    state
+    let _ = state
         .environment
         .file_package(&external.path().join("another/api.dart"));
     assert!(!state.revalidate_disk().is_empty());

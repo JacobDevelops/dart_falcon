@@ -1,7 +1,7 @@
-//! Keep GlobalKeys stable and pass owned State fields to widgets.
+//! Keep `GlobalKeys` stable and pass owned State fields to widgets.
 //!
 //! Reports nonconstant GlobalKey-subtype constructors directly in widget `key`
-//! arguments, including outside State classes. Value-stable GlobalObjectKeys,
+//! arguments, including outside State classes. Value-stable `GlobalObjectKeys`,
 //! constant keys and cached field/top-level initializers are exempt. Closures
 //! inside those initializers are still checked. Stored keys are checked only for
 //! concrete Flutter State classes: abstract bases and injected fields are skipped.
@@ -197,7 +197,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         if let Some(args) = args {
             self.arguments.extend(
                 args.positional()
-                    .chain(args.named().map(|arg| arg.value()))
+                    .chain(args.named().map(NamedArg::value))
                     .map(|argument| (owner.clone(), argument.span())),
             );
         }

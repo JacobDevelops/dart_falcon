@@ -34,7 +34,9 @@ impl TopLevelTokens<'_> {
         } else {
             self.nodes.next()
         } {
-            let node = self.tree.node(self.source, NodeId(index as u32))?;
+            let node = self
+                .tree
+                .node(self.source, NodeId(u32::try_from(index).ok()?))?;
             if !is_interpolation(node) {
                 continue;
             }
@@ -73,9 +75,10 @@ impl<'a> Iterator for TopLevelTokens<'a> {
                 self.front = None;
                 continue;
             }
-            return self
-                .tree
-                .token(self.source, TokenId(self.tokens.next()? as u32));
+            return self.tree.token(
+                self.source,
+                TokenId(u32::try_from(self.tokens.next()?).ok()?),
+            );
         }
         None
     }
@@ -94,9 +97,10 @@ impl DoubleEndedIterator for TopLevelTokens<'_> {
                 self.back = None;
                 continue;
             }
-            return self
-                .tree
-                .token(self.source, TokenId(self.tokens.next_back()? as u32));
+            return self.tree.token(
+                self.source,
+                TokenId(u32::try_from(self.tokens.next_back()?).ok()?),
+            );
         }
         None
     }
@@ -156,7 +160,7 @@ impl SyntaxTree {
             .tokens
             .partition_point(|token| token.offset() <= offset)
             .checked_sub(1)?;
-        let token = self.token(source, TokenId(index as u32))?;
+        let token = self.token(source, TokenId(u32::try_from(index).ok()?))?;
         (offset < token.span().end || (token.kind() == TokenKind::Eof && offset == self.source_len))
             .then_some(token)
     }
@@ -327,14 +331,17 @@ impl SyntaxTree {
                     TokenKind::RBrace => (2, false),
                     _ => continue,
                 };
+                let token_id =
+                    u32::try_from(index).expect("token index fits the 31-bit arena capacity");
                 if opening {
                     pairs[index] = stacks[stack];
-                    stacks[stack] = index as u32;
+                    stacks[stack] = token_id;
                 } else if stacks[stack] != u32::MAX {
-                    let open = stacks[stack] as usize;
+                    let open_id = stacks[stack];
+                    let open = open_id as usize;
                     stacks[stack] = pairs[open];
-                    pairs[open] = index as u32;
-                    pairs[index] = open as u32;
+                    pairs[open] = token_id;
+                    pairs[index] = open_id;
                 }
             }
             clear_stacks(stacks, &mut pairs);
@@ -446,7 +453,7 @@ mod tests {
                 (
                     block.start,
                     block.next_token,
-                    block.tokens().map(|token| token.text()).collect::<Vec<_>>(),
+                    block.tokens().map(SyntaxToken::text).collect::<Vec<_>>(),
                 )
             })
             .collect();
@@ -630,7 +637,7 @@ mod tests {
         assert!(tree.top_level_token_at(&source, source.len() + 1).is_none());
         assert_eq!(
             tree.doc_blocks(&source)
-                .map(|block| block.tokens().map(|token| token.text()).collect::<Vec<_>>())
+                .map(|block| block.tokens().map(SyntaxToken::text).collect::<Vec<_>>())
                 .collect::<Vec<_>>(),
             [vec!["/// outer"], vec!["/** hidden */"], vec!["/// after"],]
         );
@@ -704,7 +711,7 @@ mod tests {
         assert_eq!(tree.token(source, TokenId(2)).unwrap().offset(), 4);
         assert!(
             tree.significant_tokens(source)
-                .map(|token| token.offset())
+                .map(SyntaxToken::offset)
                 .eq([0, 4])
         );
     }

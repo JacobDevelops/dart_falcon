@@ -2,8 +2,8 @@
 //! `Border.fromBorderSide(const BorderSide(...))` when the side is constant.
 //! Only invocations whose arguments can all be constant qualify.
 
-use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -49,11 +49,14 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         }
         if !args
             .positional()
-            .chain(args.named().map(|arg| arg.value()))
+            .chain(args.named().map(NamedArg::value))
             .all(|value| crate::lint::const_eval::constant_in_context(value, &self.deferred, state))
         {
             return;
         }
-        self.diagnostics.push(self.ctx.diagnostic("Prefer `Border.fromBorderSide` with a `const` `BorderSide` instead of `Border.all`.", crate::lint::flutter::constructor_span(node)));
+        self.diagnostics.push(self.ctx.diagnostic(
+            "Prefer `Border.fromBorderSide` with a `const` `BorderSide` instead of `Border.all`.",
+            crate::lint::flutter::constructor_span(node),
+        ));
     }
 }

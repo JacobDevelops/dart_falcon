@@ -45,6 +45,7 @@ enum IdentifierOrigin<'a> {
 
 impl<'a> Identifier<'a> {
     /// A parser-confirmed name node, including zero-width missing names.
+    #[must_use]
     pub fn from_node(node: SyntaxNode<'a>) -> Option<Self> {
         if node.kind() != NodeKind::Identifier {
             return None;
@@ -63,6 +64,7 @@ impl<'a> Identifier<'a> {
         })
     }
 
+    #[must_use]
     pub fn synthetic(node: SyntaxNode<'a>, name: &'static str, span: Span) -> Self {
         Self {
             node,
@@ -70,6 +72,7 @@ impl<'a> Identifier<'a> {
         }
     }
 
+    #[must_use]
     pub fn with_span(self, span: Span) -> Self {
         let origin = match self.origin {
             IdentifierOrigin::Missing(_) => IdentifierOrigin::Missing(span),
@@ -84,6 +87,7 @@ impl<'a> Identifier<'a> {
     }
 
     /// The source name token, absent for missing, synthetic, or span-overridden names.
+    #[must_use]
     pub fn token(self) -> Option<SyntaxToken<'a>> {
         match self.origin {
             IdentifierOrigin::Source(id) => Some(self.source_token(id)),
@@ -99,14 +103,17 @@ impl<'a> Identifier<'a> {
         }
     }
 
+    #[must_use]
     pub fn syntax(self) -> SyntaxNode<'a> {
         self.node
     }
 
+    #[must_use]
     pub fn is_missing(self) -> bool {
         matches!(self.origin, IdentifierOrigin::Missing(_))
     }
 
+    #[must_use]
     pub fn name(self) -> &'a str {
         match self.origin {
             IdentifierOrigin::Source(id) => self.source_token(id).text(),
@@ -115,6 +122,7 @@ impl<'a> Identifier<'a> {
         }
     }
 
+    #[must_use]
     pub fn span(self) -> Span {
         match self.origin {
             IdentifierOrigin::Source(id) => self.source_token(id).span(),

@@ -61,8 +61,6 @@ fn visit_with_signatures(
 
 #[test]
 fn generic_predicate_closure_keeps_completed_input_context() {
-    let source = "bool predicate<T>(bool Function(T) callback) => true; \
-                  void use() { predicate((trace) { trace as StackTrace; return true; }); }";
     struct Observed;
     impl<'a> SemanticRuleVisitor<'a> for Observed {
         fn visit_call_arguments(
@@ -95,6 +93,8 @@ fn generic_predicate_closure_keeps_completed_input_context() {
             }
         }
     }
+    let source = "bool predicate<T>(bool Function(T) callback) => true; \
+                  void use() { predicate((trace) { trace as StackTrace; return true; }); }";
     visit_with_signatures(
         source,
         std::path::Path::new("/project/lib/main.dart"),
@@ -199,7 +199,7 @@ fn assert_collection_element_contexts(observed: &CollectionContextObservations) 
 
 #[test]
 fn collection_callbacks_and_implicit_function_calls_match_context() {
-    let source = r#"
+    let source = r"
 void allOf(dynamic value) {}
 void objectContext(Object value) {}
 void unresolvedContext(Missing value) {}
@@ -226,7 +226,7 @@ class GenericLookup {
   static T? maybeFind<T>() => null;
   int example() => maybeFind<int>()!;
 }
-"#;
+";
     let mut observed = CollectionContextObservations::default();
     visit_with_signatures(
         source,
@@ -235,7 +235,7 @@ class GenericLookup {
     );
     assert_collection_element_contexts(&observed);
     let implicit = observed.implicit_call.unwrap();
-    assert!(implicit.is_empty());
+    assert_eq!(implicit, [] as [falcon_analyze::ResolvedType; 0]);
     let explicit = observed.explicit_call.unwrap();
     assert_eq!(explicit.len(), 2);
     assert!(explicit[0].nullable());
@@ -246,24 +246,6 @@ class GenericLookup {
 
 #[test]
 fn inherited_implicit_generic_method_preserves_call_parameters() {
-    let source = r#"
-class Token {}
-class Base { T identity<T>(T value, {bool flag = false}) => value; }
-class Child extends Base {
-  void probe(Token value) {
-identity<Token>(value);
-identity(value);
-  }
-}
-class Other {}
-extension OtherMethods on Other {
-  T identity<T>(T value, {bool flag = false}) => value;
-  void probe(Token value) {
-identity<Token>(value);
-identity(value);
-  }
-}
-"#;
     #[derive(Default)]
     struct Observed {
         calls: usize,
@@ -294,6 +276,24 @@ identity(value);
             self.calls += 1;
         }
     }
+    let source = r"
+class Token {}
+class Base { T identity<T>(T value, {bool flag = false}) => value; }
+class Child extends Base {
+  void probe(Token value) {
+identity<Token>(value);
+identity(value);
+  }
+}
+class Other {}
+extension OtherMethods on Other {
+  T identity<T>(T value, {bool flag = false}) => value;
+  void probe(Token value) {
+identity<Token>(value);
+identity(value);
+  }
+}
+";
     let mut observed = Observed::default();
     visit_with_signatures(
         source,
@@ -336,7 +336,10 @@ impl<'a> SemanticRuleVisitor<'a> for NullsafeAccessObservations {
                 let signature = state
                     .call_signature(call.callee(), call.type_args(), call.args(), None)
                     .unwrap();
-                assert!(signature.positional.is_empty());
+                assert_eq!(
+                    signature.positional,
+                    [] as [falcon_analyze::ResolvedType; 0]
+                );
                 assert_nullsafe_value(state, &state.infer_with_context(node, None), true);
                 assert_nullsafe_value(state, &state.infer(node), true);
                 self.echoes += 1;
@@ -392,7 +395,7 @@ impl<'a> SemanticRuleVisitor<'a> for NullsafeAccessObservations {
 
 #[test]
 fn nullsafe_accesses_preserve_call_and_assignment_contexts_without_an_sdk() {
-    let source = r#"
+    let source = r"
 class Value { Value echo() => this; }
 class Box {
   Value item;
@@ -428,7 +431,7 @@ void records((Value,)? positional, ({Value slot})? named, (Value?,)? maybe) {
   named?.slot.echo();
   maybe?.$1;
 }
-"#;
+";
     let mut observed = NullsafeAccessObservations::default();
     visit_with_signatures(
         source,
@@ -447,6 +450,15 @@ fn legacy_switch_case_expressions_reach_semantic_visitors() {
     use falcon_analyze::{IdentityIndex, IdentitySource};
     use falcon_config::FalconConfig;
     use std::path::PathBuf;
+    #[derive(Default)]
+    struct CaseOperand(usize);
+    impl<'a> SemanticRuleVisitor<'a> for CaseOperand {
+        fn visit_expr(&mut self, node: Expr<'a>, _state: &SemanticState<'a>) {
+            if matches!(node, Expr::IntLit(literal) if literal.value() == "7") {
+                self.0 += 1;
+            }
+        }
+    }
 
     let source = "// @dart=2.19\nvoid f(int x) { switch (x) { case 7: break; } }";
     let path = PathBuf::from("/project/lib/main.dart");
@@ -467,15 +479,6 @@ fn legacy_switch_case_expressions_reach_semantic_visitors() {
     );
     let config = FalconConfig::default();
     let context = AnalyzeContext::new(&path, &config, &parsed).with_identities(&identities);
-    #[derive(Default)]
-    struct CaseOperand(usize);
-    impl<'a> SemanticRuleVisitor<'a> for CaseOperand {
-        fn visit_expr(&mut self, node: Expr<'a>, _state: &SemanticState<'a>) {
-            if matches!(node, Expr::IntLit(literal) if literal.value() == "7") {
-                self.0 += 1;
-            }
-        }
-    }
     let mut operand = CaseOperand::default();
     visit_program(
         &mut operand,
@@ -513,7 +516,7 @@ impl<'a> SemanticRuleVisitor<'a> for ConstructorScopeObservations {
 fn primary_parameters_and_locals_stay_in_constructor_scopes() {
     // Analyzer ConstructorInitializerScope includes primary parameters in
     // non-late instance initializers, but not in methods or late/static fields.
-    let source = r#"
+    let source = r"
 bool Future = true;
 class C(final int? _x, var int? y, int Future) {
   final x = Future;
@@ -527,7 +530,7 @@ class C(final int? _x, var int? y, int Future) {
 extension type E(int? y) {
   this { if (y != null) y; }
 }
-"#;
+";
     let mut observed = ConstructorScopeObservations::default();
     visit_with_signatures(
         source,
@@ -592,7 +595,7 @@ impl<'a> SemanticRuleVisitor<'a> for AssignmentContextObservations {
 
 #[test]
 fn assignment_patterns_and_nullable_cascades_supply_precise_contexts() {
-    let source = r#"
+    let source = r"
 void f(dynamic d, dynamic other, void value) {
   if (d is! String) return;
   int a = 0;
@@ -610,7 +613,7 @@ void cascades(C? value) {
 void assertedCascade(C value) {
   value..parent!.go();
 }
-"#;
+";
     let mut observed = AssignmentContextObservations::default();
     visit_with_signatures(
         source,
@@ -802,7 +805,7 @@ fn registry_shares_semantic_state_and_preserves_collector_lifecycle() {
     };
     let diagnostics = registry.run_all(program, &context);
     let observed: Vec<_> = received.try_iter().collect();
-    assert!(!observed.is_empty());
+    assert_ne!(observed, [] as [(&str, usize); 0]);
     assert_eq!(observed.len() % 2, 0);
     for pair in observed.as_chunks::<2>().0 {
         assert_eq!(pair[0].0, "shared-first");
@@ -1065,7 +1068,7 @@ impl<'a> SemanticRuleVisitor<'a> for DeclarationReferences<'_> {
 
 #[test]
 fn declaration_references_preserve_dispatch_and_lexical_shadowing() {
-    let source = r#"
+    let source = r"
 int? libraryValue;
 class Base {
   Base.named();
@@ -1103,7 +1106,7 @@ extension on Base {
   int get shared => 0;
   void unnamed() { print(libraryValue); print(shared); }
 }
-"#;
+";
     let mut references = DeclarationReferences {
         source,
         observed: 0,
@@ -1122,31 +1125,6 @@ fn binary_chain_visits_on_the_normal_stack() {
     use falcon_config::FalconConfig;
     use std::path::Path;
     use std::sync::Arc;
-
-    let operands = 100_000;
-    let source = format!(
-        "class A {{ A operator +(A other) => this; }} class B {{}} \
-         void f(int a) {{ {}; }} \
-         void h(dynamic a) {{ if (a is A) {{ a + (a = B()) + a; }} }}",
-        vec!["a"; operands].join(" + ")
-    );
-    let result = parse(&source);
-    assert!(result.errors.is_empty(), "{:?}", result.errors);
-    let parsed = Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree: result.tree,
-    });
-    let path = Path::new("/project/main.dart");
-    let identities = IdentityIndex::from_project_files(
-        &[IdentitySource {
-            path,
-            parsed: &parsed,
-            has_parse_errors: false,
-        }],
-        &[],
-    );
-    let config = FalconConfig::default();
-    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
     #[derive(Default)]
     struct Count<'a> {
         binaries: usize,
@@ -1181,6 +1159,31 @@ fn binary_chain_visits_on_the_normal_stack() {
             }
         }
     }
+
+    let operands = 100_000;
+    let source = format!(
+        "class A {{ A operator +(A other) => this; }} class B {{}} \
+         void f(int a) {{ {}; }} \
+         void h(dynamic a) {{ if (a is A) {{ a + (a = B()) + a; }} }}",
+        vec!["a"; operands].join(" + ")
+    );
+    let result = parse(&source);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let parsed = Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: result.tree,
+    });
+    let path = Path::new("/project/main.dart");
+    let identities = IdentityIndex::from_project_files(
+        &[IdentitySource {
+            path,
+            parsed: &parsed,
+            has_parse_errors: false,
+        }],
+        &[],
+    );
+    let config = FalconConfig::default();
+    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
     let program = parsed.program();
     let mut count = Count::default();
     visit_program(
@@ -1201,6 +1204,20 @@ fn optional_binary_chains_visit_every_operand_on_the_normal_stack() {
 
     let operands = 100_000;
     for (operator, parameter) in [("&&", "bool"), ("||", "bool"), ("??", "int?")] {
+        #[derive(Default)]
+        struct Count {
+            binaries: usize,
+            operands: usize,
+        }
+        impl<'a> SemanticRuleVisitor<'a> for Count {
+            fn visit_expr(&mut self, node: Expr<'a>, _: &SemanticState<'a>) {
+                match node {
+                    Expr::Binary(_) => self.binaries += 1,
+                    Expr::Ident(name) if name.name() == "a" => self.operands += 1,
+                    _ => {}
+                }
+            }
+        }
         let chain = vec!["a"; operands].join(&format!(" {operator} "));
         let source =
             format!("void f({parameter} a) {{ var value = {chain}; consume({chain}); {chain}; }}");
@@ -1221,20 +1238,6 @@ fn optional_binary_chains_visit_every_operand_on_the_normal_stack() {
         );
         let config = FalconConfig::default();
         let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
-        #[derive(Default)]
-        struct Count {
-            binaries: usize,
-            operands: usize,
-        }
-        impl<'a> SemanticRuleVisitor<'a> for Count {
-            fn visit_expr(&mut self, node: Expr<'a>, _: &SemanticState<'a>) {
-                match node {
-                    Expr::Binary(_) => self.binaries += 1,
-                    Expr::Ident(name) if name.name() == "a" => self.operands += 1,
-                    _ => {}
-                }
-            }
-        }
         let program = parsed.program();
         let mut count = Count::default();
         visit_program(
@@ -1253,36 +1256,6 @@ fn conditional_callbacks_preserve_branch_context_types_and_flow_joins() {
     use falcon_config::FalconConfig;
     use std::path::Path;
     use std::sync::Arc;
-
-    let source = r#"
-void f(bool flag, Object? value, int? n) {
-  int result = value is int ? value : flag ? 2 : 3;
-  Object promoted = value != null ? flag ? value : value : 1;
-  n != null ? n : (n = 2);
-  expectInt(n);
-  flag ? (n = null) : 1;
-  expectNullable(n);
-  n != null ? n : throw 0;
-  expectInt(n);
-}
-"#;
-    let result = parse(source);
-    assert!(result.errors.is_empty(), "{:?}", result.errors);
-    let parsed = Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree: result.tree,
-    });
-    let path = Path::new("/project/main.dart");
-    let identities = IdentityIndex::from_project_files(
-        &[IdentitySource {
-            path,
-            parsed: &parsed,
-            has_parse_errors: false,
-        }],
-        &[],
-    );
-    let config = FalconConfig::default();
-    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
     #[derive(Default)]
     struct Observed {
         typed: usize,
@@ -1323,6 +1296,36 @@ void f(bool flag, Object? value, int? n) {
             self.calls += 1;
         }
     }
+
+    let source = r"
+void f(bool flag, Object? value, int? n) {
+  int result = value is int ? value : flag ? 2 : 3;
+  Object promoted = value != null ? flag ? value : value : 1;
+  n != null ? n : (n = 2);
+  expectInt(n);
+  flag ? (n = null) : 1;
+  expectNullable(n);
+  n != null ? n : throw 0;
+  expectInt(n);
+}
+";
+    let result = parse(source);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let parsed = Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: result.tree,
+    });
+    let path = Path::new("/project/main.dart");
+    let identities = IdentityIndex::from_project_files(
+        &[IdentitySource {
+            path,
+            parsed: &parsed,
+            has_parse_errors: false,
+        }],
+        &[],
+    );
+    let config = FalconConfig::default();
+    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
     let program = parsed.program();
     let state = SemanticState::new(program, &context).unwrap();
     let integer = state.model.core_type("int", false);
@@ -1352,7 +1355,7 @@ impl<'a> SemanticRuleVisitor<'a> for SelectorContextObservations {
         let Some(initializer) = declaration
             .declarators()
             .next()
-            .and_then(|declarator| declarator.initializer())
+            .and_then(VarDeclarator::initializer)
         else {
             return;
         };
@@ -1426,7 +1429,7 @@ fn selector_callbacks_preserve_preorder_context_and_receiver_types() {
     use std::path::Path;
     use std::sync::Arc;
 
-    let source = r#"
+    let source = r"
 class Box {
   Box get child => this;
   Box operator [](int index) => this;
@@ -1437,7 +1440,7 @@ void f(Box? box, int index) {
 void g(Box? box, int index) {
   Box? result = box?.child[index]!.child;
 }
-"#;
+";
     let result = parse(source);
     assert!(result.errors.is_empty(), "{:?}", result.errors);
     let parsed = Arc::new(falcon_analyze::ParsedFile {
@@ -1490,36 +1493,6 @@ fn optional_binary_callbacks_keep_preorder_context_and_write_promotions() {
     use falcon_config::FalconConfig;
     use std::path::Path;
     use std::sync::Arc;
-
-    let source = r#"
-void f(bool a, bool b, bool c, int? n, int? m, int tail, Object? value) {
-  bool logical = a && b || c;
-  int? optional = n ?? m ?? tail;
-  value is String && value != null && promotedAnd(value);
-  value is! String || value == null || promotedOr(value);
-  a && value is String && promotedRight(value);
-  a && value != null && comparedRight(value);
-  a || value == null || comparedOrRight(value);
-  value is String && ((value = 0) == 0 && afterWrite(value));
-}
-"#;
-    let result = parse(source);
-    assert!(result.errors.is_empty(), "{:?}", result.errors);
-    let parsed = Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree: result.tree,
-    });
-    let path = Path::new("/project/main.dart");
-    let identities = IdentityIndex::from_project_files(
-        &[IdentitySource {
-            path,
-            parsed: &parsed,
-            has_parse_errors: false,
-        }],
-        &[],
-    );
-    let config = FalconConfig::default();
-    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
     struct Observed {
         events: Vec<(String, Option<ResolvedType>)>,
         calls: usize,
@@ -1552,6 +1525,36 @@ void f(bool a, bool b, bool c, int? n, int? m, int tail, Object? value) {
             }
         }
     }
+
+    let source = r"
+void f(bool a, bool b, bool c, int? n, int? m, int tail, Object? value) {
+  bool logical = a && b || c;
+  int? optional = n ?? m ?? tail;
+  value is String && value != null && promotedAnd(value);
+  value is! String || value == null || promotedOr(value);
+  a && value is String && promotedRight(value);
+  a && value != null && comparedRight(value);
+  a || value == null || comparedOrRight(value);
+  value is String && ((value = 0) == 0 && afterWrite(value));
+}
+";
+    let result = parse(source);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let parsed = Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: result.tree,
+    });
+    let path = Path::new("/project/main.dart");
+    let identities = IdentityIndex::from_project_files(
+        &[IdentitySource {
+            path,
+            parsed: &parsed,
+            has_parse_errors: false,
+        }],
+        &[],
+    );
+    let config = FalconConfig::default();
+    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
     let program = parsed.program();
     let state = SemanticState::new(program, &context).unwrap();
     let boolean = state.model.core_type("bool", false);
@@ -1587,49 +1590,6 @@ fn flow_joins_preserve_reachable_paths_and_nested_scope_depth() {
     use falcon_config::FalconConfig;
     use std::path::Path;
     use std::sync::Arc;
-
-    let source = r#"
-void precise(bool flag) {
-  int? value;
-  if (flag) { value = 1; } else { throw 0; }
-  expectInt(value);
-  while (true) { { int inner = 2; value = inner; break; } }
-  expectInt(value);
-  try { value = null; } finally { value = 3; }
-  expectInt(value);
-  switch (flag) {
-    case true: { int inner = 4; value = inner; break; }
-    case false: { int inner = 5; value = inner; break; }
-  }
-  expectInt(value);
-}
-void optional(bool flag) {
-  int? value;
-  while (flag) { int inner = 1; value = inner; break; }
-  expectNullable(value);
-  switch (flag) { case true: { int inner = 2; value = inner; break; } }
-  expectNullable(value);
-  try { value = 3; } catch (_) { value = null; }
-  expectNullable(value);
-}
-"#;
-    let result = parse(source);
-    assert!(result.errors.is_empty(), "{:?}", result.errors);
-    let parsed = Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree: result.tree,
-    });
-    let path = Path::new("/project/main.dart");
-    let identities = IdentityIndex::from_project_files(
-        &[IdentitySource {
-            path,
-            parsed: &parsed,
-            has_parse_errors: false,
-        }],
-        &[],
-    );
-    let config = FalconConfig::default();
-    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
     #[derive(Default)]
     struct Observed(usize);
     impl<'a> SemanticRuleVisitor<'a> for Observed {
@@ -1656,6 +1616,49 @@ void optional(bool flag) {
             self.0 += 1;
         }
     }
+
+    let source = r"
+void precise(bool flag) {
+  int? value;
+  if (flag) { value = 1; } else { throw 0; }
+  expectInt(value);
+  while (true) { { int inner = 2; value = inner; break; } }
+  expectInt(value);
+  try { value = null; } finally { value = 3; }
+  expectInt(value);
+  switch (flag) {
+    case true: { int inner = 4; value = inner; break; }
+    case false: { int inner = 5; value = inner; break; }
+  }
+  expectInt(value);
+}
+void optional(bool flag) {
+  int? value;
+  while (flag) { int inner = 1; value = inner; break; }
+  expectNullable(value);
+  switch (flag) { case true: { int inner = 2; value = inner; break; } }
+  expectNullable(value);
+  try { value = 3; } catch (_) { value = null; }
+  expectNullable(value);
+}
+";
+    let result = parse(source);
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let parsed = Arc::new(falcon_analyze::ParsedFile {
+        source: source.into(),
+        tree: result.tree,
+    });
+    let path = Path::new("/project/main.dart");
+    let identities = IdentityIndex::from_project_files(
+        &[IdentitySource {
+            path,
+            parsed: &parsed,
+            has_parse_errors: false,
+        }],
+        &[],
+    );
+    let config = FalconConfig::default();
+    let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
     let program = parsed.program();
     let mut observed = Observed::default();
     visit_program(
@@ -1717,7 +1720,7 @@ impl<'a> SemanticRuleVisitor<'a> for LexicalScopeObservations<'_> {
 
 #[test]
 fn lexical_shadowing_restores_declarations_constants_and_root_members() {
-    let source = r#"
+    let source = r"
 class Owner {
   int value = 0;
   void probe(Object input) {
@@ -1756,7 +1759,7 @@ class Owner {
     expectRoot(value);
   }
 }
-"#;
+";
     let mut observed = LexicalScopeObservations { source, calls: 0 };
     visit_with_signatures(
         source,
@@ -1772,6 +1775,38 @@ fn binary_chains_carry_evaluated_receiver_types_across_local_writes() {
     use falcon_config::FalconConfig;
     use std::path::Path;
     use std::sync::Arc;
+    #[derive(Default)]
+    struct Observed {
+        writes: usize,
+        typed_optional: usize,
+        rhs: usize,
+    }
+    impl<'a> SemanticRuleVisitor<'a> for Observed {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            if let Expr::Assign(assignment) = node
+                && matches!(assignment.target(), Expr::Ident(name) if name.name() == "y")
+            {
+                self.writes += 1;
+            }
+            if let Expr::Call(call) = node
+                && matches!(call.callee(), Expr::Ident(name) if name.name() == "rhs")
+            {
+                // The evaluated A result supplies Object even after the RHS assigns B.
+                assert_eq!(
+                    state.expected(),
+                    Some(&state.model.core_type("Object", false)),
+                );
+                self.rhs += 1;
+            }
+            if let Expr::Call(call) = node
+                && matches!(call.callee(), Expr::Ident(name) if name.name() == "tail")
+            {
+                // Contextual num fallback makes the + result num, which has no & operator.
+                assert_eq!(state.expected(), Some(&ResolvedType::UNKNOWN));
+                self.typed_optional += 1;
+            }
+        }
+    }
 
     let writes = 8_000;
     let source = format!(
@@ -1807,38 +1842,6 @@ fn binary_chains_carry_evaluated_receiver_types_across_local_writes() {
     );
     let config = FalconConfig::default();
     let context = AnalyzeContext::new(path, &config, &parsed).with_identities(&identities);
-    #[derive(Default)]
-    struct Observed {
-        writes: usize,
-        typed_optional: usize,
-        rhs: usize,
-    }
-    impl<'a> SemanticRuleVisitor<'a> for Observed {
-        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
-            if let Expr::Assign(assignment) = node
-                && matches!(assignment.target(), Expr::Ident(name) if name.name() == "y")
-            {
-                self.writes += 1;
-            }
-            if let Expr::Call(call) = node
-                && matches!(call.callee(), Expr::Ident(name) if name.name() == "rhs")
-            {
-                // The evaluated A result supplies Object even after the RHS assigns B.
-                assert_eq!(
-                    state.expected(),
-                    Some(&state.model.core_type("Object", false)),
-                );
-                self.rhs += 1;
-            }
-            if let Expr::Call(call) = node
-                && matches!(call.callee(), Expr::Ident(name) if name.name() == "tail")
-            {
-                // Contextual num fallback makes the + result num, which has no & operator.
-                assert_eq!(state.expected(), Some(&ResolvedType::UNKNOWN));
-                self.typed_optional += 1;
-            }
-        }
-    }
     let program = parsed.program();
     let mut observed = Observed::default();
     visit_program(

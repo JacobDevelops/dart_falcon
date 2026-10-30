@@ -16,8 +16,8 @@
 //! `min-sequence` (integer, default: 3) sets the minimum chain length, with a
 //! minimum effective value of 3 to avoid competing with single-widget rules.
 
-use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -79,7 +79,8 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        if let Some(falcon_analyze::ResolvedTypeView::Interface { identity, .. }) = state.expected().map(falcon_analyze::ResolvedType::view)
+        if let Some(falcon_analyze::ResolvedTypeView::Interface { identity, .. }) =
+            state.expected().map(falcon_analyze::ResolvedType::view)
             && [
                 "Transform",
                 "Padding",
@@ -120,7 +121,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             ) == falcon_analyze::Truth::No
         {
             self.covered = starts;
-            self.diags.push(self.ctx.diagnostic("Replace this layout widget sequence with a single `Container`.", crate::lint::flutter::constructor_span(node)));
+            self.diags.push(self.ctx.diagnostic(
+                "Replace this layout widget sequence with a single `Container`.",
+                crate::lint::flutter::constructor_span(node),
+            ));
         }
     }
 }
@@ -137,13 +141,13 @@ fn layout_stage<'a>(
     else {
         return None;
     };
-    let index = ctx.identities()?;
-    let (stage, property, extra) =
-        if index.is_package_declaration(&identity, "flutter", "Transform") {
+    let identities = ctx.identities()?;
+    let (layer, argument_name, permitted_name) =
+        if identities.is_package_declaration(&identity, "flutter", "Transform") {
             (0, "transform", Some("alignment"))
-        } else if index.is_package_declaration(&identity, "flutter", "Padding") {
+        } else if identities.is_package_declaration(&identity, "flutter", "Padding") {
             (
-                if previous.is_some_and(|stage| stage >= 1) {
+                if previous.is_some_and(|previous_stage| previous_stage >= 1) {
                     4
                 } else {
                     1
@@ -151,11 +155,11 @@ fn layout_stage<'a>(
                 "padding",
                 None,
             )
-        } else if index.is_package_declaration(&identity, "flutter", "ConstrainedBox") {
+        } else if identities.is_package_declaration(&identity, "flutter", "ConstrainedBox") {
             (2, "constraints", None)
-        } else if index.is_package_declaration(&identity, "flutter", "ColoredBox") {
+        } else if identities.is_package_declaration(&identity, "flutter", "ColoredBox") {
             (3, "color", None)
-        } else if index.is_package_declaration(&identity, "flutter", "Align") {
+        } else if identities.is_package_declaration(&identity, "flutter", "Align") {
             (5, "alignment", None)
         } else {
             return None;
@@ -172,17 +176,17 @@ fn layout_stage<'a>(
                 return None;
             }
             child = Some(argument.value());
-        } else if name == property {
+        } else if name == argument_name {
             if matches!(argument.value().unparenthesized(), Expr::NullLit(_)) {
                 return None;
             }
             has_property = true;
-        } else if !(extra == Some(name) || outermost && name == "key") {
+        } else if !(permitted_name == Some(name) || outermost && name == "key") {
             return None;
         }
     }
     // Align's default alignment is also exactly Container's explicit center.
-    (has_property || stage == 5).then_some((stage, child?))
+    (has_property || layer == 5).then_some((layer, child?))
 }
 
 #[cfg(test)]
@@ -232,7 +236,13 @@ Widget build(Widget child, dynamic matrix) =>
                 }}}
             }))
             .unwrap();
-            let diagnostics = crate::inference::analyze(PreferContainer::NAME, &PreferContainer, &path, source, &config);
+            let diagnostics = crate::inference::analyze(
+                PreferContainer::NAME,
+                &PreferContainer,
+                &path,
+                source,
+                &config,
+            );
             assert_eq!(diagnostics.len(), count, "minimum {minimum}");
             if let Some(diagnostic) = diagnostics.first() {
                 assert_eq!(

@@ -1,4 +1,4 @@
-//! Use the nearest BuildContext parameter inside nested callbacks. Only resolved Flutter contexts are checked, avoiding unrelated variables named context.
+//! Use the nearest `BuildContext` parameter inside nested callbacks. Only resolved Flutter contexts are checked, avoiding unrelated variables named context.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;

@@ -52,34 +52,42 @@ struct Collector<'a> {
 }
 
 impl<'a> Collector<'a> {
-    fn report(&mut self, span: Span) {
-        self.diags.push(self.ctx.diagnostic("Don't use adjacent strings in a list literal.", span));
+    fn report(ctx: &AnalyzeContext<'_>, diags: &mut Vec<Diagnostic>, span: Span) {
+        diags.push(ctx.diagnostic("Don't use adjacent strings in a list literal.", span));
     }
 
     /// The span of an unparenthesized adjacent-strings element.
-    fn adjacent_element(&self, element: CollectionElement<'a>) -> Option<Span> {
+    fn adjacent_element(element: CollectionElement<'_>) -> Option<Span> {
         let CollectionElement::Expr(Expr::StringLit(string)) = element else {
             return None;
         };
         string.is_adjacent().then_some(string.span())
     }
 
-    fn check(&mut self, element: CollectionElement<'a>) {
-        if let Some(span) = self.adjacent_element(element) {
-            self.report(span);
+    fn check(
+        element: CollectionElement<'_>,
+        ctx: &AnalyzeContext<'_>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        if let Some(span) = Self::adjacent_element(element) {
+            Self::report(ctx, diags, span);
         }
     }
-
     /// Checks only the eligible direct branch; shared callbacks handle descendants.
-    fn check_branch(&mut self, element: CollectionElement<'a>) {
+    fn check_branch(
+        element: CollectionElement<'_>,
+        ctx: &AnalyzeContext<'_>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
         match element {
             CollectionElement::If(node) => {
-                self.check(node.else_elem().unwrap_or_else(|| node.then_elem()));
+                Self::check(node.else_elem().unwrap_or_else(|| node.then_elem()), ctx, diags);
             }
-            CollectionElement::For(node) => self.check(node.element()),
+            CollectionElement::For(node) => Self::check(node.element(), ctx, diags),
             _ => {}
         }
     }
+
 
     fn check_list_pattern(&mut self, pattern: Pattern<'a>) {
         let mut pattern = pattern;
@@ -105,7 +113,7 @@ impl<'a> Collector<'a> {
                 _ => continue,
             };
             if string.is_adjacent() {
-                self.report(string.span());
+                Self::report(self.ctx, &mut self.diags, string.span());
             }
         }
     }
@@ -125,7 +133,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         };
         if let Some(elements) = elements {
             for element in elements {
-                self.check(element);
+                Self::check(element, self.ctx, &mut self.diags);
             }
         }
         StructuralTraversal::Continue
@@ -138,7 +146,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_collection_element(&mut self, node: CollectionElement<'a>) -> StructuralTraversal {
         self.nested_stack.push(self.nested);
         if self.nested {
-            self.check_branch(node);
+            Self::check_branch(node, self.ctx, &mut self.diags);
             self.nested = matches!(node, CollectionElement::If(_) | CollectionElement::For(_));
         }
         StructuralTraversal::Continue

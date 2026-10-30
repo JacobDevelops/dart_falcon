@@ -67,10 +67,10 @@ struct CorpusDiagnostic {
 fn compare_diagnostics(
     file: &Path,
     expectations: &[Expectation],
-    diagnostics: Vec<CorpusDiagnostic>,
+    diagnostics: &[CorpusDiagnostic],
     failures: &mut Vec<String>,
 ) {
-    for diagnostic in &diagnostics {
+    for diagnostic in diagnostics {
         for problem in message_style_errors(&diagnostic.message) {
             failures.push(format!(
                 "STYLE {}:{} — `{}`: {problem}: {:?}",
@@ -145,13 +145,6 @@ fn compare_diagnostics(
 }
 
 fn message_style_errors(message: &str) -> Vec<&'static str> {
-    let mut errors = Vec::new();
-    if !message.ends_with('.') {
-        errors.push("end the sentence with a full stop");
-    }
-    if message.bytes().filter(|&byte| byte == b'`').count() % 2 != 0 {
-        errors.push("balance code backticks");
-    }
     // Check unambiguous code spellings, not apostrophes in contractions or
     // possessives, nor ordinary quoted prose. Backticked strings may contain
     // any Dart spelling, including quotes and punctuation.
@@ -163,6 +156,13 @@ fn message_style_errors(message: &str) -> Vec<&'static str> {
             r"\b(?:[a-z][a-z0-9]*[A-Z][A-Za-z0-9]*|[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*|[A-Za-z_$][A-Za-z0-9_$]*\.[A-Za-z_$][A-Za-z0-9_$]*|[A-Za-z_$]*_[A-Za-z0-9_$]+)\b|&&|\|\||==|!=|=>|\?\?|\?\.",
         ).unwrap()
     });
+    let mut errors = Vec::new();
+    if !message.ends_with('.') {
+        errors.push("end the sentence with a full stop");
+    }
+    if message.bytes().filter(|&byte| byte == b'`').count() % 2 != 0 {
+        errors.push("balance code backticks");
+    }
     if message.split('`').step_by(2).any(|prose| {
         BARE_CODE.find_iter(prose).any(|code| {
             // Conventional prose abbreviations are not qualified Dart names.
@@ -295,14 +295,14 @@ fn message_expectations_match_duplicates_and_report_actual_text() {
     compare_diagnostics(
         Path::new("nested/example.dart"),
         &expectations,
-        vec![diagnostic("Use `Foo`."), diagnostic("Another message.")],
+        &[diagnostic("Use `Foo`."), diagnostic("Another message.")],
         &mut failures,
     );
     assert!(failures.is_empty(), "{failures:?}");
     compare_diagnostics(
         Path::new("nested/example.dart"),
         &expectations[1..],
-        vec![diagnostic("Use `Bar`.")],
+        &[diagnostic("Use `Bar`.")],
         &mut failures,
     );
     assert_eq!(failures.len(), 1);
@@ -320,7 +320,7 @@ fn stale_message_does_not_consume_a_later_exact_match() {
     compare_diagnostics(
         Path::new("bad.dart"),
         &expectations,
-        vec![CorpusDiagnostic {
+        &[CorpusDiagnostic {
             rule: "sample".to_owned(),
             line: 1,
             message: "Actual message.".to_owned(),
@@ -341,7 +341,7 @@ fn produced_diagnostics_require_backticks_for_bare_code() {
         compare_diagnostics(
             Path::new("bad.dart"),
             &expectations,
-            vec![CorpusDiagnostic {
+            &[CorpusDiagnostic {
                 rule: "sample".to_owned(),
                 line: 1,
                 message,
@@ -352,7 +352,10 @@ fn produced_diagnostics_require_backticks_for_bare_code() {
             failures.iter().any(|failure| failure.starts_with("STYLE ")),
             "{spelling}: {failures:?}"
         );
-        assert!(message_style_errors(&format!("Use `{spelling}` instead.")).is_empty());
+        assert_eq!(
+            message_style_errors(&format!("Use `{spelling}` instead.")),
+            [] as [&str; 0]
+        );
     }
 }
 
@@ -443,7 +446,7 @@ fn run_rule(
         .map(|d| CorpusDiagnostic {
             rule: d.rule.to_string(),
             line: byte_offset_to_line(source, d.span.start),
-            message: d.message.to_string(),
+            message: d.message.clone(),
         })
         .collect()
 }
@@ -556,7 +559,7 @@ fn registered_rules_have_real_corpus_coverage() {
 
     let mut corpus_dirs: Vec<PathBuf> = fs::read_dir(&corpus)
         .expect("corpus dir must exist")
-        .filter_map(|entry| entry.ok())
+        .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.is_dir())
         .collect();
@@ -721,9 +724,9 @@ fn corpus_matches_expectations() {
     let corpus = corpus_dir();
     let mut rule_dirs: Vec<PathBuf> = fs::read_dir(&corpus)
         .expect("corpus dir must exist")
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.is_dir())
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
         .collect();
     rule_dirs.sort();
 
@@ -766,7 +769,7 @@ fn corpus_matches_expectations() {
             total_expectations += expectations.len();
 
             let diagnostics = run_rule(registered_name, *rule, &file, &source, &config);
-            compare_diagnostics(&file, &expectations, diagnostics, &mut failures);
+            compare_diagnostics(&file, &expectations, &diagnostics, &mut failures);
         }
     }
 
@@ -796,8 +799,7 @@ fn cross_file_corpus_matches_expectations() {
         let dir = corpus.join(rule_name).join("cross-file");
         assert!(
             dir.is_dir(),
-            "cross-file rule `{}` is missing its corpus/<rule>/cross-file/ fixture",
-            rule_name
+            "cross-file rule `{rule_name}` is missing its corpus/<rule>/cross-file/ fixture"
         );
         let config = corpus_config(&corpus.join(rule_name));
         let mut rule_expectations = 0;
@@ -847,16 +849,16 @@ fn cross_file_corpus_matches_expectations() {
                     .collect();
                 total_expectations += expectations.len();
                 rule_expectations += expectations.len();
-                let found = diagnostics
+                let found: Vec<_> = diagnostics
                     .iter()
                     .filter(|diagnostic| Path::new(&diagnostic.file_path) == path)
                     .map(|diagnostic| CorpusDiagnostic {
                         rule: diagnostic.rule.to_string(),
                         line: byte_offset_to_line(source, diagnostic.span.start),
-                        message: diagnostic.message.to_string(),
+                        message: diagnostic.message.clone(),
                     })
                     .collect();
-                compare_diagnostics(path, &expectations, found, &mut failures);
+                compare_diagnostics(path, &expectations, &found, &mut failures);
             }
             for diagnostic in &diagnostics {
                 if !fixture_sources
@@ -985,13 +987,13 @@ fn resolver_dependent_per_file_project_corpus() {
                 .with_signatures(&signatures)
                 .with_library(&unit)
                 .with_environment(Some(&environment));
-            let diagnostics = rule
+            let diagnostics: Vec<_> = rule
                 .analyze(rule_name, programs[i], &ctx)
                 .into_iter()
                 .map(|diagnostic| CorpusDiagnostic {
                     rule: diagnostic.rule.to_string(),
                     line: byte_offset_to_line(&sources[i], diagnostic.span.start),
-                    message: diagnostic.message.to_string(),
+                    message: diagnostic.message.clone(),
                 })
                 .collect();
             let expectations: Vec<_> = parse_expectations(&sources[i])
@@ -999,7 +1001,7 @@ fn resolver_dependent_per_file_project_corpus() {
                 .filter(|expectation| expectation.rule == *rule_name)
                 .collect();
             total_expectations += expectations.len();
-            compare_diagnostics(&source_paths[i], &expectations, diagnostics, &mut failures);
+            compare_diagnostics(&source_paths[i], &expectations, &diagnostics, &mut failures);
         }
     }
 

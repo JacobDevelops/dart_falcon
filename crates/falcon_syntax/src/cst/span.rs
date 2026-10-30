@@ -9,18 +9,22 @@ pub struct Span {
 }
 
 impl Span {
+    #[must_use]
     pub fn new(start: usize, end: usize) -> Self {
         Self { start, end }
     }
 
+    #[must_use]
     pub fn contains(&self, other: Span) -> bool {
         self.start <= other.start && other.end <= self.end
     }
 
+    #[must_use]
     pub fn contains_offset(&self, offset: usize) -> bool {
         self.start <= offset && offset < self.end
     }
 
+    #[must_use]
     pub fn merge(&self, other: &Span) -> Span {
         Span {
             start: self.start.min(other.start),

@@ -159,7 +159,7 @@ impl<'a> Collector<'a> {
         for member in members {
             match member {
                 ClassMember::Field(node)
-                    if !(extension_type && !node.is_static())
+                    if (!extension_type || node.is_static())
                         && node
                             .declarators()
                             .any(|declarator| is_public(declarator.name())) =>

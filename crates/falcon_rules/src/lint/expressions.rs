@@ -128,10 +128,8 @@ pub(crate) fn is_provably_non_null(expr: Expr<'_>) -> bool {
 
 pub(crate) fn line_of(source: &str, offset: usize) -> usize {
     source.as_bytes()[..offset.min(source.len())]
-        .iter()
-        .filter(|&&byte| byte == b'\n')
+        .split(|&byte| byte == b'\n')
         .count()
-        + 1
 }
 
 pub(crate) fn scalar_text(expr: Expr<'_>) -> Option<&str> {

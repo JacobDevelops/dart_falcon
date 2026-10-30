@@ -6,6 +6,7 @@ pub use crate::analyze_pipeline::OutputFormat;
 ///
 /// Exposed so tooling (the docs `cli.json` generator in `xtask`) can walk the
 /// real parser definition instead of re-describing the flags by hand.
+#[must_use]
 pub fn command() -> clap::Command {
     Cli::command()
 }
@@ -32,12 +33,12 @@ pub enum LogFormat {
 pub enum Command {
     /// Lint one or more Dart files or directories
     Check(crate::analyze_pipeline::CheckOptions),
-    /// Migrate to falcon.json. Converts a dart_code_linter / pyramid_lint
-    /// analysis_options.yaml, or upgrades an existing falcon.json by rewriting
+    /// Migrate to falcon.json. Converts a `dart_code_linter` / `pyramid_lint`
+    /// `analysis_options.yaml`, or upgrades an existing falcon.json by rewriting
     /// legacy rule ids to their canonical form (auto-detected from the input).
     Migrate {
-        /// Path to the input: an analysis_options.yaml to convert, or an
-        /// existing falcon.json to upgrade (default: ./analysis_options.yaml)
+        /// Path to the input: an `analysis_options.yaml` to convert, or an
+        /// existing falcon.json to upgrade (default: ./`analysis_options.yaml`)
         #[arg(long, value_name = "PATH")]
         input: Option<std::path::PathBuf>,
         /// Write falcon.json instead of printing to stdout

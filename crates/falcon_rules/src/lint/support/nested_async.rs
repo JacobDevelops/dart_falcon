@@ -40,7 +40,7 @@ impl<'a> Collector<'a> {
         }
     }
 
-    fn exit(&mut self, parameters: AstChildren<'a, TypeParam<'a>>) {
+    fn exit(&mut self, parameters: &AstChildren<'a, TypeParam<'a>>) {
         if !parameters.is_empty() {
             self.parameters.pop();
         }
@@ -55,7 +55,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn exit_top_level_decl(&mut self, node: TopLevelDecl<'a>) {
-        self.exit(node.type_params());
+        self.exit(&node.type_params());
     }
 
     fn visit_method_decl(&mut self, node: MethodDecl<'a>) -> StructuralTraversal {
@@ -63,7 +63,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         StructuralTraversal::Continue
     }
 
-    fn exit_method_decl(&mut self, node: MethodDecl<'a>) { self.exit(node.type_params()); }
+    fn exit_method_decl(&mut self, node: MethodDecl<'a>) { self.exit(&node.type_params()); }
 
     fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         if let Stmt::LocalFunc(function) = node { self.enter(function.type_params()); }
@@ -71,7 +71,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn exit_stmt(&mut self, node: Stmt<'a>) {
-        if let Stmt::LocalFunc(function) = node { self.exit(function.type_params()); }
+        if let Stmt::LocalFunc(function) = node { self.exit(&function.type_params()); }
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
@@ -80,7 +80,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn exit_expr(&mut self, node: Expr<'a>) {
-        if let Expr::FuncExpr(function) = node { self.exit(function.type_params()); }
+        if let Expr::FuncExpr(function) = node { self.exit(&function.type_params()); }
     }
 
     fn visit_formal_param(&mut self, node: FormalParam<'a>) -> StructuralTraversal {
@@ -88,7 +88,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         StructuralTraversal::Continue
     }
 
-    fn exit_formal_param(&mut self, node: FormalParam<'a>) { self.exit(node.type_params()); }
+    fn exit_formal_param(&mut self, node: FormalParam<'a>) { self.exit(&node.type_params()); }
 
     fn visit_dart_type(&mut self, node: DartType<'a>) -> StructuralTraversal {
         if let DartType::Function(function) = node { self.enter(function.type_params()); }
@@ -115,7 +115,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn exit_dart_type(&mut self, node: DartType<'a>) {
-        if let DartType::Function(function) = node { self.exit(function.type_params()); }
+        if let DartType::Function(function) = node { self.exit(&function.type_params()); }
     }
 
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diagnostics }

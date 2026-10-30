@@ -6,8 +6,8 @@
 
 use std::collections::HashMap;
 
-use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -104,13 +104,13 @@ fn empty_collection(condition: Expr<'_>) -> Option<Identifier<'_>> {
             field
         }
         Expr::Binary(binary) if binary.op() == BinaryOp::EqEq => {
-            let (property, zero) = match (
+            let ((Expr::Field(property), Expr::IntLit(zero))
+            | (Expr::IntLit(zero), Expr::Field(property))) = (
                 binary.left().unparenthesized(),
                 binary.right().unparenthesized(),
-            ) {
-                (Expr::Field(field), Expr::IntLit(zero))
-                | (Expr::IntLit(zero), Expr::Field(field)) => (field, zero),
-                _ => return None,
+            )
+            else {
+                return None;
             };
             if property.field().name() != "length" || zero.value() != "0" {
                 return None;

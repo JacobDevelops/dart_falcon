@@ -7,6 +7,7 @@ use falcon_rules::meta::{Domain, RULE_METADATA, RuleMeta, RuleSource};
 use serde_json::{Map, Value, json};
 use std::{
     collections::HashSet,
+    fmt::Write as _,
     fs,
     path::{Path, PathBuf},
 };
@@ -37,7 +38,7 @@ fn character_column(source: &str, line: usize, utf16_column: usize) -> usize {
     1 + column.min(trimmed_length)
 }
 
-/// Map a rule's snake_case module name from its kebab id.
+/// Map a rule's `snake_case` module name from its kebab id.
 fn snake_of(name: &str) -> String {
     name.replace('-', "_")
 }
@@ -97,15 +98,12 @@ fn extract_description(lines: &[String], rule_name: &str) -> String {
 
 /// Read the summary and full markdown docs, stripping provenance from the latter.
 fn extract_docs(source_path: &Path, rule_name: &str) -> (String, String) {
-    let content = match fs::read_to_string(source_path) {
-        Ok(c) => c,
-        Err(_) => {
-            eprintln!(
-                "warning: {rule_name}: cannot read source {} for docs",
-                source_path.display()
-            );
-            return (String::new(), String::new());
-        }
+    let Ok(content) = fs::read_to_string(source_path) else {
+        eprintln!(
+            "warning: {rule_name}: cannot read source {} for docs",
+            source_path.display()
+        );
+        return (String::new(), String::new());
     };
 
     // Collect the contiguous leading run of `//!` lines (blank `//!` lines
@@ -154,13 +152,7 @@ fn extract_docs(source_path: &Path, rule_name: &str) -> (String, String) {
 /// count, so a wrapped provenance sentence is cut at its real boundary.
 fn sentence_end(text: &str) -> Option<usize> {
     text.char_indices()
-        .find(|&(i, c)| {
-            c == '.'
-                && text[i + 1..]
-                    .chars()
-                    .next()
-                    .is_none_or(|next| next.is_whitespace())
-        })
+        .find(|&(i, c)| c == '.' && text[i + 1..].chars().next().is_none_or(char::is_whitespace))
         .map(|(i, _)| i)
 }
 
@@ -289,15 +281,12 @@ fn source_json(source: &RuleSource) -> Value {
 fn cli_arg_json(arg: &clap::Arg) -> Value {
     // A flag (no value) carries no meaningful value name — only surface one for
     // args that actually take a value.
-    let takes_value = arg
-        .get_num_args()
-        .map(|r| r.takes_values())
-        .unwrap_or(false);
+    let takes_value = arg.get_num_args().is_some_and(|r| r.takes_values());
     let value_name = takes_value
         .then(|| {
             arg.get_value_names()
                 .and_then(|vs| vs.first())
-                .map(|v| v.to_string())
+                .map(ToString::to_string)
         })
         .flatten();
 
@@ -324,7 +313,7 @@ fn cli_arg_json(arg: &clap::Arg) -> Value {
         "short": arg.get_short().map(|c| format!("-{c}")),
         "valueName": value_name,
         "default": default,
-        "help": arg.get_help().map(|h| h.to_string()),
+        "help": arg.get_help().map(ToString::to_string),
         "possibleValues": possible_values,
         "positional": arg.is_positional(),
     })
@@ -390,7 +379,7 @@ fn cli_reference_json(mut root: clap::Command) -> Value {
             name.clone(),
             json!({
                 "name": name,
-                "about": sub.get_about().map(|a| a.to_string()),
+                "about": sub.get_about().map(ToString::to_string),
                 "usage": usage,
                 "args": args,
             }),
@@ -401,7 +390,7 @@ fn cli_reference_json(mut root: clap::Command) -> Value {
 
     json!({
         "name": root.get_name(),
-        "about": root.get_about().map(|a| a.to_string()),
+        "about": root.get_about().map(ToString::to_string),
         "version": root.get_version(),
         "usage": root_usage,
         "globalArgs": globals,
@@ -439,8 +428,7 @@ fn schema_type_label(root: &Value, node: &Value) -> String {
         if kind == "array" {
             let item = resolved
                 .get("items")
-                .map(|item| schema_type_label(root, item))
-                .unwrap_or_else(|| "value".to_string());
+                .map_or_else(|| "value".to_string(), |item| schema_type_label(root, item));
             if item.contains(" | ") {
                 format!("({item})[]")
             } else {
@@ -555,10 +543,8 @@ fn render_option_rows(root: &Value, node: &Value, rule: &str, path: &str, output
                 format!("{path}.{name}")
             };
             let leaf = config_leaf(root, property, &child_path);
-            let default = leaf
-                .get("default")
-                .map(|value| format!("`{}`", markdown_cell(&value.to_string())))
-                .unwrap_or_else(|| {
+            let default = leaf.get("default").map_or_else(
+                || {
                     let required = resolved
                         .get("required")
                         .and_then(Value::as_array)
@@ -568,23 +554,26 @@ fn render_option_rows(root: &Value, node: &Value, rule: &str, path: &str, output
                                 .any(|field| field.as_str() == Some(name.as_str()))
                         });
                     if required { "required" } else { "unset" }.to_string()
-                });
+                },
+                |value| format!("`{}`", markdown_cell(&value.to_string())),
+            );
             let allowed = leaf
                 .get("allowedValues")
                 .and_then(Value::as_array)
-                .map(|values| {
+                .map_or_default(|values| {
                     values
                         .iter()
                         .map(|value| format!("`{}`", markdown_cell(&value.to_string())))
                         .collect::<Vec<_>>()
                         .join(", ")
-                })
-                .unwrap_or_default();
-            output.push_str(&format!(
-                "| `{rule}` | `{child_path}` | {} | {default} | {} | {allowed} |\n",
+                });
+            writeln!(
+                output,
+                "| `{rule}` | `{child_path}` | {} | {default} | {} | {allowed} |",
                 markdown_cell(leaf["type"].as_str().unwrap_or("")),
                 markdown_cell(leaf["description"].as_str().unwrap_or("")),
-            ));
+            )
+            .expect("writing to a string cannot fail");
             render_option_rows(root, property, rule, &child_path, output);
         }
     } else if let Some(items) = resolved.get("items") {
@@ -616,7 +605,7 @@ fn rule_options_markdown(document: &str, schemas: &[(&str, Value)]) -> Result<St
         }
         render_option_rows(schema, schema, rule, "", &mut output);
     }
-    output.push_str(&format!("\n{OPTIONS_END}{after}"));
+    write!(output, "\n{OPTIONS_END}{after}").expect("writing to a string cannot fail");
     Ok(output)
 }
 
@@ -666,7 +655,10 @@ fn walk_config_schema(root: &Value, node: &Value, path: &str, out: &mut Vec<Valu
     }
 
     if let Some(Value::Object(props)) = resolved.get("properties") {
-        if path.ends_with(".rules") {
+        if path
+            .rsplit_once('.')
+            .is_some_and(|(_, section)| section == "rules")
+        {
             emit_rules_section(root, resolved, path, out);
             return;
         }
@@ -792,7 +784,7 @@ pub(crate) fn run(check: bool, falcon_bin: Option<PathBuf>) -> Result<(), String
     let cli_json = serde_json::to_string_pretty(&cli_reference_json(falcon_cli::args::command()))
         .expect("serialize cli.json");
     let config_ref = config_reference_json(&root);
-    let config_ref_count = config_ref.as_array().map(|a| a.len()).unwrap_or(0);
+    let config_ref_count = config_ref.as_array().map_or(0, Vec::len);
     let config_ref_json =
         serde_json::to_string_pretty(&config_ref).expect("serialize config-reference.json");
     let configuration_path = root.join("docs/configuration.md");
@@ -967,8 +959,10 @@ fn fixture_diagnostics(
             {
                 let relative = Path::new(&d.file_path)
                     .strip_prefix(cross_file_dir)
-                    .map(|path| path.to_string_lossy().replace('\\', "/"))
-                    .unwrap_or_else(|_| d.file_path.clone());
+                    .map_or_else(
+                        |_| d.file_path.clone(),
+                        |path| path.to_string_lossy().replace('\\', "/"),
+                    );
                 let source = cross_file_sources
                     .iter()
                     .find(|(path, _)| path == &relative)
@@ -1368,10 +1362,12 @@ mod tests {
             assert!(directory.is_dir(), "{rule} must have project examples");
             assert!(
                 recursive_files(&directory).iter().any(|file| {
-                    file.extension()
-                        .is_some_and(|extension| extension == "dart")
-                        && !crate::corpus::parse_expectations(&fs::read_to_string(file).unwrap())
-                            .is_empty()
+                    file.extension().is_some_and(|extension| {
+                        extension
+                            .to_str()
+                            .is_some_and(|extension| extension.eq_ignore_ascii_case("dart"))
+                    }) && !crate::corpus::parse_expectations(&fs::read_to_string(file).unwrap())
+                        .is_empty()
                 }),
                 "{rule} project fixtures must contain expected diagnostics"
             );
@@ -1413,7 +1409,7 @@ mod tests {
         );
         assert_eq!(
             description,
-            "Flags BuildContext use after an asynchronous gap without a mounted guard."
+            "Flags `BuildContext` use after an asynchronous gap without a mounted guard."
         );
     }
 
@@ -1488,7 +1484,7 @@ mod tests {
         );
     }
     fn run(input: &[&str]) -> Vec<String> {
-        let mut lines: Vec<String> = input.iter().map(|s| s.to_string()).collect();
+        let mut lines: Vec<String> = input.iter().map(ToString::to_string).collect();
         strip_provenance(&mut lines);
         lines
     }

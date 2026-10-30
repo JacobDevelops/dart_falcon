@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn retention_barriers_and_expiry_preserve_exact_diagnostics() {
-        let source = r#"
+        let source = r"
 class Disposable {
   Disposable.discarded();
   Disposable.kept();
@@ -203,7 +203,7 @@ void f() {
   '${new Disposable.interpolation()}';
   new Disposable.after();
 }
-"#;
+";
         let diagnostics = crate::lint::test_support::diagnostics(
             "avoid-undisposed-instances",
             &AvoidUndisposedInstances,

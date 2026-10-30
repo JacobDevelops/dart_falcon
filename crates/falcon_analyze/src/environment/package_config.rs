@@ -32,6 +32,7 @@ pub struct PackageConfig {
 
 impl PackageConfig {
     /// The nearest `.dart_tool/package_config.json` at or above `directory`.
+    #[must_use]
     pub fn discover(directory: &Path) -> Option<PathBuf> {
         directory
             .ancestors()
@@ -48,6 +49,7 @@ impl PackageConfig {
     /// Read and parse the configuration at `path`; `None` when unreadable or
     /// not a version-2 configuration. Package roots are canonicalized so they
     /// compare equal to the canonical paths of loaded files.
+    #[must_use]
     pub fn load(path: &Path) -> Option<Self> {
         let text = std::fs::read_to_string(path).ok()?;
         let mut config = Self::parse(path, &text)?;
@@ -64,6 +66,7 @@ impl PackageConfig {
 
     /// Parse configuration `text` read from `path`. Relative URIs resolve
     /// against the directory containing `path`.
+    #[must_use]
     pub fn parse(path: &Path, text: &str) -> Option<Self> {
         Self::parse_with_report(path, text, |_| {})
     }
@@ -131,11 +134,13 @@ impl PackageConfig {
         })
     }
 
+    #[must_use]
     pub fn package(&self, name: &str) -> Option<&ConfiguredPackage> {
         self.packages.iter().find(|package| package.name == name)
     }
 
     /// The package whose root is the longest ancestor of `path`.
+    #[must_use]
     pub fn package_containing(&self, path: &Path) -> Option<&ConfiguredPackage> {
         let path = canonical_or_lexical(&absolute(path));
         self.package_containing_canonical(&path)
@@ -149,6 +154,7 @@ impl PackageConfig {
     }
 
     /// The package whose library root is the longest ancestor of `path`.
+    #[must_use]
     pub fn package_library_containing(&self, path: &Path) -> Option<&ConfiguredPackage> {
         let path = canonical_or_lexical(&absolute(path));
         self.package_library_containing_canonical(&path)
@@ -166,6 +172,7 @@ impl PackageConfig {
 
     /// The file a `package:` URI names; `None` for unknown packages and paths
     /// escaping the package's library root.
+    #[must_use]
     pub fn resolve_package_uri(&self, uri: &str) -> Option<PathBuf> {
         let (name, rest) = uri.strip_prefix("package:")?.split_once('/')?;
         let package = self.package(name)?;
@@ -175,6 +182,7 @@ impl PackageConfig {
 
     /// The language version of a file at `path` from its package entry; the
     /// analyzer applies [`LanguageVersion::CURRENT`] when there is none.
+    #[must_use]
     pub fn language_version(&self, path: &Path) -> Option<LanguageVersion> {
         self.package_containing(path)?.language_version
     }
@@ -189,9 +197,10 @@ pub(crate) fn absolute(path: &Path) -> PathBuf {
     if path.is_absolute() {
         lexical_normalize(path)
     } else {
-        std::env::current_dir()
-            .map(|cwd| lexical_normalize(&cwd.join(path)))
-            .unwrap_or_else(|_| lexical_normalize(path))
+        std::env::current_dir().map_or_else(
+            |_| lexical_normalize(path),
+            |cwd| lexical_normalize(&cwd.join(path)),
+        )
     }
 }
 
@@ -247,6 +256,7 @@ pub fn percent_encode(text: &str, output: &mut String) {
 
 /// Decode the `%XX` escapes of a URI component; `None` when malformed or
 /// not UTF-8.
+#[must_use]
 pub fn percent_decode(text: &str) -> Option<String> {
     if !text.contains('%') {
         return Some(text.to_string());

@@ -78,7 +78,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             && matches!(cascade.object().unparenthesized(), Expr::This(_))
         {
             self.this_cascade_sections
-                .extend(cascade.sections().map(|section| section.span()));
+                .extend(cascade.sections().map(CascadeSection::span));
         }
         if let Expr::Field(field) = node {
             let object = field.object();

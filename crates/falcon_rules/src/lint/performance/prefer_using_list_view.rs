@@ -1,9 +1,9 @@
-//! Suggests considering ListView for a SingleChildScrollView containing a plain
+//! Suggests considering `ListView` for a `SingleChildScrollView` containing a plain
 //! Flutter Column with at least two unconditional children in a list literal.
 //! Spreads, control-flow elements and dynamic lists do not establish that minimum.
 //! This is not a layout-neutral replacement: preserve the
-//! Column's child alignment and scroll view's padding explicitly. ListView
-//! stretches children across the cross axis and adds MediaQuery padding by default.
+//! Column's child alignment and scroll view's padding explicitly. `ListView`
+//! stretches children across the cross axis and adds `MediaQuery` padding by default.
 //! For the default Column alignment, wrap each list child in an Align with
 //! Alignment.topCenter; use the original scroll padding, or EdgeInsets.zero
 //! when none was supplied. Review constraints and child lifecycle separately.

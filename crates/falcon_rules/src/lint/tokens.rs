@@ -26,6 +26,7 @@ pub(crate) fn preceding_trivia<'a>(
 mod tests {
     use super::{preceding_trivia, significant_tokens_in};
     use falcon_syntax::cst::Span;
+    use falcon_syntax::cst::SyntaxToken;
 
     #[test]
     fn source_tokens_preserve_interpolation_tokens_and_comments() {
@@ -36,14 +37,11 @@ mod tests {
         assert!(tokens().any(|token| token.text() == "call"));
         assert!(tokens().any(|token| token.text() == "("));
         assert!(tokens().all(|token| !token.is_trivia()));
-        let comments: Vec<_> = tree
-            .comment_tokens(source)
-            .map(|token| token.text())
-            .collect();
+        let comments: Vec<_> = tree.comment_tokens(source).map(SyntaxToken::text).collect();
         assert_eq!(comments, ["// outer", "/* inner */"]);
         let before = |offset| {
             preceding_trivia(tree.tokens(source), offset)
-                .map(|token| token.text())
+                .map(SyntaxToken::text)
                 .collect::<Vec<_>>()
         };
         assert_eq!(before(source.find("final").unwrap()), ["\n", "// outer"]);

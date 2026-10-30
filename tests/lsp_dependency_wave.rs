@@ -1,8 +1,9 @@
 //! The language server must survive a wide dependency export wave on hosts with
 //! few processors, where Rayon's global pool has one or two small-stack workers.
 
+use std::fmt::Write as _;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
@@ -43,9 +44,10 @@ fn write_fixture(root: &Path) {
         &root.join(format!("dep/lib/src/c{EXPORTS}.dart")),
         &format!("class C{EXPORTS} {{}}\nint last() => {EXPORTS};\n"),
     );
-    let exports: String = (1..=EXPORTS)
-        .map(|index| format!("export 'src/c{index}.dart';\n"))
-        .collect();
+    let mut exports = String::new();
+    for index in 1..=EXPORTS {
+        writeln!(exports, "export 'src/c{index}.dart';").unwrap();
+    }
     write(&root.join("dep/lib/all.dart"), &exports);
     write(
         &root.join("app/pubspec.yaml"),

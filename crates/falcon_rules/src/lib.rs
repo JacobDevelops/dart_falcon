@@ -48,22 +48,19 @@ pub fn load_config(path: &Path) -> Result<LoadedConfig, ConfigError> {
 ///
 /// Returns an error when a discovered configuration cannot be loaded.
 pub fn load_or_default(start_dir: &Path) -> Result<LoadedConfig, ConfigError> {
-    match falcon_config::find_config(start_dir) {
-        Some(path) => {
-            let mut loaded = load_config(&path)?;
-            if falcon_config::is_home_config(&path) {
-                loaded.config.resolve_paths(start_dir);
-            }
-            Ok(loaded)
+    if let Some(path) = falcon_config::find_config(start_dir) {
+        let mut loaded = load_config(&path)?;
+        if falcon_config::is_home_config(&path) {
+            loaded.config.resolve_paths(start_dir);
         }
-        None => {
-            let mut config = FalconConfig::default();
-            config.resolve_paths(start_dir);
-            canonicalize_loaded_config(LoadedConfig {
-                config,
-                warnings: Vec::new(),
-            })
-        }
+        Ok(loaded)
+    } else {
+        let mut config = FalconConfig::default();
+        config.resolve_paths(start_dir);
+        canonicalize_loaded_config(LoadedConfig {
+            config,
+            warnings: Vec::new(),
+        })
     }
 }
 
@@ -384,6 +381,7 @@ fn visit_config_rules(
 }
 
 /// Whether a registered rule needs semantic resolution; unknown names return false.
+#[must_use]
 pub fn rule_requires_resolution(name: &str) -> bool {
     meta_for(name).is_some_and(|meta| {
         matches!(
@@ -400,6 +398,7 @@ pub fn rule_requires_resolution(name: &str) -> bool {
 }
 
 /// Whether any enabled rule in the registry needs semantic resolution.
+#[must_use]
 pub fn requires_resolution(registry: &RuleRegistry) -> bool {
     registry
         .rules()
@@ -408,6 +407,7 @@ pub fn requires_resolution(registry: &RuleRegistry) -> bool {
 }
 
 /// Whether an enabled cross-file rule needs semantic resolution.
+#[must_use]
 pub fn cross_file_requires_resolution(config: &FalconConfig) -> bool {
     enabled_cross_file_rules(config).any(|(_, _, needs_resolution)| needs_resolution)
 }
@@ -438,6 +438,7 @@ pub fn build_registry(config: &FalconConfig) -> RuleRegistry {
     registry
 }
 
+#[must_use]
 pub fn build_cross_file_registry(config: &FalconConfig) -> CrossFileRuleRegistry {
     let mut registry = CrossFileRuleRegistry::new();
     for (name, make, _) in enabled_cross_file_rules(config) {
@@ -519,6 +520,7 @@ fn to_severity(sev: ResolvedSeverity) -> Severity {
 }
 
 /// Return registry validation warnings without printing or constructing rules.
+#[must_use]
 pub fn config_warnings(config: &FalconConfig) -> Vec<String> {
     let mut warnings = Vec::new();
     check_rule_groups(
@@ -583,6 +585,7 @@ fn check_rule_groups(rules: &Rules, ctx: &str, section: Section, warnings: &mut 
     }
 }
 
+#[must_use]
 pub fn all_rules() -> Vec<(&'static str, Box<dyn Rule>)> {
     RULE_METADATA
         .iter()
@@ -593,6 +596,7 @@ pub fn all_rules() -> Vec<(&'static str, Box<dyn Rule>)> {
         .collect()
 }
 
+#[must_use]
 pub fn all_cross_file_rules() -> Vec<(&'static str, Box<dyn CrossFileRule>)> {
     RULE_METADATA
         .iter()
@@ -700,7 +704,10 @@ mod tests {
             }))
             .expect("valid config")
         };
-        assert!(config_warnings(&config("security")).is_empty());
+        assert_eq!(
+            config_warnings(&config("security")),
+            [] as [std::string::String; 0]
+        );
         let warnings = config_warnings(&config("suspicious"));
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("`secure-pubspec-urls`"));

@@ -1,4 +1,4 @@
-use super::*;
+use super::{ClosureReturns, DeclarationIdentity, Expr, ResolvedType, Visitor};
 use crate::resolve::semantic::ResolvedTypeKind;
 
 pub(super) struct CollectionTypes<'a, 'model, L> {
@@ -22,9 +22,11 @@ impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
         self.lexical.environment.push_scope();
         match condition {
             IfCondition::Expr(expression) => {
-                self.lexical
-                    .flow
-                    .assume_condition(&mut self.lexical.environment, expression, truth)
+                self.lexical.flow.assume_condition(
+                    &mut self.lexical.environment,
+                    expression,
+                    truth,
+                );
             }
             IfCondition::Case(case) if truth => {
                 let expression = case.expr();
@@ -50,7 +52,7 @@ impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
                 case.pattern(),
                 false,
             ),
-            _ => {}
+            IfCondition::Case(_) => {}
         }
         visit(self);
         self.lexical.environment = saved;
@@ -71,18 +73,19 @@ impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
                 let var_type = binding.var_type();
                 let name = binding.name();
                 let iterable = binding.iterable();
-                let ty = var_type
-                    .map(|ty| {
+                let ty = var_type.map_or_else(
+                    || {
+                        self.lexical
+                            .flow
+                            .iterable_element(&self.lexical.infer(iterable, None), is_await)
+                    },
+                    |ty| {
                         self.lexical
                             .flow
                             .model
                             .resolve_type_in(ty, self.lexical.flow.type_parameters)
-                    })
-                    .unwrap_or_else(|| {
-                        self.lexical
-                            .flow
-                            .iterable_element(&self.lexical.infer(iterable, None), is_await)
-                    });
+                    },
+                );
                 self.lexical.environment.declare(name.name().to_owned(), ty);
             }
             Some(ForInit::PatternForIn(binding)) => {
@@ -111,7 +114,7 @@ impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
     fn spread(&mut self, expression: Expr<'_>, map: bool, null_aware: bool) {
         let context = self.contexts[0].map(|first| ResolvedType {
             kind: ResolvedTypeKind::Interface {
-                occurrence: Default::default(),
+                occurrence: super::FunctionTypeAlias::default(),
                 identity: DeclarationIdentity::sdk(
                     "dart:core",
                     if map { "Map" } else { "Iterable" },
@@ -171,7 +174,7 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for CollectionTy
         use falcon_syntax::cst::ElementKind;
         match element.kind() {
             ElementKind::Expression(expression) => {
-                self.components[0].push(self.lexical.infer(expression, self.contexts[0]))
+                self.components[0].push(self.lexical.infer(expression, self.contexts[0]));
             }
             ElementKind::NullAware(element) => self.components[0].push(
                 self.lexical
@@ -203,7 +206,7 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for CollectionTy
                 else_element,
             } => {
                 self.branch(condition, true, |visitor| {
-                    visitor.visit_element(then_element)
+                    visitor.visit_element(then_element);
                 });
                 if let Some(element) = else_element {
                     self.branch(condition, false, |visitor| visitor.visit_element(element));
@@ -211,8 +214,8 @@ impl<'tree, L: Fn(&str) -> Option<ResolvedType>> Visitor<'tree> for CollectionTy
             }
             ElementKind::For { header, body } => {
                 self.loop_body(header, element.is_await(), |visitor| {
-                    visitor.visit_element(body)
-                })
+                    visitor.visit_element(body);
+                });
             }
         }
     }

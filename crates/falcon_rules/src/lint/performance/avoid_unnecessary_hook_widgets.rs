@@ -11,11 +11,11 @@
 //! in other libraries are not visible and must be checked before conversion.
 //! Indirect hooks through overloaded operators or setters are not tracked.
 
-use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
-    SemanticModel, Truth, TypeRelation,
+    AnalyzeContext, DeclarationIdentity, MemberKind, ResolvedType, ResolvedTypeView, Rule,
+    RulePreparation, SemanticModel, Truth, TypeRelation,
 };
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -62,20 +62,17 @@ impl Rule for AvoidUnnecessaryHookWidgets {
                     .into_iter()
                     .flat_map(|library| library.siblings().iter().copied()),
             );
-            if programs
-                .flat_map(|program| program.declarations())
-                .any(|declaration| {
-                    let superclass = match declaration {
-                        TopLevelDecl::Class(class) => class.extends(),
-                        TopLevelDecl::ClassTypeAlias(alias) => Some(alias.superclass()),
-                        _ => None,
-                    };
-                    superclass.is_some_and(|superclass| {
-                        matches!(model.resolve_type(superclass).view(),
+            if programs.flat_map(Program::declarations).any(|declaration| {
+                let superclass = match declaration {
+                    TopLevelDecl::Class(class) => class.extends(),
+                    TopLevelDecl::ClassTypeAlias(alias) => Some(alias.superclass()),
+                    _ => None,
+                };
+                superclass.is_some_and(|superclass| {
+                    matches!(model.resolve_type(superclass).view(),
                         ResolvedTypeView::Interface { identity, .. } if identity == &class_identity)
-                    })
                 })
-            {
+            }) {
                 continue;
             }
             for member in class.members() {
@@ -162,7 +159,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 }) {
                     return true;
                 }
-                state.signatures.relation(&ResolvedType::interface_identity(identity), TypeRelation::SubtypeOfDeclaration(&self.widget), &state.model) != Truth::Yes
+                state.signatures.relation(
+                    &ResolvedType::interface_identity(identity),
+                    TypeRelation::SubtypeOfDeclaration(&self.widget),
+                    &state.model,
+                ) != Truth::Yes
             }),
             Expr::Cascade(_) => true,
             _ => getter_read(expression, state),
@@ -182,7 +183,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             .into_iter()
             .filter(|candidate| !candidate.needed)
             .map(|candidate| {
-                self.ctx.diagnostic("This widget does not use hooks; replace it with a regular widget.", candidate.report)
+                self.ctx.diagnostic(
+                    "This widget does not use hooks; replace it with a regular widget.",
+                    candidate.report,
+                )
             })
             .collect()
     }

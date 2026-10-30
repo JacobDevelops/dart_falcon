@@ -9,11 +9,11 @@
 
 use std::collections::HashSet;
 
-use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{
-    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, ResolvedTypeView, Rule, RulePreparation,
-    resolve_new_constructor,
+    AnalyzeContext, DeclarationIdentity, QualifiedName, ResolvedType, ResolvedTypeView, Rule,
+    RulePreparation, resolve_new_constructor,
 };
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -44,9 +44,9 @@ impl Rule for AvoidWeakCryptographicAlgorithms {
                                 }),
                             span.end,
                         );
-                        let first = members.next().map_or(
-                            Span::new(declaration_span.end, declaration_span.end),
-                            |member| member.span(),
+                        let first = members.next().map_or_else(
+                            || Span::new(declaration_span.end, declaration_span.end),
+                            ClassMember::span,
                         );
                         let end = members
                             .next_back()
@@ -122,7 +122,10 @@ impl<'a> SemanticRuleVisitor<'a> for WeakCrypto<'a> {
         if let Some(identity) = target
             && self.is_weak(&identity)
         {
-            self.diagnostics.push(self.ctx.diagnostic("Avoid weak cryptographic algorithms. Use a modern hash or cipher instead.", node.span()));
+            self.diagnostics.push(self.ctx.diagnostic(
+                "Avoid weak cryptographic algorithms. Use a modern hash or cipher instead.",
+                node.span(),
+            ));
         }
     }
 

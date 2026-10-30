@@ -1,11 +1,30 @@
-use super::*;
+use super::{
+    Annotation, ArgList, AssertStmt, AstChildren, Block, BreakStmt, CallExpr, CascadeExpr,
+    CascadeOp, CascadeSection, CatchClause, ClassDecl, ClassMember, ClassTypeAliasDecl,
+    ConfigurableUri, ConstPattern, ConstPatternValue, ConstructorDecl, ConstructorInitializer,
+    ConstructorRef, ContinueStmt, DartType, DoWhileStmt, EffectiveMembers, Element, ElementKind,
+    EnumDecl, EnumVariant, ErrorNode, ExportDirective, Expr, ExprStmt, ExtensionDecl,
+    ExtensionTypeDecl, FieldDecl, ForHeader, ForInit, ForStmt, FormalParam, FormalParamList,
+    FunctionBody, FunctionDecl, FunctionKind, FunctionType, FunctionTypeParam,
+    GenericInstantiationExpr, GetterDecl, Identifier, IfCondition, IfStmt, ImportCombinator,
+    ImportDirective, LabeledStmt, LibraryDirective, ListExpr, ListPattern, ListPatternElement,
+    LiteralPattern, LiteralPatternValue, LocalFuncDecl, LocalVarDecl, MapEntry, MapExpr,
+    MapPattern, MapPatternEntry, MethodDecl, MixinClassDecl, MixinDecl, NamedArg, NamedRecordField,
+    NamedType, ObjectPattern, ObjectPatternField, OperatorDecl, PartDirective, PartOfDirective,
+    Pattern, PatternAssignStmt, PatternDeclaration, PrimaryConstructor, PrimaryConstructorBody,
+    Program, RecordField, RecordPattern, RecordPatternField, RecordType, RedirectedConstructor,
+    ReturnStmt, SetExpr, SetterDecl, Span, Stmt, StringInterpolation, StringLitNode, SwitchCase,
+    SwitchCaseKind, SwitchExprArm, SwitchStmt, SyntaxNode, ThrowStmt, TopLevelDecl,
+    TopLevelVarDecl, TryCatchStmt, TypeAliasDecl, TypeParam, VarDeclarator, WhileStmt, YieldStmt,
+};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StatementListKind {
     Block,
     SwitchCase,
 }
 
-pub fn declared_member_body<'a>(member: ClassMember<'a>) -> Option<(FunctionBody<'a>, Span)> {
+#[must_use]
+pub fn declared_member_body(member: ClassMember<'_>) -> Option<(FunctionBody<'_>, Span)> {
     let (body, span) = match member {
         ClassMember::Method(n) => (n.body()?, n.span()),
         ClassMember::Constructor(n) => (n.body()?, n.span()),
@@ -18,7 +37,8 @@ pub fn declared_member_body<'a>(member: ClassMember<'a>) -> Option<(FunctionBody
     Some((body, span))
 }
 
-pub fn declared_member_name<'a>(member: ClassMember<'a>, _source: &str) -> Option<Span> {
+#[must_use]
+pub fn declared_member_name(member: ClassMember<'_>, _source: &str) -> Option<Span> {
     declared_member_body(member)?;
     Some(match member {
         ClassMember::Method(n) => n.name().span(),
@@ -624,7 +644,7 @@ fn walk_class_header<'a, V: Visitor<'a>>(
     v: &mut V,
     node: SyntaxNode<'a>,
     name: Identifier<'a>,
-    members: EffectiveMembers<'a>,
+    members: &EffectiveMembers<'a>,
 ) {
     for annotation in AstChildren::new(node) {
         v.visit_annotation(annotation);
@@ -640,7 +660,7 @@ fn walk_class_header<'a, V: Visitor<'a>>(
 }
 
 pub fn walk_class_decl<'a, V: Visitor<'a>>(v: &mut V, node: ClassDecl<'a>) {
-    walk_class_header(v, node.syntax(), node.name(), node.element_members());
+    walk_class_header(v, node.syntax(), node.name(), &node.element_members());
     if let Some(sup) = node.extends() {
         v.visit_dart_type(sup);
     }
@@ -688,7 +708,7 @@ pub fn walk_mixin_decl<'a, V: Visitor<'a>>(v: &mut V, node: MixinDecl<'a>) {
 }
 
 pub fn walk_mixin_class<'a, V: Visitor<'a>>(v: &mut V, node: MixinClassDecl<'a>) {
-    walk_class_header(v, node.syntax(), node.name(), node.element_members());
+    walk_class_header(v, node.syntax(), node.name(), &node.element_members());
     if let Some(sup) = node.extends() {
         v.visit_dart_type(sup);
     }
@@ -704,7 +724,7 @@ pub fn walk_mixin_class<'a, V: Visitor<'a>>(v: &mut V, node: MixinClassDecl<'a>)
 }
 
 pub fn walk_enum_decl<'a, V: Visitor<'a>>(v: &mut V, node: EnumDecl<'a>) {
-    walk_class_header(v, node.syntax(), node.name(), node.element_members());
+    walk_class_header(v, node.syntax(), node.name(), &node.element_members());
     for t in node.with_clause() {
         v.visit_dart_type(t);
     }
@@ -734,7 +754,7 @@ pub fn walk_extension_decl<'a, V: Visitor<'a>>(v: &mut V, node: ExtensionDecl<'a
 }
 
 pub fn walk_extension_type<'a, V: Visitor<'a>>(v: &mut V, node: ExtensionTypeDecl<'a>) {
-    walk_class_header(v, node.syntax(), node.name(), node.element_members());
+    walk_class_header(v, node.syntax(), node.name(), &node.element_members());
     for t in node.implements() {
         v.visit_dart_type(t);
     }
@@ -1141,7 +1161,7 @@ fn walk_chain<'a, V: Visitor<'a>, E, X, const EXITS: bool>(
     }
 }
 
-#[inline(always)]
+#[inline]
 fn schedule_expr_children<'a, V: Visitor<'a>>(
     v: &mut V,
     node: Expr<'a>,
@@ -1370,11 +1390,11 @@ pub fn walk_pattern<'a, V: Visitor<'a>>(v: &mut V, node: Pattern<'a>) {
         }
         Pattern::NullCheck(n) => {
             let inner = n.inner();
-            v.visit_pattern(inner)
+            v.visit_pattern(inner);
         }
         Pattern::NullAssert(n) => {
             let inner = n.inner();
-            v.visit_pattern(inner)
+            v.visit_pattern(inner);
         }
         Pattern::ParenPattern(n) => {
             let inner = n.inner();
@@ -1981,6 +2001,7 @@ pub fn for_each_stmt_in_program<'a>(program: Program<'a>, f: impl FnMut(Stmt<'a>
     Statements(f).visit_program(program);
 }
 
+#[must_use]
 pub fn bound_names(pattern: Pattern<'_>) -> Vec<Identifier<'_>> {
     let mut names = Vec::new();
     collect_bound_names(pattern, &mut names);

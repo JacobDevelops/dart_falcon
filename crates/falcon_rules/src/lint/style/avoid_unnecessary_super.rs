@@ -109,10 +109,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             return;
         };
         if !self.closed.contains(identity.name())
-            || !state
+            || state
                 .signatures
-                .declaration(identity)
-                .is_some_and(|facts| !facts.has_subclass_in_library)
+                .declaration(identity).is_none_or(|facts| facts.has_subclass_in_library)
         {
             return;
         }

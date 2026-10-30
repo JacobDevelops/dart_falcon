@@ -35,11 +35,11 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
             _ => return,
         }
         .unparenthesized();
-        if !node
+        if node
             .syntax()
             .ancestors()
             .find_map(MethodDecl::cast)
-            .is_some_and(|method| !method.is_static())
+            .is_none_or(MethodDecl::is_static)
         {
             return;
         }

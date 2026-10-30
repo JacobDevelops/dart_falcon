@@ -20,10 +20,13 @@ impl std::fmt::Display for SourceTooLarge {
 impl std::error::Error for SourceTooLarge {}
 
 /// Distinguish rejected source sizes from other read errors, including invalid UTF-8.
+#[must_use]
 pub fn is_source_too_large(error: &io::Error) -> bool {
-    error
-        .get_ref()
-        .is_some_and(|cause| cause.is::<SourceTooLarge>())
+    error.get_ref().is_some_and(
+        <dyn std::error::Error + std::marker::Send + std::marker::Sync + 'static>::is::<
+            SourceTooLarge,
+        >,
+    )
 }
 
 /// Validate a UTF-8 byte length before constructing compact syntax coordinates.
@@ -41,12 +44,15 @@ pub fn check_source_size(bytes: u64) -> io::Result<()> {
 
 /// Read source text, rejecting oversized files before allocating their contents.
 /// The bounded read and final check also cover files growing after metadata lookup.
+///
+/// # Errors
+/// Returns an error for unreadable files, invalid UTF-8, oversized sources, or failed allocation.
 pub fn read_source(path: &Path) -> io::Result<String> {
     let file = std::fs::File::open(path)?;
     let bytes = file.metadata()?.len();
     check_source_size(bytes)?;
     let mut source = String::new();
-    source.try_reserve_exact(bytes as usize)?;
+    source.try_reserve_exact(usize::try_from(bytes).map_err(io::Error::other)?)?;
     file.take(u64::from(u32::MAX) + 1)
         .read_to_string(&mut source)?;
     check_source_size(source.len() as u64)?;

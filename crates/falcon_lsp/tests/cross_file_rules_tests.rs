@@ -50,7 +50,7 @@ impl TestClient {
             config_path: Some(config_path),
         };
         let server = std::thread::spawn(move || {
-            run_with_connection(server_conn, options).expect("server loop failed");
+            run_with_connection(&server_conn, &options).expect("server loop failed");
         });
         let mut this = Self {
             client: client_conn,
@@ -146,7 +146,9 @@ impl TestClient {
                     );
                     return out;
                 }
-                other => panic!("expected publish or barrier response, got {other:?}"),
+                other @ Message::Request(_) => {
+                    panic!("expected publish or barrier response, got {other:?}")
+                }
             }
         }
     }

@@ -4,7 +4,7 @@
 //! value — non-const variables and fields, formal and closure parameters, for-in
 //! and pattern variables, catch clause bindings, named constructors, and
 //! function, method, getter, and setter names. Consistent casing lets readers
-//! distinguish these from types (UpperCamelCase) and compile-time constants at a
+//! distinguish these from types (`UpperCamelCase`) and compile-time constants at a
 //! glance. Operator names are exempt: they are not identifiers. The check mirrors
 //! the analyzer's `isLowerCamelCase`, including optional trailing underscores
 //! and underscore-digit word boundaries. Field formals are exempt because the

@@ -67,13 +67,25 @@ mod dcl {
         }
     }
 
+    const U32_BASE: f64 = 4_294_967_296.0;
+
+    // Integer spellings are normalized to f64 for comparison with decimal literals.
+    // Split into exact u32 chunks so the only rounding is the required f64 arithmetic.
+    fn integer_as_f64(number: i64) -> f64 {
+        let magnitude = number.unsigned_abs();
+        let high = u32::try_from(magnitude >> 32).expect("shifted u64 fits u32");
+        let low = u32::try_from(magnitude & u64::from(u32::MAX)).expect("masked u64 fits u32");
+        let value = f64::from(high) * U32_BASE + f64::from(low);
+        if number < 0 { -value } else { value }
+    }
+
     fn parse_num(value: &str) -> Option<f64> {
         let v = value.replace('_', "");
         if let Some(hex) = v.strip_prefix("0x").or_else(|| v.strip_prefix("0X")) {
-            return i64::from_str_radix(hex, 16).ok().map(|n| n as f64);
+            return i64::from_str_radix(hex, 16).ok().map(integer_as_f64);
         }
         if let Some(bin) = v.strip_prefix("0b").or_else(|| v.strip_prefix("0B")) {
-            return i64::from_str_radix(bin, 2).ok().map(|n| n as f64);
+            return i64::from_str_radix(bin, 2).ok().map(integer_as_f64);
         }
         v.parse::<f64>().ok()
     }
@@ -85,7 +97,7 @@ mod dcl {
         }
     }
 
-    fn root_name<'a>(expr: Expr<'a>) -> Option<&'a str> {
+    fn root_name(expr: Expr<'_>) -> Option<&str> {
         match expr.unparenthesized() {
             Expr::Ident(id) => Some(id.name()),
             Expr::Field(field) => root_name(field.object()),
@@ -93,9 +105,9 @@ mod dcl {
         }
     }
 
-    fn type_base_name<'a>(dart_type: DartType<'a>) -> Option<&'a str> {
+    fn type_base_name(dart_type: DartType<'_>) -> Option<&str> {
         match dart_type {
-            DartType::Named(n) => n.segments().last().map(|s| s.name()),
+            DartType::Named(n) => n.segments().last().map(Identifier::name),
             _ => None,
         }
     }

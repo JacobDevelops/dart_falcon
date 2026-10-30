@@ -32,6 +32,13 @@ use crate::lint::declarations::has_meta_annotation;
 #[derive(Default)]
 pub struct PublicMemberApiDocs;
 
+pub(crate) enum ApiDeclarationKind {
+    TopLevel,
+    TopLevelFunction,
+    Member { is_static: bool },
+    Constructor { exempt: bool },
+}
+
 pub(crate) struct ApiDeclaration<'a> {
     pub name: &'a str,
     pub span: Span,
@@ -39,11 +46,7 @@ pub(crate) struct ApiDeclaration<'a> {
     pub annotations: AstChildren<'a, Annotation<'a>>,
     pub owner: Option<&'a str>,
     pub kind: Option<MemberKind>,
-    pub is_static: bool,
-    pub is_top_level_function: bool,
-    /// Constructors of enums and of sealed, `abstract final` and `abstract
-    /// interface` classes are not public API.
-    pub exempt_constructor: bool,
+    pub declaration_kind: ApiDeclarationKind,
     /// The declaration's own `@internal` for top-level declarations, the
     /// enclosing declaration's `@internal` for members.
     pub internal: bool,
@@ -95,7 +98,7 @@ fn declaration_candidates<'a>(
             for v in n.declarators() {
                 emit(ApiDeclaration {
                     internal,
-                    ..candidate(v.name(), n.span().start, n.annotations(), None, None, true)
+                    ..candidate(v.name(), n.span().start, n.annotations(), None, None, ApiDeclarationKind::TopLevel)
                 });
             }
             return;
@@ -111,11 +114,11 @@ fn declaration_candidates<'a>(
         annotations.clone(),
         None,
         None,
-        true,
+        ApiDeclarationKind::TopLevel,
     );
     top.internal = is_internal(annotations);
     if let TopLevelDecl::Function(n) = decl {
-        top.is_top_level_function = true;
+        top.declaration_kind = ApiDeclarationKind::TopLevelFunction;
         top.kind = match n.kind() {
             FunctionKind::Getter => Some(MemberKind::Getter),
             FunctionKind::Setter(_) => Some(MemberKind::Setter),
@@ -143,7 +146,7 @@ fn declaration_candidates<'a>(
             constructor.annotations,
             Some(name.name()),
             None,
-            true,
+            ApiDeclarationKind::TopLevel,
         );
         if let Some(body) = body {
             c.span = body.this_span();
@@ -163,8 +166,10 @@ fn member_candidates<'a>(
 ) {
     let mut report = |mut declaration: ApiDeclaration<'a>| {
         declaration.internal = internal;
-        if extension {
-            declaration.is_static = true;
+        if extension
+            && let ApiDeclarationKind::Member { is_static } = &mut declaration.declaration_kind
+        {
+            *is_static = true;
         }
         emit(declaration);
     };
@@ -177,7 +182,9 @@ fn member_candidates<'a>(
                     n.annotations(),
                     Some(name),
                     Some(MemberKind::field(n, v)),
-                    n.is_static(),
+                    ApiDeclarationKind::Member {
+                        is_static: n.is_static(),
+                    },
                 ));
             }
         }
@@ -187,7 +194,9 @@ fn member_candidates<'a>(
             n.annotations(),
             Some(name),
             Some(MemberKind::Method),
-            n.is_static(),
+            ApiDeclarationKind::Member {
+                is_static: n.is_static(),
+            },
         )),
         ClassMember::Getter(n) => report(candidate(
             n.name(),
@@ -195,7 +204,9 @@ fn member_candidates<'a>(
             n.annotations(),
             Some(name),
             Some(MemberKind::Getter),
-            n.is_static(),
+            ApiDeclarationKind::Member {
+                is_static: n.is_static(),
+            },
         )),
         ClassMember::Setter(n) => report(candidate(
             n.name(),
@@ -203,18 +214,19 @@ fn member_candidates<'a>(
             n.annotations(),
             Some(name),
             Some(MemberKind::Setter),
-            n.is_static(),
+            ApiDeclarationKind::Member {
+                is_static: n.is_static(),
+            },
         )),
         ClassMember::Constructor(n) => {
-            let mut c = candidate(
+            let c = candidate(
                 n.constructor_name().unwrap_or(n.name()),
                 n.span().start,
                 n.annotations(),
                 Some(name),
                 None,
-                true,
+                ApiDeclarationKind::Constructor { exempt: closed },
             );
-            c.exempt_constructor = closed;
             report(c);
         }
         ClassMember::Operator(n) => report(ApiDeclaration {
@@ -227,9 +239,7 @@ fn member_candidates<'a>(
             annotations: n.annotations(),
             owner: Some(name),
             kind: Some(MemberKind::Operator),
-            is_static: false,
-            is_top_level_function: false,
-            exempt_constructor: false,
+            declaration_kind: ApiDeclarationKind::Member { is_static: false },
             internal,
         }),
         ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => {}
@@ -242,7 +252,7 @@ fn candidate<'a>(
     annotations: AstChildren<'a, Annotation<'a>>,
     owner: Option<&'a str>,
     kind: Option<MemberKind>,
-    is_static: bool,
+    declaration_kind: ApiDeclarationKind,
 ) -> ApiDeclaration<'a> {
     ApiDeclaration {
         name: name.name(),
@@ -253,9 +263,7 @@ fn candidate<'a>(
         annotations,
         owner,
         kind,
-        is_static,
-        is_top_level_function: false,
-        exempt_constructor: false,
+        declaration_kind,
         internal: false,
     }
 }
@@ -311,14 +319,22 @@ impl Collector<'_> {
         let model = self.model.as_ref();
         if d.name.starts_with('_')
             || d.internal
-            || d.exempt_constructor
-            || (d.is_top_level_function && d.name == "main")
+            || matches!(
+                &d.declaration_kind,
+                ApiDeclarationKind::Constructor { exempt: true }
+            )
+            || (matches!(
+                &d.declaration_kind,
+                ApiDeclarationKind::TopLevelFunction
+            ) && d.name == "main")
             || d.documented(&self.tokens)
         {
             return false;
         }
-        if !d.is_static
-            && let (Some(owner), Some(kind)) = (d.owner, d.kind)
+        if matches!(
+            &d.declaration_kind,
+            ApiDeclarationKind::Member { is_static: false }
+        ) && let (Some(owner), Some(kind)) = (d.owner, d.kind)
         {
             let (Some(model), Some(signatures)) = (model, ctx.signatures()) else {
                 return false;
@@ -425,7 +441,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 variant.annotations(),
                 Some(owner.name),
                 None,
-                true,
+                ApiDeclarationKind::TopLevel,
             );
             declaration.internal = owner.internal;
             self.record(&declaration);
@@ -523,7 +539,13 @@ mod tests {
         assert!(
             declarations
                 .iter()
-                .any(|d| d.owner == Some("Closed") && !d.exempt_constructor)
+                .any(|d| {
+                    d.owner == Some("Closed")
+                        && !matches!(
+                            &d.declaration_kind,
+                            ApiDeclarationKind::Constructor { exempt: true }
+                        )
+                })
         );
         assert!(
             !declarations

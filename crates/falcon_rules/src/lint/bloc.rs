@@ -16,12 +16,7 @@ impl<'a> BlocTypes<'a> {
         Self { program }
     }
 
-    pub(crate) fn is_api_type(
-        &self,
-        ty: &ResolvedType,
-        model: &SemanticModel<'_>,
-        name: &str,
-    ) -> bool {
+    pub(crate) fn is_api_type(ty: &ResolvedType, model: &SemanticModel<'_>, name: &str) -> bool {
         let ResolvedTypeView::Interface { identity, .. } = ty.view() else {
             return false;
         };
@@ -45,7 +40,7 @@ impl<'a> BlocTypes<'a> {
         model: &SemanticModel<'_>,
         name: &str,
     ) -> bool {
-        if self.is_api_type(resolved, model, name) {
+        if Self::is_api_type(resolved, model, name) {
             return true;
         }
         // Only absent external declarations use the import fallback; a local declaration wins.
@@ -196,8 +191,8 @@ impl<'a> BlocTypes<'a> {
         depth: usize,
         allow_cubit: bool,
     ) -> bool {
-        if self.is_api_type(ty, model, "Bloc")
-            || (allow_cubit && self.is_api_type(ty, model, "Cubit"))
+        if Self::is_api_type(ty, model, "Bloc")
+            || (allow_cubit && Self::is_api_type(ty, model, "Cubit"))
         {
             return true;
         }
@@ -360,7 +355,7 @@ fn unresolved_is_shadowed(model: &SemanticModel<'_>, name: QualifiedName<'_>) ->
 }
 
 fn import_exposes(import: ImportDirective<'_>, name: QualifiedName<'_>) -> bool {
-    import.as_name().map(|prefix| prefix.name()) == name.prefix
+    import.as_name().map(Identifier::name) == name.prefix
         && import.combinators().all(|combinator| match combinator {
             ImportCombinator::Show(show) => show.names().any(|entry| entry.name() == name.name),
             ImportCombinator::Hide(hide) => hide.names().all(|entry| entry.name() != name.name),
@@ -469,16 +464,15 @@ impl<'a> StructuralRuleVisitor<'a> for ModelCollector<'a> {
                     supertype, &resolved, &self.model, "Cubit",
                 );
             let index = match (self.kind, is_bloc, is_cubit) {
-                (ModelKind::Event, true, _) => Some(0),
+                (ModelKind::Event, true, _) | (ModelKind::State, false, true) => Some(0),
                 (ModelKind::State, true, _) => Some(1),
-                (ModelKind::State, _, true) => Some(0),
                 _ => None,
             };
             let Some(index) = index else {
                 return StructuralTraversal::SkipChildren;
             };
-            let root = if self.types.is_api_type(&resolved, &self.model, "Bloc")
-                || self.types.is_api_type(&resolved, &self.model, "Cubit")
+            let root = if BlocTypes::is_api_type(&resolved, &self.model, "Bloc")
+                || BlocTypes::is_api_type(&resolved, &self.model, "Cubit")
             {
                 match resolved.arguments().get(index).map(ResolvedType::view) {
                     Some(ResolvedTypeView::Interface { identity, .. }) => Some(identity.clone()),
@@ -562,13 +556,13 @@ impl ModelCollector<'_> {
             else {
                 return None;
             };
-            let index = if self.types.is_api_type(&ty, &self.model, "Bloc") {
+            let index = if BlocTypes::is_api_type(&ty, &self.model, "Bloc") {
                 match self.kind {
                     ModelKind::Event => 0,
                     ModelKind::State => 1,
                 }
             } else if matches!(self.kind, ModelKind::State)
-                && self.types.is_api_type(&ty, &self.model, "Cubit")
+                && BlocTypes::is_api_type(&ty, &self.model, "Cubit")
             {
                 0
             } else {
@@ -629,7 +623,7 @@ pub(crate) fn own_member<'a>(
         .syntax()
         .ancestors()
         .filter_map(MethodDecl::cast)
-        .any(|method| method.is_static())
+        .any(MethodDecl::is_static)
     {
         return false;
     }
@@ -638,8 +632,7 @@ pub(crate) fn own_member<'a>(
     let receiver = state
         .model
         .resolve_name(class.name().name())
-        .map(ResolvedType::interface_identity)
-        .unwrap_or(ResolvedType::UNKNOWN);
+        .map_or(ResolvedType::UNKNOWN, ResolvedType::interface_identity);
     let owner = if is_super {
         state
             .signatures

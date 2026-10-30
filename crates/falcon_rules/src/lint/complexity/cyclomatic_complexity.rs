@@ -142,7 +142,7 @@ impl<'a> StructuralRuleVisitor<'a> for DecisionPoints<'a> {
             Stmt::TryCatch(n) => n.catches().len(),
             Stmt::Switch(n) => n
                 .cases()
-                .flat_map(|case| case.cases())
+                .flat_map(SwitchCase::cases)
                 .map(|kind| match kind {
                     SwitchCaseKind::Pattern(label) => 1 + usize::from(label.guard().is_some()),
                     SwitchCaseKind::Expr(_) => 1,

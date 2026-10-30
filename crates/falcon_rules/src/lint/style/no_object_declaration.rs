@@ -36,8 +36,7 @@ fn is_object_type(ty: DartType<'_>) -> bool {
         DartType::Named(named) => named
             .segments()
             .last()
-            .map(|s| s.name() == "Object")
-            .unwrap_or(false),
+            .is_some_and(|s| s.name() == "Object"),
         _ => false,
     }
 }

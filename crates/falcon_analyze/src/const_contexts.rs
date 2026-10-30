@@ -60,6 +60,7 @@ pub struct ConstContexts {
 }
 
 impl ConstContexts {
+    #[must_use]
     pub fn new(program: Program<'_>) -> Self {
         let mut contexts = Self::default();
         contexts.visit_program(program);
@@ -69,15 +70,18 @@ impl ConstContexts {
         contexts
     }
 
+    #[must_use]
     pub fn contains(&self, span: &Span) -> bool {
         self.implicit.contains(span, true) || self.explicit.contains(span, false)
     }
 
     /// Includes an explicitly constant expression's own root.
+    #[must_use]
     pub fn contains_including_explicit(&self, span: &Span) -> bool {
         self.implicit.contains(span, true) || self.explicit.contains(span, true)
     }
 
+    #[must_use]
     pub fn in_const_constructor_assert(&self, span: &Span) -> bool {
         self.constructor_asserts.contains(span, true)
     }
@@ -90,8 +94,8 @@ impl ConstContexts {
         if keyword == VarKeyword::Const {
             self.implicit.spans.extend(
                 declarators
-                    .filter_map(|declarator| declarator.initializer())
-                    .map(|expr| expr.span()),
+                    .filter_map(falcon_syntax::cst::VarDeclarator::initializer)
+                    .map(falcon_syntax::cst::Expr::span),
             );
         }
     }
@@ -130,8 +134,8 @@ impl<'a> Visitor<'a> for ConstContexts {
     fn visit_enum_decl(&mut self, node: EnumDecl<'a>) {
         self.implicit.spans.extend(
             node.variants()
-                .filter_map(|variant| variant.args())
-                .map(|args| args.span()),
+                .filter_map(falcon_syntax::cst::EnumVariant::args)
+                .map(falcon_syntax::cst::ArgList::span),
         );
         walk_enum_decl(self, node);
     }

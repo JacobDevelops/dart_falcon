@@ -1,7 +1,7 @@
 //! Require Equatable semantics for configured class/file name patterns.
 //! Configure `class-name-pattern` or `file-name-pattern`; without either option,
 //! this rule reports no diagnostics. Already equatable subtypes (including
-//! EquatableMixin users) and unresolved inheritance are conservatively skipped.
+//! `EquatableMixin` users) and unresolved inheritance are conservatively skipped.
 
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, SemanticModel, StructuralRuleVisitor,

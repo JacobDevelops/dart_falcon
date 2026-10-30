@@ -114,13 +114,11 @@ fn emit_for_base(
         if base_name == class_name {
             let message = if let Some(replacement) = &item.use_instead {
                 format!(
-                    "Use `{}` from the design system instead of `{}`.",
-                    replacement, class_name
+                    "Use `{replacement}` from the design system instead of `{class_name}`."
                 )
             } else {
                 format!(
-                    "Use the design system equivalent instead of `{}`.",
-                    class_name
+                    "Use the design system equivalent instead of `{class_name}`."
                 )
             };
 
@@ -140,13 +138,13 @@ mod tests {
 
     #[test]
     fn use_design_system_item_fires_only_when_configured() {
-        let src = r#"
+        let src = r"
     import 'package:flutter/material.dart';
     
     Widget build(BuildContext context) {
       return Container(child: Text('hi'));
     }
-    "#;
+    ";
         let falcon_dart_parser::ParseResult { tree, .. } = parse(src);
         let parsed = Arc::new(ParsedFile {
             source: src.into(),

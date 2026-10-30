@@ -9,7 +9,7 @@ fn collect_check(options: &CheckOptions) -> Result<CheckOutput, String> {
     falcon_cli::collect_check_with_sdk_locator(options, |_| None)
 }
 
-fn run_check(options: CheckOptions) -> i32 {
+fn run_check(options: &CheckOptions) -> i32 {
     falcon_cli::run_check_with_sdk_locator(options, |_| None)
 }
 
@@ -64,7 +64,7 @@ fn oversized_sources_abort_before_partial_workspace_analysis() {
         let error = collect_check(&options).unwrap_err();
         assert!(error.contains(name));
         assert!(error.contains("maximum supported source size"));
-        assert_ne!(run_check(options), 0);
+        assert_ne!(run_check(&options), 0);
     }
 }
 
@@ -106,19 +106,16 @@ fn secure_pubspec_urls_uses_security_configuration_and_rejects_old_group() {
             continue;
         }
         let output = collect_check(&options_for(temp.path(), Some(config_path.clone()))).unwrap();
-        match expected_severity {
-            Some(severity) => {
-                assert_eq!(output.diagnostics.len(), 1, "{group}: {level}");
-                let diagnostic = &output.diagnostics[0];
-                assert_eq!(diagnostic.rule, "secure-pubspec-urls");
-                assert_eq!(diagnostic.severity, severity);
-                assert!(diagnostic.file_path.ends_with("pubspec.yaml"));
-                assert_eq!(output.exit_code, 1);
-            }
-            None => {
-                assert!(output.diagnostics.is_empty(), "{group}: {level}");
-                assert_eq!(output.exit_code, 0);
-            }
+        if let Some(severity) = expected_severity {
+            assert_eq!(output.diagnostics.len(), 1, "{group}: {level}");
+            let diagnostic = &output.diagnostics[0];
+            assert_eq!(diagnostic.rule, "secure-pubspec-urls");
+            assert_eq!(diagnostic.severity, severity);
+            assert!(diagnostic.file_path.ends_with("pubspec.yaml"));
+            assert_eq!(output.exit_code, 1);
+        } else {
+            assert!(output.diagnostics.is_empty(), "{group}: {level}");
+            assert_eq!(output.exit_code, 0);
         }
     }
 }
@@ -464,7 +461,7 @@ fn max_errors_limits_printing_not_collected_diagnostics_or_status() {
         let output = collect_check(&options).unwrap();
         assert!(output.diagnostics.len() >= 2);
         assert_eq!(output.exit_code, 7);
-        assert_eq!(run_check(options), 7);
+        assert_eq!(run_check(&options), 7);
     }
 }
 
@@ -477,7 +474,7 @@ fn test_run_check_with_clean_dart_file_returns_zero() {
         "void main() {\n  const greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
     )
     .unwrap();
-    let exit_code = run_check(CheckOptions {
+    let exit_code = run_check(&CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,
         ..options_for(temp.path(), None)
@@ -494,7 +491,7 @@ fn test_run_check_max_errors_zero() {
         "void main() {\n  const greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
     )
     .unwrap();
-    let exit_code = run_check(CheckOptions {
+    let exit_code = run_check(&CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         max_errors: Some(0),
         quiet: true,
@@ -512,7 +509,7 @@ fn test_run_check_json_format_no_panic() {
         "void main() {\n  const greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
     )
     .unwrap();
-    let exit_code = run_check(CheckOptions {
+    let exit_code = run_check(&CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: false,
         format: OutputFormat::Json,
@@ -530,7 +527,7 @@ fn test_run_check_quiet_mode() {
         "void main() {\n  const greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
     )
     .unwrap();
-    let exit_code = run_check(CheckOptions {
+    let exit_code = run_check(&CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,
         ..options_for(temp.path(), None)
@@ -544,7 +541,7 @@ fn test_run_check_with_config_path_nonexistent_returns_error() {
     use std::path::PathBuf;
     let temp = tempdir().unwrap();
     fs::write(temp.path().join("test.dart"), "void main() {}").unwrap();
-    let exit_code = run_check(CheckOptions {
+    let exit_code = run_check(&CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         config_path: Some(PathBuf::from("/nonexistent/falcon.json")),
         quiet: true,
@@ -567,7 +564,7 @@ fn test_run_check_default_clean_imports_returns_zero() {
     )
     .unwrap();
     fs::write(temp.path().join("foo.dart"), "class Foo {}\n").unwrap();
-    let exit_code = run_check(CheckOptions {
+    let exit_code = run_check(&CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,
         ..options_for(temp.path(), None)
@@ -575,7 +572,7 @@ fn test_run_check_default_clean_imports_returns_zero() {
     assert_eq!(exit_code, 0);
 }
 
-/// Test 8: --exit-code flag used as error_exit_code is wired through (no violations → always 0)
+/// Test 8: --exit-code flag used as `error_exit_code` is wired through (no violations → always 0)
 #[test]
 fn test_run_check_custom_exit_code_no_violations_returns_zero() {
     let temp = tempdir().unwrap();
@@ -584,7 +581,7 @@ fn test_run_check_custom_exit_code_no_violations_returns_zero() {
         "void main() {\n  const greeting = 'hello';\n  assert(greeting.isNotEmpty);\n}\n",
     )
     .unwrap();
-    let exit_code = run_check(CheckOptions {
+    let exit_code = run_check(&CheckOptions {
         paths: vec![temp.path().to_path_buf()],
         quiet: true,
         error_exit_code: 2,
@@ -903,7 +900,7 @@ fn unnecessary_nullable_is_independent_of_enabled_file_rules() {
     assert_eq!(results[0], results[1]);
 }
 
-/// max_errors controls output only; the CLI flag wins over the config value.
+/// `max_errors` controls output only; the CLI flag wins over the config value.
 #[test]
 fn test_config_max_errors_and_cli_precedence() {
     let temp = tempdir().unwrap();
@@ -1152,8 +1149,8 @@ fn write_identity_config(root: &std::path::Path) -> PathBuf {
     config
 }
 
-fn identity_diagnostic_count(options: CheckOptions) -> usize {
-    collect_check(&options)
+fn identity_diagnostic_count(options: &CheckOptions) -> usize {
+    collect_check(options)
         .unwrap()
         .diagnostics
         .iter()
@@ -1181,7 +1178,7 @@ fn package_identity_is_discovered_for_direct_files_with_yaml_name_syntax() {
     .unwrap();
 
     assert_eq!(
-        identity_diagnostic_count(CheckOptions {
+        identity_diagnostic_count(&CheckOptions {
             paths: vec![main, types],
             config_path: Some(write_identity_config(temp.path())),
             quiet: true,
@@ -1205,7 +1202,7 @@ fn package_identity_is_discovered_for_lib_directory_invocation() {
     .unwrap();
 
     assert_eq!(
-        identity_diagnostic_count(CheckOptions {
+        identity_diagnostic_count(&CheckOptions {
             paths: vec![lib],
             config_path: Some(write_identity_config(temp.path())),
             quiet: true,
@@ -1232,7 +1229,7 @@ fn package_identity_supports_nested_multi_package_analysis() {
     }
 
     assert_eq!(
-        identity_diagnostic_count(CheckOptions {
+        identity_diagnostic_count(&CheckOptions {
             paths: vec![temp.path().join("packages")],
             config_path: Some(write_identity_config(temp.path())),
             quiet: true,
@@ -1261,7 +1258,7 @@ fn sibling_workspace_package_name_binds_analyzed_project_file() {
     .unwrap();
 
     assert_eq!(
-        identity_diagnostic_count(CheckOptions {
+        identity_diagnostic_count(&CheckOptions {
             paths: vec![temp.path().to_path_buf()],
             config_path: Some(write_identity_config(temp.path())),
             quiet: true,
@@ -1479,7 +1476,7 @@ fn workspace_reports_include_member_configs_clean_counts_and_lsp_parity() {
         // Display limits must not suppress clean members or change full counts.
         let truncated: Vec<serde_json::Value> =
             serde_json::from_str(&render(OutputFormat::Json, &[])).unwrap();
-        assert!(truncated.is_empty());
+        assert_eq!(truncated, [] as [serde_json::Value; 0]);
         let truncated_text = render(OutputFormat::Text, &[]);
         assert_eq!(
             truncated_text.split_once("Package summary:\n").unwrap().1,
@@ -1756,11 +1753,11 @@ fn workspace_report_subprocess_entrypoint() {
         _ => unreachable!(),
     };
     println!("FALCON_REPORT_START");
-    let exit_code = run_check(CheckOptions {
+    let exit_code = run_check(&CheckOptions {
         paths: vec![root.clone()],
         format,
         baseline: Some(root.join("baseline.json")),
-        max_errors: Some(if format == OutputFormat::Json { 1 } else { 0 }),
+        max_errors: Some(usize::from(format == OutputFormat::Json)),
         ..Default::default()
     });
     println!("FALCON_REPORT_END:{exit_code}");

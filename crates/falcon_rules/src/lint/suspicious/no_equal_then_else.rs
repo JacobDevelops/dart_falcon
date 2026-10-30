@@ -29,7 +29,7 @@ use crate::lint::support::source_equality::normalize;
 
 fn last_stmt_span(stmt: Stmt<'_>) -> Span {
     match stmt {
-        Stmt::Block(b) => b.stmts().last().map(last_stmt_span).unwrap_or(b.span()),
+        Stmt::Block(b) => b.stmts().last().map_or(b.span(), last_stmt_span),
         other => other.span(),
     }
 }

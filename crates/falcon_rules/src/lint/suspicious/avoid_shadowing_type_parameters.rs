@@ -41,7 +41,7 @@ struct Checker<'a, 'ctx> {
 }
 
 impl<'a> Checker<'_, 'a> {
-    fn enter(&mut self, tps: AstChildren<'a, TypeParam<'a>>, kind: &'static str) -> usize {
+    fn enter(&mut self, tps: &AstChildren<'a, TypeParam<'a>>, kind: &'static str) -> usize {
         for tp in tps.clone() {
             for (_, ancestor_kind) in self
                 .scope
@@ -87,7 +87,7 @@ impl<'a> StructuralRuleVisitor<'a> for Checker<'_, 'a> {
             TopLevelDecl::TypeAlias(_) => "typedef",
             TopLevelDecl::Variable(_) | TopLevelDecl::Error(_) => return StructuralTraversal::Continue,
         };
-        self.enter(node.type_params(), kind);
+        self.enter(&node.type_params(), kind);
         StructuralTraversal::Continue
     }
 
@@ -105,7 +105,7 @@ impl<'a> StructuralRuleVisitor<'a> for Checker<'_, 'a> {
                     .map(|parameter| (parameter.name().name(), "method")),
             );
         } else {
-            self.enter(type_params, "method");
+            self.enter(&type_params, "method");
         }
         StructuralTraversal::Continue
     }
@@ -113,7 +113,7 @@ impl<'a> StructuralRuleVisitor<'a> for Checker<'_, 'a> {
     fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         self.save_scope();
         if let Stmt::LocalFunc(local) = node {
-            self.enter(local.type_params(), "function");
+            self.enter(&local.type_params(), "function");
         }
         StructuralTraversal::Continue
     }
@@ -121,21 +121,21 @@ impl<'a> StructuralRuleVisitor<'a> for Checker<'_, 'a> {
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         self.save_scope();
         if let Expr::FuncExpr(function) = node {
-            self.enter(function.type_params(), "function");
+            self.enter(&function.type_params(), "function");
         }
         StructuralTraversal::Continue
     }
 
     fn visit_formal_param(&mut self, node: FormalParam<'a>) -> StructuralTraversal {
         self.save_scope();
-        self.enter(node.type_params(), "parameter");
+        self.enter(&node.type_params(), "parameter");
         StructuralTraversal::Continue
     }
 
     fn visit_dart_type(&mut self, node: DartType<'a>) -> StructuralTraversal {
         self.save_scope();
         if let DartType::Function(function) = node {
-            self.enter(function.type_params(), "function");
+            self.enter(&function.type_params(), "function");
         }
         StructuralTraversal::Continue
     }

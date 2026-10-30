@@ -1,4 +1,4 @@
-//! Cross-file rules — falcon's port of dart_code_linter's `check-unused-files` /
+//! Cross-file rules — falcon's port of `dart_code_linter`'s `check-unused-files` /
 //! `check-unused-code` commands plus a conservative `check-unnecessary-nullable`.
 //! These run in the CLI and LSP cross-file passes (see
 //! `falcon_analyze::CrossFileRule`).

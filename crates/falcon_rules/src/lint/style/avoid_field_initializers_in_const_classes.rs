@@ -79,9 +79,9 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         });
         let first = constructors.next();
         let second = constructors.next();
-        let has_const = first.is_some_and(|constructor| constructor.is_const())
-            || second.is_some_and(|constructor| constructor.is_const())
-            || constructors.any(|constructor| constructor.is_const());
+        let has_const = first.is_some_and(ConstructorDecl::is_const)
+            || second.is_some_and(ConstructorDecl::is_const)
+            || constructors.any(ConstructorDecl::is_const);
         if !has_const {
             return StructuralTraversal::SkipChildren;
         }

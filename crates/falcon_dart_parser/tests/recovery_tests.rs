@@ -2,7 +2,7 @@ use falcon_dart_parser::parse;
 use falcon_syntax::cst::visit::Visitor;
 
 struct Walk;
-impl<'a> Visitor<'a> for Walk {}
+impl Visitor<'_> for Walk {}
 
 #[test]
 fn debug_and_visitor_walk_recovery_shapes_without_panicking() {
@@ -24,7 +24,7 @@ fn debug_and_visitor_walk_recovery_shapes_without_panicking() {
         "async int get x => 1; class C { async int get x => 1; async int operator +(v) => 1; }",
         "base interface mixin class M {} final base int x = 1;",
         "class C { factory {} operator [=(v) {} }",
-        r#"void f(dynamic x) async* {
+        r"void f(dynamic x) async* {
           ; label: while (true) { if (x) continue label; else break label; }
           do { assert(x, 'message'); } while (false);
           for (var i = 0; i < 2; i++) { yield i; }
@@ -56,7 +56,7 @@ fn debug_and_visitor_walk_recovery_shapes_without_panicking() {
           if (x case null) {}
           if (x case true) {}
           if (x case -1.5) {}
-        }"#,
+        }",
         "void f( { ",
     ] {
         let parsed = parse(source);

@@ -116,12 +116,17 @@ impl CrossFileRule for BannedImports {
                 let uris = std::iter::once(import.uri()).chain(
                     import
                         .configurable_uris()
-                        .map(|alternative| alternative.uri()),
+                        .map(falcon_syntax::cst::ConfigurableUri::uri),
                 );
                 for uri in uris {
                     let value = uri.value();
                     let target = if !value.contains(':') || value.starts_with("package:") {
-                        match resolve_directive_uri(&file.path, &value, Some(package), std::slice::from_ref(package)) {
+                        match resolve_directive_uri(
+                            &file.path,
+                            &value,
+                            Some(package),
+                            std::slice::from_ref(package),
+                        ) {
                             Some(ResolvedRef::Path(path)) => package_relative(&path, root, package),
                             _ => None,
                         }

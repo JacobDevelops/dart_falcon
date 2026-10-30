@@ -40,7 +40,7 @@ struct TestClient {
     client: Connection,
     server: Option<JoinHandle<()>>,
     next_id: i32,
-    _config_dir: Option<TempDir>,
+    config_dir: Option<TempDir>,
 }
 
 impl TestClient {
@@ -58,24 +58,20 @@ impl TestClient {
             config_path: Some(config_path),
         };
         let server = std::thread::spawn(move || {
-            run_with_connection(server_conn, options).expect("server loop failed");
+            run_with_connection(&server_conn, &options).expect("server loop failed");
         });
         let mut this = Self {
             client: client_conn,
             server: Some(server),
             next_id: 0,
-            _config_dir: Some(dir),
+            config_dir: Some(dir),
         };
         this.initialize();
         this
     }
 
     fn config_path(&self) -> PathBuf {
-        self._config_dir
-            .as_ref()
-            .unwrap()
-            .path()
-            .join("falcon.json")
+        self.config_dir.as_ref().unwrap().path().join("falcon.json")
     }
 
     fn request<P: serde::Serialize>(&mut self, method: &str, params: P) -> RequestId {
@@ -240,8 +236,8 @@ fn has_rule(params: &PublishDiagnosticsParams, rule: &str) -> bool {
 
 fn code_actions(
     client: &mut TestClient,
-    diagnostics: Vec<lsp_types::Diagnostic>,
-    only: Option<Vec<&str>>,
+    diagnostics: &[lsp_types::Diagnostic],
+    only: Option<&[&str]>,
     range: lsp_types::Range,
 ) -> Vec<lsp_types::CodeAction> {
     let id = client.request(
@@ -352,8 +348,8 @@ fn quick_fixes_honor_context_range_and_effective_safety() {
     let published = client.recv_publish();
     let actions = code_actions(
         &mut client,
-        published.diagnostics.clone(),
-        Some(vec!["quickfix"]),
+        &published.diagnostics,
+        Some(&["quickfix"]),
         full_range(),
     );
     assert_eq!(actions.len(), 2, "{actions:?}");
@@ -396,19 +392,19 @@ fn quick_fixes_honor_context_range_and_effective_safety() {
         .unwrap();
     let selected = code_actions(
         &mut client,
-        vec![quote.clone()],
-        Some(vec!["quickfix"]),
+        std::slice::from_ref(&quote),
+        Some(&["quickfix"]),
         quote.range,
     );
     assert_eq!(selected.len(), 1);
     assert!(selected[0].title.contains("unsafe"));
     let outside = code_actions(
         &mut client,
-        vec![quote],
-        Some(vec!["quickfix"]),
+        std::slice::from_ref(&quote),
+        Some(&["quickfix"]),
         lsp_types::Range::new(Position::new(0, 0), Position::new(0, 0)),
     );
-    assert!(outside.is_empty());
+    assert_eq!(outside, [] as [lsp_types::CodeAction; 0]);
     client.shutdown();
 }
 
@@ -417,12 +413,7 @@ fn generic_fix_all_is_safe_and_unsafe_requires_separate_kind() {
     let mut client = TestClient::start(Duration::ZERO, Some(FIX_CONFIG));
     client.open(DOC_URI, FIX_SOURCE, 3);
     client.recv_publish();
-    let safe = code_actions(
-        &mut client,
-        Vec::new(),
-        Some(vec!["source.fixAll"]),
-        full_range(),
-    );
+    let safe = code_actions(&mut client, &[], Some(&["source.fixAll"]), full_range());
     assert_eq!(safe.len(), 1);
     assert_eq!(
         safe[0].kind.as_ref().unwrap().as_str(),
@@ -433,21 +424,16 @@ fn generic_fix_all_is_safe_and_unsafe_requires_separate_kind() {
     assert!(safe_text.contains("\"hello\""), "{safe_text}");
     let unsafe_actions = code_actions(
         &mut client,
-        Vec::new(),
-        Some(vec!["source.falcon.fixAllUnsafe"]),
+        &[],
+        Some(&["source.falcon.fixAllUnsafe"]),
         full_range(),
     );
     assert_eq!(unsafe_actions.len(), 1);
     let unsafe_text = executed_action_text(&mut client, &unsafe_actions[0], 3, FIX_SOURCE);
     assert!(!unsafe_text.contains("new Object"));
     assert!(unsafe_text.contains("'hello'"), "{unsafe_text}");
-    let unsupported = code_actions(
-        &mut client,
-        Vec::new(),
-        Some(vec!["refactor"]),
-        full_range(),
-    );
-    assert!(unsupported.is_empty());
+    let unsupported = code_actions(&mut client, &[], Some(&["refactor"]), full_range());
+    assert_eq!(unsupported, [] as [lsp_types::CodeAction; 0]);
     client.shutdown();
 }
 
@@ -464,7 +450,10 @@ fn disabled_fix_policy_keeps_diagnostics_without_actions() {
     let published = client.recv_publish();
     assert!(has_rule(&published, "unnecessary-new"));
     assert!(has_rule(&published, "prefer-single-quotes"));
-    assert!(code_actions(&mut client, published.diagnostics, None, full_range()).is_empty());
+    assert_eq!(
+        code_actions(&mut client, &published.diagnostics, None, full_range()),
+        [] as [lsp_types::CodeAction; 0]
+    );
     client.shutdown();
 }
 
@@ -477,8 +466,8 @@ fn code_actions_wait_for_pending_buffer_publication() {
     client.change(DOC_URI, &current, 2);
     let stale = code_actions(
         &mut client,
-        published.diagnostics,
-        Some(vec!["quickfix"]),
+        &published.diagnostics,
+        Some(&["quickfix"]),
         full_range(),
     );
     assert!(
@@ -487,8 +476,8 @@ fn code_actions_wait_for_pending_buffer_publication() {
     );
     let safe = code_actions(
         &mut client,
-        Vec::new(),
-        Some(vec!["source.fixAll.falcon"]),
+        &[],
+        Some(&["source.fixAll.falcon"]),
         full_range(),
     );
     assert!(
@@ -508,12 +497,7 @@ fn cyclic_fix_all_returns_error_instead_of_partial_edits() {
     client.recv_publish();
     // Merely opening a lightbulb must still return an individual quick fix,
     // even though explicitly applying all fixes would cycle.
-    let quick = code_actions(
-        &mut client,
-        Vec::new(),
-        Some(vec!["quickfix"]),
-        full_range(),
-    );
+    let quick = code_actions(&mut client, &[], Some(&["quickfix"]), full_range());
     assert_eq!(quick.len(), 1);
     assert_eq!(quick[0].kind, Some(lsp_types::CodeActionKind::QUICKFIX));
     assert_eq!(
@@ -522,8 +506,8 @@ fn cyclic_fix_all_returns_error_instead_of_partial_edits() {
     );
     let mixed = code_actions(
         &mut client,
-        Vec::new(),
-        Some(vec!["quickfix", "source.fixAll.falcon"]),
+        &[],
+        Some(&["quickfix", "source.fixAll.falcon"]),
         full_range(),
     );
     assert_eq!(mixed.len(), 2);
@@ -553,8 +537,8 @@ fn cyclic_fix_all_returns_error_instead_of_partial_edits() {
     assert!(stopped.command.is_some());
     let mut only = code_actions(
         &mut client,
-        Vec::new(),
-        Some(vec!["source.fixAll.falcon"]),
+        &[],
+        Some(&["source.fixAll.falcon"]),
         full_range(),
     );
     assert_eq!(only.len(), 1);
@@ -1129,7 +1113,7 @@ fn did_close_refreshes_buffer_and_restored_disk_part_owners() {
     );
     let cleared = client.recv_publish();
     assert_eq!(cleared.uri.as_str(), pivot_uri);
-    assert!(cleared.diagnostics.is_empty());
+    assert_eq!(cleared.diagnostics, [] as [lsp_types::Diagnostic; 0]);
     let mut refreshed = (0..2)
         .map(|_| client.recv_publish().uri.as_str().to_string())
         .collect::<Vec<_>>();
@@ -1166,7 +1150,10 @@ fn did_close_clears_diagnostics() {
     let config = r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "warn" } } } }"#;
     let mut client = TestClient::start(Duration::ZERO, Some(config));
     client.open(DOC_URI, VIOLATING_SRC, 1);
-    assert!(!client.recv_publish().diagnostics.is_empty());
+    assert_ne!(
+        client.recv_publish().diagnostics,
+        [] as [lsp_types::Diagnostic; 0]
+    );
 
     client.notify(
         lsp_types::notification::DidCloseTextDocument::METHOD,
@@ -1177,7 +1164,7 @@ fn did_close_clears_diagnostics() {
         },
     );
     let params = client.recv_publish();
-    assert!(params.diagnostics.is_empty());
+    assert_eq!(params.diagnostics, [] as [lsp_types::Diagnostic; 0]);
     client.shutdown();
 }
 
@@ -1215,7 +1202,7 @@ fn hover_reports_diagnostics_under_cursor() {
     let hover = hover_at(&mut client, 1, 3).expect("hover over diagnostic");
     match hover.contents {
         lsp_types::HoverContents::Markup(content) => {
-            assert!(content.value.contains("avoid-dynamic"), "{}", content.value)
+            assert!(content.value.contains("avoid-dynamic"), "{}", content.value);
         }
         other => panic!("expected markup hover, got {other:?}"),
     }
@@ -1225,7 +1212,7 @@ fn hover_reports_diagnostics_under_cursor() {
     client.shutdown();
 }
 
-/// Unknown request methods get a MethodNotFound error response.
+/// Unknown request methods get a `MethodNotFound` error response.
 #[test]
 fn unsupported_request_returns_method_not_found() {
     let mut client = TestClient::start(Duration::ZERO, None);
@@ -1444,7 +1431,7 @@ fn malformed_did_change_params_do_not_kill_server() {
     client.shutdown();
 }
 
-/// A malformed *request* gets an InvalidParams error response rather than
+/// A malformed *request* gets an `InvalidParams` error response rather than
 /// killing the server (which then keeps handling messages).
 #[test]
 fn malformed_request_params_return_invalid_params() {
@@ -1519,6 +1506,6 @@ fn unrelated_open_save_and_close_publish_while_another_file_is_debounced() {
     );
     let closed = client.recv_publish();
     assert_eq!(closed.uri.as_str(), other);
-    assert!(closed.diagnostics.is_empty());
+    assert_eq!(closed.diagnostics, [] as [lsp_types::Diagnostic; 0]);
     client.shutdown();
 }

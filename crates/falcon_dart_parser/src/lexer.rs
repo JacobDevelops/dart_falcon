@@ -15,6 +15,7 @@ impl<'src> Lexer<'src> {
     /// # Panics
     ///
     /// Panics if the source exceeds the compact token limit of `u32::MAX` bytes.
+    #[must_use]
     pub fn new(src: &'src str) -> Self {
         u32::try_from(src.len()).expect("source exceeds u32 token capacity");
         // Only a leading BOM is valid source.
@@ -32,6 +33,7 @@ impl<'src> Lexer<'src> {
     }
 
     /// Lex the full source and return all tokens, ending with a single `Eof`.
+    #[must_use]
     pub fn tokenize(mut self) -> Vec<Token> {
         let mut tokens = Vec::new();
         loop {
@@ -86,9 +88,8 @@ impl<'src> Lexer<'src> {
             return self.make(TokenKind::LineComment, start);
         }
 
-        let c = match self.cur() {
-            None => return self.make(TokenKind::Eof, start),
-            Some(c) => c,
+        let Some(c) = self.cur() else {
+            return self.make(TokenKind::Eof, start);
         };
 
         match c {
@@ -107,9 +108,13 @@ impl<'src> Lexer<'src> {
             }
             '/' => self.lex_slash(start),
             '"' | '\'' => self.lex_string(c, false, start),
-            'r' if matches!(self.peek(1), Some('"' | '\'')) => {
-                self.advance();
-                self.lex_string(self.cur().unwrap(), true, start)
+            'r' => {
+                if let Some(delimiter @ ('"' | '\'')) = self.peek(1) {
+                    self.advance();
+                    self.lex_string(delimiter, true, start)
+                } else {
+                    self.lex_ident(start)
+                }
             }
             '0'..='9' => self.lex_number(start),
             c if is_ident_start(c) => self.lex_ident(start),

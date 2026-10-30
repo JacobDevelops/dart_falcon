@@ -126,7 +126,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        for value in args.positional().chain(args.named().map(|arg| arg.value())) {
+        for value in args.positional().chain(args.named().map(NamedArg::value)) {
             self.check(value, class, state);
         }
     }

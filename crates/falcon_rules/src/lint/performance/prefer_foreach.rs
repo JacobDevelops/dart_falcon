@@ -38,7 +38,7 @@ impl Rule for PreferForeach {
             ctx,
             import_prefixes: program
                 .imports()
-                .filter_map(|import| import.as_name().map(|name| name.name()))
+                .filter_map(|import| import.as_name().map(Identifier::name))
                 .collect(),
             pending: HashMap::new(),
         }))
@@ -80,7 +80,7 @@ fn mentions(expr: Expr<'_>, name: &str) -> bool {
 impl Collector<'_> {
     /// Whether an unqualified name in call position denotes a function (or a
     /// callable variable) rather than a class.
-    fn is_function_name(&self, name: &str, state: &SemanticState<'_>) -> bool {
+    fn is_function_name(name: &str, state: &SemanticState<'_>) -> bool {
         if state.environment.is_bound(name) {
             return true;
         }
@@ -105,7 +105,7 @@ impl Collector<'_> {
         state: &SemanticState<'_>,
     ) -> bool {
         match callee.unparenthesized() {
-            Expr::Ident(identifier) => self.is_function_name(identifier.name(), state),
+            Expr::Ident(identifier) => Self::is_function_name(identifier.name(), state),
             Expr::Field(field) => {
                 let object = field.object();
                 if mentions(object, loop_variable) {
@@ -136,7 +136,7 @@ impl Collector<'_> {
                                             .is_none()
                                 }),
                             NameIdentity::Value => true,
-                            NameIdentity::Unknown => self.is_function_name(prefix.name(), state),
+                            NameIdentity::Unknown => Self::is_function_name(prefix.name(), state),
                         }
                     }
                     _ => true,

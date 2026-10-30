@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use falcon_analyze::AnalyzeContext;
 use falcon_syntax::cst::{
     Annotation, AstChildren, ClassMember, Expr, OperatorDecl, Program, Span, SyntaxToken,
-    SyntaxTree, TopLevelDecl,
+    SyntaxTree, TopLevelDecl, VarDeclarator,
 };
 
 use super::tokens::{preceding_trivia, significant_tokens_in};
@@ -15,7 +15,7 @@ use super::tokens::{preceding_trivia, significant_tokens_in};
 /// Comments after metadata take precedence over comments before annotations.
 pub(crate) fn documented_node_span<'a>(
     span: Span,
-    annotations: AstChildren<'a, Annotation<'a>>,
+    annotations: &AstChildren<'a, Annotation<'a>>,
     ctx: &AnalyzeContext,
 ) -> Span {
     let documentation_before = |start: usize| {
@@ -24,7 +24,7 @@ pub(crate) fn documented_node_span<'a>(
             start,
         )
         .last()
-        .map_or(start, |token| token.offset());
+        .map_or(start, SyntaxToken::offset);
         ctx.tree()
             .documentation_start(ctx.source(), Span::new(gap_start, start))
     };
@@ -38,7 +38,7 @@ pub(crate) fn documented_node_span<'a>(
                 Span::new(annotation.span().end, span.end),
             )
             .next()
-            .map_or(span.start, |token| token.offset())
+            .map_or(span.start, SyntaxToken::offset)
         });
     let documentation = documentation_before(body_start).or_else(|| {
         annotations
@@ -95,9 +95,9 @@ pub(crate) fn in_test_directory(ctx: &falcon_analyze::AnalyzeContext<'_>) -> boo
         .any(|directory| ctx.file_package().in_directory(directory))
 }
 
-pub(crate) fn members_of<'a>(
-    declaration: TopLevelDecl<'a>,
-) -> Option<AstChildren<'a, ClassMember<'a>>> {
+pub(crate) fn members_of(
+    declaration: TopLevelDecl<'_>,
+) -> Option<AstChildren<'_, ClassMember<'_>>> {
     match declaration {
         TopLevelDecl::Class(node) => Some(node.members()),
         TopLevelDecl::Mixin(node) => Some(node.members()),
@@ -111,7 +111,7 @@ pub(crate) fn members_of<'a>(
 
 /// Top-level variable and field initializers, in declaration/declarator order.
 /// Does not descend into expressions, local declarations, or constructor initializers.
-pub(crate) fn declaration_initializers<'a>(program: Program<'a>) -> impl Iterator<Item = Expr<'a>> {
+pub(crate) fn declaration_initializers(program: Program<'_>) -> impl Iterator<Item = Expr<'_>> {
     program
         .declarations()
         .flat_map(|declaration| {
@@ -130,7 +130,7 @@ pub(crate) fn declaration_initializers<'a>(program: Program<'a>) -> impl Iterato
                     .flatten(),
             )
         })
-        .filter_map(|declarator| declarator.initializer())
+        .filter_map(VarDeclarator::initializer)
 }
 
 /// Names of the fields, methods, getters, and setters `members` declare: the
@@ -219,7 +219,7 @@ pub(crate) fn first_token_after_annotations<'a>(
         .fold(span.start, usize::max);
     significant_tokens_in(tree, source, Span::new(offset, span.end))
         .next()
-        .map_or(span.end, |token| token.offset())
+        .map_or(span.end, SyntaxToken::offset)
 }
 
 #[cfg(test)]

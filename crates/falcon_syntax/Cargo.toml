@@ -6,3 +6,6 @@ description       = "Dart arena-backed concrete syntax trees and typed views for
 
 [dev-dependencies]
 falcon_dart_parser = { path = "../falcon_dart_parser" }
+
+[lints]
+workspace = true

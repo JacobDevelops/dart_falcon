@@ -1,7 +1,7 @@
 //! Requires useful tooltips on Flutter floating action buttons and icon buttons.
 //!
 //! Tooltips describe actions to assistive technology. Resolved Flutter
-//! FloatingActionButton (unnamed, small, large, extended) and IconButton (unnamed,
+//! `FloatingActionButton` (unnamed, small, large, extended) and `IconButton` (unnamed,
 //! filled, filledTonal, outlined) constructors are checked. Missing, literal null,
 //! and empty non-interpolated string tooltips are reported. Dynamic labels and
 //! other button APIs are not guessed; custom classes and shadowed names are ignored.

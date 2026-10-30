@@ -146,7 +146,8 @@ impl Collector<'_> {
             declarator.initializer().is_some_and(|initializer| {
                 // Only a bare integer literal (`double d = 1`) keeps its type;
                 // an explicit Expr::Paren is not this syntax exclusion.
-                !(matches!(initializer, Expr::IntLit(_)) && !declared.interface("dart:core", "int"))
+                (!matches!(initializer, Expr::IntLit(_))
+                    || declared.interface("dart:core", "int"))
                     && !state.generic_function_returns_type_parameter(initializer)
                     && !promoted_type_parameter(initializer, state)
                     && has_static_type(initializer, &declared, state)

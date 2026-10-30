@@ -1,7 +1,7 @@
 //! Diagnostic types, severity levels, and reporting.
 //!
 //! The `Diagnostic` type is the canonical output of every lint rule.
-//! JSON exposes rule, severity, message, file_path, span, resolved positions, and an optional fix.
+//! JSON exposes rule, severity, message, `file_path`, span, resolved positions, and an optional fix.
 //! LSP diagnostics use the rule name as their code.
 
 use lsp_types::{Diagnostic as LspDiagnostic, DiagnosticSeverity, Position, Range};
@@ -45,6 +45,8 @@ pub struct Diagnostic {
     pub fix: Option<Fix>,
 }
 
+#[expect(clippy::trivially_copy_pass_by_ref)]
+// Serde's `skip_serializing_if` predicates receive a reference to the field.
 fn is_zero(value: &u32) -> bool {
     *value == 0
 }
@@ -64,10 +66,12 @@ pub struct Span {
 }
 
 impl Span {
+    #[must_use]
     pub fn contains(&self, other: Span) -> bool {
         self.start <= other.start && other.end <= self.end
     }
 
+    #[must_use]
     pub fn contains_offset(&self, offset: usize) -> bool {
         self.start <= offset && offset < self.end
     }
@@ -89,6 +93,7 @@ impl From<falcon_syntax::cst::Span> for Span {
 /// past the last line clamp to `source.len()`. `character` counts UTF-16 code
 /// units, per the LSP default encoding (astral chars = 2 units), so a position
 /// landing inside a surrogate pair resolves to the character's start.
+#[must_use]
 pub fn lsp_position_to_byte(source: &str, position: Position) -> usize {
     let mut line = 0u32;
     let mut character = 0u32;
@@ -104,7 +109,7 @@ pub fn lsp_position_to_byte(source: &str, position: Position) -> usize {
             line += 1;
             character = 0;
         } else {
-            let next = character + c.len_utf16() as u32;
+            let next = character.saturating_add(u32::try_from(c.len_utf16()).unwrap_or(u32::MAX));
             // Target lands inside this char (e.g. mid surrogate pair): clamp to
             // its start rather than splitting the code point.
             if line == position.line && next > position.character {
@@ -118,6 +123,7 @@ pub fn lsp_position_to_byte(source: &str, position: Position) -> usize {
 
 /// Convert a byte offset in `source` to an LSP `Position` (0-based line +
 /// UTF-16 `character`, the LSP default encoding — astral chars count as 2).
+#[must_use]
 pub fn byte_to_lsp_position(source: &str, offset: usize) -> Position {
     let clamped = offset.min(source.len());
     let mut line = 0u32;
@@ -130,7 +136,7 @@ pub fn byte_to_lsp_position(source: &str, offset: usize) -> Position {
             line += 1;
             character = 0;
         } else {
-            character += c.len_utf16() as u32;
+            character = character.saturating_add(u32::try_from(c.len_utf16()).unwrap_or(u32::MAX));
         }
     }
     Position { line, character }
@@ -138,6 +144,7 @@ pub fn byte_to_lsp_position(source: &str, offset: usize) -> Position {
 
 /// 1-based `(line, column)` of `offset` within `source`.
 /// Columns count UTF-16 code units, consistent with [`byte_to_lsp_position`].
+#[must_use]
 pub fn byte_to_line_col(source: &str, offset: usize) -> (u32, u32) {
     let pos = byte_to_lsp_position(source, offset);
     (pos.line + 1, pos.character + 1)
@@ -151,6 +158,7 @@ pub struct LineIndex<'a> {
 }
 
 impl<'a> LineIndex<'a> {
+    #[must_use]
     pub fn new(source: &'a str) -> Self {
         let line_starts = std::iter::once(0)
             .chain(source.match_indices('\n').map(|(newline, _)| newline + 1))
@@ -162,13 +170,16 @@ impl<'a> LineIndex<'a> {
     }
 
     /// The 0-based line containing a byte offset, clamped to the source length.
+    #[must_use]
     pub fn line_for_offset(&self, offset: usize) -> u32 {
         let clamped = offset.min(self.source.len());
         // Line 0 starts at 0 <= clamped, so the partition point is at least 1.
-        (self.line_starts.partition_point(|&start| start <= clamped) - 1) as u32
+        u32::try_from(self.line_starts.partition_point(|&start| start <= clamped) - 1)
+            .unwrap_or(u32::MAX)
     }
 
     /// The same position as [`byte_to_lsp_position`] for this source.
+    #[must_use]
     pub fn lsp_position(&self, offset: usize) -> Position {
         let clamped = offset.min(self.source.len());
         let line = self.line_for_offset(clamped) as usize;
@@ -176,10 +187,11 @@ impl<'a> LineIndex<'a> {
         let character = self.source[start..]
             .char_indices()
             .take_while(|(index, _)| start + index < clamped)
-            .map(|(_, c)| c.len_utf16() as u32)
-            .sum();
+            .fold(0u32, |character, (_, c)| {
+                character.saturating_add(u32::try_from(c.len_utf16()).unwrap_or(u32::MAX))
+            });
         Position {
-            line: line as u32,
+            line: u32::try_from(line).unwrap_or(u32::MAX),
             character,
         }
     }
@@ -206,6 +218,7 @@ impl Diagnostic {
     }
 
     /// Attach a fix whose safety is explicitly declared by the rule.
+    #[must_use]
     pub fn with_fix(mut self, fix: Fix) -> Self {
         self.fix = Some(fix);
         self
@@ -225,6 +238,7 @@ impl Diagnostic {
         self.col = position.character + 1;
     }
 
+    #[must_use]
     pub fn format_text(&self) -> String {
         if self.line == 0 || self.col == 0 {
             format!(
@@ -243,6 +257,7 @@ impl Diagnostic {
     ///
     /// `source` is the full text of the file — required to convert the byte-offset
     /// `Span` into the 0-based line+character positions that LSP expects.
+    #[must_use]
     pub fn format_lsp(&self, source: &str) -> LspDiagnostic {
         self.format_lsp_in(&LineIndex::new(source))
     }
@@ -250,6 +265,7 @@ impl Diagnostic {
     /// Serialize with a source index shared by every diagnostic in one LSP publish.
     ///
     /// Positions use UTF-16 code units, including two units per astral character.
+    #[must_use]
     pub fn format_lsp_in(&self, lines: &LineIndex<'_>) -> LspDiagnostic {
         let start_pos = lines.lsp_position(self.span.start);
         let end_pos = lines.lsp_position(self.span.end);

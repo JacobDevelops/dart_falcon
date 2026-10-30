@@ -24,7 +24,7 @@ use inference::{assert_diagnostics, assert_lints};
 fn generic_callback_results_ignore_unknown_downward_schema_slots() {
     assert_lints(
         "unrelated-type-equality-checks",
-        r#"
+        r"
 T pick<T>(T left, T right) => left;
 T identity<T>(T value) => value;
 bool entry() {
@@ -36,7 +36,7 @@ bool invocation() {
 bool tearoff() {
   return [1].map(identity).first == 'text'; /* expect: unrelated-type-equality-checks */
 }
-"#,
+",
         3,
     );
 }
@@ -45,14 +45,14 @@ bool tearoff() {
 fn spread_only_maps_preserve_value_types_for_equality_checks() {
     assert_lints(
         "unrelated-type-equality-checks",
-        r#"
+        r"
 bool different(Map<String, String> input) {
   return {...input}.values.first == 1; /* expect: unrelated-type-equality-checks */
 }
 bool compatible(Map<String, String> input) {
   return {...input}.values.first == 'value';
 }
-"#,
+",
         1,
     );
 }
@@ -61,7 +61,7 @@ bool compatible(Map<String, String> input) {
 fn omitted_future_value_argument_infers_dynamic_through_await() {
     assert_lints(
         "avoid-dynamic-calls",
-        r#"
+        r"
 Future<void> omitted() async {
   (await Future.value()).add(1); /* expect: avoid-dynamic-calls */
 }
@@ -74,7 +74,7 @@ Future<void> explicitList() async {
 Future<void> inferredList() async {
   (await Future.value(<int>[])).add(1);
 }
-"#,
+",
         2,
     );
 }
@@ -83,7 +83,7 @@ Future<void> inferredList() async {
 fn callable_objects_receive_function_context_for_local_type_omission() {
     assert_lints(
         "omit-local-variable-types",
-        r#"
+        r"
 class Callable { void call() {} }
 void use(Callable value, dynamic dynamicValue) {
   void Function() callback = value; /* expect: omit-local-variable-types */
@@ -93,7 +93,7 @@ void use(Callable value, dynamic dynamicValue) {
   ordinary();
   dynamicCallback();
 }
-"#,
+",
         2,
     );
 }
@@ -104,14 +104,14 @@ type ExpectedSpan<'a> = (usize, usize, &'a str);
 fn historical_callable_contexts_preserve_exact_omission_spans() {
     let cases: &[(&str, &[ExpectedSpan<'_>])] = &[
         (
-            r#"class C { void call() {} int x = 0; }
+            r"class C { void call() {} int x = 0; }
 void f(C c, C c2, C? n, bool b) {
   void Function() v1 = b ? c : c2;
   void Function() v2 = c..x = 1;
   void Function() v3 = n ?? c;
   print([v1, v2, v3]);
 }
-"#,
+",
             &[
                 (3, 3, "void Function()"),
                 (4, 3, "void Function()"),
@@ -119,7 +119,7 @@ void f(C c, C c2, C? n, bool b) {
             ],
         ),
         (
-            r#"import 'dart:async';
+            r"import 'dart:async';
 class C { void call() {} }
 extension type XC(C c) implements C {}
 void takeFO(FutureOr<void Function()> f) {}
@@ -144,7 +144,7 @@ void g(Gen g) {
   var h3 = g<int>;
   print([h2, h3]);
 }
-"#,
+",
             &[
                 (6, 3, "void Function()"),
                 (9, 3, "(void Function(), int)"),
@@ -156,7 +156,7 @@ void g(Gen g) {
         (
             // The analyzer rejects assigning nullable C directly to Function?,
             // and does not report omission for either nullable function local.
-            r#"class C { void call() {} int x = 0; }
+            r"class C { void call() {} int x = 0; }
 class Gen { T call<T>(T t) => t; }
 void f(C c, C c2, C? n, bool b, Gen g) {
   void Function() conditional = b ? c : c2;
@@ -170,7 +170,7 @@ void f(C c, C c2, C? n, bool b, Gen g) {
   C retained = n ?? c;
   print([conditional, cascade, coalesce, nullable, nonnullable, generic, explicitCall, ordinary, retained]);
 }
-"#,
+",
             &[
                 (4, 3, "void Function()"),
                 (5, 3, "void Function()"),
@@ -216,7 +216,7 @@ fn assert_callable_omission_spans(cases: &[(&str, &[ExpectedSpan<'_>])]) {
 
 #[test]
 fn late_const_declaration_span_starts_at_late_keyword() {
-    let source = r#"class A {
+    let source = r"class A {
   static late final a35 = 1;
   static final /* late */ commented = 2;
 }
@@ -225,7 +225,7 @@ void locals() {
   late final local = 1;
   print(local);
 }
-"#;
+";
     let rules = all_rules();
     let rule = &rules
         .iter()
@@ -259,7 +259,7 @@ void locals() {
 fn generic_implicit_call_tearoffs_use_applicable_extension_methods() {
     assert_lints(
         "omit-local-variable-types",
-        r#"
+        r"
 class C {}
 extension on C { T call<T>(T x) => x; }
 void use(C c) {
@@ -268,7 +268,7 @@ void use(C c) {
   int Function(int) explicit = c.call<int>; /* expect: omit-local-variable-types */
   print([inferred, typed, explicit]);
 }
-"#,
+",
         2,
     );
 }
@@ -411,7 +411,7 @@ fn prefixed_extensions_obey_show_and_hide_without_explicit_extension_access() {
 fn null_aware_calls_keep_reached_member_annotations() {
     assert_lints(
         "discarded-futures",
-        r#"
+        r"
 import 'package:meta/meta.dart';
 class Controller {
   @awaitNotRequired
@@ -424,7 +424,7 @@ void use(Controller? controller, Holder? holder) {
   holder?.controller.forward();
   controller?.required(); /* expect: discarded-futures */
 }
-"#,
+",
         1,
     );
 }
@@ -433,7 +433,7 @@ void use(Controller? controller, Holder? holder) {
 fn bounded_iterables_keep_for_in_annotations() {
     assert_lints(
         "omit-local-variable-types",
-        r#"
+        r"
 void bounded<E, T extends Iterable<E>>(T? elements) {
   if (elements == null) return;
   for (E element in elements) { print(element); }
@@ -441,7 +441,7 @@ void bounded<E, T extends Iterable<E>>(T? elements) {
 void direct<E>(Iterable<E> elements) {
   for (E element in elements) { print(element); } /* expect: omit-local-variable-types */
 }
-"#,
+",
         1,
     );
 }
@@ -450,7 +450,7 @@ void direct<E>(Iterable<E> elements) {
 fn assignment_context_preserves_generic_receiver_promotions() {
     assert_lints(
         "avoid-types-on-closure-parameters",
-        r#"
+        r"
 class Rows<E> {
   T fold<T>(T initial, T Function(T, E) combine) => initial;
 }
@@ -468,14 +468,14 @@ class Metadata {
     return merged;
   }
 }
-"#,
+",
         1,
     );
 }
 
 #[test]
 fn future_diagnostic_spans_distinguish_methods_from_function_callees() {
-    let source = r#"
+    let source = r"
 Future<void> function() async {}
 class Receiver {
   Future<void> method() async {}
@@ -490,7 +490,7 @@ Future<void> use(Receiver receiver, (Future<void> Function(),) record) async {
   record.$1();
   (record.$1)();
 }
-"#;
+";
     let rules = all_rules();
     let rule = &rules
         .iter()
@@ -525,7 +525,7 @@ Future<void> use(Receiver receiver, (Future<void> Function(),) record) async {
 #[test]
 fn prefixed_future_callees_distinguish_values_from_functions_and_methods() {
     let directory = tempfile::tempdir().unwrap();
-    let declarations = r#"
+    let declarations = r"
 Future<void> function() async {}
 Future<void> Function() callback = function;
 Future<void> Function() get topGetter => function;
@@ -534,9 +534,9 @@ class C {
   static Future<void> Function() staticField = function;
   static Future<void> method() async {}
 }
-"#;
+";
     std::fs::write(directory.path().join("members.dart"), declarations).unwrap();
-    let source = r#"
+    let source = r"
 import 'members.dart' as prefix;
 Future<void> use() async {
   prefix.callback();
@@ -546,7 +546,7 @@ Future<void> use() async {
   prefix.C.method();
   prefix.function();
 }
-"#;
+";
     let path = directory.path().join("prefixed_spans.dart");
     std::fs::write(&path, source).unwrap();
     let rules = all_rules();
@@ -655,7 +655,7 @@ fn existing_variable_checks_long_initializer_and_repeated_chains() {
 fn existing_variable_summaries_preserve_mutation_promotion_and_const_checks() {
     assert_lints(
         "use-existing-variable",
-        r#"
+        r"
 void writes() {
   var x = 1;
   final cached = x + 1;
@@ -675,7 +675,7 @@ int constants() {
   const value = (2 + 3) * 4;
   return value;
 }
-"#,
+",
         2,
     );
 }

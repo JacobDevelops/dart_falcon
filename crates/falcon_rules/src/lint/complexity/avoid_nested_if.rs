@@ -3,7 +3,7 @@
 //! Pyramid-shaped nesting is hard to follow; combining conditions with `&&`,
 //! using early returns, or extracting a method flattens it. The rule counts the
 //! `if` statements within a then-branch subtree and fires when at least two are
-//! present (pyramid_lint's default `max_nesting_level` of two), so an `if` whose
+//! present (`pyramid_lint`'s default `max_nesting_level` of two), so an `if` whose
 //! body nests two further `if`s is reported. Local functions and closures count
 //! as part of the then-branch subtree, and closures anywhere in the file are checked.
 
@@ -16,7 +16,7 @@ use falcon_syntax::cst::*;
 #[derive(Default)]
 pub struct AvoidNestedIf;
 
-/// pyramid_lint's default `max_nesting_level`: an `if` is flagged when its
+/// `pyramid_lint`'s default `max_nesting_level`: an `if` is flagged when its
 /// then-branch subtree contains at least this many `if` statements.
 const MAX_NESTING_LEVEL: usize = 2;
 

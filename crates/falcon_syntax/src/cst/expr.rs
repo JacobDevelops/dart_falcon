@@ -1,6 +1,11 @@
 use std::{borrow::Cow, fmt};
 
-use super::*;
+use super::macros::DebugList;
+use super::{
+    AssignOp, AstChildren, AstNode, AsyncMarker, BinaryOp, DartType, ForHeader, FormalParamList,
+    FunctionBody, Identifier, IfCondition, NodeKind, Pattern, PostfixIncDec, Span, StringDelimiter,
+    SyntaxElement, SyntaxNode, SyntaxToken, TypeArgs, TypeParam, UnaryOp, parse_string_delimiter,
+};
 use crate::token::TokenKind;
 
 fn has(node: SyntaxNode<'_>, kind: TokenKind) -> bool {
@@ -239,7 +244,8 @@ expression_enum!(Expr {
     | NodeKind::Error
 });
 
-impl<'a> Expr<'a> {
+impl Expr<'_> {
+    #[must_use]
     pub fn unparenthesized(self) -> Self {
         let mut node = self;
         while let Self::Paren(paren) = node {
@@ -325,19 +331,22 @@ impl<'a> AstNode<'a> for ErrorExpr<'a> {
     }
 }
 impl<'a> ErrorExpr<'a> {
+    #[must_use]
     pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         <Self as AstNode>::cast(node)
     }
+    #[must_use]
     pub fn syntax(self) -> SyntaxNode<'a> {
         self.0
     }
+    #[must_use]
     pub fn span(self) -> Span {
         let span = self.0.span();
         if span.start == span.end {
             self.0
                 .tree()
                 .token_at(self.0.source(), span.start)
-                .map_or(span, |token| token.span())
+                .map_or(span, SyntaxToken::span)
         } else {
             span
         }
@@ -346,29 +355,39 @@ impl<'a> ErrorExpr<'a> {
 debug_node!(ErrorExpr => "Error" { span });
 
 impl<'a> IntLitExpr<'a> {
+    #[must_use]
     pub fn value(self) -> &'a str {
         self.0.text()
     }
 }
 impl<'a> DoubleLitExpr<'a> {
+    #[must_use]
     pub fn value(self) -> &'a str {
         self.0.text()
     }
 }
-impl<'a> BoolLitExpr<'a> {
+impl BoolLitExpr<'_> {
+    #[must_use]
     pub fn value(self) -> bool {
         has(self.0, TokenKind::True)
     }
 }
 impl<'a> ParenExpr<'a> {
+    #[must_use]
     pub fn expr(self) -> Expr<'a> {
         self.0.required()
     }
 }
 impl<'a> UnaryExpr<'a> {
+    #[must_use]
     pub fn operand(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
+    /// Returns the unary operator.
+    ///
+    /// # Panics
+    /// Panics if the parser did not emit a unary operator token.
     pub fn op(self) -> UnaryOp {
         match self.0.first_token().expect("unary operator").kind() {
             TokenKind::Minus => UnaryOp::Minus,
@@ -381,9 +400,11 @@ impl<'a> UnaryExpr<'a> {
     }
 }
 impl<'a> PostfixIncDecExpr<'a> {
+    #[must_use]
     pub fn operand(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn op(self) -> PostfixIncDec {
         if has(self.0, TokenKind::PlusPlus) {
             PostfixIncDec::Increment
@@ -393,58 +414,77 @@ impl<'a> PostfixIncDecExpr<'a> {
     }
 }
 impl<'a> BinaryExpr<'a> {
+    #[must_use]
     pub fn left(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn right(self) -> Expr<'a> {
         expr(self.0, 1)
     }
 }
 impl<'a> AssignExpr<'a> {
+    #[must_use]
     pub fn target(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn value(self) -> Expr<'a> {
         expr(self.0, 1)
     }
 }
 impl<'a> ConditionalExpr<'a> {
+    #[must_use]
     pub fn condition(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn then_expr(self) -> Expr<'a> {
         expr(self.0, 1)
     }
+    #[must_use]
     pub fn else_expr(self) -> Expr<'a> {
         expr(self.0, 2)
     }
 }
 impl<'a> IsExpr<'a> {
+    #[must_use]
     pub fn expr(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn dart_type(self) -> DartType<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn negated(self) -> bool {
         has(self.0, TokenKind::Bang)
     }
 }
 impl<'a> AsExpr<'a> {
+    #[must_use]
     pub fn expr(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn dart_type(self) -> DartType<'a> {
         self.0.required()
     }
 }
 impl<'a> FieldExpr<'a> {
+    #[must_use]
     pub fn object(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn is_null_safe(self) -> bool {
         has(self.0, TokenKind::QmarkDot) || has(self.0, TokenKind::QmarkLBracket)
     }
+    #[must_use]
+    /// Returns this field expression's identifier.
+    ///
+    /// # Panics
+    /// Panics if the parser did not emit a field identifier.
     pub fn field(self) -> Identifier<'a> {
         AstChildren::<Identifier>::new(self.0)
             .next_back()
@@ -452,34 +492,43 @@ impl<'a> FieldExpr<'a> {
     }
 }
 impl<'a> IndexExpr<'a> {
+    #[must_use]
     pub fn object(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn index(self) -> Expr<'a> {
         expr(self.0, 1)
     }
+    #[must_use]
     pub fn is_null_safe(self) -> bool {
         has(self.0, TokenKind::QmarkDot) || has(self.0, TokenKind::QmarkLBracket)
     }
 }
 impl<'a> CallExpr<'a> {
+    #[must_use]
     pub fn callee(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn args(self) -> ArgList<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn type_args(self) -> AstChildren<'a, DartType<'a>> {
         TypeArgs::of(self.0)
     }
 }
 impl<'a> CascadeExpr<'a> {
+    #[must_use]
     pub fn object(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn sections(self) -> AstChildren<'a, CascadeSection<'a>> {
         AstChildren::new(self.0)
     }
+    #[must_use]
     pub fn is_null_aware(self) -> bool {
         self.0
             .children_with_tokens()
@@ -498,109 +547,137 @@ impl<'a> CascadeExpr<'a> {
     }
 }
 impl<'a> AwaitExpr<'a> {
+    #[must_use]
     pub fn expr(self) -> Expr<'a> {
         self.0.required()
     }
 }
 impl<'a> ThrowExpr<'a> {
+    #[must_use]
     pub fn expr(self) -> Expr<'a> {
         self.0.required()
     }
 }
 impl<'a> SwitchExpr<'a> {
+    #[must_use]
     pub fn subject(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn arms(self) -> AstChildren<'a, SwitchExprArm<'a>> {
         AstChildren::new(self.0)
     }
 }
 impl<'a> NullAssertExpr<'a> {
+    #[must_use]
     pub fn operand(self) -> Expr<'a> {
         self.0.required()
     }
 }
 impl<'a> GenericInstantiationExpr<'a> {
+    #[must_use]
     pub fn target(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn type_args(self) -> AstChildren<'a, DartType<'a>> {
         TypeArgs::of(self.0)
     }
 }
 impl<'a> NewExpr<'a> {
+    #[must_use]
     pub fn dart_type(self) -> DartType<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn constructor_name(self) -> Option<Identifier<'a>> {
         self.0.child::<Identifier>()
     }
+    #[must_use]
     pub fn args(self) -> ArgList<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn is_const(self) -> bool {
         has(self.0, TokenKind::Const)
     }
 }
 impl<'a> DotShorthandExpr<'a> {
+    #[must_use]
     pub fn name(self) -> Identifier<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn is_const(self) -> bool {
         has(self.0, TokenKind::Const)
     }
 }
 impl<'a> MapExpr<'a> {
+    #[must_use]
     pub fn type_args(self) -> AstChildren<'a, DartType<'a>> {
         TypeArgs::of(self.0)
     }
+    #[must_use]
     pub fn is_const(self) -> bool {
         has(self.0, TokenKind::Const)
     }
+    #[must_use]
     pub fn elements(self) -> AstChildren<'a, MapElement<'a>> {
         AstChildren::new(self.0)
     }
 }
 impl<'a> ListExpr<'a> {
+    #[must_use]
     pub fn type_arg(self) -> Option<DartType<'a>> {
         TypeArgs::of(self.0).next()
     }
+    #[must_use]
     pub fn is_const(self) -> bool {
         has(self.0, TokenKind::Const)
     }
+    #[must_use]
     pub fn elements(self) -> AstChildren<'a, CollectionElement<'a>> {
         AstChildren::new(self.0)
     }
 }
 impl<'a> SetExpr<'a> {
+    #[must_use]
     pub fn type_arg(self) -> Option<DartType<'a>> {
         TypeArgs::of(self.0).next()
     }
+    #[must_use]
     pub fn is_const(self) -> bool {
         has(self.0, TokenKind::Const)
     }
+    #[must_use]
     pub fn elements(self) -> AstChildren<'a, CollectionElement<'a>> {
         AstChildren::new(self.0)
     }
 }
 impl<'a> RecordExpr<'a> {
+    #[must_use]
     pub fn is_const(self) -> bool {
         has(self.0, TokenKind::Const)
     }
+    #[must_use]
     pub fn fields(self) -> AstChildren<'a, RecordField<'a>> {
         AstChildren::new(self.0)
     }
 }
 impl<'a> FuncExpr<'a> {
+    #[must_use]
     pub fn type_params(self) -> AstChildren<'a, TypeParam<'a>> {
         AstChildren::new(self.0)
     }
+    #[must_use]
     pub fn params(self) -> FormalParamList<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn body(self) -> FunctionBody<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn async_marker(self) -> AsyncMarker {
         if has(self.0, TokenKind::Async) {
             if has(self.0, TokenKind::Star) {
@@ -616,6 +693,7 @@ impl<'a> FuncExpr<'a> {
     }
 }
 impl<'a> SymbolLitExpr<'a> {
+    #[must_use]
     pub fn raw(self) -> &'a str {
         self.0.text()
     }
@@ -654,6 +732,7 @@ fn assign_op(node: SyntaxNode<'_>) -> AssignOp {
 }
 
 impl BinaryExpr<'_> {
+    #[must_use]
     pub fn op(self) -> BinaryOp {
         match operator(self.0).kind() {
             TokenKind::Plus => BinaryOp::Add,
@@ -680,12 +759,14 @@ impl BinaryExpr<'_> {
             _ => unreachable!("binary operator"),
         }
     }
+    #[must_use]
     pub fn op_span(self) -> Span {
         operator(self.0).span()
     }
 }
 
 impl AssignExpr<'_> {
+    #[must_use]
     pub fn op(self) -> AssignOp {
         assign_op(self.0)
     }
@@ -709,19 +790,22 @@ impl<'a> AstNode<'a> for StringLitNode<'a> {
     }
 }
 impl<'a> StringLitNode<'a> {
+    #[must_use]
     pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         <Self as AstNode>::cast(node)
     }
+    #[must_use]
     pub fn syntax(self) -> SyntaxNode<'a> {
         self.0
     }
+    #[must_use]
     pub fn span(self) -> Span {
         let span = self.0.span();
         if span.start == span.end {
             self.0
                 .tree()
                 .token_at(self.0.source(), span.start)
-                .map_or(span, |token| token.span())
+                .map_or(span, SyntaxToken::span)
         } else {
             span
         }
@@ -729,6 +813,7 @@ impl<'a> StringLitNode<'a> {
     fn text(self) -> &'a str {
         &self.0.source()[self.span().start..self.span().end]
     }
+    #[must_use]
     pub fn is_adjacent(self) -> bool {
         self.0.kind() == NodeKind::AdjacentStrings
     }
@@ -736,7 +821,7 @@ impl<'a> StringLitNode<'a> {
         self.0
             .children()
             .filter(|node| node.kind() == NodeKind::StringLitNode)
-            .map(|node| node.span())
+            .map(SyntaxNode::span)
     }
     pub fn raw(self) -> Cow<'a, str> {
         if !self.is_adjacent() {
@@ -746,7 +831,7 @@ impl<'a> StringLitNode<'a> {
             self.0
                 .children()
                 .filter_map(Self::cast)
-                .map(|node| node.text())
+                .map(Self::text)
                 .collect(),
         )
     }
@@ -764,6 +849,7 @@ impl<'a> StringLitNode<'a> {
                 parse_string_delimiter(node.text()).map(|delimiter| (delimiter, node.span()))
             })
     }
+    #[must_use]
     pub fn delimiter(self) -> Option<StringDelimiter<'a>> {
         if self.is_adjacent() {
             None
@@ -781,6 +867,7 @@ impl<'a> StringLitNode<'a> {
             self.text().starts_with('r')
         }
     }
+    #[must_use]
     pub fn value(self) -> Cow<'a, str> {
         if let Some(delimiter) = self.delimiter() {
             return Cow::Borrowed(delimiter.content);
@@ -817,11 +904,11 @@ impl fmt::Debug for StringLitNode<'_> {
         f.debug_struct("StringLitNode")
             .field("raw", &self.raw())
             .field("is_adjacent", &self.is_adjacent())
-            .field("segment_spans", &macros::DebugList(self.segment_spans()))
+            .field("segment_spans", &DebugList(self.segment_spans()))
             .field("has_raw_segment", &self.has_raw_segment())
             .field("value", &self.value())
             .field("span", &self.span())
-            .field("interpolations", &macros::DebugList(self.interpolations()))
+            .field("interpolations", &DebugList(self.interpolations()))
             .finish()
     }
 }
@@ -840,15 +927,23 @@ impl<'a> AstNode<'a> for StringInterpolation<'a> {
     }
 }
 impl<'a> StringInterpolation<'a> {
+    #[must_use]
     pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         <Self as AstNode>::cast(node)
     }
+    #[must_use]
     pub fn syntax(self) -> SyntaxNode<'a> {
         self.0
     }
+    #[must_use]
     pub fn expr(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
+    /// Returns the source span covered by this interpolation.
+    ///
+    /// # Panics
+    /// Panics if the parser did not emit the interpolation opener and end tokens.
     pub fn span(self) -> Span {
         let first = self.0.first_token().expect("interpolation opener");
         let last = self.0.last_token().expect("interpolation end");
@@ -867,6 +962,7 @@ debug_node!(StringInterpolation { expr, span });
 typed_node!(CascadeSection, CascadeSection);
 debug_node!(CascadeSection { ops, span });
 impl<'a> CascadeSection<'a> {
+    #[must_use]
     pub fn ops(self) -> AstChildren<'a, CascadeOp<'a>> {
         AstChildren::new(self.0)
     }
@@ -888,9 +984,11 @@ typed_node!(CascadeIndexAssign, CascadeIndexAssign);
 debug_tuple!(CascadeIndexAssign => "IndexAssign" { target, op, value });
 
 impl<'a> CascadeField<'a> {
+    #[must_use]
     pub fn name(self) -> Identifier<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn is_null_aware(self) -> bool {
         has(self.0, TokenKind::QmarkDot)
             || self.0.parent().is_some_and(|parent| {
@@ -902,9 +1000,11 @@ impl<'a> CascadeField<'a> {
     }
 }
 impl<'a> CascadeIndex<'a> {
+    #[must_use]
     pub fn index(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn is_null_aware(self) -> bool {
         has(self.0, TokenKind::QmarkLBracket)
             || self.0.parent().is_some_and(|parent| {
@@ -916,42 +1016,53 @@ impl<'a> CascadeIndex<'a> {
     }
 }
 impl<'a> CascadeCall<'a> {
+    #[must_use]
     pub fn name(self) -> Identifier<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn type_args(self) -> AstChildren<'a, DartType<'a>> {
         TypeArgs::of(self.0)
     }
+    #[must_use]
     pub fn args(self) -> ArgList<'a> {
         self.0.required()
     }
 }
 impl<'a> CascadeInvoke<'a> {
+    #[must_use]
     pub fn type_args(self) -> AstChildren<'a, DartType<'a>> {
         TypeArgs::of(self.0)
     }
+    #[must_use]
     pub fn args(self) -> ArgList<'a> {
         self.0.required()
     }
 }
 impl<'a> CascadeAssign<'a> {
+    #[must_use]
     pub fn target(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn op(self) -> AssignOp {
         assign_op(self.0)
     }
+    #[must_use]
     pub fn value(self) -> Expr<'a> {
         expr(self.0, 1)
     }
 }
 impl<'a> CascadeIndexAssign<'a> {
+    #[must_use]
     pub fn target(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn op(self) -> AssignOp {
         assign_op(self.0)
     }
+    #[must_use]
     pub fn value(self) -> Expr<'a> {
         expr(self.0, 1)
     }
@@ -981,77 +1092,97 @@ typed_node!(MapForElement, MapForElement);
 debug_node!(MapForElement => "For" { is_await, header, entry, span });
 
 impl<'a> NullAwareElement<'a> {
+    #[must_use]
     pub fn expr(self) -> Expr<'a> {
         self.0.required()
     }
 }
 impl<'a> SpreadElement<'a> {
+    #[must_use]
     pub fn expr(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn is_null_aware(self) -> bool {
         has(self.0, TokenKind::DotDotDotQmark)
     }
 }
 impl<'a> MapSpreadElement<'a> {
+    #[must_use]
     pub fn expr(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn is_null_aware(self) -> bool {
         has(self.0, TokenKind::DotDotDotQmark)
     }
 }
 impl<'a> IfElement<'a> {
+    #[must_use]
     pub fn condition(self) -> IfCondition<'a> {
         collection_condition(self.0)
     }
+    #[must_use]
     pub fn then_elem(self) -> CollectionElement<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn else_elem(self) -> Option<CollectionElement<'a>> {
         AstChildren::new(self.0).nth(1)
     }
 }
 impl<'a> MapIfElement<'a> {
+    #[must_use]
     pub fn condition(self) -> IfCondition<'a> {
         collection_condition(self.0)
     }
+    #[must_use]
     pub fn then_entry(self) -> MapElement<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn else_entry(self) -> Option<MapElement<'a>> {
         AstChildren::new(self.0).nth(1)
     }
 }
 impl<'a> ForElement<'a> {
+    #[must_use]
     pub fn is_await(self) -> bool {
         has(self.0, TokenKind::Await)
     }
+    #[must_use]
     pub fn header(self) -> ForHeader<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn element(self) -> CollectionElement<'a> {
         self.0.required()
     }
 }
 impl<'a> MapForElement<'a> {
+    #[must_use]
     pub fn is_await(self) -> bool {
         has(self.0, TokenKind::Await)
     }
+    #[must_use]
     pub fn header(self) -> ForHeader<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn entry(self) -> MapElement<'a> {
         self.0.required()
     }
 }
 impl<'a> MapEntry<'a> {
+    #[must_use]
     pub fn key(self) -> Expr<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn value(self) -> Expr<'a> {
         expr(self.0, 1)
     }
+    #[must_use]
     pub fn key_null_aware(self) -> bool {
         self.0
             .first_token()
@@ -1083,12 +1214,15 @@ impl<'a> AstNode<'a> for RecordField<'a> {
 }
 debug_node!(RecordField { name, value, span });
 impl<'a> RecordField<'a> {
+    #[must_use]
     pub fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         <Self as AstNode>::cast(node)
     }
+    #[must_use]
     pub fn syntax(self) -> SyntaxNode<'a> {
         self.0
     }
+    #[must_use]
     pub fn span(self) -> Span {
         let mut span = self.0.span();
         if let Some(record) = self.0.parent()
@@ -1101,9 +1235,14 @@ impl<'a> RecordField<'a> {
         }
         span
     }
+    #[must_use]
     pub fn name(self) -> Option<Identifier<'a>> {
         has(self.0, TokenKind::Colon).then(|| self.0.required())
     }
+    /// Returns this record field's value expression.
+    ///
+    /// # Panics
+    /// Panics if the parser did not emit a value expression.
     pub fn value(self) -> Expr<'a> {
         self.0
             .children()
@@ -1119,9 +1258,11 @@ debug_node!(ArgList {
     span
 });
 impl<'a> ArgList<'a> {
+    #[must_use]
     pub fn positional(self) -> AstChildren<'a, Expr<'a>> {
         AstChildren::new(self.0)
     }
+    #[must_use]
     pub fn named(self) -> AstChildren<'a, NamedArg<'a>> {
         AstChildren::new(self.0)
     }
@@ -1129,9 +1270,14 @@ impl<'a> ArgList<'a> {
 typed_node!(NamedArg, NamedArg);
 debug_node!(NamedArg { name, value, span });
 impl<'a> NamedArg<'a> {
+    #[must_use]
     pub fn name(self) -> Identifier<'a> {
         self.0.required()
     }
+    /// Returns the named argument's value expression.
+    ///
+    /// # Panics
+    /// Panics if the parser did not emit a value expression.
     pub fn value(self) -> Expr<'a> {
         self.0
             .children()
@@ -1148,15 +1294,18 @@ debug_node!(SwitchExprArm {
     span
 });
 impl<'a> SwitchExprArm<'a> {
+    #[must_use]
     pub fn pattern(self) -> Pattern<'a> {
         self.0.required()
     }
+    #[must_use]
     pub fn guard(self) -> Option<Expr<'a>> {
         self.0
             .children()
             .find(|node| node.kind() == NodeKind::ExprGuard)
             .map(|node| expr(node, 0))
     }
+    #[must_use]
     pub fn body(self) -> Expr<'a> {
         self.0.required()
     }

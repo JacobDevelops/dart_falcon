@@ -15,12 +15,14 @@ enum Binding {
     Other,
 }
 
+#[must_use]
 pub fn used_parameters<'a>(params: FormalParamList<'a>, body: FunctionBody<'a>) -> HashSet<usize> {
     let mut collector = UsageCollector::new(params);
     walk_function_body(&mut collector, body);
     collector.used
 }
 
+#[must_use]
 pub fn used_constructor_parameters<'a>(
     params: FormalParamList<'a>,
     initializers: AstChildren<'a, ConstructorInitializer<'a>>,
@@ -36,6 +38,7 @@ pub fn used_constructor_parameters<'a>(
 
 /// Primary parameters are also in scope in eager instance field initializers,
 /// but not in late/static fields or other members of the enclosing type.
+#[must_use]
 pub fn used_primary_constructor_parameters<'a>(
     primary: PrimaryConstructor<'a>,
     members: AstChildren<'a, ClassMember<'a>>,
@@ -110,6 +113,7 @@ pub fn local_writes(program: Program<'_>) -> Vec<LocalWrite> {
 /// `program` that resolve to a lexically scoped local — a variable, parameter,
 /// loop, pattern or catch variable, or local function — instead of a member or
 /// top-level declaration.
+#[must_use]
 pub fn locally_bound_identifiers(program: Program<'_>) -> HashSet<usize> {
     let mut collector = UsageCollector {
         scopes: LexicalScopes::new(),
@@ -470,7 +474,7 @@ impl<'a> Visitor<'a> for UsageCollector {
     fn visit_class_member(&mut self, node: ClassMember<'a>) {
         match node {
             ClassMember::Operator(operator) => {
-                self.visit_declared_function(Some(operator.params()), operator.body())
+                self.visit_declared_function(Some(operator.params()), operator.body());
             }
             _ => walk_class_member(self, node),
         }
@@ -591,7 +595,7 @@ impl<'a> Visitor<'a> for UsageCollector {
             match node {
                 Expr::Ident(identifier) => collector.use_identifier(identifier),
                 Expr::FuncExpr(function) => {
-                    collector.visit_nested_function(function.params(), function.body())
+                    collector.visit_nested_function(function.params(), function.body());
                 }
                 Expr::List(list) => {
                     for element in list.elements() {

@@ -4,7 +4,7 @@
 //! `numen run -- mbx test -p falcon_analyze --release --lib inference_index_baseline -- --ignored --nocapture --test-threads=1`
 //!
 //! Keep this corpus and the generated fixture unchanged when comparing algorithms.
-//! Timing includes fresh SignatureIndex construction and declaration inference,
+//! Timing includes fresh `SignatureIndex` construction and declaration inference,
 //! but excludes source generation, I/O, parsing, identity/type indexes, checksums,
 //! printing, destruction, and per-sample identity cloning (which resets lookup
 //! and alias-template caches). No external SDK/package sources are loaded; curated
@@ -26,10 +26,10 @@ const INDEPENDENT_DECLARATIONS: usize = 2_048;
 fn checksum(bytes: &[u8], state: &mut u64) {
     for byte in bytes {
         *state ^= u64::from(*byte);
-        *state = state.wrapping_mul(0x100000001b3);
+        *state = state.wrapping_mul(0x0100_0000_01b3);
     }
     *state ^= 0xff;
-    *state = state.wrapping_mul(0x100000001b3);
+    *state = state.wrapping_mul(0x0100_0000_01b3);
 }
 
 fn dart_files(directory: &Path, files: &mut Vec<PathBuf>) {
@@ -120,7 +120,7 @@ fn fact_summary(index: &SignatureIndex, provenance_free: bool) -> (usize, usize,
         }
     }
     rows.sort_unstable();
-    let mut hash = 0xcbf29ce484222325;
+    let mut hash = 0xcbf2_9ce4_8422_2325;
     for row in rows {
         checksum(row.as_bytes(), &mut hash);
     }
@@ -133,7 +133,7 @@ fn fact_summary(index: &SignatureIndex, provenance_free: bool) -> (usize, usize,
 }
 
 fn benchmark(label: &str, sources: Vec<(PathBuf, String)>, require_clean_parse: bool) {
-    let mut input_hash = 0xcbf29ce484222325;
+    let mut input_hash = 0xcbf2_9ce4_8422_2325;
     let mut parse_errors = Vec::with_capacity(sources.len());
     let files: Vec<_> = sources
         .into_iter()

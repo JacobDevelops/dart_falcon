@@ -115,16 +115,13 @@ impl<'a> Collector<'a> {
     ) {
         if !args
             .positional()
-            .chain(args.named().map(|argument| argument.value()))
+            .chain(args.named().map(NamedArg::value))
             .any(|argument| self.matches_argument(argument, state))
             || !self.matches_target(target, state)
         {
             return;
         }
-        for argument in args
-            .positional()
-            .chain(args.named().map(|argument| argument.value()))
-        {
+        for argument in args.positional().chain(args.named().map(NamedArg::value)) {
             if self.matches_argument(argument, state) {
                 let message = match self.passing {
                     Passing::BlocToBloc => {

@@ -30,13 +30,14 @@ use std::collections::{HashMap, HashSet};
 use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::{
+    ArgList, AssignOp, AsyncMarker, BinaryOp, CascadeOp, CollectionElement, Expr, ForInit,
+    FunctionBody, LocalVarDecl, MapElement, Pattern, Program, Span, Stmt,
     visit::{Visitor, walk_expr_chain, walk_stmt},
-    *,
 };
 
 use crate::lint::expressions::identifier_name;
-use falcon_analyze::{BodyOwner, FunctionBodies};
 use crate::lint::support::null_assert_initializers::declaration_initializers;
+use falcon_analyze::{BodyOwner, FunctionBodies};
 use falcon_analyze::{SemanticRuleVisitor, SemanticState, returned_expressions};
 
 const MESSAGE: &str = "Avoid a null assertion on a nullable type parameter.";
@@ -177,7 +178,7 @@ impl<'a> Collector<'a> {
     fn mark_initializers(&mut self, declaration: LocalVarDecl<'a>) {
         for initializer in declaration
             .declarators()
-            .filter_map(|declarator| declarator.initializer())
+            .filter_map(falcon_syntax::cst::VarDeclarator::initializer)
         {
             if asserted(initializer).is_some() {
                 self.initializers.insert(key(&initializer.span()));
@@ -446,7 +447,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                         id, nullable: true, ..
                     } if id == expected_id)
                 {
-                    self.diagnostics.push(self.ctx.diagnostic(MESSAGE, Span::new(span.end - 1, span.end)));
+                    self.diagnostics.push(
+                        self.ctx
+                            .diagnostic(MESSAGE, Span::new(span.end - 1, span.end)),
+                    );
                 }
             }
             Expr::Assign(assignment) if assignment.op() == AssignOp::Eq => {
@@ -469,7 +473,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 self.mark_contextual(binary.right());
             }
             Expr::Cascade(cascade) => {
-                for operation in cascade.sections().flat_map(|section| section.ops()) {
+                for operation in cascade
+                    .sections()
+                    .flat_map(falcon_syntax::cst::CascadeSection::ops)
+                {
                     if let CascadeOp::Assign(assignment) = operation
                         && assignment.op() == AssignOp::Eq
                     {
@@ -494,11 +501,15 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         _state: &SemanticState<'a>,
     ) {
         if let Pattern::NullAssert(assertion) = node
-            && matches!(matched.map(ResolvedType::view),
+            && matches!(
+                matched.map(ResolvedType::view),
                 Some(ResolvedTypeView::TypeParameter { nullable: true, .. })
             )
         {
-            self.diagnostics.push(self.ctx.diagnostic(MESSAGE, Span::new(assertion.span().end - 1, assertion.span().end)));
+            self.diagnostics.push(self.ctx.diagnostic(
+                MESSAGE,
+                Span::new(assertion.span().end - 1, assertion.span().end),
+            ));
         }
     }
 }

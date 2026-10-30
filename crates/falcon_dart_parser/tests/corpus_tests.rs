@@ -4,7 +4,7 @@ use falcon_syntax::cst::visit::Visitor;
 use falcon_syntax::cst::{DartType, Expr, Pattern};
 
 struct Accessors;
-impl<'a> Visitor<'a> for Accessors {}
+impl Visitor<'_> for Accessors {}
 
 fn exercise_corpus(source: &str) {
     let parsed = parse(source);
@@ -25,7 +25,7 @@ fn exercise_corpus(source: &str) {
         assert_eq!(node.text(), &source[span.start..span.end]);
         for token in node
             .children_with_tokens()
-            .filter_map(|child| child.into_token())
+            .filter_map(falcon_syntax::cst::SyntaxElement::into_token)
         {
             assert_eq!(token.text(), &source[token.span().start..token.span().end]);
         }

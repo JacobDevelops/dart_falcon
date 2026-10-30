@@ -45,6 +45,7 @@ impl Rule for DirectivesOrdering {
         program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
+        type Section = fn(&Namespace) -> bool;
         let imports: Vec<Namespace> = program
             .imports()
             .map(|import| Namespace {
@@ -111,7 +112,6 @@ impl Rule for DirectivesOrdering {
         check_export_section(program, &mut report);
 
         // Each section is sorted alphabetically.
-        type Section = fn(&Namespace) -> bool;
         let sections: [Section; 3] = [is_dart, |d| !is_absolute(d), is_package];
         for in_section in sections {
             for (directives, _) in groups {

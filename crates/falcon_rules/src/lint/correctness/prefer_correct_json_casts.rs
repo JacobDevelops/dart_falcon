@@ -12,7 +12,7 @@
 //! named json, mutable aliases, custom decoders, and values returned from
 //! collection conversions are not assumed to be decoded JSON.
 //!
-//! Reference: https://dcm.dev/docs/rules/common/prefer-correct-json-casts/
+//! Reference: <https://dcm.dev/docs/rules/common/prefer-correct-json-casts/>
 
 use std::collections::HashSet;
 

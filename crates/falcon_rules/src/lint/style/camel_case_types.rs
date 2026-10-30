@@ -1,7 +1,7 @@
-//! Flags type names that are not UpperCamelCase.
+//! Flags type names that are not `UpperCamelCase`.
 //!
 //! Classes, mixins, enums, extension types, and type aliases are all types and
-//! read most predictably when named in UpperCamelCase, matching the rest of the
+//! read most predictably when named in `UpperCamelCase`, matching the rest of the
 //! Dart ecosystem. Leading underscores are ignored, then each word must begin
 //! with an uppercase letter or `$`; a name that is entirely underscores is
 //! treated as a wildcard and never flagged.

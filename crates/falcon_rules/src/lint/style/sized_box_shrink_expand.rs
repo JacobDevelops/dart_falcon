@@ -14,8 +14,8 @@
 //!
 //! Adopted from the official `sized_box_shrink_expand` lint.
 
-use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, DeclarationIdentity, Rule, RulePreparation, parse_int};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -68,6 +68,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Dimension {
+    Zero,
+    Infinity,
+    Other,
+}
+
 /// The named constructor equivalent to these arguments, if any.
 fn replacement(args: ArgList<'_>) -> Option<&'static str> {
     if !args.positional().is_empty() {
@@ -79,29 +86,46 @@ fn replacement(args: ArgList<'_>) -> Option<&'static str> {
             .and_then(|argument| literal_value(argument.value()))
     };
     match (dimension("width")?, dimension("height")?) {
-        (width, height) if width == 0.0 && height == 0.0 => Some("shrink"),
-        (width, height) if width == f64::INFINITY && height == f64::INFINITY => Some("expand"),
+        (Dimension::Zero, Dimension::Zero) => Some("shrink"),
+        (Dimension::Infinity, Dimension::Infinity) => Some("expand"),
         _ => None,
     }
 }
 
 /// The value of a bare numeric literal or `double.infinity`; parenthesized
 /// values do not match the official rule.
-fn literal_value(expression: Expr<'_>) -> Option<f64> {
+fn literal_value(expression: Expr<'_>) -> Option<Dimension> {
     if is_parenthesized(expression) {
         return None;
     }
-    match expression {
-        Expr::IntLit(literal) => parse_int(literal.value()).map(|value| value as f64),
-        Expr::DoubleLit(literal) => literal.value().replace('_', "").parse().ok(),
+    let value = match expression {
+        Expr::IntLit(literal) => {
+            return parse_int(literal.value()).map(|value| {
+                if value == 0 {
+                    Dimension::Zero
+                } else {
+                    Dimension::Other
+                }
+            });
+        }
+        Expr::DoubleLit(literal) => literal.value().replace('_', "").parse::<f64>().ok()?,
         Expr::Field(field)
             if !field.is_null_safe()
                 && field.field().name() == "infinity"
                 && matches!(field.object(), Expr::Ident(prefix) if prefix.name() == "double")
                 && !is_parenthesized(field.object()) =>
         {
-            Some(f64::INFINITY)
+            return Some(Dimension::Infinity);
         }
-        _ => None,
-    }
+        _ => return None,
+    };
+    Some(
+        if value.total_cmp(&0.0).is_eq() || value.total_cmp(&-0.0).is_eq() {
+            Dimension::Zero
+        } else if value.total_cmp(&f64::INFINITY).is_eq() {
+            Dimension::Infinity
+        } else {
+            Dimension::Other
+        },
+    )
 }

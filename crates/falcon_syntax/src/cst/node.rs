@@ -18,24 +18,30 @@ impl<'a> SyntaxNode<'a> {
     fn data(self) -> &'a NodeData {
         &self.tree.nodes[self.id.0 as usize]
     }
+    #[must_use]
     pub fn id(self) -> NodeId {
         self.id
     }
+    #[must_use]
     pub fn tree(self) -> &'a SyntaxTree {
         self.tree
     }
+    #[must_use]
     pub fn source(self) -> &'a str {
         self.source
     }
+    #[must_use]
     pub fn kind(self) -> NodeKind {
         self.data().kind
     }
+    #[must_use]
     pub fn span(self) -> Span {
         self.data().span
     }
     pub(crate) fn param_kind(self) -> super::ParamKind {
         self.data().param_kind()
     }
+    #[must_use]
     pub fn recovery_span(self) -> Option<Span> {
         let spans = &self.tree.recovery_spans;
         spans
@@ -43,6 +49,7 @@ impl<'a> SyntaxNode<'a> {
             .ok()
             .map(|index| spans[index].1)
     }
+    #[must_use]
     pub fn full_span(self) -> Span {
         if self.id == NodeId(0) {
             return Span::new(0, self.source.len());
@@ -61,10 +68,12 @@ impl<'a> SyntaxNode<'a> {
         }
         span
     }
+    #[must_use]
     pub fn text(self) -> &'a str {
         let span = self.span();
         &self.source[span.start..span.end]
     }
+    #[must_use]
     pub fn parent(self) -> Option<Self> {
         self.data().parent.map(|link| Self {
             id: link.id(),
@@ -74,12 +83,14 @@ impl<'a> SyntaxNode<'a> {
     pub fn ancestors(self) -> impl Iterator<Item = Self> + Clone {
         std::iter::successors(Some(self), |node| node.parent())
     }
+    #[must_use]
     pub fn children_with_tokens(self) -> SyntaxElementChildren<'a> {
         SyntaxElementChildren {
             parent: self,
             elements: self.tree.elements[self.data().child_range()].iter(),
         }
     }
+    #[must_use]
     pub fn children(self) -> SyntaxNodeChildren<'a> {
         SyntaxNodeChildren {
             inner: self.children_with_tokens(),
@@ -96,12 +107,14 @@ impl<'a> SyntaxNode<'a> {
         self.child()
             .expect("parser emits required children, recovering with missing nodes")
     }
+    /// Returns this node and its descendants in arena order.
     pub fn descendants(self) -> impl DoubleEndedIterator<Item = Self> + ExactSizeIterator + Clone {
-        (self.id.0 as usize..self.data().subtree_end as usize).map(move |index| Self {
-            id: NodeId(index as u32),
+        (self.id.0..self.data().subtree_end).map(move |index| Self {
+            id: NodeId(index),
             ..self
         })
     }
+    #[must_use]
     pub fn tokens(self) -> SyntaxTokens<'a> {
         SyntaxTokens::new(self.tree, self.source, self.data().token_range())
     }
@@ -109,9 +122,11 @@ impl<'a> SyntaxNode<'a> {
         self.tokens()
             .filter(|token| !token.is_trivia() && token.kind() != TokenKind::Eof)
     }
+    #[must_use]
     pub fn first_token(self) -> Option<SyntaxToken<'a>> {
         self.tokens().next()
     }
+    #[must_use]
     pub fn last_token(self) -> Option<SyntaxToken<'a>> {
         self.tokens().next_back()
     }
@@ -146,30 +161,39 @@ pub struct SyntaxToken<'a> {
 }
 
 impl<'a> SyntaxToken<'a> {
+    #[must_use]
     pub fn id(self) -> TokenId {
         self.id
     }
+    #[must_use]
     pub fn kind(self) -> TokenKind {
         self.tree.tokens[self.id.index()].kind
     }
+    #[must_use]
     pub fn text(self) -> &'a str {
         self.tree.tokens[self.id.index()].text(self.source)
     }
+    #[must_use]
     pub fn offset(self) -> usize {
         self.tree.tokens[self.id.index()].offset()
     }
+    #[must_use]
     pub fn len(self) -> usize {
         self.tree.tokens[self.id.index()].len()
     }
+    #[must_use]
     pub fn is_empty(self) -> bool {
         self.len() == 0
     }
+    #[must_use]
     pub fn span(self) -> Span {
         Span::new(self.offset(), self.offset() + self.len())
     }
+    #[must_use]
     pub fn is_trivia(self) -> bool {
         self.tree.tokens[self.id.index()].is_trivia()
     }
+    #[must_use]
     pub fn parent(self) -> SyntaxNode<'a> {
         SyntaxNode {
             tree: self.tree,
@@ -177,18 +201,22 @@ impl<'a> SyntaxToken<'a> {
             id: self.tree.token_parents[self.id.index()],
         }
     }
+    #[must_use]
     pub fn next(self) -> Option<Self> {
         self.tree
             .token(self.source, TokenId(self.id.0.checked_add(1)?))
     }
+    #[must_use]
     pub fn prev(self) -> Option<Self> {
         self.tree
             .token(self.source, TokenId(self.id.0.checked_sub(1)?))
     }
+    #[must_use]
     pub fn next_significant(self) -> Option<Self> {
         std::iter::successors(self.next(), |token| token.next())
             .find(|token| !token.is_trivia() && token.kind() != TokenKind::Eof)
     }
+    #[must_use]
     pub fn prev_significant(self) -> Option<Self> {
         std::iter::successors(self.prev(), |token| token.prev())
             .find(|token| !token.is_trivia() && token.kind() != TokenKind::Eof)
@@ -218,6 +246,7 @@ pub enum SyntaxElement<'a> {
 }
 
 impl<'a> SyntaxElement<'a> {
+    #[must_use]
     pub fn into_token(self) -> Option<SyntaxToken<'a>> {
         if let Self::Token(token) = self {
             Some(token)
@@ -225,12 +254,14 @@ impl<'a> SyntaxElement<'a> {
             None
         }
     }
+    #[must_use]
     pub fn span(self) -> Span {
         match self {
             Self::Node(node) => node.span(),
             Self::Token(token) => token.span(),
         }
     }
+    #[must_use]
     pub fn text(self) -> &'a str {
         match self {
             Self::Node(node) => node.text(),
@@ -303,21 +334,22 @@ impl std::iter::FusedIterator for SyntaxNodeChildren<'_> {}
 pub struct SyntaxTokens<'a> {
     tree: &'a SyntaxTree,
     source: &'a str,
-    range: Range<usize>,
+    range: Range<u32>,
 }
 impl<'a> SyntaxTokens<'a> {
     pub(crate) fn new(tree: &'a SyntaxTree, source: &'a str, range: Range<usize>) -> Self {
         Self {
             tree,
             source,
-            range,
+            range: u32::try_from(range.start).expect("token range starts within arena capacity")
+                ..u32::try_from(range.end).expect("token range ends within arena capacity"),
         }
     }
-    fn resolve(&self, index: usize) -> SyntaxToken<'a> {
+    fn resolve(&self, index: u32) -> SyntaxToken<'a> {
         SyntaxToken {
             tree: self.tree,
             source: self.source,
-            id: TokenId(index as u32),
+            id: TokenId(index),
         }
     }
 }
@@ -359,24 +391,30 @@ impl<'a, T: AstNode<'a>> AstChildren<'a, T> {
             std::sync::LazyLock::new(|| SyntaxTree::build("", &[], Vec::new()));
         Self::new(EMPTY.root(""))
     }
+    #[must_use]
     pub fn new(parent: SyntaxNode<'a>) -> Self {
         Self::from_children(parent.children())
     }
+    #[must_use]
     pub fn from_children(children: SyntaxNodeChildren<'a>) -> Self {
         Self {
             children,
             marker: PhantomData,
         }
     }
+    #[must_use]
     pub fn len(&self) -> usize {
         self.clone().count()
     }
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.clone().next().is_none()
     }
+    #[must_use]
     pub fn first(&self) -> Option<T> {
         self.clone().next()
     }
+    #[must_use]
     pub fn last(&self) -> Option<T> {
         self.clone().next_back()
     }

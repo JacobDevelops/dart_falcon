@@ -67,7 +67,7 @@ fn null_assert_initializers<'a>(
     declarators: AstChildren<'a, VarDeclarator<'a>>,
 ) -> impl Iterator<Item = Span> + 'a {
     declarators
-        .filter_map(|declarator| declarator.initializer())
+        .filter_map(VarDeclarator::initializer)
         .filter(|initializer| matches!(initializer.unparenthesized(), Expr::NullAssert(_)))
         .map(|initializer| initializer.unparenthesized().span())
 }
@@ -151,7 +151,7 @@ impl<'a> Collector<'a> {
     fn contextual_arguments(&mut self, args: ArgList<'a>) {
         self.contextual.extend(
             args.positional()
-                .chain(args.named().map(|argument| argument.value()))
+                .chain(args.named().map(NamedArg::value))
                 .filter(|argument| is_null_assert(*argument))
                 .map(|argument| argument.unparenthesized().span()),
         );
@@ -169,8 +169,8 @@ impl<'a> Collector<'a> {
         let body = self.bodies.enclosing(span)?;
         if !matches!(
             body.owner,
-            BodyOwner::TopLevelFunction | BodyOwner::LocalFunction
-        ) && !(body.owner == BodyOwner::Getter && state.enclosing_type.is_none())
+            BodyOwner::TopLevelFunction | BodyOwner::LocalFunction | BodyOwner::Getter
+        ) || body.owner == BodyOwner::Getter && state.enclosing_type.is_some()
         {
             return None;
         }

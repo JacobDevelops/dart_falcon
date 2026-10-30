@@ -223,6 +223,7 @@ pub struct ProjectAnalysis {
 }
 
 impl ProjectAnalysis {
+    #[must_use]
     pub fn new(config: &FalconConfig) -> Self {
         let registry = falcon_rules::build_registry(config);
         let cross_file_registry = falcon_rules::build_cross_file_registry(config);
@@ -233,8 +234,8 @@ impl ProjectAnalysis {
             registry,
             cross_file_registry,
             resolve,
-            cross_file_resolve,
             collect_programs,
+            cross_file_resolve,
         }
     }
 }
@@ -294,6 +295,7 @@ pub fn analyze_document<'a>(
 }
 
 /// Retain a manifest using the same parsed-file representation as Dart sources.
+#[must_use]
 pub fn manifest_file(path: PathBuf, source: String) -> ProjectFile {
     let tree = falcon_dart_parser::lex_tree(&source);
     ProjectFile {

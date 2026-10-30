@@ -1,5 +1,10 @@
 use super::super::{hierarchy, sdk_hierarchy::SDK_HIERARCHY};
-use super::*;
+use super::{
+    Arc, DeclarationIdentity, FxHashSet, HashMap, HashSet, ResolvedType, SemanticModel,
+    SignatureIndex, Truth, TypeKind, has_inference_holes,
+};
+#[cfg(test)]
+use super::{IdentityIndex, TypeIndex};
 use crate::resolve::semantic::ResolvedTypeKind;
 use std::ops::ControlFlow;
 
@@ -112,7 +117,7 @@ impl SignatureIndex {
         identity: &DeclarationIdentity,
         matches: &impl Fn(&DeclarationIdentity) -> bool,
     ) -> Truth {
-        self.ancestor_matches(
+        Self::ancestor_matches(
             identity,
             |identity| {
                 self.type_facts
@@ -131,7 +136,7 @@ impl SignatureIndex {
         identity: &DeclarationIdentity,
         matches: &impl Fn(&DeclarationIdentity) -> bool,
     ) -> Truth {
-        self.ancestor_matches(
+        Self::ancestor_matches(
             identity,
             |identity| {
                 self.type_facts
@@ -144,7 +149,6 @@ impl SignatureIndex {
     }
 
     pub(super) fn ancestor_matches<'s>(
-        &'s self,
         identity: &'s DeclarationIdentity,
         edges: impl Fn(&DeclarationIdentity) -> Option<&'s [ResolvedType]>,
         matches: &impl Fn(&DeclarationIdentity) -> bool,
@@ -221,6 +225,7 @@ impl SignatureIndex {
     /// `ty` with every raw use of an indexed generic interface, at any depth,
     /// replaced by its instantiation to bounds, as the analyzer's type of a
     /// written raw type. Inserted bound defaults are not normalized again.
+    #[must_use]
     pub fn instantiate_to_bounds(&self, ty: &ResolvedType) -> ResolvedType {
         match ty {
             ResolvedType {
@@ -376,6 +381,7 @@ impl SignatureIndex {
         self.instantiated_matching(ty, &target, model, &mut FxHashSet::default())
     }
 
+    #[must_use]
     pub fn instantiated_supertype(
         &self,
         ty: &ResolvedType,
@@ -594,13 +600,13 @@ impl SignatureIndex {
     /// anything else — unresolved supertypes, unlisted SDK or package types,
     /// non-interface types — is `Unknown`. An extension type implements what
     /// its `implements` clause reaches, as the analyzer's `allSupertypes`.
+    #[must_use]
     pub fn implements_sdk(&self, ty: &ResolvedType, library: &str, name: &str) -> Truth {
         match ty {
             ResolvedType {
-                kind: ResolvedTypeKind::TypeParameter { bound, .. },
-            }
-            | ResolvedType {
-                kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+                kind:
+                    ResolvedTypeKind::TypeParameter { bound, .. }
+                    | ResolvedTypeKind::NonNullTypeParameter { bound, .. },
             } => self.implements_sdk(bound, library, name),
             ResolvedType {
                 kind: ResolvedTypeKind::Interface { identity, .. },
@@ -611,6 +617,7 @@ impl SignatureIndex {
 
     /// Match the analyzer linter's interface checks, which inspect extension
     /// representation types and type-parameter bounds rather than subtyping.
+    #[must_use]
     pub fn interface_check_sdk(
         &self,
         ty: &ResolvedType,
@@ -620,10 +627,9 @@ impl SignatureIndex {
     ) -> Truth {
         let mut ty = ty;
         while let ResolvedType {
-            kind: ResolvedTypeKind::TypeParameter { bound, .. },
-        }
-        | ResolvedType {
-            kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+            kind:
+                ResolvedTypeKind::TypeParameter { bound, .. }
+                | ResolvedTypeKind::NonNullTypeParameter { bound, .. },
         } = ty
         {
             ty = bound;

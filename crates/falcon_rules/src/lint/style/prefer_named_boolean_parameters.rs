@@ -102,7 +102,7 @@ impl<'a> Collector<'a> {
                 return false;
             };
             let mut segments = ty.segments();
-            if !segments.next().is_some_and(|name| name.name() == "bool")
+            if segments.next().is_none_or(|name| name.name() != "bool")
                 || segments.next().is_some()
                 || ty.type_args().next().is_some()
             {

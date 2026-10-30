@@ -24,7 +24,7 @@ fn one_walk_prunes_excluded_directories_and_collects_manifests_once() {
     let output = walk_project(&[temp.path().to_path_buf(), source.clone()], &filter, true).unwrap();
     assert_eq!(output.files, [(source, "void main() {}".into())]);
     assert_eq!(output.manifests, [(manifest, "name: package\n".into())]);
-    assert!(output.missing_paths.is_empty());
+    assert_eq!(output.missing_paths, [] as [std::path::PathBuf; 0]);
 }
 
 #[test]
@@ -104,11 +104,9 @@ fn excluded_oversized_files_do_not_abort_collection() {
     }
     let filter = PathFilter::from_includes(&["!**/excluded/**".to_string()]);
     let paths = [temp.path().to_path_buf()];
-    assert!(
-        walk_project(&paths, &filter, false)
-            .unwrap()
-            .files
-            .is_empty()
+    assert_eq!(
+        walk_project(&paths, &filter, false).unwrap().files,
+        [] as [(std::path::PathBuf, std::string::String); 0]
     );
     assert!(
         walk_project(&paths, &filter, true)
@@ -208,8 +206,14 @@ fn test_walk_nonexistent_path_reports_missing() {
         true,
     )
     .unwrap();
-    assert!(output.files.is_empty());
-    assert!(output.manifests.is_empty());
+    assert_eq!(
+        output.files,
+        [] as [(std::path::PathBuf, std::string::String); 0]
+    );
+    assert_eq!(
+        output.manifests,
+        [] as [(std::path::PathBuf, std::string::String); 0]
+    );
     assert_eq!(output.missing_paths, [nonexistent]);
 }
 
@@ -225,7 +229,7 @@ fn explicit_filtered_files_are_reported_even_with_an_admitted_input() {
     let output = walk_project(&[source.clone(), filtered.clone()], &filter, false).unwrap();
     assert_eq!(output.files, [(source, "void main() {}".into())]);
     assert_eq!(output.filtered_paths, [filtered]);
-    assert!(output.missing_paths.is_empty());
+    assert_eq!(output.missing_paths, [] as [std::path::PathBuf; 0]);
 }
 
 #[test]
@@ -235,8 +239,14 @@ fn unsupported_explicit_files_do_not_discover_ancestor_manifests() {
     let readme = temp.path().join("README.txt");
     fs::write(&readme, "package notes").unwrap();
     let output = walk_project(&[readme], &PathFilter::default(), true).unwrap();
-    assert!(output.files.is_empty());
-    assert!(output.manifests.is_empty());
+    assert_eq!(
+        output.files,
+        [] as [(std::path::PathBuf, std::string::String); 0]
+    );
+    assert_eq!(
+        output.manifests,
+        [] as [(std::path::PathBuf, std::string::String); 0]
+    );
 }
 
 #[cfg(unix)]
@@ -294,11 +304,11 @@ fn dart_includes_do_not_hide_package_manifests() {
         1
     );
     filter.extend_excludes(&["**/pubspec.yaml".to_string()]);
-    assert!(
+    assert_eq!(
         walk_project(&[temp.path().to_path_buf()], &filter, true)
             .unwrap()
-            .manifests
-            .is_empty()
+            .manifests,
+        [] as [(std::path::PathBuf, std::string::String); 0]
     );
 }
 
@@ -328,5 +338,5 @@ fn discovery_preserves_missing_and_filtered_inputs() {
     let discovery = discover_project(&[missing.clone(), filtered.clone()], &filter, true);
     assert_eq!(discovery.missing_paths, [missing]);
     assert_eq!(discovery.filtered_paths, [filtered]);
-    assert!(discovery.files.is_empty());
+    assert_eq!(discovery.files, [] as [std::path::PathBuf; 0]);
 }

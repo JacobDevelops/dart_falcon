@@ -15,8 +15,6 @@ use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 
-
-
 use super::{canonical_or_lexical, enclosing_pubspec};
 
 #[derive(Default)]
@@ -60,8 +58,14 @@ impl CrossFileRule for DependOnReferencedPackages {
                     .is_some()
             });
 
-            let import_uris = file.program().imports().map(|directive| directive.uri());
-            let export_uris = file.program().exports().map(|directive| directive.uri());
+            let import_uris = file
+                .program()
+                .imports()
+                .map(falcon_syntax::cst::ImportDirective::uri);
+            let export_uris = file
+                .program()
+                .exports()
+                .map(falcon_syntax::cst::ExportDirective::uri);
             for uri in import_uris.chain(export_uris) {
                 let value = uri.value();
                 let Some(package) = imported_package(&value) else {
@@ -96,7 +100,6 @@ impl CrossFileRule for DependOnReferencedPackages {
         diagnostics
     }
 }
-
 
 fn is_public_or_executable(file: &Path, pubspec: &Path) -> bool {
     let root = pubspec.parent().unwrap_or_else(|| Path::new(""));

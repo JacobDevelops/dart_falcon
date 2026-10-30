@@ -39,7 +39,7 @@ fn test_metadata_before_export() {
     assert_eq!(e.uri().value(), "p.dart");
     match e.combinators().next().unwrap() {
         ImportCombinator::Show(names) => assert_eq!(names.names().next().unwrap().name(), "B"),
-        other => panic!("expected show combinator, got {other:?}"),
+        other @ ImportCombinator::Hide(_) => panic!("expected show combinator, got {other:?}"),
     }
     // No stray top-level error node from the leading `@`.
     assert!(
@@ -120,7 +120,10 @@ fn test_metadata_before_library_dotted_name() {
             .name(),
         "A"
     );
-    let dotted: Vec<_> = lib.name().map(|s| s.name()).collect();
+    let dotted: Vec<_> = lib
+        .name()
+        .map(falcon_syntax::cst::Identifier::name)
+        .collect();
     assert_eq!(dotted, vec!["a", "b", "c"], "dotted library name lost");
 }
 
@@ -137,7 +140,10 @@ fn test_metadata_with_args_before_part_of() {
         1,
         "annotation not attached to part-of"
     );
-    let dotted: Vec<_> = po.name().map(|s| s.name()).collect();
+    let dotted: Vec<_> = po
+        .name()
+        .map(falcon_syntax::cst::Identifier::name)
+        .collect();
     assert_eq!(dotted, vec!["foo", "bar"]);
 }
 
@@ -259,7 +265,10 @@ fn test_part_of_still_parses() {
     let prog = tree.program(source);
     assert!(errors.is_empty(), "errors: {errors:?}");
     let po = prog.part_of_directive().expect("part-of directive");
-    let dotted: Vec<_> = po.name().map(|s| s.name()).collect();
+    let dotted: Vec<_> = po
+        .name()
+        .map(falcon_syntax::cst::Identifier::name)
+        .collect();
     assert_eq!(dotted, vec!["foo", "bar"]);
 }
 

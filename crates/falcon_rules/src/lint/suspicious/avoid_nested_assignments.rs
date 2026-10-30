@@ -55,7 +55,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         {
             let mut parent = assign.syntax().parent();
             while parent.is_some_and(|node| node.kind() == NodeKind::ParenExpr) {
-                parent = parent.and_then(|node| node.parent());
+                parent = parent.and_then(SyntaxNode::parent);
             }
             let chained = parent.is_some_and(|parent| {
                 let value = match (Expr::cast(parent), CascadeOp::cast(parent)) {

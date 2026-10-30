@@ -156,7 +156,7 @@ fn check_group(
     ctx: &AnalyzeContext,
     cfg: &Options,
 ) {
-    let is_doc = group.first().map(|t| t.marker == "///").unwrap_or(false);
+    let is_doc = group.first().is_some_and(|t| t.marker == "///");
     if !is_doc && cfg.only_doc_comments {
         return;
     }
@@ -236,13 +236,11 @@ fn is_valid_sentence(sentence: &str) -> bool {
     let upper = trimmed
         .chars()
         .next()
-        .map(|c| !c.is_lowercase())
-        .unwrap_or(true);
+        .is_none_or(|c| !c.is_lowercase());
     let last_symbol = trimmed
         .chars()
         .next_back()
-        .map(|c| PUNCTUATION.contains(&c))
-        .unwrap_or(false);
+        .is_some_and(|c| PUNCTUATION.contains(&c));
     let has_empty_space = sentence.starts_with(' ');
     upper && last_symbol && has_empty_space
 }
@@ -314,6 +312,6 @@ mod tests {
             split_sentences(" Value.without spaces"),
             [" Value.without spaces"]
         );
-        assert!(split_sentences("").is_empty());
+        assert_eq!(split_sentences(""), [] as [&str; 0]);
     }
 }

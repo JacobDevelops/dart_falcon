@@ -1,7 +1,7 @@
 //! Flags Riverpod WidgetRef.read calls after an async gap without a mounted guard.
 //!
 //! A widget may be disposed while awaiting a future. Check Flutter mounted before
-//! reading a provider. Only resolved Riverpod WidgetRef receivers are checked;
+//! reading a provider. Only resolved Riverpod `WidgetRef` receivers are checked;
 //! notifier references are handled by use-ref-and-state-synchronously. Nested
 //! function bodies form independent async boundaries.
 

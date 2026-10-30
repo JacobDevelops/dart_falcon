@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn source_getters_are_not_stable_variable_reads() {
-        let source = r#"
+        let source = r"
 int nextId = 0;
 int get changing => nextId++;
 bool getterEqual() => changing == changing;
@@ -144,7 +144,7 @@ class Child extends Values {
   bool inheritedGetterEqual() => changing == changing;
   bool inheritedFieldEqual() => value == value;
 }
-"#;
+";
         let diagnostics = diagnostics(
             NoSelfComparisons::NAME,
             &NoSelfComparisons,

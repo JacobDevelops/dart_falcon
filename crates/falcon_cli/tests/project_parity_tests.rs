@@ -95,7 +95,7 @@ fn cli_and_lsp_have_full_project_diagnostic_parity() {
             uri
         })
         .collect::<Vec<_>>();
-    assert!(lsp.take_config_messages().is_empty());
+    assert_eq!(lsp.take_config_messages(), Vec::new());
     assert!(lsp.cross_file_rules_enabled());
 
     // Analyze only after every admitted document is open. Cross-file publication
@@ -142,7 +142,7 @@ fn assert_project_diagnostics(
             })
             .unwrap_or_else(|| panic!("missing {rule} in {file}: {diagnostics:#?}"));
         assert_eq!(diagnostic.severity, severity);
-        assert!(!diagnostic.message.is_empty());
+        assert_ne!(diagnostic.message, "");
         assert!(diagnostic.line > 0 && diagnostic.col > 0);
         if rule == "unused-files" {
             assert!(diagnostic.message.contains("not reachable"));
@@ -274,7 +274,7 @@ fn cli_and_lsp_have_sdk_resolution_parity_for_unsaved_buffers() {
     assert!(lsp.analyze(&uri).is_empty());
     assert!(lsp.change(&uri, source.to_owned(), Some(2)));
     let editor_diagnostics = lsp.analyze(&uri);
-    assert!(lsp.take_config_messages().is_empty());
+    assert_eq!(lsp.take_config_messages(), Vec::new());
     assert_eq!(fs::read_to_string(&path).unwrap(), saved);
 
     for diagnostics in [&cli.diagnostics, &editor_diagnostics] {

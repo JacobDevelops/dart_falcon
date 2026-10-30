@@ -332,8 +332,8 @@ impl Collector<'_, '_> {
                     self.model,
                 ) == Truth::Yes
             }
-            (ResolvedTypeView::Null, ResolvedTypeView::Null) => true,
-            (ResolvedTypeView::Void, ResolvedTypeView::Void) => true,
+            (ResolvedTypeView::Null, ResolvedTypeView::Null)
+            | (ResolvedTypeView::Void, ResolvedTypeView::Void) => true,
             (ResolvedTypeView::Function { .. }, ResolvedTypeView::Function { .. })
             | (ResolvedTypeView::Record { .. }, ResolvedTypeView::Record { .. }) => left == right,
             _ => false,

@@ -128,11 +128,13 @@ impl<'a> FileSuppressions<'a> {
 
     /// The 0-based line a byte offset falls on (used for a diagnostic's span
     /// start). Shared here so callers don't recompute a line table.
+    #[must_use]
     pub fn line_for_offset(&self, offset: usize) -> u32 {
         self.lines.line_for_offset(offset)
     }
 
     /// Whether `rule` is suppressed on the given 0-based `line`.
+    #[must_use]
     pub fn is_suppressed(&self, rule: &str, line: u32) -> bool {
         self.all_file.contains(rule)
             || self
@@ -144,16 +146,19 @@ impl<'a> FileSuppressions<'a> {
     /// True when the file carries no *valid* directives (skip the filter pass).
     /// Malformed-suppression diagnostics are reported separately and do not
     /// count here.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.all_file.is_empty() && self.by_line.is_empty()
     }
 
     /// Diagnostics for malformed suppression comments found while parsing.
+    #[must_use]
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
     }
 
     /// Consume the parse result, yielding its malformed-suppression diagnostics.
+    #[must_use]
     pub fn into_diagnostics(self) -> Vec<Diagnostic> {
         self.diagnostics
     }

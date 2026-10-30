@@ -2,7 +2,7 @@
 //!
 //! Shrink wrapping repeatedly measures the list's contents; prefer slivers instead.
 //! Only resolved Flutter `ListView` constructors with a literal `true` shrinkWrap
-//! argument inside a Flutter Row, Column, or ListView child argument are flagged.
+//! argument inside a Flutter Row, Column, or `ListView` child argument are flagged.
 //! Unknown flags, false values, unrelated classes, and standalone lists are ignored.
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};

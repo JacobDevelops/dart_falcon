@@ -3,6 +3,7 @@
 //! Text changes reparse only the changed document; config changes rerun rules
 //! over cached ASTs without reparsing.
 
+use std::fmt::Write as _;
 use std::fs;
 use std::time::{Duration, Instant};
 
@@ -608,7 +609,7 @@ fn assert_external_indexes_survive_edits(
     let replacement_source = format!(
         "{:<width$}",
         "part of dep;\nvoid calculate() {}\n",
-        width = before.len() as usize
+        width = usize::try_from(before.len()).expect("file length fits usize")
     );
     assert_eq!(replacement_source.len() as u64, before.len());
     fs::write(&generated, replacement_source).unwrap();
@@ -943,7 +944,7 @@ fn closed_document_operations_are_noops() {
     assert!(state.document(URI_A).is_none());
     assert!(!state.change(URI_A, VIOLATING_SRC.to_string(), Some(2)));
     assert!(state.analyze(URI_A).is_empty());
-    assert!(state.open_uris().is_empty());
+    assert_eq!(state.open_uris(), [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -1052,9 +1053,11 @@ fn workspace_package_import_resolves_and_refreshes_semantic_diagnostics() {
 fn incremental_reanalyze_meets_latency_gate() {
     let mut source = String::from("class Generated {\n");
     for i in 0..200 {
-        source.push_str(&format!(
+        write!(
+            source,
             "  int method{i}(int value) {{\n    final int result{i} = value + {i};\n    return result{i};\n  }}\n"
-        ));
+        )
+        .expect("writing to a String cannot fail");
     }
     source.push_str("}\n");
 

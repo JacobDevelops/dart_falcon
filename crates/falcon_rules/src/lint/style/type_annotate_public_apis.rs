@@ -25,7 +25,8 @@
 //! Adopted from the official `type_annotate_public_apis` lint.
 
 use falcon_analyze::{
-    AnalyzeContext, ResolvedTypeView, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    AnalyzeContext, ResolvedTypeView, Rule, RulePreparation, StructuralRuleVisitor,
+    StructuralTraversal,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -245,7 +246,7 @@ impl<'a> Checker<'a> {
             {
                 self.report(documented_node_span(
                     param.span(),
-                    param.annotations(),
+                    &param.annotations(),
                     self.ctx,
                 ));
             }

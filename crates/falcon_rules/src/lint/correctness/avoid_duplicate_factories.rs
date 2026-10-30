@@ -47,7 +47,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     );
                     self.diags.push(self.ctx.diagnostic(
                         format!("This factory has the same implementation as `{original}` — remove it or add unique functionality."),
-                        constructor.constructor_name().map_or(constructor.name().span(), |name| name.span()),
+                        constructor.constructor_name().map_or(constructor.name().span(), cst::Identifier::span),
                     ));
                 }
             }
@@ -145,8 +145,8 @@ fn normalized<'a>(
         });
         let label = token.parent().parent().is_some_and(|parent| {
             cst::NamedArg::cast(parent)
-                .map(|argument| argument.name())
-                .or_else(|| cst::RecordField::cast(parent).and_then(|field| field.name()))
+                .map(cst::NamedArg::name)
+                .or_else(|| cst::RecordField::cast(parent).and_then(cst::RecordField::name))
                 .is_some_and(|name| name.span() == token.span())
         });
         let type_name = token

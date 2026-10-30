@@ -6,8 +6,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use falcon_analyze::{SemanticRuleVisitor, SemanticState, visit_program};
 use falcon_analyze::{AnalyzeContext, CrossFileRule, ProjectFile, SemanticIndexes};
+use falcon_analyze::{SemanticRuleVisitor, SemanticState, visit_program};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use falcon_syntax::cst::visit::{Visitor, walk_expr_chain, walk_function_body};
@@ -264,7 +264,7 @@ fn decl_names(program: Program<'_>) -> Vec<&str> {
                 if !matches!(f.kind(), FunctionKind::Getter)
                     && !matches!(f.kind(), FunctionKind::Setter(_)) =>
             {
-                out.push(f.name().name())
+                out.push(f.name().name());
             }
             _ => {
                 if let Some(members) = crate::lint::declarations::members_of(decl) {
@@ -365,7 +365,10 @@ struct ArgumentNullability {
 impl ArgumentNullability {
     fn record<'a>(&mut self, expr: Expr<'a>, state: &SemanticState<'a>) {
         let span = expr.span();
-        let mut shadow = MemberDependency { state, found: false };
+        let mut shadow = MemberDependency {
+            state,
+            found: false,
+        };
         if state.enclosing_type.is_some() {
             shadow.visit_expr(expr);
         }
@@ -388,7 +391,7 @@ impl ArgumentNullability {
     }
 
     fn record_arguments(&mut self, args: ArgList<'_>) {
-        for value in args.positional().chain(args.named().map(|arg| arg.value())) {
+        for value in args.positional().chain(args.named().map(NamedArg::value)) {
             let span = value.span();
             self.values.insert((span.start, span.end), true);
         }
@@ -457,7 +460,9 @@ impl<'a> Visitor<'a> for MemberDependency<'_, 'a> {
                 return false;
             }
             if matches!(expr, Expr::Ident(_))
-                && visitor.state.referenced_declaration(expr, false)
+                && visitor
+                    .state
+                    .referenced_declaration(expr, false)
                     .is_some_and(|reference| !reference.selector.name.is_empty())
             {
                 visitor.found = true;
@@ -506,7 +511,10 @@ impl<'a> Visitor<'a> for CallCollector<'a, '_> {
                     }
                     // Visit the receiver and arguments, but not the callee name
                     // as a tear-off.
-                    if matches!(callee, Expr::Ident(_) | Expr::DotShorthand(_) | Expr::Field(_)) {
+                    if matches!(
+                        callee,
+                        Expr::Ident(_) | Expr::DotShorthand(_) | Expr::Field(_)
+                    ) {
                         visitor.callee = Some(callee.span());
                     }
                 }
@@ -654,7 +662,9 @@ impl<'a> Visitor<'a> for NullAssignFinder<'a, '_> {
                 }
             }
             let increment_target = match node {
-                Expr::Unary(unary) if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) => {
+                Expr::Unary(unary)
+                    if matches!(unary.op(), UnaryOp::PlusPlus | UnaryOp::MinusMinus) =>
+                {
                     Some(unary.operand())
                 }
                 Expr::PostfixIncDec(increment) => Some(increment.operand()),
@@ -722,7 +732,11 @@ mod tests {
         collector.visit_program(file.program());
         assert_eq!(collector.tear_offs, HashSet::from(["_method", "c"]));
         assert_eq!(
-            collector.calls.iter().map(|call| call.name).collect::<Vec<_>>(),
+            collector
+                .calls
+                .iter()
+                .map(|call| call.name)
+                .collect::<Vec<_>>(),
             ["_called", "_called", "_called", "_top", "_top"]
         );
     }

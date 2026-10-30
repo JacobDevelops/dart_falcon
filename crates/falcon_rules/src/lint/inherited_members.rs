@@ -28,9 +28,9 @@ pub(crate) struct InheritingDeclaration<'a> {
     pub source: InheritanceSource<'a>,
 }
 
-pub(crate) fn inheriting_declaration<'a>(
-    declaration: TopLevelDecl<'a>,
-) -> Option<InheritingDeclaration<'a>> {
+pub(crate) fn inheriting_declaration(
+    declaration: TopLevelDecl<'_>,
+) -> Option<InheritingDeclaration<'_>> {
     let (name, members, primary_constructor, source) = match declaration {
         TopLevelDecl::Class(node) => (
             node.name(),

@@ -235,7 +235,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                                 if exits.0 { break; }
                             }
                         }
-                        _ => {}
+                        FunctionBody::Native(_) => {}
                     }
                 }
                 Some(method.params())

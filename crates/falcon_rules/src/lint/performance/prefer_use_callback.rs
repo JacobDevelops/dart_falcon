@@ -1,5 +1,5 @@
 //! Prefer `useCallback` for synchronous memoized function literals.
-//! Only resolved flutter_hooks calls with a zero-argument, single-expression
+//! Only resolved `flutter_hooks` calls with a zero-argument, single-expression
 //! builder are checked; asynchronous and side-effectful builders are preserved.
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};

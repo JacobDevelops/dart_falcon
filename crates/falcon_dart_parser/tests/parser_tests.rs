@@ -33,33 +33,29 @@ fn test_empty_program() {
     assert!(prog.declarations().is_empty());
 }
 
-parser_case!(test_import_simple, r#"import 'dart:core';"#, |prog| {
+parser_case!(test_import_simple, r"import 'dart:core';", |prog| {
     assert_eq!(prog.imports().len(), 1);
     assert_eq!(prog.imports().next().unwrap().uri().value(), "dart:core");
 });
 
-parser_case!(
-    test_import_with_as,
-    r#"import 'foo.dart' as foo;"#,
-    |prog| {
-        assert_eq!(prog.imports().len(), 1);
-        assert!(prog.imports().next().unwrap().as_name().is_some());
-        assert_eq!(
-            prog.imports()
-                .next()
-                .unwrap()
-                .as_name()
-                .as_ref()
-                .unwrap()
-                .name(),
-            "foo"
-        );
-    }
-);
+parser_case!(test_import_with_as, r"import 'foo.dart' as foo;", |prog| {
+    assert_eq!(prog.imports().len(), 1);
+    assert!(prog.imports().next().unwrap().as_name().is_some());
+    assert_eq!(
+        prog.imports()
+            .next()
+            .unwrap()
+            .as_name()
+            .as_ref()
+            .unwrap()
+            .name(),
+        "foo"
+    );
+});
 
 parser_case!(
     test_import_with_show,
-    r#"import 'pkg.dart' show foo, bar;"#,
+    r"import 'pkg.dart' show foo, bar;",
     |prog| {
         assert_eq!(prog.imports().next().unwrap().combinators().len(), 1);
     }
@@ -67,7 +63,7 @@ parser_case!(
 
 parser_case!(
     test_import_with_hide,
-    r#"import 'pkg.dart' hide Secret;"#,
+    r"import 'pkg.dart' hide Secret;",
     |prog| {
         assert_eq!(prog.imports().next().unwrap().combinators().len(), 1);
     }
@@ -75,13 +71,13 @@ parser_case!(
 
 parser_case!(
     test_import_deferred,
-    r#"import 'pkg.dart' deferred as lazy;"#,
+    r"import 'pkg.dart' deferred as lazy;",
     |prog| {
         assert!(prog.imports().next().unwrap().is_deferred());
     }
 );
 
-parser_case!(test_export_simple, r#"export 'foo.dart';"#, |prog| {
+parser_case!(test_export_simple, r"export 'foo.dart';", |prog| {
     assert_eq!(prog.exports().len(), 1);
 });
 
@@ -89,7 +85,7 @@ parser_case!(test_library_directive, "library my.lib;", |prog| {
     assert!(prog.library_directive().is_some());
 });
 
-parser_case!(test_part_directive, r#"part 'foo.dart';"#, |prog| {
+parser_case!(test_part_directive, r"part 'foo.dart';", |prog| {
     assert_eq!(prog.part_directives().len(), 1);
 });
 
@@ -1913,7 +1909,7 @@ fn snap_collection_for() {
 #[test]
 fn snap_switch_pattern_guard() {
     parser_case!(
-        r#"String classify(int n) => switch (n) { < 0 => 'neg', 0 => 'zero', _ => 'pos' };"#,
+        r"String classify(int n) => switch (n) { < 0 => 'neg', 0 => 'zero', _ => 'pos' };",
         |src, tree, errors, prog| {
             assert_debug_snapshot!(prog.declarations().next().unwrap());
         }
@@ -1968,7 +1964,7 @@ fn first_fn_arrow_or_block_expr(prog: Program<'_>) -> Expr<'_> {
                 .expect("init"),
             other => panic!("unexpected stmt: {other:?}"),
         },
-        _ => panic!("unexpected body"),
+        FunctionBody::Native(_) => panic!("unexpected body"),
     }
 }
 
@@ -2044,14 +2040,14 @@ fn test_bug_map_comprehension_for_pattern() {
 #[test]
 fn test_bug_function_typed_field_then_override_method() {
     // @override on a method after a function-typed field must be preserved.
-    let src = r#"
+    let src = r"
 class W {
   final void Function() onTap;
   W(this.onTap);
   @override
   Widget build(BuildContext context) => X();
 }
-"#;
+";
     let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
@@ -2076,7 +2072,7 @@ class W {
 #[test]
 fn test_bug_function_typed_field_named_params_then_override() {
     // Mirrors jfit _SessionTile: function type with named param, then @override.
-    let src = r#"
+    let src = r"
 class _SessionTile extends StatelessWidget {
   const _SessionTile({required this.session, required this.onRespond});
 
@@ -2086,7 +2082,7 @@ class _SessionTile extends StatelessWidget {
   @override
   Widget build(final BuildContext context) => SessionCard(session: session);
 }
-"#;
+";
     let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
     let prog = tree.program(src);
     assert!(errors.is_empty(), "errors: {errors:?}");
@@ -2392,7 +2388,10 @@ fn first_call_first_arg(prog: Program<'_>) -> Expr<'_> {
 fn first_local_var_init(prog: Program<'_>) -> Option<Expr<'_>> {
     for s in first_fn_body_stmts(prog) {
         if let Stmt::LocalVar(v) = s {
-            return v.declarators().next().and_then(|d| d.initializer());
+            return v
+                .declarators()
+                .next()
+                .and_then(falcon_syntax::cst::VarDeclarator::initializer);
         }
     }
     None
@@ -2446,7 +2445,11 @@ fn test_pattern_decl_var_named_shorthand() {
     assert_eq!(rec.fields().len(), 2);
     assert!(rec.fields().next().unwrap().name().is_none());
     assert_eq!(
-        rec.fields().nth(1).unwrap().name().map(|n| n.name()),
+        rec.fields()
+            .nth(1)
+            .unwrap()
+            .name()
+            .map(falcon_syntax::cst::Identifier::name),
         Some("y")
     );
     assert!(

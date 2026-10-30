@@ -155,7 +155,7 @@ mod tests {
                 assert_eq!(
                     UnnecessaryStringInterpolations.analyze(UnnecessaryStringInterpolations::NAME, program, ctx).len(),
                     3
-                )
+                );
             },
         );
     }

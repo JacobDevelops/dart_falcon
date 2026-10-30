@@ -1,4 +1,17 @@
-use super::*;
+use super::{
+    Arc, AstChildren, ClassMember, ClassRestriction, ConstConstructorBody, ConstructorFacts,
+    DartType, DeclarationFacts, DeclarationIdentity, EffectiveMembers, Expr, ExtensionFacts,
+    ExtensionMemberName, ExtensionMembers, ExternalLibraries, FileId, FormalParam, FormalParamList,
+    FunctionKind, FunctionTypeShape, FxHashMap, FxHashSet, HashMap, HashSet, IdentityIndex,
+    InitializingFormal, LibraryId, MemberEntry, MemberFacts, MemberKind, ParamKind,
+    ParameterContract, ParameterDefault, ParameterFacts, ParameterOwner, PathBuf, Program,
+    QualifiedName, ResolvedSignature, ResolvedType, SemanticModel, SignatureIndex, SignatureMap,
+    StaticConstFacts, SuperFormal, TopLevelDecl, Truth, TypeFacts, TypeIndex, TypeKind, TypeParam,
+    TypeParameterId, TypeParameterScope, VarKeyword, constructed_identity, default_syntax,
+    empty_parameter_contracts, expression_segments, find_type_including_bounds, index_fixpoint,
+    inherited, instantiate_parameter_bound, refine_inferred_type, resolve_call_constructor,
+    setter_parameter_contracts,
+};
 use crate::resolve::semantic::ResolvedTypeKind;
 
 type IndexedProgram<'a> = (Option<FileId>, &'a Arc<crate::ParsedFile>, bool);
@@ -50,6 +63,7 @@ impl SignatureIndex {
         self.member_entries.get(identity)?.get(name)
     }
 
+    #[must_use]
     pub fn from_program(program: Program<'_>, model: &SemanticModel<'_>) -> Self {
         let mut index = Self::default();
         index.add_sdk_signatures();
@@ -146,11 +160,11 @@ impl SignatureIndex {
         external: Arc<SignatureIndex>,
     ) -> Self {
         let index = Self::borrowing_external(external);
-        let all = files
+        let all: Vec<IndexedProgram<'_>> = files
             .iter()
             .map(|(path, parsed)| (identities.file(path), parsed, true))
             .collect();
-        Self::build_programs(index, all, identities, types)
+        Self::build_programs(index, &all, identities, types)
     }
 
     /// Index project `files` and, when given, the loaded external libraries
@@ -185,7 +199,7 @@ impl SignatureIndex {
                     .map(|(path, parsed)| (identities.file(path), parsed, true)),
             )
             .collect();
-        Self::build_programs(Self::default(), all, identities, types)
+        Self::build_programs(Self::default(), &all, identities, types)
     }
 
     /// Replace facts owned by dirty project libraries, retaining all other
@@ -283,11 +297,11 @@ impl SignatureIndex {
 
     fn build_programs(
         mut index: Self,
-        all: Vec<IndexedProgram<'_>>,
+        all: &[IndexedProgram<'_>],
         identities: &IdentityIndex,
         types: &TypeIndex,
     ) -> Self {
-        for (file, parsed, analyze_bodies) in &all {
+        for (file, parsed, analyze_bodies) in all {
             let model = SemanticModel::from_file(*file, parsed, identities, Some(types));
             index.add_declarations(parsed.program(), &model, *analyze_bodies);
         }
@@ -432,7 +446,7 @@ impl SignatureIndex {
             alias.name().name(),
             alias.annotations(),
             alias.type_params(),
-            EffectiveMembers::declared(AstChildren::empty()),
+            &EffectiveMembers::declared(AstChildren::empty()),
             (None, alias.modifiers().is_abstract),
             model,
         );
@@ -440,7 +454,7 @@ impl SignatureIndex {
             alias.name().name(),
             alias.type_params(),
             TopLevelDecl::ClassTypeAlias(alias),
-            EffectiveMembers::declared(AstChildren::empty()),
+            &EffectiveMembers::declared(AstChildren::empty()),
             model,
         );
     }
@@ -458,7 +472,7 @@ impl SignatureIndex {
             alias.name().name(),
             alias.annotations(),
             alias.type_params(),
-            EffectiveMembers::declared(AstChildren::empty()),
+            &EffectiveMembers::declared(AstChildren::empty()),
             (None, false),
             model,
         );
@@ -508,8 +522,7 @@ impl SignatureIndex {
                 identity,
                 function
                     .return_type()
-                    .map(|ty| model.resolve_type(ty))
-                    .unwrap_or(ResolvedType::DYNAMIC),
+                    .map_or(ResolvedType::DYNAMIC, |ty| model.resolve_type(ty)),
             );
         }
     }
@@ -528,16 +541,16 @@ impl SignatureIndex {
             };
             self.value_types.insert(
                 identity.clone(),
-                variable
-                    .var_type()
-                    .map(|ty| model.resolve_type(ty))
-                    .unwrap_or_else(|| {
+                variable.var_type().map_or_else(
+                    || {
                         if declarator.initializer().is_none() {
                             ResolvedType::DYNAMIC
                         } else {
                             ResolvedType::UNKNOWN
                         }
-                    }),
+                    },
+                    |ty| model.resolve_type(ty),
+                ),
             );
             if variable.keyword() == VarKeyword::Const
                 && let Some(initializer) = declarator.initializer()
@@ -561,14 +574,14 @@ impl SignatureIndex {
             class.name().name(),
             class.type_params(),
             TopLevelDecl::Class(class),
-            members.clone(),
+            &members,
             model,
         );
         self.add_declaration_facts(
             class.name().name(),
             class.annotations(),
             class.type_params(),
-            members.clone(),
+            &members,
             (None, class.modifiers().is_abstract),
             model,
         );
@@ -584,14 +597,14 @@ impl SignatureIndex {
             class.name().name(),
             class.type_params(),
             TopLevelDecl::MixinClass(class),
-            members.clone(),
+            &members,
             model,
         );
         self.add_declaration_facts(
             class.name().name(),
             class.annotations(),
             class.type_params(),
-            members.clone(),
+            &members,
             (None, class.is_abstract()),
             model,
         );
@@ -607,7 +620,7 @@ impl SignatureIndex {
                 name.name(),
                 extension.type_params(),
                 TopLevelDecl::Extension(extension),
-                EffectiveMembers::declared(extension.members()),
+                &EffectiveMembers::declared(extension.members()),
                 model,
             );
         }
@@ -693,18 +706,18 @@ impl SignatureIndex {
             extension.name().name(),
             extension.type_params(),
             TopLevelDecl::ExtensionType(extension),
-            members.clone(),
+            &members,
             model,
         );
         self.add_declaration_facts(
             extension.name().name(),
             extension.annotations(),
             extension.type_params(),
-            members.clone(),
+            &members,
             (
                 extension
                     .representation()
-                    .and_then(|param| param.param_type()),
+                    .and_then(falcon_syntax::cst::FormalParam::param_type),
                 false,
             ),
             model,
@@ -720,7 +733,7 @@ impl SignatureIndex {
             mixin.name().name(),
             mixin.type_params(),
             TopLevelDecl::Mixin(mixin),
-            EffectiveMembers::declared(mixin.members()),
+            &EffectiveMembers::declared(mixin.members()),
             model,
         );
         // Mixins are never instantiated: abstract for every consumer.
@@ -728,7 +741,7 @@ impl SignatureIndex {
             mixin.name().name(),
             mixin.annotations(),
             mixin.type_params(),
-            EffectiveMembers::declared(mixin.members()),
+            &EffectiveMembers::declared(mixin.members()),
             (None, true),
             model,
         );
@@ -744,14 +757,14 @@ impl SignatureIndex {
             enumeration.name().name(),
             enumeration.type_params(),
             TopLevelDecl::Enum(enumeration),
-            members.clone(),
+            &members,
             model,
         );
         self.add_declaration_facts(
             enumeration.name().name(),
             enumeration.annotations(),
             enumeration.type_params(),
-            members.clone(),
+            &members,
             (None, false),
             model,
         );
@@ -787,7 +800,7 @@ impl SignatureIndex {
             let enum_type =
                 self.with_raw_arguments(&ResolvedType::interface_identity(identity.clone()));
             let values_type = ResolvedType::from_kind(ResolvedTypeKind::Interface {
-                occurrence: Default::default(),
+                occurrence: super::FunctionTypeAlias::default(),
                 identity: DeclarationIdentity::sdk("dart:core", "List"),
                 arguments: vec![enum_type].into(),
                 nullable: false,
@@ -1321,7 +1334,7 @@ impl SignatureIndex {
                 continue;
             }
             let mut signature = source.clone();
-            signature.owner_parameters = owner_parameters.clone();
+            signature.owner_parameters.clone_from(&owner_parameters);
             signature.positional = positional;
             signature.named = named;
             for default in signature.defaults.values_mut() {
@@ -1481,7 +1494,7 @@ impl SignatureIndex {
     fn add_const_constructor_bodies(
         &mut self,
         identity: &DeclarationIdentity,
-        members: EffectiveMembers<'_>,
+        members: &EffectiveMembers<'_>,
         model: &SemanticModel<'_>,
     ) {
         let bodies: FxHashMap<String, ConstConstructorBody> = members
@@ -1545,7 +1558,7 @@ impl SignatureIndex {
         name: &str,
         annotations: AstChildren<'_, falcon_syntax::cst::Annotation<'_>>,
         type_parameters: AstChildren<'_, TypeParam<'_>>,
-        members: EffectiveMembers<'_>,
+        members: &EffectiveMembers<'_>,
         declaration_kind: (Option<DartType<'_>>, bool),
         model: &SemanticModel<'_>,
     ) {
@@ -1553,7 +1566,7 @@ impl SignatureIndex {
         let Some(identity) = model.resolve_name(name) else {
             return;
         };
-        self.add_const_constructor_bodies(&identity, members.clone(), model);
+        self.add_const_constructor_bodies(&identity, members, model);
         let mut scope = TypeParameterScope::default();
         scope.push(type_parameters, model);
         let library_target = annotations
@@ -1565,8 +1578,7 @@ impl SignatureIndex {
             .map(|constructor| ConstructorFacts {
                 name: constructor
                     .constructor_name
-                    .map(|name| name.name().to_owned())
-                    .unwrap_or_else(|| "new".to_string()),
+                    .map_or_else(|| "new".to_string(), |name| name.name().to_owned()),
                 annotations: resolve_annotations(constructor.annotations, model),
                 is_const: constructor.is_const,
                 is_factory: constructor.is_factory,
@@ -1600,8 +1612,7 @@ impl SignatureIndex {
                                                 })
                                             })
                                             .and_then(|entry| entry.field.as_ref())
-                                            .map(|(_, ty)| ty.clone())
-                                            .unwrap_or(ResolvedType::UNKNOWN)
+                                            .map_or(ResolvedType::UNKNOWN, |(_, ty)| ty.clone())
                                     },
                                 )
                             })
@@ -1618,7 +1629,7 @@ impl SignatureIndex {
                     .collect(),
             })
             .collect();
-        let static_consts = declaration_static_consts(&members, &scope, model);
+        let static_consts = declaration_static_consts(members, &scope, model);
         self.type_facts.entry(identity).or_default().declaration = Some(DeclarationFacts {
             annotations,
             library_target,
@@ -1685,7 +1696,7 @@ impl SignatureIndex {
         name: &str,
         type_parameters: AstChildren<'_, TypeParam<'_>>,
         declaration: TopLevelDecl<'_>,
-        members: EffectiveMembers<'_>,
+        members: &EffectiveMembers<'_>,
         model: &SemanticModel<'_>,
     ) {
         let type_identity = model.resolve_name(name);
@@ -1703,10 +1714,9 @@ impl SignatureIndex {
             .map(|(id, parameter)| {
                 (
                     id.clone(),
-                    parameter
-                        .bound()
-                        .map(|bound| model.resolve_type_in(bound, &scope))
-                        .unwrap_or(ResolvedType::DYNAMIC),
+                    parameter.bound().map_or(ResolvedType::DYNAMIC, |bound| {
+                        model.resolve_type_in(bound, &scope)
+                    }),
                 )
             })
             .collect();
@@ -1716,7 +1726,7 @@ impl SignatureIndex {
                 instantiate_parameter_bound(id, &bounds, &mut HashSet::new(), model),
             );
         }
-        let field_types = Self::type_field_types(&members, &scope, model);
+        let field_types = Self::type_field_types(members, &scope, model);
         self.add_type_supertypes(
             declaration,
             &identity,
@@ -1759,8 +1769,7 @@ impl SignatureIndex {
             .flat_map(|field| {
                 let field_type = field
                     .field_type()
-                    .map(|ty| model.resolve_type_in(ty, scope))
-                    .unwrap_or(ResolvedType::UNKNOWN);
+                    .map_or(ResolvedType::UNKNOWN, |ty| model.resolve_type_in(ty, scope));
                 field.declarators().map(move |declarator| {
                     (declarator.name().name().to_string(), field_type.clone())
                 })
@@ -1771,8 +1780,7 @@ impl SignatureIndex {
                 parameter.name().name().to_string(),
                 parameter
                     .param_type()
-                    .map(|ty| model.resolve_type_in(ty, scope))
-                    .unwrap_or(ResolvedType::UNKNOWN),
+                    .map_or(ResolvedType::UNKNOWN, |ty| model.resolve_type_in(ty, scope)),
             );
         }
         field_types
@@ -1878,7 +1886,7 @@ struct TypeMemberRegistration<'a, 's> {
 }
 
 impl TypeMemberRegistration<'_, '_> {
-    fn register(mut self, members: EffectiveMembers<'_>) {
+    fn register(mut self, members: &EffectiveMembers<'_>) {
         for member in members.declared.clone() {
             match member {
                 ClassMember::Method(method) => self.add_method(method),
@@ -1891,8 +1899,8 @@ impl TypeMemberRegistration<'_, '_> {
                 ClassMember::PrimaryConstructorBody(_) | ClassMember::Error(_) => {}
             }
         }
-        self.add_declaring_fields(&members);
-        self.add_primary_constructor(&members);
+        self.add_declaring_fields(members);
+        self.add_primary_constructor(members);
         self.record_blocked_promotions();
     }
 
@@ -1940,8 +1948,7 @@ impl TypeMemberRegistration<'_, '_> {
             .insert(
                 constructor
                     .constructor_name()
-                    .map(|name| name.name().to_string())
-                    .unwrap_or_else(|| "new".to_string()),
+                    .map_or_else(|| "new".to_string(), |name| name.name().to_string()),
                 signature(
                     &self.scope,
                     &self.owner_parameters,
@@ -1955,10 +1962,9 @@ impl TypeMemberRegistration<'_, '_> {
     }
 
     fn add_field(&mut self, field: falcon_syntax::cst::FieldDecl<'_>) {
-        let field_type = field
-            .field_type()
-            .map(|ty| self.model.resolve_type_in(ty, &self.scope))
-            .unwrap_or(ResolvedType::UNKNOWN);
+        let field_type = field.field_type().map_or(ResolvedType::UNKNOWN, |ty| {
+            self.model.resolve_type_in(ty, &self.scope)
+        });
         for declarator in field.declarators() {
             let kind = MemberKind::field(field, declarator);
             let entry = self
@@ -2243,7 +2249,7 @@ fn annotation_targets_library(
         return false;
     };
     args.positional()
-        .chain(args.named().map(|argument| argument.value()))
+        .chain(args.named().map(falcon_syntax::cst::NamedArg::value))
         .any(|expression| target_kind_library(expression, model))
 }
 
@@ -2468,7 +2474,10 @@ pub(super) fn signature<'a>(
     let mut required_named = Vec::new();
     let mut named_parameter_names = Vec::new();
     let mut contracts = Vec::new();
-    for param in params.into_iter().flat_map(|params| params.params()) {
+    for param in params
+        .into_iter()
+        .flat_map(falcon_syntax::cst::FormalParamList::params)
+    {
         let name = param.name().name();
         let kind = param.kind();
         let initializing = param.initializing();
@@ -2562,10 +2571,11 @@ pub(super) fn mentions_any(ty: &ResolvedType, parameters: &[TypeParameterId]) ->
         ty,
         &mut |ty| {
             matches!(
-                ty,
-                ResolvedType { kind: ResolvedTypeKind::TypeParameter { id, .. } }
-                    | ResolvedType { kind: ResolvedTypeKind::NonNullTypeParameter { id, .. } } if parameters.contains(id)
-            )
+                            ty,
+                            ResolvedType {
+            kind: ResolvedTypeKind::TypeParameter { id, .. } |
+                ResolvedTypeKind::NonNullTypeParameter { id, .. } } if parameters.contains(id)
+                        )
         },
         &mut FxHashSet::default(),
         true,

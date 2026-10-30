@@ -124,7 +124,7 @@ struct TypeUsage<'a, 'model, 'tree> {
 impl<'tree> Visitor<'tree> for TypeUsage<'_, '_, 'tree> {
     fn visit_dart_type(&mut self, node: DartType<'tree>) {
         if let DartType::Named(named) = node {
-            let mut segments = named.segments().map(|segment| segment.name());
+            let mut segments = named.segments().map(Identifier::name);
             match self.model.resolve_type(node).view() {
                 ResolvedTypeView::Interface { identity, .. } if framework_identity(identity) => {
                     match (segments.next(), segments.next(), segments.next()) {
@@ -169,7 +169,7 @@ fn framework_identity(identity: &DeclarationIdentity) -> bool {
 
 fn import_targets_framework(import: ImportDirective<'_>) -> bool {
     std::iter::once(import.uri())
-        .chain(import.configurable_uris().map(|uri| uri.uri()))
+        .chain(import.configurable_uris().map(ConfigurableUri::uri))
         .any(|uri| uri.value().starts_with("package:flutter/") || uri.value() == "dart:async")
 }
 

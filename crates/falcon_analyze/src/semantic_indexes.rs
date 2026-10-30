@@ -104,6 +104,9 @@ pub fn build_semantic_indexes(
 /// The caller must retain the same external source and environment snapshot.
 /// Changes to project membership or package identities rebuild the full snapshot.
 /// Returns the current grouping and number of rebuilt project libraries.
+///
+/// # Panics
+/// Panics if an indexed project file is missing from the identity index.
 pub fn update_semantic_indexes(
     indexes: &mut SemanticIndexes,
     files: &[IdentitySource<'_>],
@@ -216,8 +219,9 @@ mod tests {
             .identities
             .resolve_declaration(unrelated, "Unrelated".into())
             .unwrap();
-        let shape = indexes.signatures.declaration(&unrelated_identity).unwrap()
-            as *const crate::DeclarationFacts;
+        let shape = std::ptr::from_ref::<crate::DeclarationFacts>(
+            indexes.signatures.declaration(&unrelated_identity).unwrap(),
+        );
         for (file, source) in [
             (0, "class A { String get value => 'a'; }"),
             (2, "import 'a.dart'; final result = A().value;"),
@@ -236,8 +240,9 @@ mod tests {
             }
             assert_eq!(
                 shape,
-                indexes.signatures.declaration(&unrelated_identity).unwrap()
-                    as *const crate::DeclarationFacts,
+                std::ptr::from_ref::<crate::DeclarationFacts>(
+                    indexes.signatures.declaration(&unrelated_identity).unwrap()
+                ),
             );
             let (fresh, _) = build_semantic_indexes(&input, &[], None, None);
             for (path, _) in &files {
@@ -350,13 +355,14 @@ mod tests {
         ];
         files.reserve(1_024);
         for ordinal in 0..1_024 {
-            let source: String = (0..8)
-                .map(|member| {
-                    format!(
-                        "class Independent{ordinal}_{member} {{ int value = 0; int run(int x) => value + x; }}\n"
-                    )
-                })
-                .collect();
+            let mut source = String::new();
+            for member in 0..8 {
+                std::fmt::Write::write_fmt(
+                    &mut source,
+                    format_args!("class Independent{ordinal}_{member} {{ int value = 0; int run(int x) => value + x; }}\n"),
+                )
+                .expect("writing to a String cannot fail");
+            }
             files.push((
                 PathBuf::from(format!("/project/independent{ordinal}.dart")),
                 parsed_fixture(&source),

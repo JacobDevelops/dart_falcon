@@ -52,7 +52,7 @@ impl Rule for BooleanPrefixes {
     }
 }
 
-/// pyramid_lint's default valid prefixes. A user-provided `valid-prefixes`
+/// `pyramid_lint`'s default valid prefixes. A user-provided `valid-prefixes`
 /// option EXTENDS this list rather than replacing it.
 const DEFAULT_PREFIXES: &[&str] = &[
     "is", "are", "was", "were", "has", "have", "had", "can", "should", "will", "do", "does", "did",
@@ -70,7 +70,7 @@ fn is_bool_type(ty: Option<DartType<'_>>) -> bool {
 
 use crate::lint::support::annotations::has_override;
 
-/// pyramid_lint strips a single leading underscore and then checks whether the
+/// `pyramid_lint` strips a single leading underscore and then checks whether the
 /// name simply *starts with* a valid prefix (no camelCase boundary is required,
 /// mirroring `validPrefixes.any(name.startsWith)`).
 fn has_valid_boolean_prefix(name: &str, prefixes: &[String]) -> bool {
@@ -94,7 +94,7 @@ fn check_name(
 }
 
 /// A variable/field is only inspected when its initializer is a boolean *literal*
-/// (`= true` / `= false`). pyramid_lint hooks `BooleanLiteral` nodes whose parent
+/// (`= true` / `= false`). `pyramid_lint` hooks `BooleanLiteral` nodes whose parent
 /// is a `VariableDeclaration`, so an uninitialized `bool` field or one assigned a
 /// non-literal expression (`= !kDebugMode`) is out of scope, and the declared
 /// type is irrelevant.

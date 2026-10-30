@@ -3,8 +3,8 @@
 //! Resolution queries (`name` visible from a library, a library's export
 //! namespace) are asked again for every reference in every file; their
 //! answers depend only on the index, so the first answer is kept. Keys hash
-//! with FxHash and are looked up by borrowed parts, so looking up a cached
-//! key neither allocates nor runs SipHash. Returning an owned answer may clone it.
+//! with `FxHash` and are looked up by borrowed parts, so looking up a cached
+//! key neither allocates nor runs `SipHash`. Returning an owned answer may clone it.
 
 use std::borrow::Borrow;
 use std::hash::{BuildHasher, Hash, Hasher};

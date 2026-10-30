@@ -6,7 +6,7 @@
 //! are ignored; inherited methods are checked only when their SDK owner resolves
 //! and library/import lookup does not select a different completeError function.
 //!
-//! Reference: https://dcm.dev/docs/rules/common/avoid-missing-completer-stack-trace/
+//! Reference: <https://dcm.dev/docs/rules/common/avoid-missing-completer-stack-trace/>
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, ResolvedType, Rule, RulePreparation};

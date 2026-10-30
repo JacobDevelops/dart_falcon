@@ -97,7 +97,7 @@ fn member_run_wide_settings_warn_once_on_stderr_only_when_present() {
             .env("PATH", "")
             .output()
             .unwrap();
-        assert!(output.status.success(), "{:?}", output);
+        assert!(output.status.success(), "{output:?}");
         let stderr = String::from_utf8(output.stderr).unwrap();
         assert_eq!(
             stderr.matches("ignores run-wide setting").count(),

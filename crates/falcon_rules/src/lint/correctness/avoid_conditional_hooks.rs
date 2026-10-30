@@ -2,7 +2,7 @@
 //!
 //! Hooks depend on a stable invocation order across builds. Move the hook call
 //! outside the condition and put conditional work inside its callback instead.
-//! Only hook-widget builds, custom useX functions, and HookBuilder builders
+//! Only hook-widget builds, custom useX functions, and `HookBuilder` builders
 //! are checked; invalid hook contexts belong to the other hook rules.
 //! Package hooks and custom hooks proven to compose them are recognized by
 //! semantic identity. If/ternary conditions, switch subjects, left operands,

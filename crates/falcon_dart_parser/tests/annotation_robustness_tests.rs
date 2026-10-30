@@ -48,7 +48,9 @@ fn annotations_are_dispatched_once_through_the_directive_preamble() {
     assert!(result.tree.is_lossless(source));
     let root = result.tree.root(source);
     assert_eq!(
-        root.children().map(|node| node.kind()).collect::<Vec<_>>(),
+        root.children()
+            .map(falcon_syntax::cst::SyntaxNode::kind)
+            .collect::<Vec<_>>(),
         [
             NodeKind::LibraryDirective,
             NodeKind::PartOfDirective,

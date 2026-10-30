@@ -1,8 +1,8 @@
-//! Requires owned FocusNode and Timer fields to be released in State.dispose().
+//! Requires owned `FocusNode` and Timer fields to be released in `State.dispose()`.
 //!
-//! Only fields constructed by a resolved Flutter FocusNode or dart:async Timer
+//! Only fields constructed by a resolved Flutter `FocusNode` or dart:async Timer
 //! constructor are checked, including assignments in lifecycle methods. A direct
-//! dispose()/cancel() invocation in dispose() is required; tear-offs, callbacks,
+//! `dispose()/cancel()` invocation in `dispose()` is required; tear-offs, callbacks,
 //! and conditional-only invocations do not prove release. Borrowed and static
 //! fields are ignored. Controllers belong to proper-controller-dispose; other
 //! disposable fields belong to dispose-fields, and unretained temporary objects

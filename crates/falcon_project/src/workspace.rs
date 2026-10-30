@@ -34,6 +34,10 @@ pub struct WorkspacePackage {
 /// uses its `packages` globs and `ignore` patterns. Melos 7 script-selection
 /// ignores do not change pub membership. Invalid metadata warns and is skipped.
 /// All returned package roots are canonical and contained within the workspace root.
+///
+/// # Panics
+///
+/// Panics if an internally discovered package root is outside its workspace.
 pub fn discover_workspace(start_dir: &Path) -> Option<Workspace> {
     let start = start_dir.canonicalize().ok()?;
     for root in start.ancestors() {
@@ -449,7 +453,10 @@ mod tests {
         write(root, "melos.yaml", "[invalid\n");
         assert!(discover_workspace(root).is_none());
         write(root, "pubspec.yaml", "workspace: []\n");
-        assert!(discover_workspace(root).unwrap().packages.is_empty());
+        assert_eq!(
+            discover_workspace(root).unwrap().packages,
+            [] as [WorkspacePackage; 0]
+        );
     }
 
     #[cfg(unix)]

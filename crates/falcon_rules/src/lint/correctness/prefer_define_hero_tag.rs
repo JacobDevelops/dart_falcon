@@ -1,4 +1,4 @@
-//! Require an explicit heroTag on Flutter FloatingActionButton constructors.
+//! Require an explicit heroTag on Flutter `FloatingActionButton` constructors.
 //!
 //! The default tag is shared, so multiple buttons can collide during a Hero
 //! transition. Set a unique tag or explicitly pass null to disable the transition.

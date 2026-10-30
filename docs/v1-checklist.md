@@ -1,18 +1,6 @@
 # Falcon 1.0 checklist
 
-Every hardening item and rule row below must be resolved before falcon 1.0; there is no post-1.0 tier. A hardening item or rule row is deleted once it ships, and a batch heading goes with its last item. The declarations in `crates/falcon_rules/src/lint/<group>.rs` and `crates/falcon_rules/src/cross_file.rs` are authoritative for shipped rule ids, groups, domains, execution kinds, and default enablement.
-
-## Hardening
-
-Engine fixes from the October 2026 audit plus the 1.0 workflow features. Every item blocks 1.0. Items are grouped into batches sized for one agent: each batch says what code it owns and what it waits on. Batches in the same stage can run in parallel unless a batch says otherwise. Each fix lands with a regression test built from its repro.
-
-### Stage 7: last
-
-#### 26. Clippy pedantic
-
-Touches every crate, so it runs alone after the refactors above; earlier it would conflict with every parallel batch.
-
-- [ ] **Clippy pedantic.** Enable `pedantic` in `[workspace.lints.clippy]`, inherited by every crate, under the existing `-D warnings` gate. A trial run reported 4,546 warnings, 3,492 with machine-applicable suggestions.
+Every rule row below must be resolved before falcon 1.0; there is no post-1.0 tier. A rule row is deleted once it ships. The declarations in `crates/falcon_rules/src/lint/<group>.rs` and `crates/falcon_rules/src/cross_file.rs` are authoritative for shipped rule ids, groups, domains, execution kinds, and default enablement.
 
 ## Legend
 

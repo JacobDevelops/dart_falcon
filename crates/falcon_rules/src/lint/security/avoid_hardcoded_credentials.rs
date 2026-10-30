@@ -2,7 +2,7 @@
 //! nonempty string or numeric literals.
 //!
 //! Names such as `password`, `apiKey`, `clientSecret`, and `accessToken` are
-//! checked case-insensitively, including snake_case and private spellings.
+//! checked case-insensitively, including `snake_case` and private spellings.
 //! String values matching their variable name are ignored as storage-key names.
 //! Read credentials from secure runtime configuration instead. This is a naming
 //! heuristic, not a general-purpose secrets scanner.

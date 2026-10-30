@@ -76,7 +76,7 @@ impl Collector<'_> {
             self.ctx.source(),
             Span::new(setter.name().span().end, setter.span().end),
         );
-        if tokens.next().map(|token| token.kind()) != Some(TokenKind::LParen) {
+        if tokens.next().map(SyntaxToken::kind) != Some(TokenKind::LParen) {
             return;
         }
         let mut final_span = None;

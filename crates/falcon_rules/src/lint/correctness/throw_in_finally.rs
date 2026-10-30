@@ -69,7 +69,7 @@ impl<'a> StructuralRuleVisitor<'a> for Finder<'_, '_> {
         self.states.push(self.in_finally);
         match node {
             Stmt::TryCatch(try_catch) => {
-                self.finally_blocks.push(try_catch.finally().map(|block| block.span()));
+                self.finally_blocks.push(try_catch.finally().map(Block::span));
                 self.in_finally = false;
             }
             Stmt::Throw(throw) => self.report(Span {

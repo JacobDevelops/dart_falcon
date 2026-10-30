@@ -8,6 +8,7 @@ use crate::lexer::{Lexer, scan::interp_close};
 /// # Panics
 ///
 /// Panics if `source` exceeds the compact token limit of `u32::MAX` bytes.
+#[must_use]
 pub fn lex_tree(source: &str) -> falcon_syntax::cst::SyntaxTree {
     use falcon_syntax::cst::{Event, NodeKind, SyntaxTree};
 
@@ -171,12 +172,11 @@ fn cst_tokens_with_regions(
             if prefix == TokenKind::InterpolationStart {
                 let lexical;
                 let cached = regions.binary_search_by_key(&span.start, |(span, _)| span.start);
-                let tokens = match cached {
-                    Ok(index) => &regions[index].1,
-                    Err(_) => {
-                        lexical = lex_region(source, span);
-                        &lexical
-                    }
+                let tokens = if let Ok(index) = cached {
+                    &regions[index].1
+                } else {
+                    lexical = lex_region(source, span);
+                    &lexical
                 };
                 pieces.extend(tokens.iter().copied().filter(|t| t.kind != TokenKind::Eof));
                 pieces.push(Token::new(TokenKind::RBrace, span.end, 1));
@@ -209,7 +209,7 @@ impl super::Parser<'_> {
 
         let mut regions = Vec::new();
         visit_interpolations(token.text(self.src), token.offset(), |region| {
-            regions.push(region)
+            regions.push(region);
         });
         if regions.is_empty() {
             return;

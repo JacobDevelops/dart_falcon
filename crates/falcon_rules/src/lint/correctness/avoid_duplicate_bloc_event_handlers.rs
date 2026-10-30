@@ -6,7 +6,7 @@
 //! for each constructor. Deferred callbacks, branches, other receivers, local
 //! `on` bindings, unresolved generic arguments, opaque mixins and classes
 //! overriding `on` are excluded. Bloc identity requires package resolution or
-//! a matching bloc/flutter_bloc import and superclass.
+//! a matching `bloc/flutter_bloc` import and superclass.
 //!
 //! ### Bad
 //! ```dart

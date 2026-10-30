@@ -3,7 +3,7 @@ use crate::lint::tokens::significant_tokens_in;
 use falcon_analyze::AnalyzeContext;
 use falcon_syntax::{
     TokenKind,
-    cst::{SetterDecl, Span},
+    cst::{SetterDecl, Span, SyntaxToken},
 };
 
 /// Includes the setter's full parameter range rather than just its name.
@@ -15,10 +15,10 @@ pub(crate) fn setter_parameter_span(node: SetterDecl<'_>, ctx: &AnalyzeContext) 
     )
     .skip_while(|token| token.kind() != TokenKind::LParen)
     .nth(1)
-    .map_or(node.param().span().start, |token| token.offset());
+    .map_or(node.param().span().start, SyntaxToken::offset);
     documented_node_span(
         Span::new(start, node.param().span().end),
-        node.param_annotations(),
+        &node.param_annotations(),
         ctx,
     )
 }

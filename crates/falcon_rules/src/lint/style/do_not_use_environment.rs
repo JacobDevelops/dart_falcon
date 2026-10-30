@@ -90,9 +90,9 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 }
                 let constructor_name = construction.constructor_name();
                 let mut segments: Vec<&str> =
-                    named.segments().map(|segment| segment.name()).collect();
+                    named.segments().map(Identifier::name).collect();
                 let Some(constructor) = constructor_name
-                    .map(|name| name.name())
+                    .map(Identifier::name)
                     .or_else(|| segments.pop())
                 else {
                     return;

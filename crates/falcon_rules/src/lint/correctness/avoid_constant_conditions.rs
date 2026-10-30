@@ -104,7 +104,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 }
             }
             Stmt::Switch(node) => {
-                for label in node.cases().flat_map(|case| case.cases()) {
+                for label in node.cases().flat_map(SwitchCase::cases) {
                     if let SwitchCaseKind::Pattern(label) = label
                         && let Some(guard) = label.guard()
                     {

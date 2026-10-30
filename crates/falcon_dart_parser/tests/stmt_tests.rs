@@ -17,9 +17,16 @@ fn only_stmt(program: Program<'_>) -> Stmt<'_> {
 #[test]
 fn test_empty_and_rethrow_have_no_expression_children() {
     use falcon_syntax::cst::visit::{Visitor, walk_stmt};
+    #[derive(Default)]
+    struct Expressions(usize);
 
+    impl<'a> Visitor<'a> for Expressions {
+        fn visit_expr(&mut self, _: Expr<'a>) {
+            self.0 += 1;
+        }
+    }
     let source = "; null; try {} catch (e) { rethrow; throw e; }";
-    let source = format!("void f() async {{ {} }}", source);
+    let source = format!("void f() async {{ {source} }}");
     let parsed = parse(&source);
     let (stmts, errors) = (
         body_stmts(parsed.tree.program(&source)),
@@ -55,15 +62,6 @@ fn test_empty_and_rethrow_have_no_expression_children() {
         catch.stmts().nth(1).unwrap(),
         Stmt::Throw(statement) if matches!(statement.value(), Expr::Ident(identifier) if identifier.name() == "e")
     ));
-
-    #[derive(Default)]
-    struct Expressions(usize);
-
-    impl<'a> Visitor<'a> for Expressions {
-        fn visit_expr(&mut self, _: Expr<'a>) {
-            self.0 += 1;
-        }
-    }
 
     let mut expressions = Expressions::default();
     for statement in stmts.clone() {
@@ -547,7 +545,7 @@ fn test_if_case_guard_bare_pattern() {
                 let guard = guard.expect("expected a when-guard");
                 assert!(matches!(guard, Expr::Ident(_)), "guard: {guard:?}");
             }
-            other => panic!("expected case condition, got {other:?}"),
+            other @ IfCondition::Expr(_) => panic!("expected case condition, got {other:?}"),
         },
         other => panic!("expected if statement, got {other:?}"),
     }
@@ -573,14 +571,14 @@ fn test_if_case_guard_dotted_pattern() {
                         let ConstPatternValue::Name(name) = constant.value() else {
                             panic!("expected Name constant value")
                         };
-                        let segs: Vec<_> = name.map(|s| s.name()).collect();
+                        let segs: Vec<_> = name.map(falcon_syntax::cst::Identifier::name).collect();
                         assert_eq!(segs, ["State", "a"]);
                     }
                     other => panic!("expected const pattern, got {other:?}"),
                 }
                 assert!(guard.is_some(), "expected a when-guard");
             }
-            other => panic!("expected case condition, got {other:?}"),
+            other @ IfCondition::Expr(_) => panic!("expected case condition, got {other:?}"),
         },
         other => panic!("expected if statement, got {other:?}"),
     }
@@ -600,7 +598,7 @@ fn test_if_case_without_guard() {
     match stmt {
         Stmt::If(i) => match i.condition() {
             IfCondition::Case(condition) => assert!(condition.guard().is_none()),
-            other => panic!("expected case condition, got {other:?}"),
+            other @ IfCondition::Expr(_) => panic!("expected case condition, got {other:?}"),
         },
         other => panic!("expected if statement, got {other:?}"),
     }
@@ -631,7 +629,7 @@ fn test_if_case_typed_variable_guard() {
                 );
                 assert!(guard.is_some());
             }
-            other => panic!("expected case condition, got {other:?}"),
+            other @ IfCondition::Expr(_) => panic!("expected case condition, got {other:?}"),
         },
         other => panic!("expected if statement, got {other:?}"),
     }

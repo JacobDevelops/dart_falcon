@@ -10,7 +10,7 @@ fn changed_length_skips_write_and_reports_without_leaving_a_tempfile() {
     let snapshot = WriteSnapshot::capture(&path, "original").unwrap();
     fs::write(&path, "user saved a longer source").unwrap();
     let error = snapshot.write(&path, "fixed").unwrap_err();
-    let report = fix_report(&path, error);
+    let report = fix_report(&path, &error);
     assert_eq!(report.rule, "autofix");
     assert!(report.message.contains("mtime or length"));
     assert_eq!(

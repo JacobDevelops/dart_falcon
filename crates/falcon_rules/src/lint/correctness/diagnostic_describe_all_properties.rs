@@ -281,7 +281,7 @@ impl Described {
         match node {
             Expr::Field(field) => self.reference(field.field().name()),
             Expr::Cascade(cascade) => {
-                for op in cascade.sections().flat_map(|section| section.ops()) {
+                for op in cascade.sections().flat_map(CascadeSection::ops) {
                     match op {
                         CascadeOp::Field(field) => self.reference(field.name().name()),
                         CascadeOp::Call(call) => self.reference(call.name().name()),

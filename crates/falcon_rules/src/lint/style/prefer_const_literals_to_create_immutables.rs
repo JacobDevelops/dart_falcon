@@ -77,7 +77,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         }
         let arguments = args
             .positional()
-            .chain(args.named().map(|argument| argument.value()));
+            .chain(args.named().map(NamedArg::value));
         for literal in arguments.flat_map(collection_literals) {
             if constant_in_context(literal, &self.deferred, state) {
                 self.diags.push(self.ctx.diagnostic("Use `const` literals as arguments to constructors of `@immutable` classes.", literal.unparenthesized().span()));

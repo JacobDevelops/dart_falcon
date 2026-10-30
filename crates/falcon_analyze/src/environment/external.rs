@@ -183,7 +183,7 @@ impl ExternalLibraries {
             dependencies.extend(
                 program
                     .part_of_directive()
-                    .and_then(|part| part.uri())
+                    .and_then(falcon_syntax::cst::PartOfDirective::uri)
                     .and_then(|uri| {
                         resolve(
                             environment,
@@ -388,7 +388,7 @@ impl ExternalLibraries {
         context: Option<usize>,
         wave: &mut Vec<(u32, PathBuf, Option<usize>)>,
     ) -> u32 {
-        let next = self.states.len() as u32;
+        let next = u32::try_from(self.states.len()).expect("external path count fits in u32");
         let id = *self.paths.entry(path.clone()).or_insert_with(|| {
             self.states.push(PathState {
                 context,
@@ -422,14 +422,20 @@ impl ExternalLibraries {
         }
         if context != state.context && self.graph.is_none() {
             let mut graph = InstanceGraph {
-                indices: FxHashMap::with_capacity_and_hasher(self.states.len(), Default::default()),
+                indices: FxHashMap::with_capacity_and_hasher(
+                    self.states.len(),
+                    rustc_hash::FxBuildHasher,
+                ),
                 nodes: Vec::with_capacity(self.states.len()),
                 facts: Vec::with_capacity(self.states.len()),
                 ..InstanceGraph::default()
             };
             for (id, state) in self.states.iter().enumerate() {
                 if state.sdk == Some(false) {
-                    let node = (id as u32, state.context);
+                    let node = (
+                        u32::try_from(id).expect("external path count fits in u32"),
+                        state.context,
+                    );
                     graph.indices.insert(node, graph.nodes.len());
                     graph.nodes.push(node);
                     graph.facts.push(None);
@@ -485,8 +491,12 @@ impl ExternalLibraries {
         is_project: &impl Fn(&Path) -> bool,
         observe_source: &(impl Fn(&Path, &ExternalOrigin) + Sync),
     ) {
-        let track_dependencies =
-            environment.contexts.len() + usize::from(environment.default_sdk.is_some()) > 1;
+        let track_dependencies = environment.contexts.len()
+            + usize::from(!matches!(
+                environment.default_sdk,
+                super::DefaultSdk::NotLoaded
+            ))
+            > 1;
         while !wave.is_empty() {
             let mut revisits = Vec::new();
             wave.retain(|(id, path, context)| {
@@ -636,7 +646,8 @@ impl ExternalLibraries {
                 let name = if let Some(&id) = graph.names.get(&package.name) {
                     id
                 } else {
-                    let next = graph.names.len() as u32;
+                    let next =
+                        u32::try_from(graph.names.len()).expect("package-name count fits in u32");
                     graph.names.insert(package.name.clone(), next);
                     next
                 };
@@ -648,7 +659,8 @@ impl ExternalLibraries {
                         .strip_prefix("package:")
                         .map(|rest| rest.split('/').next().unwrap_or(rest))
                     {
-                        let next = graph.names.len() as u32;
+                        let next = u32::try_from(graph.names.len())
+                            .expect("package-name count fits in u32");
                         let name = if let Some(&id) = graph.names.get(name) {
                             id
                         } else {
@@ -969,7 +981,6 @@ impl ExternalLibraries {
 
     /// Find the configured package owning this instance's defining library.
     pub(crate) fn package_library<'a>(
-        &self,
         environment: &'a AnalysisEnvironment,
         library: &ExternalLibrary,
     ) -> Option<&'a super::ConfiguredPackage> {
@@ -980,11 +991,10 @@ impl ExternalLibraries {
 
     /// Return this instance's package URI when its defining file belongs to a package.
     pub(crate) fn package_uri(
-        &self,
         environment: &AnalysisEnvironment,
         library: &ExternalLibrary,
     ) -> Option<String> {
-        let package = self.package_library(environment, library)?;
+        let package = Self::package_library(environment, library)?;
         let relative = library.files[0].path.strip_prefix(&package.lib_root).ok()?;
         let mut uri = format!("package:{}", package.name);
         for component in relative.components() {
@@ -1185,7 +1195,7 @@ fn dependency_closures(
             }
             for &member in members {
                 if member != node {
-                    closures[member] = closure.clone();
+                    closures[member].clone_from(&closure);
                 }
             }
             closures[node] = closure;
@@ -1354,9 +1364,6 @@ fn read_source(
 /// language-feature gate on otherwise well-formed syntax (external sources
 /// are written for their own, possibly newer, language version).
 fn declarations_intact(program: Program<'_>, errors: &[ParseError]) -> bool {
-    if errors.is_empty() {
-        return true;
-    }
     #[derive(Default)]
     struct Integrity {
         bodies: Vec<Span>,
@@ -1372,7 +1379,8 @@ fn declarations_intact(program: Program<'_>, errors: &[ParseError]) -> bool {
         }
 
         fn visit_function_decl(&mut self, function: FunctionDecl<'a>) {
-            self.bodies.extend(function.body().map(|body| body.span()));
+            self.bodies
+                .extend(function.body().map(falcon_syntax::cst::FunctionBody::span));
         }
 
         fn visit_class_member(&mut self, member: ClassMember<'a>) {
@@ -1389,8 +1397,12 @@ fn declarations_intact(program: Program<'_>, errors: &[ParseError]) -> bool {
                 }
                 ClassMember::Field(_) => None,
             };
-            self.bodies.extend(body.map(|body| body.span()));
+            self.bodies
+                .extend(body.map(falcon_syntax::cst::FunctionBody::span));
         }
+    }
+    if errors.is_empty() {
+        return true;
     }
     let mut integrity = Integrity::default();
     integrity.visit_program(program);
@@ -1762,19 +1774,19 @@ mod tests {
             cached.dependencies,
             [directory.path().join("replacement.dart")]
         );
-        assert!(cached.parts.is_empty());
+        assert_eq!(cached.parts, [] as [std::path::PathBuf; 0]);
         std::fs::remove_file(&path).unwrap();
         assert!(
             libraries
                 .companion_dependencies(&environment, None, &path, &|_, _| {})
-                .is_none(),
+                .is_none()
         );
         assert!(!libraries.companion_dependencies.contains_key(&path));
         std::fs::write(&path, "part 'restored.dart';").unwrap();
         let cached = libraries
             .companion_dependencies(&environment, None, &path, &|_, _| {})
             .unwrap();
-        assert!(cached.dependencies.is_empty());
+        assert_eq!(cached.dependencies, [] as [std::path::PathBuf; 0]);
         assert_eq!(cached.parts, [directory.path().join("restored.dart")]);
     }
 
