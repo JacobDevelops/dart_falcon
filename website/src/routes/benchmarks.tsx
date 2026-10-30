@@ -59,7 +59,9 @@ function Benchmarks() {
               The Dart Code Linter (DCL) scenarios compare falcon, DCL and DCM with
               the selected DCL rule names enabled; their speedup baseline is DCL,
               not dart analyze. DCM is not measured where the source subset exceeds
-              the DCM Free 50k-line limit; those omissions are labeled, not timed.{' '}
+              the DCM Free 50k-line limit, and DCL is not measured where a corpus
+              cannot be represented as one DCL root; those omissions are labeled,
+              not timed.{' '}
             </>
           ) : null}
           Matching rule names do not imply identical work or output. The{' '}

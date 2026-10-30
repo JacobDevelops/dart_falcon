@@ -2,7 +2,7 @@ use crate::support::prepare_checkout;
 use clap::Args;
 use falcon_rules::meta::{RULE_METADATA, RuleKind, RuleSource};
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -39,6 +39,9 @@ pub struct Options {
     /// Report destination (defaults to the published website data).
     #[arg(long)]
     output: Option<PathBuf>,
+    /// Run only one tool's cold preflight, without timing or publishing a report.
+    #[arg(long, value_parser = ["falcon", "dart-analyze", "dcl", "dcm"])]
+    preflight: Option<String>,
     /// Reuse an already built target/release/falcon.
     #[arg(long)]
     skip_build: bool,
@@ -377,7 +380,12 @@ fn dcl_report(bytes: &[u8]) -> Result<Value> {
 fn dcl_diagnostics(bytes: &[u8], _stderr: &[u8]) -> Result<ParsedDiagnostics> {
     let mut parsed = ParsedDiagnostics::default();
     let report = dcl_report(bytes)?;
+    let mut paths = BTreeSet::new();
     for record in report["records"].as_array().ok_or("missing records")? {
+        let path = record["path"].as_str().ok_or("missing DCL record path")?;
+        if !paths.insert(path) {
+            return Err(format!("DCL reported duplicate file path: {path}").into());
+        }
         for issue in record["issues"].as_array().ok_or("missing record issues")? {
             let code = issue["ruleId"].as_str().ok_or("missing issue ruleId")?;
             *parsed.by_rule.entry(code.to_lowercase()).or_default() += 1;
@@ -831,7 +839,7 @@ fn benchmark_corpus(
         .tools
         .iter()
         .filter_map(|tool| {
-            tool.omission_reason(&inventory)
+            tool.omission_reason(corpus, &inventory)
                 .map(|reason| json!({"tool": tool.id, "reason": reason}))
         })
         .collect::<Vec<_>>();
@@ -911,17 +919,26 @@ struct Tool {
     allowed_exit: std::ops::RangeInclusive<i32>,
     maps_falcon_rules: bool,
     families: &'static [&'static str],
-    source_limit: Option<(usize, &'static str)>,
     expected_version: Option<&'static str>,
     metadata: Value,
     artifact: PathBuf,
 }
 
 impl Tool {
-    fn omission_reason(&self, inventory: &CorpusInventory) -> Option<&'static str> {
-        self.source_limit
-            .filter(|(limit, _)| inventory.dcl_lines > *limit)
-            .map(|(_, reason)| reason)
+    fn omission_reason(
+        &self,
+        corpus: &Corpus,
+        inventory: &CorpusInventory,
+    ) -> Option<&'static str> {
+        match (self.id, corpus.id) {
+            ("dcl", "flutter-plugins") => Some(
+                "DCL 4.4.4 drops nested package contexts under a single root (analyzer_utils.dart getFilePaths); multiple roots analyze 259 files twice",
+            ),
+            ("dcm", _) if inventory.dcl_lines > DCM_FREE_LINE_LIMIT => {
+                Some("exceeds DCM Free 50k-line limit")
+            }
+            _ => None,
+        }
     }
 
     fn report(&self, sdk: &Path) -> Result<Value> {
@@ -969,7 +986,6 @@ fn dcl_descriptor(dart: &Path, dcl: &Path, exclude: &str) -> Tool {
         id: "dcl",
         maps_falcon_rules: false,
         families: &["dcl-rules"],
-        source_limit: None,
         expected_version: Some("4.4.4"),
         metadata: json!({"name": "Dart Code Linter", "package": "dart_code_linter", "homepage": "https://pub.dev/packages/dart_code_linter"}),
         artifact: dcl.to_owned(),
@@ -1003,7 +1019,6 @@ fn tool_descriptors(falcon: &Path, dart: &Path, dcl: &Path, dcm: &Path, sdk: &Pa
             id: "falcon",
             maps_falcon_rules: true,
             families: &["same-rules", "dcl-rules"],
-            source_limit: None,
             expected_version: None,
             metadata: json!({"name": "falcon"}),
             artifact: falcon.to_owned(),
@@ -1029,7 +1044,6 @@ fn tool_descriptors(falcon: &Path, dart: &Path, dcl: &Path, dcm: &Path, sdk: &Pa
             id: "dart-analyze",
             maps_falcon_rules: false,
             families: &["same-rules"],
-            source_limit: None,
             expected_version: Some("3.13.5"),
             metadata: json!({"name": "dart analyze"}),
             artifact: dart.to_owned(),
@@ -1047,7 +1061,6 @@ fn tool_descriptors(falcon: &Path, dart: &Path, dcl: &Path, dcm: &Path, sdk: &Pa
             id: "dcm",
             maps_falcon_rules: false,
             families: &["dcl-rules"],
-            source_limit: Some((DCM_FREE_LINE_LIMIT, "exceeds DCM Free 50k-line limit")),
             expected_version: Some("1.40.0"),
             metadata: json!({"name": "DCM", "homepage": "https://dcm.dev", "reporter": "console", "licenseRequirement": "activated local license; machine reporters are not required"}),
             artifact: dcm.to_owned(),
@@ -1087,6 +1100,9 @@ fn measure_corpus(
     ] {
         write_configurations(family, names, config, project, config_path, excluded)?;
         for cold in [true, false] {
+            if options.preflight.is_some() && !cold {
+                continue;
+            }
             let scenario = format!("{family}-{}", if cold { "cold" } else { "warm" });
             let runs = if cold {
                 options.cold_runs
@@ -1094,29 +1110,45 @@ fn measure_corpus(
                 options.runs
             };
             for tool in benchmark.tools.iter().filter(|tool| {
-                tool.families.contains(&family) && tool.omission_reason(inventory).is_none()
+                tool.families.contains(&family)
+                    && options.preflight.as_ref().is_none_or(|id| id == tool.id)
             }) {
+                if let Some(reason) = tool.omission_reason(corpus, inventory) {
+                    if options.preflight.is_some() {
+                        eprintln!(
+                            "{} {scenario} {}: not measured ({reason})",
+                            corpus.id, tool.id
+                        );
+                    }
+                    continue;
+                }
                 let state =
                     cache.join(format!("{}-{family}-{}-analyzer-state", corpus.id, tool.id));
-                results.push(
-                    Invocation {
-                        benchmark,
-                        corpus,
-                        project,
-                        state: &state,
-                        scenario: &scenario,
-                        cold,
-                        runs,
-                        tool,
-                        expected_files: if family == "same-rules" {
-                            inventory.files
-                        } else {
-                            inventory.dcl_files
-                        },
-                        names,
-                    }
-                    .measure()?,
-                );
+                let invocation = Invocation {
+                    benchmark,
+                    corpus,
+                    project,
+                    state: &state,
+                    scenario: &scenario,
+                    cold,
+                    runs,
+                    tool,
+                    expected_files: if family == "same-rules" {
+                        inventory.files
+                    } else {
+                        inventory.dcl_files
+                    },
+                    names,
+                };
+                if options.preflight.is_some() {
+                    invocation.preflight()?;
+                    eprintln!(
+                        "{} {scenario} {}: preflight passed ({} expected files)",
+                        corpus.id, tool.id, invocation.expected_files
+                    );
+                } else {
+                    results.push(invocation.measure()?);
+                }
             }
         }
     }
@@ -1414,7 +1446,8 @@ fn report_paths(options: &Options, root: &Path) -> Result<(PathBuf, PathBuf)> {
         .output
         .as_ref()
         .map_or_else(|| published.clone(), |path| root.join(path));
-    if !options.corpus.is_empty()
+    if options.preflight.is_none()
+        && !options.corpus.is_empty()
         && (report == published
             || fs::canonicalize(&report)
                 .ok()
@@ -1519,6 +1552,9 @@ pub fn run(options: &Options) -> Result<()> {
             previous.as_ref(),
             &mut results,
         )?);
+    }
+    if options.preflight.is_some() {
+        return Ok(());
     }
     let report = json!({"generatedAt": text(Command::new("date").args(["-u", "+%Y-%m-%dT%H:%M:%SZ"]))?,
         "machine": machine_metadata()?,
@@ -1812,8 +1848,54 @@ To get a single-line per-violation format, pass the '--concise' flag (or just '-
         assert_eq!(rules["avoid-dynamic"], 1);
         assert_eq!(rules["unknown-config"], 1);
         assert!(diagnostics("dcl", b"{}").is_err());
-        assert!(diagnostics("dcl", br#"{"formatVersion":2,"records":[{}]}"#).is_err());
-        assert!(diagnostics("dcl", br#"{"formatVersion":2,"records":[{"issues":[{}]}]}"#).is_err());
+        assert!(
+            diagnostics(
+                "dcl",
+                br#"{"formatVersion":2,"records":[{"path":"lib/a.dart"}]}"#
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("missing record issues")
+        );
+        assert!(
+            diagnostics(
+                "dcl",
+                br#"{"formatVersion":2,"records":[{"path":"lib/a.dart","issues":[{}]}]}"#
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("missing issue ruleId")
+        );
+        assert!(diagnostics("dcl", br#"{"formatVersion":2,"records":[{"path":"lib/a.dart","issues":[]},{"path":"lib/a.dart","issues":[]}],"summary":[{"title":"Total scanned files","value":2}]}"#).unwrap_err().to_string().contains("duplicate file path"));
+    }
+    #[test]
+    fn tool_omissions_distinguish_corpus_support_and_plan_limits() {
+        let path = Path::new("tool");
+        let tools = tool_descriptors(path, path, path, path, path);
+        let mut inventory = CorpusInventory {
+            files: 715,
+            lines: DCM_FREE_LINE_LIMIT + 1,
+            dcl_files: 715,
+            dcl_lines: DCM_FREE_LINE_LIMIT,
+            locks: BTreeMap::new(),
+        };
+        for corpus in CORPORA {
+            for tool in &tools {
+                assert_eq!(
+                    tool.omission_reason(corpus, &inventory).is_some(),
+                    tool.id == "dcl" && corpus.id == "flutter-plugins",
+                );
+            }
+        }
+        inventory.dcl_lines += 1;
+        assert!(
+            tools
+                .iter()
+                .find(|tool| tool.id == "dcm")
+                .unwrap()
+                .omission_reason(&CORPORA[0], &inventory)
+                .is_some()
+        );
     }
 
     #[test]

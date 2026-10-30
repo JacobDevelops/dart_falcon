@@ -4,6 +4,7 @@ import {
   corpusLabel,
   formatMs,
   formatRange,
+  hasComparator,
   speedup,
   unmeasuredTools,
   type BenchRun,
@@ -31,7 +32,7 @@ export function BenchChart({
 }) {
   const max = run.rows[run.rows.length - 1].meanMs
   const compared =
-    run.rows.some((r) => r.tool === 'falcon') && speedup(run).versus.tool !== 'falcon'
+    hasComparator(run) && run.rows.some((r) => r.tool === 'falcon') && speedup(run).versus.tool !== 'falcon'
       ? compareText(run)
       : null
   const dcl = run.scenario.comparator === 'dcl'
@@ -104,8 +105,8 @@ export function BenchChart({
  * slowest tool, with falcon's speedup over the scenario comparator as the callout.
  */
 export function BenchSummaryChart({ summary }: { summary: ScenarioSummary }) {
-  const { scenario, runs, min, max, slower } = summary
-  const versus = speedup(runs[0]).versus
+  const { scenario, runs, comparableRuns, min, max, slower } = summary
+  const versus = speedup(comparableRuns[0]).versus
   const tools = [...new Map(runs.flatMap((run) => run.rows.map((row) => [row.tool, row] as const))).values()]
     .sort((a, b) => Number(b.tool === 'falcon') - Number(a.tool === 'falcon'))
   return (
@@ -126,23 +127,23 @@ export function BenchSummaryChart({ summary }: { summary: ScenarioSummary }) {
       </figcaption>
       {slower.length === 0 ? (
         <p className="bench-callout">
-          <strong>
-            {formatRange(min, max)}
-          </strong>{' '}
-          faster than {versus.name} on {runs.length === 1 ? 'this corpus' : `all ${runs.length} corpora`}
+          <strong>{formatRange(min, max)}</strong>{' '}
+          faster than {versus.name} on {comparableRuns.length === 1 ? 'this corpus' : `${comparableRuns.length} corpora`}
         </p>
       ) : null}
       <ol className="bench-rows">
         {runs.map((run, i) => {
           const top = Math.max(...run.rows.map((r) => r.meanMs))
-          const comparison = compareText(run)
+          const comparison = hasComparator(run) ? compareText(run) : null
           return (
             <li key={run.corpus.id} className="bench-group">
               <span className="bench-tool">
                 {corpusLabel(run.corpus)}
-                <small>
-                  {comparison.ratio} {comparison.text.split(' ')[0]}
-                </small>
+                {comparison ? (
+                  <small>
+                    {comparison.ratio} {comparison.text.split(' ')[0]}
+                  </small>
+                ) : null}
               </span>
               {tools.map((tool) => {
                 const r = run.rows.find((x) => x.tool === tool.tool)

@@ -89,6 +89,10 @@ export function speedup(run: BenchRun) {
   return { factor: falcon ? versus.meanMs / falcon.meanMs : 1, versus }
 }
 
+export function hasComparator(run: BenchRun): boolean {
+  return run.rows.some((row) => row.tool === (run.scenario.comparator ?? 'dart-analyze'))
+}
+
 export function formatMs(ms: number): string {
   if (ms >= 10_000) return `${(ms / 1000).toFixed(1)} s`
   if (ms >= 1000) return `${(ms / 1000).toFixed(2)} s`
@@ -122,9 +126,11 @@ export function unmeasuredTools(run: BenchRun) {
 
 export interface ScenarioSummary {
   scenario: BenchScenario
-  /** Runs comparing falcon with the scenario's comparator, one per corpus. */
+  /** Runs across corpora, including those where the comparator was not measured. */
   runs: BenchRun[]
-  /** Lowest and highest falcon speedup across corpora. */
+  /** Runs comparing falcon with the scenario's comparator. */
+  comparableRuns: BenchRun[]
+  /** Lowest and highest falcon speedup across comparable corpora. */
   min: number
   max: number
   slower: BenchRun[]
@@ -135,11 +141,19 @@ export function scenarioSummaries(view: BenchView): ScenarioSummary[] {
   const scenarios = [...new Map(view.runs.map((r) => [r.scenario.id, r.scenario])).values()]
   return scenarios.flatMap((scenario) => {
     const runs = view.runs.filter(
-      (r) => r.scenario.id === scenario.id && r.rows.some((x) => x.tool === 'falcon') && speedup(r).versus.tool !== 'falcon',
+      (r) => r.scenario.id === scenario.id && r.rows.some((x) => x.tool === 'falcon'),
     )
-    if (runs.length === 0) return []
-    const factors = runs.map((r) => speedup(r).factor)
-    return [{ scenario, runs, min: Math.min(...factors), max: Math.max(...factors), slower: runs.filter((r) => speedup(r).factor < 1) }]
+    const comparableRuns = runs.filter(hasComparator)
+    if (comparableRuns.length === 0) return []
+    const factors = comparableRuns.map((r) => speedup(r).factor)
+    return [{
+      scenario,
+      runs,
+      comparableRuns,
+      min: Math.min(...factors),
+      max: Math.max(...factors),
+      slower: comparableRuns.filter((r) => speedup(r).factor < 1),
+    }]
   })
 }
 
@@ -153,18 +167,23 @@ export function formatRange(min: number, max: number): string {
 const list = (names: string[]) =>
   names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
 
-/** "falcon 3.9–6.0× faster than dart analyze on all 4 corpora." */
+/** "falcon 3.9–6.0× faster than dart analyze on 4 corpora." */
 export function summaryBody(s: ScenarioSummary): string {
-  const versus = speedup(s.runs[0]).versus.name
-  if (s.slower.length === 0) {
-    return `falcon ${formatRange(s.min, s.max)} faster than ${versus} on ${s.runs.length === 1 ? corpusLabel(s.runs[0].corpus) : `all ${s.runs.length} corpora`}.`
-  }
-  const faster = s.runs.filter((r) => !s.slower.includes(r))
-  return `${versus} was faster on ${list(s.slower.map((r) => corpusLabel(r.corpus)))}${
-    faster.length > 0
-      ? `; falcon was faster on ${list(faster.map((r) => `${corpusLabel(r.corpus)} (${formatSpeedup(speedup(r).factor)})`))}`
-      : ''
-  }.`
+  const versus = speedup(s.comparableRuns[0]).versus.name
+  const faster = s.comparableRuns.filter((r) => !s.slower.includes(r))
+  const comparison = s.slower.length === 0
+    ? `falcon ${formatRange(s.min, s.max)} faster than ${versus} on ${s.comparableRuns.length === 1 ? corpusLabel(s.comparableRuns[0].corpus) : `${s.comparableRuns.length} corpora`}`
+    : `${versus} was faster on ${list(s.slower.map((r) => corpusLabel(r.corpus)))}${
+      faster.length > 0
+        ? `; falcon was faster on ${list(faster.map((r) => `${corpusLabel(r.corpus)} (${formatSpeedup(speedup(r).factor)})`))}`
+        : ''
+    }`
+  const omissions = s.runs.filter((run) => !hasComparator(run)).map((run) => {
+    const comparator = run.scenario.comparator ?? 'dart-analyze'
+    const reason = unmeasuredTools(run).find((entry) => entry.tool === comparator)?.reason
+    return `${corpusLabel(run.corpus)}: ${versus} not measured${reason ? ` (${reason})` : ''}`
+  })
+  return `${comparison}${omissions.length > 0 ? `; no comparison on ${list(omissions)}` : ''}.`
 }
 
 export function summaryText(s: ScenarioSummary): string {
