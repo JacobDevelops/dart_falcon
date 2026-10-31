@@ -24,6 +24,14 @@ makers build
 The repo is a colocated jj + git repo. **jj (Jujutsu) users are welcome**, but
 plain git works fine. Use whichever you prefer.
 
+## Engineering changes
+
+Read [the engineering and ownership contract](docs/architecture.md) before changing
+analysis boundaries or invariants. Use [the v1 checklist](docs/v1-checklist.md) for
+cleanup acceptance and remaining release obligations. `makers architecture` checks
+local production/build dependency boundaries; source responsibility still requires
+review. Personal agent loops and coordination are not contributor prerequisites.
+
 ## The gates
 
 Verification requires Python 3.11+ and Git as well as the tools above. Choose a

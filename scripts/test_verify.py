@@ -29,7 +29,7 @@ class VerificationTests(unittest.TestCase):
 
     def test_final_plan_retains_full_coverage_and_shared_validation(self):
         tasks = [cmd[1] for cmd in verify.plan("full", None)]
-        self.assertEqual(tasks, ["verify-tooling", "lint", "check", "test", "ci_validate", "build_release"])
+        self.assertEqual(tasks, ["verify-tooling", "architecture", "lint", "check", "test", "ci_validate", "build_release"])
         self.assertNotIn("build_release", [cmd[1] for cmd in verify.plan("fast", None)])
         self.assertEqual(verify.plan("package", "falcon_config")[1][1:5],
                          ["nextest", "run", "--locked", "-p"])

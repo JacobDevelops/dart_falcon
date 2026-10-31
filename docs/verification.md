@@ -113,3 +113,17 @@ limits for experiments belong to their owned process scope, not global settings.
 
 Personal Numen coordination, loops and review dispatch stay outside the OSS
 repository. Those tools should invoke these contributor-facing commands.
+
+## Architecture and readiness
+
+`makers architecture` checks the declared local production/build dependency graph
+without compiling. Fast/full gates run it, and the CI lint job runs the same command.
+The separate CI tooling job exercises the Python runner and architecture-check tests.
+See [the ownership contract](architecture.md) for scope and deliberate exclusions.
+Local fast includes Zed formatting but omits Zed Clippy/build and release/CLI/docgen
+stages; full includes them.
+CI splits lint, tests and validation and additionally runs a pinned fast OSS corpus;
+Dart and website jobs are path-selected. It is not identical to local full, which
+also builds releases. Changes to `scripts/` select Rust CI so policy/check changes
+cannot pass on Python tests alone. The [v1 checklist](v1-checklist.md) records
+additional release evidence; a green local gate is not release approval.

@@ -38,8 +38,8 @@ def plan(tier, scope, root=ROOT):
     if tier in ("fast", "full"):
         if scope:
             raise ValueError(f"{tier} does not accept a scope")
-        tasks = (["verify-tooling", "format_check", "toml_check", "clippy_workspace", "test"] if tier == "fast"
-                 else ["verify-tooling", "lint", "check", "test", "ci_validate", "build_release"])
+        tasks = (["verify-tooling", "architecture", "format_check", "toml_check", "clippy_workspace", "test"] if tier == "fast"
+                 else ["verify-tooling", "architecture", "lint", "check", "test", "ci_validate", "build_release"])
         return [["@cargo", "clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings"]
                 if task == "clippy_workspace" else ["makers", task] for task in tasks]
     if tier == "package" or tier.startswith("iterate-"):

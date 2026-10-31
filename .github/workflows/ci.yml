@@ -48,6 +48,7 @@ jobs:
         with:
           filters: |
             rust:
+              - scripts/**
               - "**/*.rs"
               - "**/*.toml"
               - Cargo.lock
@@ -92,7 +93,7 @@ jobs:
             name: Lint (fmt, taplo, clippy)
             tools: cargo-make taplo mr-boxington
             gc: 2GiB
-            run: makers ci_rustup_show && makers lint
+            run: makers ci_rustup_show && makers architecture && makers lint
           - snapshot: test
             name: Test
             tools: cargo-make cargo-nextest mr-boxington

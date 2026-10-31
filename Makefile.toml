@@ -297,3 +297,7 @@ args    = [ "scripts/verify.py", "iterate-build", "${@}" ]
 [tasks.iterate-test]
 command = "python3"
 args    = [ "scripts/verify.py", "iterate-test", "${@}" ]
+
+[tasks.architecture]
+command = "python3"
+args    = [ "scripts/check_architecture.py" ]

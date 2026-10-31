@@ -25,8 +25,10 @@ Project skills live in `.agents/skills/`.
 - Docs pin the current falcon version only where a pin is the point (mise and
   CI snippets); `cargo xtask version` rewrites those, and an xtask test fails if
   one drifts. Install links use the versionless `releases/latest/download/` form.
-- For planned scope, consult `docs/v1-checklist.md`; it lists unshipped work,
-  so don't treat it as evidence of implemented behavior.
+- For cleanup, design and review, read `docs/architecture.md`. Strict domain
+  ownership applies to Falcon's actual analysis domain, not a generic layer layout.
+- Select readiness work from `docs/v1-checklist.md`, the canonical backlog.
+  Distinguish implemented rule coverage, open acceptance criteria and verified v1 readiness.
 
 ## Boundaries and generated content
 

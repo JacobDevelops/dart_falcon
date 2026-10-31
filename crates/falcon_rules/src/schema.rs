@@ -345,8 +345,7 @@ mod tests {
         assert_eq!(properties["error-on-warnings"]["default"], false);
         for domain in Domain::ALL {
             assert_eq!(
-                properties["linter"]["properties"]["domains"]["properties"][domain.as_str()]
-                    ["default"],
+                properties["linter"]["properties"]["domains"]["properties"][domain.as_str()]["default"],
                 "recommended"
             );
         }

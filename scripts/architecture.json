@@ -1,0 +1,62 @@
+{
+  "production_dependencies": {
+    "dart_falcon": [
+      "falcon_cli"
+    ],
+    "falcon_analyze": [
+      "falcon_config",
+      "falcon_dart_parser",
+      "falcon_diagnostics",
+      "falcon_syntax"
+    ],
+    "falcon_cli": [
+      "falcon_analyze",
+      "falcon_config",
+      "falcon_dart_parser",
+      "falcon_diagnostics",
+      "falcon_lsp",
+      "falcon_project",
+      "falcon_rules",
+      "falcon_syntax"
+    ],
+    "falcon_config": [],
+    "falcon_dart_parser": [
+      "falcon_syntax"
+    ],
+    "falcon_diagnostics": [
+      "falcon_syntax"
+    ],
+    "falcon_lsp": [
+      "falcon_analyze",
+      "falcon_config",
+      "falcon_dart_parser",
+      "falcon_diagnostics",
+      "falcon_project",
+      "falcon_rules",
+      "falcon_syntax"
+    ],
+    "falcon_project": [
+      "falcon_analyze",
+      "falcon_config",
+      "falcon_dart_parser",
+      "falcon_diagnostics",
+      "falcon_rules"
+    ],
+    "falcon_rules": [
+      "falcon_analyze",
+      "falcon_config",
+      "falcon_dart_parser",
+      "falcon_diagnostics",
+      "falcon_syntax"
+    ],
+    "falcon_syntax": [],
+    "xtask": [
+      "falcon_analyze",
+      "falcon_cli",
+      "falcon_config",
+      "falcon_diagnostics",
+      "falcon_project",
+      "falcon_rules"
+    ]
+  }
+}
