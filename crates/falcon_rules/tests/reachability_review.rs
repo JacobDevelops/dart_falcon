@@ -1,8 +1,7 @@
 use falcon_analyze::RuleAnalysis;
 use falcon_rules::all_rules;
 
-#[path = "support/inference.rs"]
-mod inference;
+use crate::inference;
 
 #[test]
 fn inherited_inventory_does_not_hide_movable_assertions() {

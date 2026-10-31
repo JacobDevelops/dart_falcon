@@ -292,7 +292,7 @@ fn selected_workspace_binds_discovered_home_config_to_input_root() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "selected_workspace_binds_discovered_home_config_to_input_root",
+                "workspace_config_tests::selected_workspace_binds_discovered_home_config_to_input_root",
             ])
             .current_dir(temp.path())
             .env("HOME", temp.path())
@@ -664,7 +664,7 @@ fn explicit_home_configuration_binds_to_start_directory_not_process_directory() 
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "explicit_home_configuration_binds_to_start_directory_not_process_directory",
+                "workspace_config_tests::explicit_home_configuration_binds_to_start_directory_not_process_directory",
             ])
             .env(CHILD, "1")
             .env("HOME", temp.path())

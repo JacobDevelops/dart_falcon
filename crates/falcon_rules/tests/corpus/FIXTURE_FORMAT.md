@@ -214,7 +214,7 @@ SDK member signatures.
    according to the naming/annotation policy above; dependency stubs are not
    independent clean cases. Cross-file and resolver-project inputs run together.
 2. **Run Analysis**: The CLI harness executes falcon, while
-   `cargo test -p falcon_rules --test corpus_tests` runs rules in-process.
+   `cargo test -p falcon_rules --test it corpus_tests::` runs rules in-process.
 3. **Match Diagnostics**: Each annotation consumes one diagnostic with the same
    rule, file, and line. An optional `msg:` must match exactly in-process, or
    meet the CLI fuzzy threshold. Constrained exact matches are claimed before

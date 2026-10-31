@@ -5,7 +5,7 @@ use falcon_syntax::cst::{Expr, Stmt};
 use std::sync::mpsc;
 use std::time::Duration;
 
-mod common;
+use crate::common;
 use common::body_stmts;
 
 #[test]

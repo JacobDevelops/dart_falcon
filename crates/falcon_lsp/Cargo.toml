@@ -1,4 +1,5 @@
 [package]
+autotests         = false
 name              = "falcon_lsp"
 version.workspace = true
 edition.workspace = true
@@ -24,3 +25,7 @@ serde.workspace    = true
 
 [lints]
 workspace = true
+
+[[test]]
+name = "it"
+path = "tests/it.rs"

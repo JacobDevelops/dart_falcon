@@ -2,11 +2,10 @@
 //! construct must parse with zero errors (unless the gap is specifically about a
 //! *missing* diagnostic) and produce a faithful CST view shape.
 
+use crate::common_class;
+use common_class::only_class;
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::cst::*;
-#[path = "common/only_class.rs"]
-mod common_class;
-use common_class::only_class;
 
 /// Parse `var x = <expr>;` and retain its source and concrete tree. Wrapping in a top-level variable is the simplest way to drive the
 /// expression parser through the public `parse` entry point.
@@ -42,11 +41,9 @@ fn parse_ok(expr_src: &str) -> (String, falcon_dart_parser::ParseResult) {
     (source, parsed)
 }
 
-mod common;
-#[path = "common/errs.rs"]
-mod common_errs;
-#[path = "common/first_stmt_expr.rs"]
-mod common_expr;
+use crate::common;
+use crate::common_errs;
+use crate::common_expr;
 use common::body_stmts;
 use common_errs::errs;
 

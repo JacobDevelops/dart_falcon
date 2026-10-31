@@ -1,10 +1,9 @@
+use crate::common_expr;
+use common_expr::first_stmt_expr;
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::cst::visit::{Visitor, walk_expr};
 use falcon_syntax::cst::*;
 use insta::assert_debug_snapshot;
-#[path = "common/first_stmt_expr.rs"]
-mod common_expr;
-use common_expr::first_stmt_expr;
 
 macro_rules! parser_case {
     ($name:ident, $source:expr, |$prog:ident| $assertions:block) => {

@@ -4,7 +4,7 @@
 //! rule-only namespace (including by alias or glob) is forbidden. This source
 //! scan sees macro bodies; trailing unit-test modules are excluded.
 
-mod support;
+use crate::support;
 
 use std::collections::BTreeSet;
 use std::fs;

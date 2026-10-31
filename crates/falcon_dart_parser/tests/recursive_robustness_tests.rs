@@ -2,7 +2,7 @@ use falcon_dart_parser::{ParseResult, parse};
 use falcon_syntax::cst::visit::Visitor;
 use falcon_syntax::cst::*;
 
-mod common;
+use crate::common;
 
 struct Walk;
 impl Visitor<'_> for Walk {}

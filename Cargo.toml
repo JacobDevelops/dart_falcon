@@ -57,6 +57,7 @@ criterion = { version = "0.5", features = [ "html_reports" ] }
 pedantic = { level = "warn", priority = -1 }
 
 [package]
+autotests            = false
 name                 = "dart_falcon"
 version.workspace    = true
 edition.workspace    = true
@@ -112,3 +113,10 @@ debug = true
 
 [profile.dev]
 debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[[test]]
+name = "it"
+path = "tests/it.rs"

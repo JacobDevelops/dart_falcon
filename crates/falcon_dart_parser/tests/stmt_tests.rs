@@ -4,7 +4,7 @@
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::cst::*;
 
-mod common;
+use crate::common;
 use common::body_stmts;
 
 /// Return the single statement, asserting exactly one statement.

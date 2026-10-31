@@ -25,6 +25,7 @@ values override them. Benchmarks and normal Falcon execution are unaffected.
 | `NEXTEST_TEST_THREADS` | 4 | Concurrent nextest test processes |
 | `RUST_TEST_THREADS` | 4 | Threads inside libtest harnesses |
 | `MBX_SCHEDULER_TESTS` | 1 | mbx admission for supported test runs |
+| `MBX_CACHE_LINKS` | false | Linked test executables change every edit and are rarely reused; caching them doubles writes |
 
 Compilation and test defaults match the corresponding LOKE values: two compile
 jobs, four nextest tests and four libtest threads. Falcon sets them in this wrapper;
@@ -57,6 +58,21 @@ workspaces at the same writable `CARGO_TARGET_DIR` or clear the shared cache to
 resolve contention. Cargo may serialize writes to one target; mbx safely shares
 matching compiler outputs across targets and deduplicates equivalent compilations.
 The verification runner adds no host queue, daemon or completed-check cache.
+
+## Integration builds and debug information
+
+Each package registers one integration target, `tests/it.rs`, with automatic test
+discovery disabled. Add test files as modules there, keeping fixtures beside their
+existing source files and shared helpers at the target's crate root. Select a
+suite with `cargo test -p falcon_rules --test it corpus_tests::`, or omit the
+filter to run the package's entire integration binary.
+
+Dev/test builds retain line tables for workspace code, so backtraces still show
+Falcon source locations. External dependencies omit debug information to reduce
+link output and disk writes; their backtraces lose source locations, and stepping
+through dependency code needs a local debug-profile override. Workspace line
+tables do not provide full debugger variable/type information. Bench profiling
+still uses full debug information, and release settings are unchanged.
 
 ## Evidence and cancellation
 

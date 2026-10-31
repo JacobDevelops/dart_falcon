@@ -1,4 +1,5 @@
 [package]
+autotests         = false
 name              = "falcon_syntax"
 version.workspace = true
 edition.workspace = true
@@ -9,3 +10,7 @@ falcon_dart_parser = { path = "../falcon_dart_parser" }
 
 [lints]
 workspace = true
+
+[[test]]
+name = "it"
+path = "tests/it.rs"

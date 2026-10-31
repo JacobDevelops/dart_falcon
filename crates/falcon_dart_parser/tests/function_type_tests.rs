@@ -11,9 +11,8 @@
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::cst::*;
 
-mod common;
-#[path = "common/only_class.rs"]
-mod common_class;
+use crate::common;
+use crate::common_class;
 use common_class::only_class;
 
 /// Return the aliased type of a single top-level `typedef`.

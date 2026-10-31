@@ -20,9 +20,8 @@
 
 #[path = "support/corpus.rs"]
 mod corpus;
-#[path = "support/inference.rs"]
-mod inference;
-mod support;
+use crate::inference;
+use crate::support;
 use corpus::{
     Expectation, contains_placeholder_marker, cross_file_project_roots, parse_expectations,
 };

@@ -4,8 +4,7 @@
 //! Joined callable signatures retain typedef annotations only when both
 //! operands preserve the same alias instance, including nullable joins.
 
-#[path = "support/inference.rs"]
-mod inference;
+use crate::inference;
 
 use std::path::Path;
 

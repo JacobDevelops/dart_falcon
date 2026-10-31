@@ -6,10 +6,8 @@
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::cst::*;
 
-#[path = "common/only_class.rs"]
-mod common_class;
-#[path = "common/errs.rs"]
-mod common_errs;
+use crate::common_class;
+use crate::common_errs;
 use common_class::only_class;
 use common_errs::errs;
 

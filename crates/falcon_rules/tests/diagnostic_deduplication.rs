@@ -1,13 +1,11 @@
 //! Identical rule reports are normalized at the common CLI/LSP registry boundary.
 
-#[path = "support/inference.rs"]
-mod inference;
+use crate::inference;
 
 use std::path::Path;
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, RuleRegistry};
 use falcon_config::FalconConfig;
-use falcon_rules::all_rules;
 use falcon_rules::lint::performance::noop_primitive_operations::NoopPrimitiveOperations;
 use falcon_syntax::cst::Program;
 

@@ -408,7 +408,7 @@ mod guard_walkers {
             let output = Command::new(std::env::current_exe().unwrap())
                 .args([
                     "--exact",
-                    "guard_walkers::library_target_annotation",
+                    "long_expression_chains::guard_walkers::library_target_annotation",
                     "--nocapture",
                 ])
                 .env(CHILD, "1")

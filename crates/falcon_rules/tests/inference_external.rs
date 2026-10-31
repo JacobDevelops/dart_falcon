@@ -2,11 +2,9 @@
 //! Like `falcon_analyze`'s `external_libraries` tests, these load parsed Dart source
 //! from a small local SDK-shaped tree, never an installed SDK or production table.
 
-#[path = "support/inference.rs"]
-mod inference;
+use crate::inference;
 
 use falcon_analyze::RuleAnalysis;
-use falcon_rules::all_rules;
 use inference::assert_lints as assert_external_lints;
 
 #[test]

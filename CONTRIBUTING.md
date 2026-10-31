@@ -146,7 +146,7 @@ The full spec, including the annotation format and upstream-fixture migration
 notes, is in
 [`crates/falcon_rules/tests/corpus/FIXTURE_FORMAT.md`](./crates/falcon_rules/tests/corpus/FIXTURE_FORMAT.md).
 
-`cargo test -p falcon_rules --test corpus_tests` runs the corpus in-process
+`cargo test -p falcon_rules --test it corpus_tests::` runs the corpus in-process
 without a pre-built CLI. It matches every annotation by rule, file, and line;
 when `msg:` is present, it also requires the exact produced message, including
 in cross-file and resolver projects. Mismatches show expected and actual text.

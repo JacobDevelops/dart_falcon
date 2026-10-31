@@ -9,7 +9,7 @@
 //! Run with `UPDATE_BESPOKE_WALKER_BASELINE=1` to rewrite the baseline after a
 //! deliberate migration.
 
-mod support;
+use crate::support;
 
 use std::collections::BTreeSet;
 use std::fmt::Write;

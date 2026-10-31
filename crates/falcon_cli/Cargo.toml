@@ -1,4 +1,5 @@
 [package]
+autotests         = false
 name              = "falcon_cli"
 version.workspace = true
 edition.workspace = true
@@ -25,3 +26,7 @@ insta.workspace = true
 
 [lints]
 workspace = true
+
+[[test]]
+name = "it"
+path = "tests/it.rs"

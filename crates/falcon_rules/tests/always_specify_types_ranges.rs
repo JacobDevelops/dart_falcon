@@ -1,7 +1,6 @@
 //! Exact syntax anchors checked against Dart 3.13.5 machine diagnostics.
 
-#[path = "support/inference.rs"]
-mod inference;
+use crate::inference;
 
 use std::path::Path;
 

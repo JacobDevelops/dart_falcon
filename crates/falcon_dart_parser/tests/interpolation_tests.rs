@@ -4,8 +4,7 @@
 use falcon_dart_parser::parser::parse;
 use falcon_syntax::cst::*;
 
-#[path = "common/string_lit.rs"]
-mod common_string;
+use crate::common_string;
 use common_string::string_lit;
 
 /// The source text under an interpolation's span.

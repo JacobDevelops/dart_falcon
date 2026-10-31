@@ -1568,7 +1568,7 @@ fn selected_member_ignores_unselected_malformed_configuration() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "selected_member_ignores_unselected_malformed_configuration",
+                "pipeline_tests::selected_member_ignores_unselected_malformed_configuration",
             ])
             .current_dir(&bad_member)
             .env("HOME", temp.path())
@@ -1629,7 +1629,7 @@ fn nonmember_cwd_configuration_agrees_for_default_and_dot_inputs() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "nonmember_cwd_configuration_agrees_for_default_and_dot_inputs",
+                "pipeline_tests::nonmember_cwd_configuration_agrees_for_default_and_dot_inputs",
                 "--nocapture",
             ])
             .current_dir(&tools)
@@ -1785,7 +1785,7 @@ fn explicit_workspace_stdout_counts_after_baseline_before_print_limit() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "workspace_report_subprocess_entrypoint",
+                "pipeline_tests::workspace_report_subprocess_entrypoint",
                 "--nocapture",
             ])
             .current_dir(outside.path())
