@@ -2,6 +2,10 @@
 
 wrappers = { cargo = { command = "mbx", env = { MBX_CARGO_SHIM_MODE = "1" } } }
 
+[env]
+# Linked test executables change every edit and are rarely reused; caching them doubles disk writes.
+MBX_CACHE_LINKS = "{{ get_env(name='MBX_CACHE_LINKS', default='false') }}"
+
 # Rust comes from rustup via rust-toolchain.toml; mise installs the other tools.
 [tools]
 blaze         = "0.20261029.1"

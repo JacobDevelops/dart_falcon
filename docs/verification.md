@@ -17,7 +17,8 @@ There is no blanket waiver for a red or unexecuted final gate.
 ## Resource budget
 
 Verification sets these defaults only for its children; explicit environment
-values override them. Benchmarks and normal Falcon execution are unaffected.
+values override them. Benchmarks and normal Falcon execution are unaffected,
+except for `MBX_CACHE_LINKS` as described below.
 
 | Variable | Default | Controls |
 | --- | --- | --- |
@@ -26,6 +27,12 @@ values override them. Benchmarks and normal Falcon execution are unaffected.
 | `RUST_TEST_THREADS` | 4 | Threads inside libtest harnesses |
 | `MBX_SCHEDULER_TESTS` | 1 | mbx admission for supported test runs |
 | `MBX_CACHE_LINKS` | false | Linked test executables change every edit and are rarely reused; caching them doubles writes |
+
+`mise.toml` also defaults `MBX_CACHE_LINKS` to false in its `[env]`, so any
+command run in the repository through mise (`cargo`, `cargo bench`, `makers`)
+skips the same linked-binary cache writes; an explicit value still wins. CI's
+`mbx-setup` action sets it to true because later CI runs restore linked binaries
+from main's saved snapshots.
 
 Compilation and test defaults match the corresponding LOKE values: two compile
 jobs, four nextest tests and four libtest threads. Falcon sets them in this wrapper;
