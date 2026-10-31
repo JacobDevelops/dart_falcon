@@ -1,0 +1,1 @@
+{"configVersion":2,"packages":[{"name":"custom_lint","rootUri":"../deps/custom_lint","packageUri":"lib/"},{"name":"riverpod_lint","rootUri":"../deps/riverpod_lint","packageUri":"lib/"},{"name":"top_plugin","rootUri":"../deps/top_plugin","packageUri":"lib/"},{"name":"dart_cli","rootUri":"../deps/dart_cli","packageUri":"lib/"}]}

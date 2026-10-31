@@ -1,0 +1,3 @@
+name: inner_tools
+dev_dependencies:
+  nearest_tool: any # /* expect: unused-dev-dependencies */

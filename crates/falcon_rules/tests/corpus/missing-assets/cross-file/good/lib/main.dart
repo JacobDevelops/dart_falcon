@@ -1,0 +1,11 @@
+import 'support.dart';
+import 'assets/import.dart';
+const declared = 'assets/declared.png';
+const map = 'assets/map.png';
+const directory = 'assets/icons/direct.png';
+const external = 'packages/other/assets/other.png';
+const extensionless = 'assets/README';
+const trailing = 'assets/icons/';
+const ordinary = 'images/a.png';
+String dynamicAsset(String name) => 'assets/$name.png';
+const adjacent = 'assets/' 'declared.png';

@@ -1,0 +1,14 @@
+name: sample
+flutter:
+  assets:
+    - assets/plain.png
+    - path: assets/map.png
+      transformers: []
+    - assets/packaged.png
+    - assets/icons/
+    - assets/dynamic/
+    - assets/missing/
+    - assets/empty/
+    - assets/raw$dollar.png
+    - assets/adjacent.png
+    - assets/prefix/

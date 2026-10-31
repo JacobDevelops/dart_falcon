@@ -1,0 +1,5 @@
+name: brand
+flutter:
+  assets:
+    - assets/logo.png
+    - assets/package.png

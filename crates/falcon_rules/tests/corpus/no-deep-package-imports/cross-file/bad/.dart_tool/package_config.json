@@ -1,0 +1,1 @@
+{"configVersion": 2, "packages": [{"name": "app", "rootUri": "../", "packageUri": "lib/"}, {"name": "other", "rootUri": "../packages/other", "packageUri": "lib/"}, {"name": "bare", "rootUri": "../packages/bare", "packageUri": "lib/"}]}

@@ -1,0 +1,3 @@
+name: build_runner
+executables:
+  build_runner: build_runner

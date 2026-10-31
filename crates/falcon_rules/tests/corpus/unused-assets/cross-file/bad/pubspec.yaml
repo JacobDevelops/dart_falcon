@@ -1,0 +1,12 @@
+name: sample
+flutter:
+  assets:
+    - assets/orphan.png # /* expect: unused-assets, msg: "Asset `assets/orphan.png` is declared in `pubspec.yaml` but never referenced." */
+    - path: assets/map.png # /* expect: unused-assets */
+      flavors: [demo]
+    - assets/unused/ # /* expect: unused-assets */
+    - assets/nested/ # /* expect: unused-assets */
+    - assets/import.dart # /* expect: unused-assets */
+    - assets/used.png
+    - assets/package.png
+    - assets/dynamic/

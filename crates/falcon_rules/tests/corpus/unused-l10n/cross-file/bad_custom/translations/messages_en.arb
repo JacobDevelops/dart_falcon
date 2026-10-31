@@ -1,0 +1,4 @@
+{
+  "customUnused": "Unused /* expect: unused-l10n */",
+  "customUsed": "Used"
+}

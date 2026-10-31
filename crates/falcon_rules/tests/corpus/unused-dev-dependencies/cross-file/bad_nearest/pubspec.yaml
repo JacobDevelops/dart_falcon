@@ -1,0 +1,3 @@
+name: outer_tools
+dev_dependencies:
+  nearest_tool: any

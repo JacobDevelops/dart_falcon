@@ -1,0 +1,4 @@
+name: brand
+flutter:
+  assets:
+    - assets/orphan.png # /* expect: unused-assets */

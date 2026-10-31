@@ -1831,6 +1831,21 @@
                 },
                 "avoid-missing-test-files": {
                   "$ref": "#/definitions/avoid-missing-test-files"
+                },
+                "unused-assets": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "unused-l10n": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "architecture-layer-boundaries": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "unused-dev-dependencies": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "no-deep-package-imports": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
                 }
               },
               "description": "Per-rule severity levels for the `correctness` group."
@@ -1857,6 +1872,9 @@
               "properties": {
                 "package-names": {
                   "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "unexported-public-api": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
                 }
               },
               "description": "Per-rule severity levels for the `style` group."
@@ -1867,6 +1885,12 @@
               "properties": {
                 "avoid-importing-entrypoint-exports": {
                   "$ref": "#/definitions/avoid-importing-entrypoint-exports"
+                },
+                "missing-assets": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "duplicate-barrel-exports": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
                 }
               },
               "description": "Per-rule severity levels for the `suspicious` group."
@@ -3649,6 +3673,21 @@
                 },
                 "avoid-missing-test-files": {
                   "$ref": "#/definitions/avoid-missing-test-files"
+                },
+                "unused-assets": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "unused-l10n": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "architecture-layer-boundaries": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "unused-dev-dependencies": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "no-deep-package-imports": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
                 }
               },
               "description": "Per-rule severity levels for the `correctness` group."
@@ -3675,6 +3714,9 @@
               "properties": {
                 "package-names": {
                   "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "unexported-public-api": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
                 }
               },
               "description": "Per-rule severity levels for the `style` group."
@@ -3685,6 +3727,12 @@
               "properties": {
                 "avoid-importing-entrypoint-exports": {
                   "$ref": "#/definitions/avoid-importing-entrypoint-exports"
+                },
+                "missing-assets": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "duplicate-barrel-exports": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
                 }
               },
               "description": "Per-rule severity levels for the `suspicious` group."

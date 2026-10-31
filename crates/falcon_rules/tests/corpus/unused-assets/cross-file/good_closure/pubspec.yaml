@@ -1,0 +1,4 @@
+name: app
+flutter:
+  assets:
+    - assets/own.png

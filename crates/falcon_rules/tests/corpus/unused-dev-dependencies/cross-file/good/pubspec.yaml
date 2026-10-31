@@ -1,0 +1,19 @@
+name: used_dev_good
+dependencies:
+  regular_unused: any
+dev_dependencies:
+  exported: any
+  conditional_default: any
+  conditional_io: any
+  lib_used: any
+  test_used: any
+  tool_used: any
+  integration_used: any
+  flutter_test:
+    sdk: flutter
+  flutter_lints: any
+  json_serializable: any
+  build_runner: any
+  flutter_launcher_icons: any
+flutter_launcher_icons:
+  android: true

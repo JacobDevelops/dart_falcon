@@ -1,0 +1,7 @@
+name: sample
+flutter:
+  assets:
+    - assets/declared.png
+    - assets/icons/
+    - path: assets/map.png
+      transformers: []

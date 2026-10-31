@@ -1,0 +1,15 @@
+{
+  "@@locale": "en",
+  "unusedKey": "Unused /* expect: unused-l10n */",
+  "generatedOnly": "Generated /* expect: unused-l10n */",
+  "localeOnly": "Locale /* expect: unused-l10n */",
+  "stringOnly": "String /* expect: unused-l10n */",
+  "commentOnly": "Comment /* expect: unused-l10n */",
+  "\u0075nusedEscaped": "Escaped /* expect: unused-l10n */",
+  "hello": "Hello",
+  "greeting": "Hello {name}",
+  "@greeting": {"placeholders": {"name": {"type": "String"}}},
+  "tearOff": "Hi {name}",
+  "interpolated": "Interpolation",
+  "extensionMessage": "Extension"
+}

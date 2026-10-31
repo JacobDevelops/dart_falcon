@@ -1,0 +1,6 @@
+name: sample
+flutter:
+  assets:
+    - assets/flags/us.png
+    - assets/flags/fr.png
+    - assets/icons/home.png

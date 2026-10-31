@@ -1,0 +1,7 @@
+name: sample
+flutter:
+  assets:
+    - assets/images/
+    - assets/images/2.0x/
+    - assets/images/2.0x/logo.png
+    - assets/translations/

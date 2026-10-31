@@ -1,0 +1,2 @@
+other:
+  include: package:not_included/rules.yaml

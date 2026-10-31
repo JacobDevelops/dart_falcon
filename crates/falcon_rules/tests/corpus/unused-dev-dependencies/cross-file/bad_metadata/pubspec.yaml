@@ -1,0 +1,4 @@
+name: broken_tool_metadata
+dev_dependencies:
+  missing_pubspec: any # /* expect: unused-dev-dependencies */
+  malformed_pubspec: any # /* expect: unused-dev-dependencies */

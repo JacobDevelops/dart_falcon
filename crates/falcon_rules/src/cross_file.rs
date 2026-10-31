@@ -6,6 +6,9 @@
 //! This module root holds the shared cross-file plumbing every rule needs:
 //! package/pubspec discovery, directive-URI resolution, and path normalization.
 
+mod barrels;
+mod flutter_assets;
+
 #[cfg(test)]
 mod dependency_tests;
 
@@ -25,16 +28,28 @@ crate::declare_rules! {
     sort_pub_dependencies::SortPubDependencies => ("sort-pub-dependencies", cross_file, Correctness, false, RuleSource::Lints("sort_pub_dependencies"));
     avoid_importing_entrypoint_exports::AvoidImportingEntrypointExports => ("avoid-importing-entrypoint-exports", cross_file, Suspicious, false, RuleSource::Falcon, options = avoid_importing_entrypoint_exports::Options);
     avoid_missing_test_files::AvoidMissingTestFiles => ("avoid-missing-test-files", cross_file, Correctness, false, RuleSource::Falcon, options = avoid_missing_test_files::Options);
+    unused_assets::UnusedAssets => ("unused-assets", cross_file, Correctness, false, RuleSource::Falcon);
+    unused_l10n::UnusedL10n => ("unused-l10n", cross_file, Correctness, false, RuleSource::Falcon);
+    architecture_layer_boundaries::ArchitectureLayerBoundaries => ("architecture-layer-boundaries", cross_file, Correctness, false, RuleSource::Falcon);
+    unexported_public_api::UnexportedPublicApi => ("unexported-public-api", cross_file, Style, false, RuleSource::Falcon);
+    missing_assets::MissingAssets => ("missing-assets", cross_file, Suspicious, false, RuleSource::Falcon);
+    unused_dev_dependencies::UnusedDevDependencies => ("unused-dev-dependencies", cross_file, Correctness, false, RuleSource::Falcon);
+    no_deep_package_imports::NoDeepPackageImports => ("no-deep-package-imports", cross_file, Correctness, false, RuleSource::Falcon);
+    duplicate_barrel_exports::DuplicateBarrelExports => ("duplicate-barrel-exports", cross_file, Suspicious, false, RuleSource::Falcon);
 }
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use falcon_analyze::{PackageIdentity, ProjectFile, canonical_or_lexical};
+use crate::lint::support::package_manifests::parse_manifest;
+use falcon_analyze::{PackageConfig, PackageIdentity, ProjectFile, canonical_or_lexical};
 use falcon_analyze::{canonical_package_path, enclosing_pubspec, package_identity};
-use falcon_diagnostics::Span as DiagSpan;
+use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::cst::Program;
-use marked_yaml::{Node as MarkedNode, parse_yaml};
+use marked_yaml::{
+    LoaderOptions, Node as MarkedNode, parse_yaml, parse_yaml_with_options,
+    types::MarkedMappingNode,
+};
 use serde_yaml::Value;
 #[cfg(test)]
 use std::time::SystemTime;
@@ -282,15 +297,121 @@ pub fn resolve_directive_uri(
 }
 
 /// Conditional alternatives also keep platform-specific files reachable.
-fn program_reference_uris(program: Program<'_>) -> impl Iterator<Item = std::borrow::Cow<'_, str>> {
-    let imports = program.imports().flat_map(|i| {
-        std::iter::once(i.uri().value()).chain(i.configurable_uris().map(|c| c.uri().value()))
+fn program_reference_uris(
+    program: Program<'_>,
+) -> impl Iterator<Item = falcon_syntax::cst::StringLitNode<'_>> {
+    let imports = program.imports().flat_map(|directive| {
+        std::iter::once(directive.uri()).chain(
+            directive
+                .configurable_uris()
+                .map(falcon_syntax::cst::ConfigurableUri::uri),
+        )
     });
-    let exports = program.exports().flat_map(|e| {
-        std::iter::once(e.uri().value()).chain(e.configurable_uris().map(|c| c.uri().value()))
+    let exports = program.exports().flat_map(|directive| {
+        std::iter::once(directive.uri()).chain(
+            directive
+                .configurable_uris()
+                .map(falcon_syntax::cst::ConfigurableUri::uri),
+        )
     });
-    let parts = program.part_directives().map(|p| p.uri().value());
+    let parts = program
+        .part_directives()
+        .map(falcon_syntax::cst::PartDirective::uri);
     imports.chain(exports).chain(parts)
+}
+
+fn analyzed_package_usage(files: &[ProjectFile]) -> BTreeMap<PathBuf, HashSet<String>> {
+    let mut usage: BTreeMap<PathBuf, HashSet<String>> = BTreeMap::new();
+    for file in files {
+        let Some(pubspec) = enclosing_pubspec(&file.path) else {
+            continue;
+        };
+        let used = usage.entry(pubspec).or_default();
+        if file
+            .path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("dart")
+        {
+            continue;
+        }
+        for uri in program_reference_uris(file.program()) {
+            if let Some(package) =
+                crate::lint::support::package_manifests::imported_package(&uri.value())
+            {
+                used.insert(package.to_owned());
+            }
+        }
+    }
+    usage
+}
+
+fn unused_dependency_diagnostics(
+    pubspec: &Path,
+    used: &HashSet<String>,
+    section: &str,
+    exempt: impl Fn(&str, &MarkedMappingNode, Option<&Path>) -> bool,
+    message: impl Fn(&str) -> String,
+) -> Vec<Diagnostic> {
+    let Ok(source) = falcon_config::read_metadata_text(pubspec) else {
+        return Vec::new();
+    };
+    if parse_manifest(&source).is_none() {
+        return Vec::new();
+    }
+    let Ok(root) = parse_yaml_with_options(
+        0,
+        &source,
+        LoaderOptions::default().error_on_duplicate_keys(true),
+    ) else {
+        return Vec::new();
+    };
+    let Some(root) = root.as_mapping() else {
+        return Vec::new();
+    };
+    let Some(dependencies) = root.get_mapping(section) else {
+        return Vec::new();
+    };
+    let Some(package_root) = pubspec.parent() else {
+        return Vec::new();
+    };
+    let package_config =
+        PackageConfig::discover(package_root).and_then(|path| PackageConfig::load(&path));
+    let mut diagnostics = Vec::new();
+    for (name, value) in dependencies.iter() {
+        let resolved = package_config
+            .as_ref()
+            .and_then(|config| config.package(name.as_str()))
+            .map(|package| package.root.as_path());
+        if used.contains(name.as_str())
+            || value
+                .as_mapping()
+                .is_some_and(|mapping| mapping.get("sdk").is_some())
+            || exempt(name.as_str(), root, resolved)
+        {
+            continue;
+        }
+        let Some(start) = name
+            .span()
+            .start()
+            .and_then(|marker| character_to_byte(&source, marker.character()))
+        else {
+            continue;
+        };
+        let Some(span) = scalar_source_span(&source, start) else {
+            continue;
+        };
+        let mut diagnostic = Diagnostic::new(
+            "",
+            Severity::Warning,
+            message(name.as_str()),
+            pubspec.to_string_lossy().into_owned(),
+            span,
+        );
+        diagnostic.resolve_position(&source);
+        diagnostics.push(diagnostic);
+    }
+    diagnostics
 }
 
 #[derive(Default)]
@@ -360,7 +481,12 @@ pub fn build_reference_graph(
     let mut adj = vec![Vec::new(); files.len()];
     for (i, f) in files.iter().enumerate() {
         for uri in program_reference_uris(f.program()) {
-            match resolve_directive_uri(&canons[i], &uri, file_packages[i].identity(), packages) {
+            match resolve_directive_uri(
+                &canons[i],
+                &uri.value(),
+                file_packages[i].identity(),
+                packages,
+            ) {
                 Some(ResolvedRef::Path(p)) => {
                     if let Some(&j) = by_path.get(p.as_path()) {
                         adj[i].push(j);
@@ -673,7 +799,9 @@ mod tests {
         let src = "export 'src/impl_stub.dart'\n    if (dart.library.io) 'src/impl_io.dart'\n    if (dart.library.html) 'src/impl_web.dart';";
         let falcon_dart_parser::ParseResult { tree, errors } = parse(src);
         assert!(errors.is_empty(), "{errors:?}");
-        let uris: Vec<_> = program_reference_uris(tree.program(src)).collect();
+        let uris: Vec<_> = program_reference_uris(tree.program(src))
+            .map(falcon_syntax::cst::StringLitNode::value)
+            .collect();
         assert!(
             uris.iter().any(|uri| uri == "src/impl_stub.dart"),
             "default uri: {uris:?}"
@@ -692,7 +820,9 @@ mod tests {
     fn conditional_import_uris_are_collected_too() {
         let src = "import 'src/stub.dart' if (dart.library.io) 'src/io.dart';";
         let falcon_dart_parser::ParseResult { tree, .. } = parse(src);
-        let uris: Vec<_> = program_reference_uris(tree.program(src)).collect();
+        let uris: Vec<_> = program_reference_uris(tree.program(src))
+            .map(falcon_syntax::cst::StringLitNode::value)
+            .collect();
         assert!(
             uris.iter().any(|uri| uri == "src/io.dart"),
             "import branch: {uris:?}"

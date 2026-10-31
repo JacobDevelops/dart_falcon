@@ -1,0 +1,7 @@
+name: brand
+flutter:
+  assets:
+    - assets/dark.png
+    - assets/light.png
+    - assets/parenthesized.png
+    - assets/named.png

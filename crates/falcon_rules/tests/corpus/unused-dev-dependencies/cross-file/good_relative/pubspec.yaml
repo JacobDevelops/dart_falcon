@@ -1,0 +1,4 @@
+name: relative_options
+dev_dependencies:
+  mapped_plugin: any
+  relative_lints: any

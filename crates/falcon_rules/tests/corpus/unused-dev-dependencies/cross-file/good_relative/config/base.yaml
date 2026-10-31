@@ -1,0 +1,6 @@
+include:
+  - ../analysis_options.yaml
+  - package:relative_lints/options.yaml
+analyzer:
+  plugins:
+    mapped_plugin: {}

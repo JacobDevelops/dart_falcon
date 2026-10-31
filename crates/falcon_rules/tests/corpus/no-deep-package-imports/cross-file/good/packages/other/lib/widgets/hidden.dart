@@ -1,0 +1,2 @@
+class Visible {}
+class Hidden {}

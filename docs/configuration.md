@@ -10,7 +10,7 @@ falcon reads `falcon.json`. Discovery order (first match wins):
 2. `falcon.json` at the nearest enclosing Git or Jujutsu repository root (`.git` or `.jj`)
 3. `~/.falcon.json`
 
-If no config is found, falcon enables its own recommended set: 215 recommended rules out of 538 shipped rules, at their default severity (warning), chosen independently of upstream presets.
+If no config is found, falcon enables its own recommended set: 215 recommended rules out of 546 shipped rules, at their default severity (warning), chosen independently of upstream presets.
 
 A config that **is** found but fails to load is a hard **error**: falcon prints a message and exits non-zero rather than silently falling back to defaults. This covers invalid JSON, wrong-typed values, `max-errors: 0` (see [`max-errors`](#max-errors)), and the [legacy flat schema](#migrating-from-the-legacy-flat-schema).
 

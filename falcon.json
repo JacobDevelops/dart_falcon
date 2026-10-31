@@ -574,16 +574,24 @@
         "undeclared-dependencies": "warn",
         "no-import-cycles": "warn",
         "banned-imports": "warn",
-        "avoid-missing-test-files": "warn"
+        "avoid-missing-test-files": "warn",
+        "unused-assets": "warn",
+        "unused-l10n": "warn",
+        "architecture-layer-boundaries": "warn",
+        "unused-dev-dependencies": "warn",
+        "no-deep-package-imports": "warn"
       },
       "suspicious": {
-        "avoid-importing-entrypoint-exports": "warn"
+        "avoid-importing-entrypoint-exports": "warn",
+        "missing-assets": "warn",
+        "duplicate-barrel-exports": "warn"
       },
       "security": {
         "secure-pubspec-urls": "off"
       },
       "style": {
-        "package-names": "off"
+        "package-names": "off",
+        "unexported-public-api": "warn"
       }
     }
   },

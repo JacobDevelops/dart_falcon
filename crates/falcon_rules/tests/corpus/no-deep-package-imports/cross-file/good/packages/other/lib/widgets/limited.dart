@@ -1,0 +1,2 @@
+class Limited {}
+class NotExported {}

@@ -1,0 +1,3 @@
+builders:
+  generator:
+    import: package:json_serializable/builder.dart

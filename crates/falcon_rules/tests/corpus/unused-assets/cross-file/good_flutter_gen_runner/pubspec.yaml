@@ -1,0 +1,6 @@
+name: sample
+dev_dependencies:
+  flutter_gen_runner: any
+flutter:
+  assets:
+    - assets/generated.png

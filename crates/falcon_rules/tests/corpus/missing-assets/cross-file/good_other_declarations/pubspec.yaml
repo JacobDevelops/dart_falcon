@@ -1,0 +1,12 @@
+name: sample
+flutter:
+  fonts:
+    - family: Demo
+      fonts:
+        - asset: assets/demo.ttf
+  shaders:
+    - assets/shader.frag
+  deferred-components:
+    - name: deferred
+      assets:
+        - assets/deferred.png

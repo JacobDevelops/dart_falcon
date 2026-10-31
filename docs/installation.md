@@ -295,4 +295,4 @@ cargo xtask homebrew --version X.Y.Z --checksums SHA256SUMS --output falcon.rb
 
 See [configuration.md](./configuration.md) for configuring rules and options,
 or run `falcon check .`. With no `falcon.json` present, falcon's 215 recommended
-rules out of 538 shipped rules run at their default severity.
+rules out of 546 shipped rules run at their default severity.

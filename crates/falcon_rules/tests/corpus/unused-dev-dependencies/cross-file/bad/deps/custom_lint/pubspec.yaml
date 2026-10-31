@@ -1,0 +1,3 @@
+name: disabled_custom_lint
+dependencies:
+  custom_lint_builder: any

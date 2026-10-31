@@ -1,0 +1,4 @@
+name: before_pub_get
+dev_dependencies:
+  build_runner: any
+  unresolved: any

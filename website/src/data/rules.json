@@ -4839,6 +4839,721 @@
     ]
   },
   {
+    "name": "architecture-layer-boundaries",
+    "group": "correctness",
+    "domains": [],
+    "recommended": false,
+    "crossFile": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "sourcePath": "crates/falcon_rules/src/cross_file/architecture_layer_boundaries.rs",
+    "fixturePath": "crates/falcon_rules/tests/corpus/architecture-layer-boundaries",
+    "description": "Warns when package dependencies cross clean-architecture layer or feature boundaries.",
+    "docs": "Warns when package dependencies cross clean-architecture layer or feature boundaries.\n\nImports, conditional alternatives, exports, and parts within a known package's\n`lib/` are classified by the innermost recognized directory, ignoring feature\nroot/name components and treating use cases nested under domain as domain:\npresentation (`presentation`, `ui`, `view`, `views`, `widgets`, `screens`,\n`pages`), application (`application`, `use_cases`, `usecases`), domain\n(`domain`), or data (`data`, `infrastructure`). Presentation may depend on\napplication or domain; application\nand data may depend on domain. Same-layer dependencies are allowed.\n\nBetween different features directly under `lib/features/`, `lib/feature/`, or\n`lib/modules/`, dependencies must target a directory tree containing `domain`\nor a file directly in the feature root. Layer direction still applies; a\nforbidden layer direction takes precedence over the feature diagnostic.\nUnclassified endpoints, files outside `lib/`, unknown packages, and external\npackages are ignored. Classification is path-based, not semantic; public\nbarrels are identified by their location alone.",
+    "examples": {
+      "bad": null,
+      "good": null,
+      "crossFile": [
+        {
+          "path": "bad/lib/application/bad.dart",
+          "content": "import '../presentation/target.dart';\nimport 'package:architecture_fixture/data/target.dart';"
+        },
+        {
+          "path": "bad/lib/application/exports.dart",
+          "content": "export '../data/target.dart';"
+        },
+        {
+          "path": "bad/lib/application/target.dart",
+          "content": "class ApplicationTarget {}"
+        },
+        {
+          "path": "bad/lib/data/bad.dart",
+          "content": "import '../presentation/target.dart';\nimport 'package:architecture_fixture/application/target.dart';"
+        },
+        {
+          "path": "bad/lib/data/domain/inner.dart",
+          "content": "import '../target.dart';"
+        },
+        {
+          "path": "bad/lib/data/piece.dart",
+          "content": "part of '../domain/parts.dart';"
+        },
+        {
+          "path": "bad/lib/data/target.dart",
+          "content": "class DataTarget {}"
+        },
+        {
+          "path": "bad/lib/domain/bad.dart",
+          "content": "import '../presentation/target.dart';\nimport 'package:architecture_fixture/application/target.dart';\nimport '../data/target.dart';"
+        },
+        {
+          "path": "bad/lib/domain/conditional.dart",
+          "content": "import 'target.dart'\n  if (dart.library.io) '../data/target.dart';\nexport 'target.dart'\n  if (dart.library.html) '../presentation/target.dart';"
+        },
+        {
+          "path": "bad/lib/domain/data/nested.dart",
+          "content": "class NestedData {}"
+        },
+        {
+          "path": "bad/lib/domain/parts.dart",
+          "content": "part '../data/piece.dart';"
+        },
+        {
+          "path": "bad/lib/domain/target.dart",
+          "content": "class DomainTarget {}"
+        },
+        {
+          "path": "bad/lib/domain/usecases/application_dependency.dart",
+          "content": "import '../../application/target.dart';"
+        },
+        {
+          "path": "bad/lib/feature/auth/presentation/page.dart",
+          "content": "class AuthPage {}"
+        },
+        {
+          "path": "bad/lib/feature/domain/presentation/page.dart",
+          "content": "class DomainFeaturePage {}"
+        },
+        {
+          "path": "bad/lib/feature/shop/presentation/feature_name.dart",
+          "content": "import '../../domain/presentation/page.dart';"
+        },
+        {
+          "path": "bad/lib/feature/shop/presentation/page.dart",
+          "content": "import '../../auth/presentation/page.dart';"
+        },
+        {
+          "path": "bad/lib/features/auth/data/client.dart",
+          "content": "class AuthClient {}"
+        },
+        {
+          "path": "bad/lib/features/auth/domain/application/action.dart",
+          "content": "class Action {}"
+        },
+        {
+          "path": "bad/lib/features/auth/presentation/page.dart",
+          "content": "class AuthPage {}"
+        },
+        {
+          "path": "bad/lib/features/data/data.dart",
+          "content": "class DataFeature {}"
+        },
+        {
+          "path": "bad/lib/features/domain/presentation/page.dart",
+          "content": "class DomainFeaturePage {}"
+        },
+        {
+          "path": "bad/lib/features/shop/data/client.dart",
+          "content": "import '../../auth/data/client.dart';"
+        },
+        {
+          "path": "bad/lib/features/shop/domain/barrel.dart",
+          "content": "import '../../data/data.dart';"
+        },
+        {
+          "path": "bad/lib/features/shop/domain/domain_application.dart",
+          "content": "import '../../auth/domain/application/action.dart';"
+        },
+        {
+          "path": "bad/lib/features/shop/domain/model.dart",
+          "content": "import '../../auth/data/client.dart';"
+        },
+        {
+          "path": "bad/lib/features/shop/presentation/feature_name.dart",
+          "content": "import '../../domain/presentation/page.dart';"
+        },
+        {
+          "path": "bad/lib/features/shop/presentation/page.dart",
+          "content": "import '../../auth/presentation/page.dart';"
+        },
+        {
+          "path": "bad/lib/infrastructure/bad.dart",
+          "content": "import '../application/target.dart';"
+        },
+        {
+          "path": "bad/lib/modules/auth/presentation/page.dart",
+          "content": "class AuthPage {}"
+        },
+        {
+          "path": "bad/lib/modules/domain/presentation/page.dart",
+          "content": "class DomainFeaturePage {}"
+        },
+        {
+          "path": "bad/lib/modules/shop/presentation/feature_name.dart",
+          "content": "import '../../domain/presentation/page.dart';"
+        },
+        {
+          "path": "bad/lib/modules/shop/presentation/page.dart",
+          "content": "import '../../auth/presentation/page.dart';"
+        },
+        {
+          "path": "bad/lib/pages/bad.dart",
+          "content": "import '../data/target.dart';"
+        },
+        {
+          "path": "bad/lib/presentation/bad.dart",
+          "content": "import '../data/target.dart';"
+        },
+        {
+          "path": "bad/lib/presentation/domain_target.dart",
+          "content": "import '../domain/data/nested.dart';"
+        },
+        {
+          "path": "bad/lib/presentation/target.dart",
+          "content": "class PresentationTarget {}"
+        },
+        {
+          "path": "bad/lib/screens/bad.dart",
+          "content": "import '../data/target.dart';"
+        },
+        {
+          "path": "bad/lib/ui/bad.dart",
+          "content": "import '../data/target.dart';"
+        },
+        {
+          "path": "bad/lib/use_cases/bad.dart",
+          "content": "import '../data/target.dart';"
+        },
+        {
+          "path": "bad/lib/usecases/bad.dart",
+          "content": "import '../data/target.dart';"
+        },
+        {
+          "path": "bad/lib/view/bad.dart",
+          "content": "import '../data/target.dart';"
+        },
+        {
+          "path": "bad/lib/views/bad.dart",
+          "content": "import '../data/target.dart';"
+        },
+        {
+          "path": "bad/lib/widgets/bad.dart",
+          "content": "import '../data/target.dart';"
+        },
+        {
+          "path": "bad/pubspec.yaml",
+          "content": "name: architecture_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
+        },
+        {
+          "path": "good/lib/application/allowed.dart",
+          "content": "import 'package:architecture_fixture/application/target.dart';\nimport 'package:architecture_fixture/domain/target.dart';"
+        },
+        {
+          "path": "good/lib/application/target.dart",
+          "content": "class ApplicationTarget {}"
+        },
+        {
+          "path": "good/lib/data/allowed.dart",
+          "content": "import 'package:architecture_fixture/data/target.dart';\nimport 'package:architecture_fixture/domain/target.dart';"
+        },
+        {
+          "path": "good/lib/data/domain/allowed.dart",
+          "content": "import '../../domain/target.dart';"
+        },
+        {
+          "path": "good/lib/data/target.dart",
+          "content": "class DataTarget {}"
+        },
+        {
+          "path": "good/lib/domain/allowed.dart",
+          "content": "import 'package:architecture_fixture/domain/target.dart';"
+        },
+        {
+          "path": "good/lib/domain/nested_package.dart",
+          "content": "import '../vendor/lib/data/client.dart';"
+        },
+        {
+          "path": "good/lib/domain/target.dart",
+          "content": "class DomainTarget {}"
+        },
+        {
+          "path": "good/lib/domain/ui/allowed.dart",
+          "content": "import '../../application/target.dart';"
+        },
+        {
+          "path": "good/lib/domain/unclassified_target.dart",
+          "content": "import '../shared/unclassified.dart';\nimport '../domain.dart';\nimport 'dart:async';\nimport 'package:other/data/client.dart';"
+        },
+        {
+          "path": "good/lib/domain.dart",
+          "content": "class RootDomain {}"
+        },
+        {
+          "path": "good/lib/feature/auth/auth.dart",
+          "content": "export 'domain/model.dart';"
+        },
+        {
+          "path": "good/lib/feature/auth/data/client.dart",
+          "content": "class Client {}"
+        },
+        {
+          "path": "good/lib/feature/auth/domain/application/action.dart",
+          "content": "class Action {}"
+        },
+        {
+          "path": "good/lib/feature/auth/domain/model.dart",
+          "content": "class AuthModel {}"
+        },
+        {
+          "path": "good/lib/feature/auth/domain/use_cases/get_user.dart",
+          "content": "class GetOtherUser {}"
+        },
+        {
+          "path": "good/lib/feature/auth/domain/usecases/get_user.dart",
+          "content": "class GetUser {}"
+        },
+        {
+          "path": "good/lib/feature/auth/presentation/page.dart",
+          "content": "class Page {}"
+        },
+        {
+          "path": "good/lib/feature/data/usage.dart",
+          "content": "import '../../auth/presentation/page.dart';"
+        },
+        {
+          "path": "good/lib/feature/domain/usage.dart",
+          "content": "import '../../auth/data/client.dart';"
+        },
+        {
+          "path": "good/lib/feature/shop/application/action.dart",
+          "content": "import '../../auth/domain/model.dart';"
+        },
+        {
+          "path": "good/lib/feature/shop/domain/feature_barrel.dart",
+          "content": "import '../../data/usage.dart';\nimport '../../domain/usage.dart';"
+        },
+        {
+          "path": "good/lib/feature/shop/domain/use_cases.dart",
+          "content": "import '../../auth/domain/usecases/get_user.dart';\nimport '../../auth/domain/use_cases/get_user.dart';"
+        },
+        {
+          "path": "good/lib/feature/shop/presentation/domain_tree.dart",
+          "content": "import '../../auth/domain/application/action.dart';"
+        },
+        {
+          "path": "good/lib/feature/shop/presentation/other.dart",
+          "content": "class OtherPage {}"
+        },
+        {
+          "path": "good/lib/feature/shop/presentation/page.dart",
+          "content": "import '../../auth/domain/model.dart';\nimport '../../auth/auth.dart';\nimport '../application/action.dart';\nimport 'other.dart';"
+        },
+        {
+          "path": "good/lib/features/auth/auth.dart",
+          "content": "export 'domain/model.dart';"
+        },
+        {
+          "path": "good/lib/features/auth/data/client.dart",
+          "content": "class Client {}"
+        },
+        {
+          "path": "good/lib/features/auth/domain/application/action.dart",
+          "content": "class Action {}"
+        },
+        {
+          "path": "good/lib/features/auth/domain/model.dart",
+          "content": "class AuthModel {}"
+        },
+        {
+          "path": "good/lib/features/auth/domain/use_cases/get_user.dart",
+          "content": "class GetOtherUser {}"
+        },
+        {
+          "path": "good/lib/features/auth/domain/usecases/get_user.dart",
+          "content": "class GetUser {}"
+        },
+        {
+          "path": "good/lib/features/auth/presentation/alternate_root.dart",
+          "content": "import '../../../modules/auth/presentation/page.dart';"
+        },
+        {
+          "path": "good/lib/features/auth/presentation/page.dart",
+          "content": "class Page {}"
+        },
+        {
+          "path": "good/lib/features/auth/state/session.dart",
+          "content": "class Session {}"
+        },
+        {
+          "path": "good/lib/features/data/data.dart",
+          "content": "class DataFeature {}"
+        },
+        {
+          "path": "good/lib/features/data/usage.dart",
+          "content": "import '../../auth/presentation/page.dart';"
+        },
+        {
+          "path": "good/lib/features/domain/usage.dart",
+          "content": "import '../../auth/data/client.dart';"
+        },
+        {
+          "path": "good/lib/features/shop/application/action.dart",
+          "content": "import '../../auth/domain/model.dart';"
+        },
+        {
+          "path": "good/lib/features/shop/data/barrel.dart",
+          "content": "import '../../data/data.dart';"
+        },
+        {
+          "path": "good/lib/features/shop/domain/feature_barrel.dart",
+          "content": "import '../../data/usage.dart';\nimport '../../domain/usage.dart';"
+        },
+        {
+          "path": "good/lib/features/shop/domain/use_cases.dart",
+          "content": "import '../../auth/domain/usecases/get_user.dart';\nimport '../../auth/domain/use_cases/get_user.dart';"
+        },
+        {
+          "path": "good/lib/features/shop/presentation/domain_tree.dart",
+          "content": "import '../../auth/domain/application/action.dart';"
+        },
+        {
+          "path": "good/lib/features/shop/presentation/other.dart",
+          "content": "class OtherPage {}"
+        },
+        {
+          "path": "good/lib/features/shop/presentation/page.dart",
+          "content": "import '../../auth/domain/model.dart';\nimport '../../auth/auth.dart';\nimport '../application/action.dart';\nimport 'other.dart';"
+        },
+        {
+          "path": "good/lib/features/shop/presentation/unclassified.dart",
+          "content": "import '../../auth/state/session.dart';"
+        },
+        {
+          "path": "good/lib/features/shop/state/cart.dart",
+          "content": "import '../../auth/presentation/page.dart';"
+        },
+        {
+          "path": "good/lib/infrastructure/allowed.dart",
+          "content": "import '../domain/target.dart';"
+        },
+        {
+          "path": "good/lib/modules/auth/auth.dart",
+          "content": "export 'domain/model.dart';"
+        },
+        {
+          "path": "good/lib/modules/auth/data/client.dart",
+          "content": "class Client {}"
+        },
+        {
+          "path": "good/lib/modules/auth/domain/application/action.dart",
+          "content": "class Action {}"
+        },
+        {
+          "path": "good/lib/modules/auth/domain/model.dart",
+          "content": "class AuthModel {}"
+        },
+        {
+          "path": "good/lib/modules/auth/domain/use_cases/get_user.dart",
+          "content": "class GetOtherUser {}"
+        },
+        {
+          "path": "good/lib/modules/auth/domain/usecases/get_user.dart",
+          "content": "class GetUser {}"
+        },
+        {
+          "path": "good/lib/modules/auth/presentation/page.dart",
+          "content": "class Page {}"
+        },
+        {
+          "path": "good/lib/modules/data/usage.dart",
+          "content": "import '../../auth/presentation/page.dart';"
+        },
+        {
+          "path": "good/lib/modules/domain/usage.dart",
+          "content": "import '../../auth/data/client.dart';"
+        },
+        {
+          "path": "good/lib/modules/shop/application/action.dart",
+          "content": "import '../../auth/domain/model.dart';"
+        },
+        {
+          "path": "good/lib/modules/shop/domain/feature_barrel.dart",
+          "content": "import '../../data/usage.dart';\nimport '../../domain/usage.dart';"
+        },
+        {
+          "path": "good/lib/modules/shop/domain/use_cases.dart",
+          "content": "import '../../auth/domain/usecases/get_user.dart';\nimport '../../auth/domain/use_cases/get_user.dart';"
+        },
+        {
+          "path": "good/lib/modules/shop/presentation/domain_tree.dart",
+          "content": "import '../../auth/domain/application/action.dart';"
+        },
+        {
+          "path": "good/lib/modules/shop/presentation/other.dart",
+          "content": "class OtherPage {}"
+        },
+        {
+          "path": "good/lib/modules/shop/presentation/page.dart",
+          "content": "import '../../auth/domain/model.dart';\nimport '../../auth/auth.dart';\nimport '../application/action.dart';\nimport 'other.dart';"
+        },
+        {
+          "path": "good/lib/pages/allowed.dart",
+          "content": "import '../domain/target.dart';"
+        },
+        {
+          "path": "good/lib/presentation/allowed.dart",
+          "content": "import 'package:architecture_fixture/presentation/target.dart';\nimport 'package:architecture_fixture/application/target.dart';\nimport 'package:architecture_fixture/domain/target.dart';"
+        },
+        {
+          "path": "good/lib/presentation/target.dart",
+          "content": "class PresentationTarget {}"
+        },
+        {
+          "path": "good/lib/screens/allowed.dart",
+          "content": "import '../domain/target.dart';"
+        },
+        {
+          "path": "good/lib/shared/unclassified.dart",
+          "content": "import '../data/target.dart';"
+        },
+        {
+          "path": "good/lib/ui/allowed.dart",
+          "content": "import '../domain/target.dart';"
+        },
+        {
+          "path": "good/lib/use_cases/allowed.dart",
+          "content": "import '../domain/target.dart';"
+        },
+        {
+          "path": "good/lib/usecases/allowed.dart",
+          "content": "import '../domain/target.dart';"
+        },
+        {
+          "path": "good/lib/vendor/lib/data/client.dart",
+          "content": "class ExternalClient {}"
+        },
+        {
+          "path": "good/lib/vendor/pubspec.yaml",
+          "content": "name: nested_vendor\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
+        },
+        {
+          "path": "good/lib/view/allowed.dart",
+          "content": "import '../domain/target.dart';"
+        },
+        {
+          "path": "good/lib/views/allowed.dart",
+          "content": "import '../domain/target.dart';"
+        },
+        {
+          "path": "good/lib/widgets/allowed.dart",
+          "content": "import '../domain/target.dart';"
+        },
+        {
+          "path": "good/pubspec.yaml",
+          "content": "name: architecture_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
+        },
+        {
+          "path": "good/test/domain/outside.dart",
+          "content": "import '../../lib/data/target.dart';"
+        }
+      ]
+    },
+    "diagnostics": [
+      {
+        "message": "The `application` layer must not import from the `presentation` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/application/bad.dart"
+      },
+      {
+        "message": "The `application` layer must not import from the `data` layer.",
+        "line": 2,
+        "column": 8,
+        "file": "bad/lib/application/bad.dart"
+      },
+      {
+        "message": "The `application` layer must not import from the `data` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/application/exports.dart"
+      },
+      {
+        "message": "The `data` layer must not import from the `presentation` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/data/bad.dart"
+      },
+      {
+        "message": "The `data` layer must not import from the `application` layer.",
+        "line": 2,
+        "column": 8,
+        "file": "bad/lib/data/bad.dart"
+      },
+      {
+        "message": "The `domain` layer must not import from the `data` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/data/domain/inner.dart"
+      },
+      {
+        "message": "The `domain` layer must not import from the `presentation` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/domain/bad.dart"
+      },
+      {
+        "message": "The `domain` layer must not import from the `application` layer.",
+        "line": 2,
+        "column": 8,
+        "file": "bad/lib/domain/bad.dart"
+      },
+      {
+        "message": "The `domain` layer must not import from the `data` layer.",
+        "line": 3,
+        "column": 8,
+        "file": "bad/lib/domain/bad.dart"
+      },
+      {
+        "message": "The `domain` layer must not import from the `data` layer.",
+        "line": 2,
+        "column": 24,
+        "file": "bad/lib/domain/conditional.dart"
+      },
+      {
+        "message": "The `domain` layer must not import from the `presentation` layer.",
+        "line": 4,
+        "column": 26,
+        "file": "bad/lib/domain/conditional.dart"
+      },
+      {
+        "message": "The `domain` layer must not import from the `data` layer.",
+        "line": 1,
+        "column": 6,
+        "file": "bad/lib/domain/parts.dart"
+      },
+      {
+        "message": "The `domain` layer must not import from the `application` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/domain/usecases/application_dependency.dart"
+      },
+      {
+        "message": "Import another feature only through its `domain` layer or public barrel.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/feature/shop/presentation/feature_name.dart"
+      },
+      {
+        "message": "Import another feature only through its `domain` layer or public barrel.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/feature/shop/presentation/page.dart"
+      },
+      {
+        "message": "Import another feature only through its `domain` layer or public barrel.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/features/shop/data/client.dart"
+      },
+      {
+        "message": "The `domain` layer must not import from the `application` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/features/shop/domain/domain_application.dart"
+      },
+      {
+        "message": "The `domain` layer must not import from the `data` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/features/shop/domain/model.dart"
+      },
+      {
+        "message": "Import another feature only through its `domain` layer or public barrel.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/features/shop/presentation/feature_name.dart"
+      },
+      {
+        "message": "Import another feature only through its `domain` layer or public barrel.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/features/shop/presentation/page.dart"
+      },
+      {
+        "message": "The `data` layer must not import from the `application` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/infrastructure/bad.dart"
+      },
+      {
+        "message": "Import another feature only through its `domain` layer or public barrel.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/modules/shop/presentation/feature_name.dart"
+      },
+      {
+        "message": "Import another feature only through its `domain` layer or public barrel.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/modules/shop/presentation/page.dart"
+      },
+      {
+        "message": "The `presentation` layer must not import from the `data` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/pages/bad.dart"
+      },
+      {
+        "message": "The `presentation` layer must not import from the `data` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/presentation/bad.dart"
+      },
+      {
+        "message": "The `presentation` layer must not import from the `data` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/presentation/domain_target.dart"
+      },
+      {
+        "message": "The `presentation` layer must not import from the `data` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/screens/bad.dart"
+      },
+      {
+        "message": "The `presentation` layer must not import from the `data` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/ui/bad.dart"
+      },
+      {
+        "message": "The `application` layer must not import from the `data` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/use_cases/bad.dart"
+      },
+      {
+        "message": "The `application` layer must not import from the `data` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/usecases/bad.dart"
+      },
+      {
+        "message": "The `presentation` layer must not import from the `data` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/view/bad.dart"
+      },
+      {
+        "message": "The `presentation` layer must not import from the `data` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/views/bad.dart"
+      },
+      {
+        "message": "The `presentation` layer must not import from the `data` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/widgets/bad.dart"
+      }
+    ]
+  },
+  {
     "name": "avoid-assigning-to-static-field",
     "group": "correctness",
     "domains": [],
@@ -13566,6 +14281,277 @@
     ]
   },
   {
+    "name": "no-deep-package-imports",
+    "group": "correctness",
+    "domains": [],
+    "recommended": false,
+    "crossFile": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "sourcePath": "crates/falcon_rules/src/cross_file/no_deep_package_imports.rs",
+    "fixturePath": "crates/falcon_rules/tests/corpus/no-deep-package-imports",
+    "description": "Prefer another package's public barrel over libraries it exports without restrictions.",
+    "docs": "Prefer another package's public barrel over libraries it exports without restrictions.\n\nChecks default and conditional import URIs using the nearest package configuration\nor packages in the analyzed workspace. The barrel is `lib/<package>.dart`.\nOwn-package imports are exempt; `src/` imports are left to `implementation-imports`.\nOnly unrestricted export paths within the dependency's library root establish\na violation; exports with combinators or conditional alternatives are skipped.\nMissing, unreadable or malformed sources are skipped. Export traversal is cached\nper package configuration and package, bounded to 512 libraries and 8 MiB of source.\nLibraries beyond those limits cannot establish a violation. Analyzed source snapshots\ntake precedence over files on disk.",
+    "examples": {
+      "bad": null,
+      "good": null,
+      "crossFile": [
+        {
+          "path": "bad/lib/local.dart",
+          "content": "class Local {}"
+        },
+        {
+          "path": "bad/main.dart",
+          "content": "import 'package:other/widgets/button.dart';\nimport 'package:other/widgets/label.dart';\nimport 'package:other/widgets/icon.dart';\nimport 'package:other/widgets/card.dart';\nimport 'package:other/widgets/private.dart'\n    if (dart.library.io) 'package:other/widgets/button.dart';\nimport 'package:other/caf%C3%A9.dart';\nvoid main() {}"
+        },
+        {
+          "path": "bad/packages/bare/lib/widget.dart",
+          "content": "class BareWidget {}"
+        },
+        {
+          "path": "bad/packages/bare/pubspec.yaml",
+          "content": "name: bare"
+        },
+        {
+          "path": "bad/packages/other/lib/alternative.dart",
+          "content": "class Alternative {}"
+        },
+        {
+          "path": "bad/packages/other/lib/api.dart",
+          "content": "export 'widgets/label.dart';\nexport 'widgets/icon.dart';\nexport 'package:other/widgets/card.dart';\nexport 'other.dart';"
+        },
+        {
+          "path": "bad/packages/other/lib/café.dart",
+          "content": "class Cafe {}"
+        },
+        {
+          "path": "bad/packages/other/lib/conditional.dart",
+          "content": "class Conditional {}"
+        },
+        {
+          "path": "bad/packages/other/lib/other.dart",
+          "content": "export 'widgets/button.dart';\nexport 'api.dart';\nexport 'widgets/limited.dart' show Limited;\nexport 'widgets/hidden.dart' hide Hidden;\nexport 'restricted.dart' show TransitLimited;\nexport 'conditional.dart' if (dart.library.io) 'alternative.dart';\nexport 'src/internal.dart';\nexport 'caf%C3%A9.dart';"
+        },
+        {
+          "path": "bad/packages/other/lib/restricted.dart",
+          "content": "export 'widgets/transit_limited.dart';"
+        },
+        {
+          "path": "bad/packages/other/lib/src/internal.dart",
+          "content": "class Internal {}"
+        },
+        {
+          "path": "bad/packages/other/lib/widgets/button.dart",
+          "content": "class Button {}"
+        },
+        {
+          "path": "bad/packages/other/lib/widgets/card.dart",
+          "content": "class Card {}"
+        },
+        {
+          "path": "bad/packages/other/lib/widgets/hidden.dart",
+          "content": "class Visible {}\nclass Hidden {}"
+        },
+        {
+          "path": "bad/packages/other/lib/widgets/icon.dart",
+          "content": "class Icon {}"
+        },
+        {
+          "path": "bad/packages/other/lib/widgets/label.dart",
+          "content": "class Label {}"
+        },
+        {
+          "path": "bad/packages/other/lib/widgets/limited.dart",
+          "content": "class Limited {}\nclass NotExported {}"
+        },
+        {
+          "path": "bad/packages/other/lib/widgets/private.dart",
+          "content": "class Private {}"
+        },
+        {
+          "path": "bad/packages/other/lib/widgets/transit_limited.dart",
+          "content": "class TransitLimited {}"
+        },
+        {
+          "path": "bad/packages/other/pubspec.yaml",
+          "content": "name: other"
+        },
+        {
+          "path": "bad/pubspec.yaml",
+          "content": "name: app\ndependencies:\n  other: any\n  bare: any"
+        },
+        {
+          "path": "bad/support.dart",
+          "content": "export 'lib/local.dart';"
+        },
+        {
+          "path": "bad_workspace/main.dart",
+          "content": "import 'package:workspace_dep/widgets.dart';\nvoid main() {}"
+        },
+        {
+          "path": "bad_workspace/packages/workspace_dep/lib/widgets.dart",
+          "content": "class WorkspaceWidget {}"
+        },
+        {
+          "path": "bad_workspace/packages/workspace_dep/lib/workspace_dep.dart",
+          "content": "export 'widgets.dart';"
+        },
+        {
+          "path": "bad_workspace/packages/workspace_dep/pubspec.yaml",
+          "content": "name: workspace_dep"
+        },
+        {
+          "path": "bad_workspace/pubspec.yaml",
+          "content": "name: workspace_app"
+        },
+        {
+          "path": "good/lib/local.dart",
+          "content": "class Local {}"
+        },
+        {
+          "path": "good/main.dart",
+          "content": "import 'package:other/other.dart';\nimport 'package:other/src/internal.dart';\nimport 'package:other/widgets/private.dart';\nimport 'package:other/widgets/limited.dart';\nimport 'package:other/widgets/hidden.dart';\nimport 'package:other/widgets/transit_limited.dart';\nimport 'package:other/conditional.dart';\nimport 'package:other/alternative.dart';\nimport 'package:bare/widget.dart';\nimport 'package:app/local.dart';\nimport 'package:missing/unknown.dart';\nimport 'package:other/src/../widgets/button.dart';\nvoid main() {}"
+        },
+        {
+          "path": "good/packages/bare/lib/widget.dart",
+          "content": "class BareWidget {}"
+        },
+        {
+          "path": "good/packages/bare/pubspec.yaml",
+          "content": "name: bare"
+        },
+        {
+          "path": "good/packages/missing/lib/missing.dart",
+          "content": "export 'unknown.dart';"
+        },
+        {
+          "path": "good/packages/missing/lib/unknown.dart",
+          "content": "class Unconfigured {}"
+        },
+        {
+          "path": "good/packages/missing/pubspec.yaml",
+          "content": "name: missing"
+        },
+        {
+          "path": "good/packages/other/lib/alternative.dart",
+          "content": "class Alternative {}"
+        },
+        {
+          "path": "good/packages/other/lib/api.dart",
+          "content": "export 'widgets/label.dart';\nexport 'widgets/icon.dart';\nexport 'package:other/widgets/card.dart';\nexport 'other.dart';"
+        },
+        {
+          "path": "good/packages/other/lib/café.dart",
+          "content": "class Cafe {}"
+        },
+        {
+          "path": "good/packages/other/lib/conditional.dart",
+          "content": "class Conditional {}"
+        },
+        {
+          "path": "good/packages/other/lib/other.dart",
+          "content": "export 'widgets/button.dart';\nexport 'api.dart';\nexport 'widgets/limited.dart' show Limited;\nexport 'widgets/hidden.dart' hide Hidden;\nexport 'restricted.dart' show TransitLimited;\nexport 'conditional.dart' if (dart.library.io) 'alternative.dart';\nexport 'src/internal.dart';\nexport 'caf%C3%A9.dart';"
+        },
+        {
+          "path": "good/packages/other/lib/restricted.dart",
+          "content": "export 'widgets/transit_limited.dart';"
+        },
+        {
+          "path": "good/packages/other/lib/src/internal.dart",
+          "content": "class Internal {}"
+        },
+        {
+          "path": "good/packages/other/lib/widgets/button.dart",
+          "content": "class Button {}"
+        },
+        {
+          "path": "good/packages/other/lib/widgets/card.dart",
+          "content": "class Card {}"
+        },
+        {
+          "path": "good/packages/other/lib/widgets/hidden.dart",
+          "content": "class Visible {}\nclass Hidden {}"
+        },
+        {
+          "path": "good/packages/other/lib/widgets/icon.dart",
+          "content": "class Icon {}"
+        },
+        {
+          "path": "good/packages/other/lib/widgets/label.dart",
+          "content": "class Label {}"
+        },
+        {
+          "path": "good/packages/other/lib/widgets/limited.dart",
+          "content": "class Limited {}\nclass NotExported {}"
+        },
+        {
+          "path": "good/packages/other/lib/widgets/private.dart",
+          "content": "class Private {}"
+        },
+        {
+          "path": "good/packages/other/lib/widgets/transit_limited.dart",
+          "content": "class TransitLimited {}"
+        },
+        {
+          "path": "good/packages/other/pubspec.yaml",
+          "content": "name: other"
+        },
+        {
+          "path": "good/pubspec.yaml",
+          "content": "name: app\ndependencies:\n  other: any\n  bare: any"
+        }
+      ]
+    },
+    "diagnostics": [
+      {
+        "message": "Import `package:other/other.dart` instead of reaching into `package:other/widgets/button.dart`.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/main.dart"
+      },
+      {
+        "message": "Import `package:other/other.dart` instead of reaching into `package:other/widgets/label.dart`.",
+        "line": 2,
+        "column": 8,
+        "file": "bad/main.dart"
+      },
+      {
+        "message": "Import `package:other/other.dart` instead of reaching into `package:other/widgets/icon.dart`.",
+        "line": 3,
+        "column": 8,
+        "file": "bad/main.dart"
+      },
+      {
+        "message": "Import `package:other/other.dart` instead of reaching into `package:other/widgets/card.dart`.",
+        "line": 4,
+        "column": 8,
+        "file": "bad/main.dart"
+      },
+      {
+        "message": "Import `package:other/other.dart` instead of reaching into `package:other/widgets/button.dart`.",
+        "line": 6,
+        "column": 26,
+        "file": "bad/main.dart"
+      },
+      {
+        "message": "Import `package:other/other.dart` instead of reaching into `package:other/caf%C3%A9.dart`.",
+        "line": 7,
+        "column": 8,
+        "file": "bad/main.dart"
+      },
+      {
+        "message": "Import `package:workspace_dep/workspace_dep.dart` instead of reaching into `package:workspace_dep/widgets.dart`.",
+        "line": 1,
+        "column": 8,
+        "file": "bad_workspace/main.dart"
+      }
+    ]
+  },
+  {
     "name": "no-import-cycles",
     "group": "correctness",
     "domains": [],
@@ -17065,6 +18051,275 @@
     ]
   },
   {
+    "name": "unused-assets",
+    "group": "correctness",
+    "domains": [],
+    "recommended": false,
+    "crossFile": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "sourcePath": "crates/falcon_rules/src/cross_file/unused_assets.rs",
+    "fixturePath": "crates/falcon_rules/tests/corpus/unused-assets",
+    "description": "Report Flutter asset declarations without references in analyzed Dart sources.",
+    "docs": "Report Flutter asset declarations without references in analyzed Dart sources.\n\nFile and direct-directory declarations are checked, including references from\nother analyzed packages using `packages/<name>/` or a literal `package:` argument.\nInterpolated paths preserve declarations only when both their static prefix\nand suffix match; literal directory paths also preserve matching assets.\nMissing, unreadable and empty directories and resolution-variant\ndeclarations are exempt. Packages using `flutter_gen` or `flutter_gen_runner`\nare skipped because generated accessors may be excluded from analysis.\nManifests using YAML anchors or tags are skipped when scalar positions cannot\nbe recovered safely. Native code and unanalyzed sources cannot establish usage.",
+    "examples": {
+      "bad": null,
+      "good": null,
+      "crossFile": [
+        {
+          "path": "bad/assets/import.dart",
+          "content": "const unrelated = 1;"
+        },
+        {
+          "path": "bad/main.dart",
+          "content": "import 'assets/import.dart';\nimport 'support.dart';\nconst used = 'assets/used.png';\nString dynamicAsset(String name) => 'assets/dynamic/$name.png';"
+        },
+        {
+          "path": "bad/pubspec.yaml",
+          "content": "name: sample\nflutter:\n  assets:\n    - assets/orphan.png #\n    - path: assets/map.png #\n      flavors: [demo]\n    - assets/unused/ #\n    - assets/nested/ #\n    - assets/import.dart #\n    - assets/used.png\n    - assets/package.png\n    - assets/dynamic/"
+        },
+        {
+          "path": "bad/support.dart",
+          "content": "const packaged = 'packages/sample/assets/package.png';\nconst nested = 'assets/nested/sub/deep.png';"
+        },
+        {
+          "path": "bad_dynamic/main.dart",
+          "content": "import 'support.dart';\nString asset(String name) => 'assets/$name.png';\nString message(int count) => '$count items';"
+        },
+        {
+          "path": "bad_dynamic/pubspec.yaml",
+          "content": "name: sample\nflutter:\n  assets:\n    - assets/selected.png\n    - assets/wrong.svg #\n    - assets/messages/ #"
+        },
+        {
+          "path": "bad_dynamic/support.dart",
+          "content": "const helper = 1;"
+        },
+        {
+          "path": "bad_external_dynamic/lib/main.dart",
+          "content": "import 'support.dart';\nString local(String name) => '$name.png';"
+        },
+        {
+          "path": "bad_external_dynamic/lib/support.dart",
+          "content": "const helper = 1;"
+        },
+        {
+          "path": "bad_external_dynamic/pubspec.yaml",
+          "content": "name: app\nflutter: {}"
+        },
+        {
+          "path": "bad_external_dynamic/vendor/brand/lib/brand.dart",
+          "content": "const brand = 1;"
+        },
+        {
+          "path": "bad_external_dynamic/vendor/brand/pubspec.yaml",
+          "content": "name: brand\nflutter:\n  assets:\n    - assets/orphan.png #"
+        },
+        {
+          "path": "good/main.dart",
+          "content": "import 'support.dart';\nconst plain = 'assets/plain.png';\nconst map = 'assets/map.png';\nconst raw = r'assets/raw$dollar.png';\nconst adjacent = 'assets/' 'adjacent.png';\nString dynamicAsset(String name) => 'assets/dynamic/$name.png';\nString prefix(String name) => 'assets/${name}.png';"
+        },
+        {
+          "path": "good/pubspec.yaml",
+          "content": "name: sample\nflutter:\n  assets:\n    - assets/plain.png\n    - path: assets/map.png\n      transformers: []\n    - assets/packaged.png\n    - assets/icons/\n    - assets/dynamic/\n    - assets/missing/\n    - assets/empty/\n    - assets/raw$dollar.png\n    - assets/adjacent.png\n    - assets/prefix/"
+        },
+        {
+          "path": "good/support.dart",
+          "content": "const packaged = 'packages/sample/assets/packaged.png';\nconst icon = 'assets/icons/a.png';"
+        },
+        {
+          "path": "good_call_wrappers/lib/main.dart",
+          "content": "import 'support.dart';\nvoid use(bool dark) {\n  image(dark ? 'assets/dark.png' : 'assets/light.png', package: 'brand');\n  image(('assets/parenthesized.png'), package: 'brand');\n  load(asset: 'assets/named.png', package: 'brand');\n}"
+        },
+        {
+          "path": "good_call_wrappers/lib/support.dart",
+          "content": "void image(String asset, {String? package}) {}\nvoid load({String? asset, String? package}) {}"
+        },
+        {
+          "path": "good_call_wrappers/pubspec.yaml",
+          "content": "name: app\nflutter: {}"
+        },
+        {
+          "path": "good_call_wrappers/vendor/brand/lib/brand.dart",
+          "content": "const brand = 1;"
+        },
+        {
+          "path": "good_call_wrappers/vendor/brand/pubspec.yaml",
+          "content": "name: brand\nflutter:\n  assets:\n    - assets/dark.png\n    - assets/light.png\n    - assets/parenthesized.png\n    - assets/named.png"
+        },
+        {
+          "path": "good_closure/lib/main.dart",
+          "content": "import 'support.dart';\nvoid main() { build(package: 'brand', builder: () => 'assets/own.png'); }"
+        },
+        {
+          "path": "good_closure/lib/support.dart",
+          "content": "void build({String? package, String Function()? builder}) {}"
+        },
+        {
+          "path": "good_closure/pubspec.yaml",
+          "content": "name: app\nflutter:\n  assets:\n    - assets/own.png"
+        },
+        {
+          "path": "good_dynamic_file/lib/main.dart",
+          "content": "import 'support.dart';\nString flag(String code) => 'assets/flags/$code.png';\nString home(String directory) => '$directory/home.png';"
+        },
+        {
+          "path": "good_dynamic_file/lib/support.dart",
+          "content": "const helper = 1;"
+        },
+        {
+          "path": "good_dynamic_file/pubspec.yaml",
+          "content": "name: sample\nflutter:\n  assets:\n    - assets/flags/us.png\n    - assets/flags/fr.png\n    - assets/icons/home.png"
+        },
+        {
+          "path": "good_dynamic_package/main.dart",
+          "content": "import 'support.dart';\nString asset(String package, String name) => 'packages/$package/assets/icons/$name.png';"
+        },
+        {
+          "path": "good_dynamic_package/pubspec.yaml",
+          "content": "name: sample\nflutter:\n  assets:\n    - assets/icons/"
+        },
+        {
+          "path": "good_dynamic_package/support.dart",
+          "content": "const support = 1;"
+        },
+        {
+          "path": "good_flutter_gen/lib/main.dart",
+          "content": "import 'support.dart';\nconst generatedAccessor = 'generated';"
+        },
+        {
+          "path": "good_flutter_gen/lib/support.dart",
+          "content": "const helper = 1;"
+        },
+        {
+          "path": "good_flutter_gen/pubspec.yaml",
+          "content": "name: sample\nflutter_gen: {}\nflutter:\n  assets:\n    - assets/generated.png"
+        },
+        {
+          "path": "good_flutter_gen_runner/lib/main.dart",
+          "content": "import 'support.dart';\nconst generatedAccessor = 'generated';"
+        },
+        {
+          "path": "good_flutter_gen_runner/lib/support.dart",
+          "content": "const helper = 1;"
+        },
+        {
+          "path": "good_flutter_gen_runner/pubspec.yaml",
+          "content": "name: sample\ndev_dependencies:\n  flutter_gen_runner: any\nflutter:\n  assets:\n    - assets/generated.png"
+        },
+        {
+          "path": "good_prefix/main.dart",
+          "content": "import 'support.dart';\nString asset(String name) => 'assets/icons/' + name;\nString file(String name) => 'assets/' + name;"
+        },
+        {
+          "path": "good_prefix/pubspec.yaml",
+          "content": "name: sample\nflutter:\n  assets:\n    - assets/icons/\n    - assets/file.png"
+        },
+        {
+          "path": "good_prefix/support.dart",
+          "content": "const helper = 1;"
+        },
+        {
+          "path": "good_resolution_directory/lib/main.dart",
+          "content": "import 'support.dart';\nconst image = 'assets/images/logo.png';\nconst translations = 'assets/translations';"
+        },
+        {
+          "path": "good_resolution_directory/lib/support.dart",
+          "content": "const helper = 1;"
+        },
+        {
+          "path": "good_resolution_directory/pubspec.yaml",
+          "content": "name: sample\nflutter:\n  assets:\n    - assets/images/\n    - assets/images/2.0x/\n    - assets/images/2.0x/logo.png\n    - assets/translations/"
+        },
+        {
+          "path": "good_symlink/main.dart",
+          "content": "import 'support.dart';\nconst asset = 'assets/links/b.png';"
+        },
+        {
+          "path": "good_symlink/pubspec.yaml",
+          "content": "name: sample\nflutter:\n  assets:\n    - assets/links/"
+        },
+        {
+          "path": "good_symlink/support.dart",
+          "content": "const support = 1;"
+        },
+        {
+          "path": "good_workspace/lib/main.dart",
+          "content": "import 'support.dart';\nconst asset = 'packages/brand/assets/logo.png';\nvoid main() { image('assets/package.png', package: 'brand'); }"
+        },
+        {
+          "path": "good_workspace/lib/support.dart",
+          "content": "void image(String asset, {String? package}) {}"
+        },
+        {
+          "path": "good_workspace/pubspec.yaml",
+          "content": "name: app\nflutter: {}"
+        },
+        {
+          "path": "good_workspace/vendor/brand/lib/brand.dart",
+          "content": "const brand = 1;"
+        },
+        {
+          "path": "good_workspace/vendor/brand/pubspec.yaml",
+          "content": "name: brand\nflutter:\n  assets:\n    - assets/logo.png\n    - assets/package.png"
+        }
+      ]
+    },
+    "diagnostics": [
+      {
+        "message": "Asset `assets/orphan.png` is declared in `pubspec.yaml` but never referenced.",
+        "line": 4,
+        "column": 7,
+        "file": "bad/pubspec.yaml"
+      },
+      {
+        "message": "Asset `assets/map.png` is declared in `pubspec.yaml` but never referenced.",
+        "line": 5,
+        "column": 13,
+        "file": "bad/pubspec.yaml"
+      },
+      {
+        "message": "Asset `assets/unused/` is declared in `pubspec.yaml` but never referenced.",
+        "line": 7,
+        "column": 7,
+        "file": "bad/pubspec.yaml"
+      },
+      {
+        "message": "Asset `assets/nested/` is declared in `pubspec.yaml` but never referenced.",
+        "line": 8,
+        "column": 7,
+        "file": "bad/pubspec.yaml"
+      },
+      {
+        "message": "Asset `assets/import.dart` is declared in `pubspec.yaml` but never referenced.",
+        "line": 9,
+        "column": 7,
+        "file": "bad/pubspec.yaml"
+      },
+      {
+        "message": "Asset `assets/wrong.svg` is declared in `pubspec.yaml` but never referenced.",
+        "line": 5,
+        "column": 7,
+        "file": "bad_dynamic/pubspec.yaml"
+      },
+      {
+        "message": "Asset `assets/messages/` is declared in `pubspec.yaml` but never referenced.",
+        "line": 6,
+        "column": 7,
+        "file": "bad_dynamic/pubspec.yaml"
+      },
+      {
+        "message": "Asset `assets/orphan.png` is declared in `pubspec.yaml` but never referenced.",
+        "line": 4,
+        "column": 7,
+        "file": "bad_external_dynamic/vendor/brand/pubspec.yaml"
+      }
+    ]
+  },
+  {
     "name": "unused-code",
     "group": "correctness",
     "domains": [],
@@ -17211,6 +18466,361 @@
     ]
   },
   {
+    "name": "unused-dev-dependencies",
+    "group": "correctness",
+    "domains": [],
+    "recommended": false,
+    "crossFile": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "sourcePath": "crates/falcon_rules/src/cross_file/unused_dev_dependencies.rs",
+    "fixturePath": "crates/falcon_rules/tests/corpus/unused-dev-dependencies",
+    "description": "Report resolved pubspec dev dependencies unused by analyzed Dart sources or tools.",
+    "docs": "Report resolved pubspec dev dependencies unused by analyzed Dart sources or tools.\n\nThis rule needs `pub get`: unresolved dependencies are not reported. A package\nis checked only when at least one analyzed Dart file is outside `lib/`, since\nlibrary-only analysis cannot establish non-use of development tools. Imports\nand exports in every analyzed location and conditional alternatives count.\nDeliberately, `lib/` imports also count: `depend-on-referenced-packages` covers\ndev dependencies referenced by library code.\n\nSDK dependencies, analysis-options includes and analyzer plugins, same-named\ntop-level pubspec configuration, builders, executables and `bin/*.dart` tools\nare exempt. When `custom_lint` is enabled, resolved packages depending on\n`custom_lint_builder` are exempt too. Options are discovered at the package or\nnearest ancestor; relative scalar/list includes are followed with cycle\nprotection. Package includes establish usage but are not followed. Resolution\nuses the nearest `.dart_tool/package_config.json`. Missing or unreadable tool\nmetadata cannot establish an exemption. Nested packages are independent, and\nexcluded or unscanned sources cannot establish usage.",
+    "examples": {
+      "bad": null,
+      "good": null,
+      "crossFile": [
+        {
+          "path": "bad/analysis_options.yaml",
+          "content": "other:\n  include: package:not_included/rules.yaml"
+        },
+        {
+          "path": "bad/deps/custom_lint/pubspec.yaml",
+          "content": "name: disabled_custom_lint\ndependencies:\n  custom_lint_builder: any"
+        },
+        {
+          "path": "bad/deps/empty_cli/pubspec.yaml",
+          "content": "name: empty_cli\nexecutables: {}"
+        },
+        {
+          "path": "bad/deps/not_a_cli/pubspec.yaml",
+          "content": "name: not_a_cli"
+        },
+        {
+          "path": "bad/deps/plain/pubspec.yaml",
+          "content": "name: plain"
+        },
+        {
+          "path": "bad/main.dart",
+          "content": "import 'support.dart';\n// import 'package:comment_only/api.dart';\nconst example = 'package:string_only/api.dart';\nvoid main() { support(); }"
+        },
+        {
+          "path": "bad/nested/main.dart",
+          "content": "import 'package:nested_only/api.dart';\nvoid main() {}"
+        },
+        {
+          "path": "bad/nested/pubspec.yaml",
+          "content": "name: nested_package"
+        },
+        {
+          "path": "bad/pubspec.yaml",
+          "content": "name: unused_dev_bad\ndev_dependencies:\n  never_used: any #\n  comment_only: any #\n  string_only: any #\n  build_runner: any\n  unresolved_cli: any\n  empty_cli: any #\n  not_included: any #\n  nested_only: any #\n  disabled_custom_lint: any #\n  not_a_cli: any #\ntool_settings:\n  nested_only: true"
+        },
+        {
+          "path": "bad/support.dart",
+          "content": "void support() {}"
+        },
+        {
+          "path": "bad_metadata/deps/malformed/pubspec.yaml",
+          "content": "name: malformed_pubspec\nexecutables: ["
+        },
+        {
+          "path": "bad_metadata/main.dart",
+          "content": "import 'support.dart';\nvoid main() { support(); }"
+        },
+        {
+          "path": "bad_metadata/pubspec.yaml",
+          "content": "name: broken_tool_metadata\ndev_dependencies:\n  missing_pubspec: any #\n  malformed_pubspec: any #"
+        },
+        {
+          "path": "bad_metadata/support.dart",
+          "content": "void support() {}"
+        },
+        {
+          "path": "bad_nearest/deps/builder/build.yaml",
+          "content": "builders: {}"
+        },
+        {
+          "path": "bad_nearest/deps/builder/pubspec.yaml",
+          "content": "name: nearest_tool"
+        },
+        {
+          "path": "bad_nearest/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "bad_nearest/nested/deps/plain/pubspec.yaml",
+          "content": "name: nearest_tool"
+        },
+        {
+          "path": "bad_nearest/nested/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "bad_nearest/nested/pubspec.yaml",
+          "content": "name: inner_tools\ndev_dependencies:\n  nearest_tool: any #"
+        },
+        {
+          "path": "bad_nearest/pubspec.yaml",
+          "content": "name: outer_tools\ndev_dependencies:\n  nearest_tool: any"
+        },
+        {
+          "path": "good/analysis_options.yaml",
+          "content": "include: package:flutter_lints/flutter.yaml"
+        },
+        {
+          "path": "good/deps/builder/build.yaml",
+          "content": "builders:\n  generator:\n    import: package:json_serializable/builder.dart"
+        },
+        {
+          "path": "good/deps/builder/pubspec.yaml",
+          "content": "name: json_serializable"
+        },
+        {
+          "path": "good/deps/cli/pubspec.yaml",
+          "content": "name: build_runner\nexecutables:\n  build_runner: build_runner"
+        },
+        {
+          "path": "good/deps/plain/pubspec.yaml",
+          "content": "name: plain"
+        },
+        {
+          "path": "good/integration_test/app_test.dart",
+          "content": "import 'package:integration_used/api.dart';\nvoid main() {}"
+        },
+        {
+          "path": "good/lib/api.dart",
+          "content": "import 'package:lib_used/api.dart';\nvoid api() {}"
+        },
+        {
+          "path": "good/main.dart",
+          "content": "export 'package:exported/api.dart';\nimport 'package:conditional_default/api.dart'\n  if (dart.library.io) 'package:conditional_io/api.dart';\nvoid main() {}"
+        },
+        {
+          "path": "good/pubspec.yaml",
+          "content": "name: used_dev_good\ndependencies:\n  regular_unused: any\ndev_dependencies:\n  exported: any\n  conditional_default: any\n  conditional_io: any\n  lib_used: any\n  test_used: any\n  tool_used: any\n  integration_used: any\n  flutter_test:\n    sdk: flutter\n  flutter_lints: any\n  json_serializable: any\n  build_runner: any\n  flutter_launcher_icons: any\nflutter_launcher_icons:\n  android: true"
+        },
+        {
+          "path": "good/test/app_test.dart",
+          "content": "import 'package:test_used/api.dart';\nvoid main() {}"
+        },
+        {
+          "path": "good/tool/generate.dart",
+          "content": "import 'package:tool_used/api.dart';\nvoid main() {}"
+        },
+        {
+          "path": "good_inherited/analysis_options.yaml",
+          "content": "include: package:inherited_lints/options.yaml"
+        },
+        {
+          "path": "good_inherited/app/deps/plain/pubspec.yaml",
+          "content": "name: plain"
+        },
+        {
+          "path": "good_inherited/app/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good_inherited/app/pubspec.yaml",
+          "content": "name: inherited_options\ndev_dependencies:\n  inherited_lints: any"
+        },
+        {
+          "path": "good_library_only/deps/test/pubspec.yaml",
+          "content": "name: test"
+        },
+        {
+          "path": "good_library_only/lib/api.dart",
+          "content": "void api() {}"
+        },
+        {
+          "path": "good_library_only/pubspec.yaml",
+          "content": "name: library_only\ndev_dependencies:\n  test: any"
+        },
+        {
+          "path": "good_list/analysis_options.yaml",
+          "content": "include:\n  - package:lints/recommended.yaml\n  - package:custom_lints/options.yaml"
+        },
+        {
+          "path": "good_list/deps/plain/pubspec.yaml",
+          "content": "name: plain"
+        },
+        {
+          "path": "good_list/main.dart",
+          "content": "import 'support.dart';\nvoid main() { support(); }"
+        },
+        {
+          "path": "good_list/pubspec.yaml",
+          "content": "name: list_includes\ndev_dependencies:\n  lints: any\n  custom_lints: any"
+        },
+        {
+          "path": "good_list/support.dart",
+          "content": "void support() {}"
+        },
+        {
+          "path": "good_missing_root/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good_missing_root/pubspec.yaml",
+          "content": "name: absent_pub_cache\ndev_dependencies:\n  build_runner: any"
+        },
+        {
+          "path": "good_plugins/analysis_options.yaml",
+          "content": "analyzer:\n  plugins:\n    - custom_lint\nplugins:\n  top_plugin:\n    diagnostics: true"
+        },
+        {
+          "path": "good_plugins/deps/custom_lint/pubspec.yaml",
+          "content": "name: custom_lint"
+        },
+        {
+          "path": "good_plugins/deps/dart_cli/bin/generate.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good_plugins/deps/dart_cli/pubspec.yaml",
+          "content": "name: dart_cli"
+        },
+        {
+          "path": "good_plugins/deps/riverpod_lint/pubspec.yaml",
+          "content": "name: riverpod_lint\ndependencies:\n  custom_lint_builder: any"
+        },
+        {
+          "path": "good_plugins/deps/top_plugin/pubspec.yaml",
+          "content": "name: top_plugin"
+        },
+        {
+          "path": "good_plugins/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good_plugins/pubspec.yaml",
+          "content": "name: analyzer_plugins\ndev_dependencies:\n  custom_lint: any\n  riverpod_lint: any\n  top_plugin: any\n  dart_cli: any"
+        },
+        {
+          "path": "good_relative/analysis_options.yaml",
+          "content": "include: config/base.yaml"
+        },
+        {
+          "path": "good_relative/config/base.yaml",
+          "content": "include:\n  - ../analysis_options.yaml\n  - package:relative_lints/options.yaml\nanalyzer:\n  plugins:\n    mapped_plugin: {}"
+        },
+        {
+          "path": "good_relative/deps/plain/pubspec.yaml",
+          "content": "name: plain"
+        },
+        {
+          "path": "good_relative/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good_relative/pubspec.yaml",
+          "content": "name: relative_options\ndev_dependencies:\n  mapped_plugin: any\n  relative_lints: any"
+        },
+        {
+          "path": "good_scalar_plugin/analysis_options.yaml",
+          "content": "analyzer:\n  plugins: custom_lint"
+        },
+        {
+          "path": "good_scalar_plugin/deps/plain/pubspec.yaml",
+          "content": "name: plain"
+        },
+        {
+          "path": "good_scalar_plugin/deps/riverpod_lint/pubspec.yaml",
+          "content": "name: riverpod_lint\ndependencies:\n  custom_lint_builder: any"
+        },
+        {
+          "path": "good_scalar_plugin/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good_scalar_plugin/pubspec.yaml",
+          "content": "name: scalar_analyzer_plugin\ndev_dependencies:\n  custom_lint: any\n  riverpod_lint: any"
+        },
+        {
+          "path": "good_unresolved/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good_unresolved/pubspec.yaml",
+          "content": "name: before_pub_get\ndev_dependencies:\n  build_runner: any\n  unresolved: any"
+        }
+      ]
+    },
+    "diagnostics": [
+      {
+        "message": "No analyzed Dart source uses `never_used`; remove the dev dependency if it is not used by build tools.",
+        "line": 3,
+        "column": 3,
+        "file": "bad/pubspec.yaml"
+      },
+      {
+        "message": "No analyzed Dart source uses `comment_only`; remove the dev dependency if it is not used by build tools.",
+        "line": 4,
+        "column": 3,
+        "file": "bad/pubspec.yaml"
+      },
+      {
+        "message": "No analyzed Dart source uses `string_only`; remove the dev dependency if it is not used by build tools.",
+        "line": 5,
+        "column": 3,
+        "file": "bad/pubspec.yaml"
+      },
+      {
+        "message": "No analyzed Dart source uses `empty_cli`; remove the dev dependency if it is not used by build tools.",
+        "line": 8,
+        "column": 3,
+        "file": "bad/pubspec.yaml"
+      },
+      {
+        "message": "No analyzed Dart source uses `not_included`; remove the dev dependency if it is not used by build tools.",
+        "line": 9,
+        "column": 3,
+        "file": "bad/pubspec.yaml"
+      },
+      {
+        "message": "No analyzed Dart source uses `nested_only`; remove the dev dependency if it is not used by build tools.",
+        "line": 10,
+        "column": 3,
+        "file": "bad/pubspec.yaml"
+      },
+      {
+        "message": "No analyzed Dart source uses `disabled_custom_lint`; remove the dev dependency if it is not used by build tools.",
+        "line": 11,
+        "column": 3,
+        "file": "bad/pubspec.yaml"
+      },
+      {
+        "message": "No analyzed Dart source uses `not_a_cli`; remove the dev dependency if it is not used by build tools.",
+        "line": 12,
+        "column": 3,
+        "file": "bad/pubspec.yaml"
+      },
+      {
+        "message": "No analyzed Dart source uses `missing_pubspec`; remove the dev dependency if it is not used by build tools.",
+        "line": 3,
+        "column": 3,
+        "file": "bad_metadata/pubspec.yaml"
+      },
+      {
+        "message": "No analyzed Dart source uses `malformed_pubspec`; remove the dev dependency if it is not used by build tools.",
+        "line": 4,
+        "column": 3,
+        "file": "bad_metadata/pubspec.yaml"
+      },
+      {
+        "message": "No analyzed Dart source uses `nearest_tool`; remove the dev dependency if it is not used by build tools.",
+        "line": 3,
+        "column": 3,
+        "file": "bad_nearest/nested/pubspec.yaml"
+      }
+    ]
+  },
+  {
     "name": "unused-files",
     "group": "correctness",
     "domains": [],
@@ -17270,6 +18880,315 @@
         "line": 1,
         "column": 1,
         "file": "bad/lib/src/orphan.dart"
+      }
+    ]
+  },
+  {
+    "name": "unused-l10n",
+    "group": "correctness",
+    "domains": [],
+    "recommended": false,
+    "crossFile": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "sourcePath": "crates/falcon_rules/src/cross_file/unused_l10n.rs",
+    "fixturePath": "crates/falcon_rules/tests/corpus/unused-l10n",
+    "description": "Report template ARB message keys with no identifier reference in analyzed Dart sources.",
+    "docs": "Report template ARB message keys with no identifier reference in analyzed Dart sources.\n\nReads Flutter `gen-l10n` paths from `l10n.yaml`, or defaults to\n`lib/l10n/app_en.arb` when no configuration exists. Diagnostics point to the\ntemplate key; metadata keys starting with `@` are ignored. The configured\noutput localization file and its locale siblings in the output directory do\nnot establish usage. Locale suffixes must occur in an ARB filename or its\n`@@locale` metadata; unrecognized siblings conservatively establish usage.\nAny matching identifier-like Dart token outside those files counts, including\ndeclarations, contextual keywords (even in keyword positions), getters, calls,\ntear-offs and interpolation.\nReceiver types and the configured output class are deliberately not required,\nsince extension accessors can hide them. References in other analyzed packages\ncount too, supporting shared localization packages and example applications.\nMalformed configuration and missing or malformed templates are skipped.",
+    "examples": {
+      "bad": null,
+      "good": null,
+      "crossFile": [
+        {
+          "path": "bad/lib/l10n/app_localizations.dart",
+          "content": "abstract class AppLocalizations {\n  String get generatedOnly;\n}"
+        },
+        {
+          "path": "bad/lib/l10n/app_localizations_en.dart",
+          "content": "class AppLocalizationsEn {\n  String get localeOnly => 'Locale';\n}"
+        },
+        {
+          "path": "bad/main.dart",
+          "content": "import 'support.dart';\nvoid main() {\n  final l10n = Messages();\n  print(l10n.hello);\n  print(l10n.greeting('World'));\n  final callback = l10n.tearOff;\n  print(callback);\n  print('${l10n.interpolated}');\n  print(Object().l10n.extensionMessage);\n  print('stringOnly');\n  // commentOnly\n}"
+        },
+        {
+          "path": "bad/pubspec.yaml",
+          "content": "name: default_l10n"
+        },
+        {
+          "path": "bad/support.dart",
+          "content": "class Messages {\n  String get hello => 'Hello';\n  String greeting(String name) => name;\n  String tearOff(String name) => name;\n  String get interpolated => 'Value';\n  String get extensionMessage => 'Extended';\n}\nextension Localization on Object {\n  Messages get l10n => Messages();\n}"
+        },
+        {
+          "path": "bad_custom/l10n.yaml",
+          "content": "arb-dir: translations\ntemplate-arb-file: messages_en.arb\noutput-class: Messages\noutput-localization-file: messages.dart\noutput-dir: lib/generated"
+        },
+        {
+          "path": "bad_custom/lib/generated/messages.dart",
+          "content": "abstract class Messages { String get customUnused; }"
+        },
+        {
+          "path": "bad_custom/lib/generated/messages_fr.dart",
+          "content": "class MessagesFr { String get customUnused => 'Inutilisé'; }"
+        },
+        {
+          "path": "bad_custom/main.dart",
+          "content": "import 'support.dart';\nvoid main() { print(Messages().customUsed); }"
+        },
+        {
+          "path": "bad_custom/pubspec.yaml",
+          "content": "name: custom_l10n"
+        },
+        {
+          "path": "bad_custom/support.dart",
+          "content": "class Messages { String get customUsed => 'Used'; }"
+        },
+        {
+          "path": "bad_empty_config/l10n.yaml",
+          "content": ""
+        },
+        {
+          "path": "bad_empty_config/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "bad_empty_config/pubspec.yaml",
+          "content": "name: empty_config_unused"
+        },
+        {
+          "path": "bad_shared_generated/lib/l10n/app_localizations.dart",
+          "content": "abstract class AppLocalizations { String get sharedUnused; }"
+        },
+        {
+          "path": "bad_shared_generated/lib/l10n/app_localizations_en.dart",
+          "content": "class AppLocalizationsEn { String get sharedUnused => 'Generated'; }"
+        },
+        {
+          "path": "bad_shared_generated/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "bad_shared_generated/nested/lib/l10n/app_localizations.dart",
+          "content": "abstract class AppLocalizations { String get sharedUnused; }"
+        },
+        {
+          "path": "bad_shared_generated/nested/lib/l10n/app_localizations_en.dart",
+          "content": "class AppLocalizationsEn { String get sharedUnused => 'Generated'; }"
+        },
+        {
+          "path": "bad_shared_generated/nested/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "bad_shared_generated/nested/pubspec.yaml",
+          "content": "name: inner_shared"
+        },
+        {
+          "path": "bad_shared_generated/pubspec.yaml",
+          "content": "name: outer_shared"
+        },
+        {
+          "path": "good/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good/pubspec.yaml",
+          "content": "name: no_localization"
+        },
+        {
+          "path": "good_empty_config/l10n.yaml",
+          "content": ""
+        },
+        {
+          "path": "good_empty_config/main.dart",
+          "content": "void main() { final used = 'Used'; print(used); }"
+        },
+        {
+          "path": "good_empty_config/pubspec.yaml",
+          "content": "name: empty_config"
+        },
+        {
+          "path": "good_escaped/main.dart",
+          "content": "void main() { final used = 'Used'; print(used); }"
+        },
+        {
+          "path": "good_escaped/pubspec.yaml",
+          "content": "name: escaped_l10n"
+        },
+        {
+          "path": "good_invalid_config/l10n.yaml",
+          "content": "arb-dir: [not, a, path]"
+        },
+        {
+          "path": "good_invalid_config/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good_invalid_config/pubspec.yaml",
+          "content": "name: invalid_config"
+        },
+        {
+          "path": "good_keywords/main.dart",
+          "content": "import 'support.dart';\nvoid main() {\n  final l10n = Messages();\n  print([l10n.on, l10n.show, l10n.hide, l10n.type, l10n.get, l10n.set, l10n.required, l10n.late, l10n.when, l10n.base]);\n}"
+        },
+        {
+          "path": "good_keywords/pubspec.yaml",
+          "content": "name: keyword_localization"
+        },
+        {
+          "path": "good_keywords/support.dart",
+          "content": "class Messages {\n  dynamic noSuchMethod(Invocation invocation) => 'Localized';\n}"
+        },
+        {
+          "path": "good_locale_lookalike/lib/l10n/app_localizations_ext.dart",
+          "content": "class Messages { String get used => 'Used'; }"
+        },
+        {
+          "path": "good_locale_lookalike/main.dart",
+          "content": "import 'lib/l10n/app_localizations_ext.dart';\nvoid main() { print(Messages()); }"
+        },
+        {
+          "path": "good_locale_lookalike/pubspec.yaml",
+          "content": "name: localization_extension"
+        },
+        {
+          "path": "good_malformed/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good_malformed/pubspec.yaml",
+          "content": "name: malformed_l10n"
+        },
+        {
+          "path": "good_missing/l10n.yaml",
+          "content": "arb-dir: missing"
+        },
+        {
+          "path": "good_missing/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good_missing/pubspec.yaml",
+          "content": "name: missing_template"
+        },
+        {
+          "path": "good_output_default/l10n.yaml",
+          "content": "output-class: CustomLocalizations"
+        },
+        {
+          "path": "good_output_default/lib/l10n/app_localizations_helpers.dart",
+          "content": "class LocalizationsHelper { String get usedInHelper => 'Used'; }"
+        },
+        {
+          "path": "good_output_default/main.dart",
+          "content": "import 'lib/l10n/app_localizations_helpers.dart';\nvoid main() { print(LocalizationsHelper()); }"
+        },
+        {
+          "path": "good_output_default/pubspec.yaml",
+          "content": "name: output_defaults"
+        },
+        {
+          "path": "good_scoped/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good_scoped/nested/main.dart",
+          "content": "void main() { final outerOnly = 'Not in the outer package'; print(outerOnly); }"
+        },
+        {
+          "path": "good_scoped/nested/pubspec.yaml",
+          "content": "name: nested_l10n"
+        },
+        {
+          "path": "good_scoped/pubspec.yaml",
+          "content": "name: outer_l10n"
+        },
+        {
+          "path": "good_surrogate/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good_surrogate/pubspec.yaml",
+          "content": "name: malformed_surrogate"
+        },
+        {
+          "path": "good_used/main.dart",
+          "content": "import 'support.dart';\nvoid main() { print(Localizations().used); }"
+        },
+        {
+          "path": "good_used/pubspec.yaml",
+          "content": "name: used_l10n"
+        },
+        {
+          "path": "good_used/support.dart",
+          "content": "class Localizations { String get used => 'Used'; }"
+        }
+      ]
+    },
+    "diagnostics": [
+      {
+        "message": "Localization key `unusedKey` is never used.",
+        "line": 3,
+        "column": 1,
+        "file": "bad/lib/l10n/app_en.arb"
+      },
+      {
+        "message": "Localization key `generatedOnly` is never used.",
+        "line": 4,
+        "column": 1,
+        "file": "bad/lib/l10n/app_en.arb"
+      },
+      {
+        "message": "Localization key `localeOnly` is never used.",
+        "line": 5,
+        "column": 1,
+        "file": "bad/lib/l10n/app_en.arb"
+      },
+      {
+        "message": "Localization key `stringOnly` is never used.",
+        "line": 6,
+        "column": 1,
+        "file": "bad/lib/l10n/app_en.arb"
+      },
+      {
+        "message": "Localization key `commentOnly` is never used.",
+        "line": 7,
+        "column": 1,
+        "file": "bad/lib/l10n/app_en.arb"
+      },
+      {
+        "message": "Localization key `unusedEscaped` is never used.",
+        "line": 8,
+        "column": 1,
+        "file": "bad/lib/l10n/app_en.arb"
+      },
+      {
+        "message": "Localization key `customUnused` is never used.",
+        "line": 2,
+        "column": 1,
+        "file": "bad_custom/translations/messages_en.arb"
+      },
+      {
+        "message": "Localization key `unused` is never used.",
+        "line": 1,
+        "column": 1,
+        "file": "bad_empty_config/lib/l10n/app_en.arb"
+      },
+      {
+        "message": "Localization key `sharedUnused` is never used.",
+        "line": 1,
+        "column": 1,
+        "file": "bad_shared_generated/lib/l10n/app_en.arb"
+      },
+      {
+        "message": "Localization key `sharedUnused` is never used.",
+        "line": 1,
+        "column": 1,
+        "file": "bad_shared_generated/nested/lib/l10n/app_en.arb"
       }
     ]
   },
@@ -37744,6 +39663,361 @@
     ]
   },
   {
+    "name": "unexported-public-api",
+    "group": "style",
+    "domains": [],
+    "recommended": false,
+    "crossFile": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "sourcePath": "crates/falcon_rules/src/cross_file/unexported_public_api.rs",
+    "fixturePath": "crates/falcon_rules/tests/corpus/unexported-public-api",
+    "description": "Report implementation declarations used across a package but absent from its public API.",
+    "docs": "Report implementation declarations used across a package but absent from its public API.\n\nIn packages with an analyzed public barrel, checks public top-level declarations\nunder `lib/src/`. Public libraries are analyzed non-part libraries under `lib/`\noutside `lib/src/`; their own declarations and transitive same-package exports\nform the public namespace, respecting `show`/`hide` and unioning every conditional\nexport alternative. Exempts `main`, `@internal`, and `@visibleForTesting`.\nUsage is name-based in analyzed same-package files outside `lib/src/` and `test/`.\nDeclaration names, import/export directives, comments, and strings do not count.\nOther identifiers, including member selectors, are matched by spelling without\nbinding resolution, so unrelated same-named references can count as usage.\nUnknown packages are not checked. Packages containing malformed Dart files are\nskipped because their public namespace is incomplete.",
+    "examples": {
+      "bad": null,
+      "good": null,
+      "crossFile": [
+        {
+          "path": "bad/bin/state.dart",
+          "content": "void update(Iterable<Object> values) {\n  for (current in values) {}\n  (selected, _) = (1, 2);\n}"
+        },
+        {
+          "path": "bad/bin/values.dart",
+          "content": "final timeout = defaultTimeout;\nvoid use({Object value = defaultValue}) {}"
+        },
+        {
+          "path": "bad/lib/api.dart",
+          "content": "export 'src/bridge.dart' show Visible;\nexport 'src/default.dart' if (dart.library.io) 'src/platform.dart';"
+        },
+        {
+          "path": "bad/lib/src/bridge.dart",
+          "content": "export 'hidden.dart' hide HiddenMixin;"
+        },
+        {
+          "path": "bad/lib/src/default.dart",
+          "content": "class DefaultApi {}"
+        },
+        {
+          "path": "bad/lib/src/hidden.dart",
+          "content": "class Hidden {}\nmixin HiddenMixin {}\ntypedef HiddenAlias = Hidden;\nvoid hiddenFunction() {}\nfinal hiddenValue = 1;\nclass Visible {}"
+        },
+        {
+          "path": "bad/lib/src/platform.dart",
+          "content": "class PlatformOnly {}"
+        },
+        {
+          "path": "bad/lib/src/state.dart",
+          "content": "Object? current;\nObject? selected;"
+        },
+        {
+          "path": "bad/lib/src/values.dart",
+          "content": "const defaultTimeout = 10;\nconst defaultValue = 20;"
+        },
+        {
+          "path": "bad/main.dart",
+          "content": "import 'lib/src/hidden.dart';\nvoid main() { Hidden(); HiddenMixin; HiddenAlias; hiddenFunction(); hiddenValue; PlatformOnly(); }"
+        },
+        {
+          "path": "bad/pubspec.yaml",
+          "content": "name: barrel_example"
+        },
+        {
+          "path": "bad/support.dart",
+          "content": "import 'lib/src/hidden.dart';\nHidden? consumer;"
+        },
+        {
+          "path": "bad_hidden/lib/api.dart",
+          "content": "export 'src/api.dart' hide Hidden;"
+        },
+        {
+          "path": "bad_hidden/lib/src/api.dart",
+          "content": "class Hidden {}\nclass Public {}"
+        },
+        {
+          "path": "bad_hidden/pubspec.yaml",
+          "content": "name: barrel_example"
+        },
+        {
+          "path": "bad_hidden/test/api_test.dart",
+          "content": "import '../lib/src/api.dart';\nHidden? tested;"
+        },
+        {
+          "path": "bad_hidden/tool/use.dart",
+          "content": "Hidden? value;"
+        },
+        {
+          "path": "bad_same_name/bin/main.dart",
+          "content": "import '../lib/src/api.dart';\nvoid main() { SameName(); }"
+        },
+        {
+          "path": "bad_same_name/lib/api.dart",
+          "content": "export 'src/other.dart';"
+        },
+        {
+          "path": "bad_same_name/lib/src/api.dart",
+          "content": "class SameName {}"
+        },
+        {
+          "path": "bad_same_name/lib/src/other.dart",
+          "content": "class SameName {}"
+        },
+        {
+          "path": "bad_same_name/pubspec.yaml",
+          "content": "name: barrel_example"
+        },
+        {
+          "path": "good/lib/api.dart",
+          "content": "export 'src/bridge.dart' hide Testing, Unused;"
+        },
+        {
+          "path": "good/lib/src/api.dart",
+          "content": "class Exported {}\nconst internal = 0;\nconst visibleForTesting = 0;\n@internal\nclass Internal {}\n@visibleForTesting\nclass Testing {}\nclass _Private {}\nclass OwnFileOnly {}\nOwnFileOnly localUse() => OwnFileOnly();\nvoid main() {}\nclass Unused {}"
+        },
+        {
+          "path": "good/lib/src/bridge.dart",
+          "content": "export 'api.dart' show Exported;"
+        },
+        {
+          "path": "good/lib/umbrella.dart",
+          "content": "export 'api.dart';"
+        },
+        {
+          "path": "good/main.dart",
+          "content": "import 'lib/src/api.dart';\nvoid main() { Exported(); Testing(); Internal(); _Private(); }"
+        },
+        {
+          "path": "good/pubspec.yaml",
+          "content": "name: barrel_example"
+        },
+        {
+          "path": "good_conditional/bin/main.dart",
+          "content": "PlatformOnly? client;\nWebClient? web;\nCafe? cafe;"
+        },
+        {
+          "path": "good_conditional/lib/api.dart",
+          "content": "export 'src/stub.dart' if (dart.library.io) 'src/io.dart' if (dart.library.js_interop) 'src/web.dart';\nexport 'src/caf%C3%A9.dart';"
+        },
+        {
+          "path": "good_conditional/lib/src/café.dart",
+          "content": "class Cafe {}"
+        },
+        {
+          "path": "good_conditional/lib/src/io.dart",
+          "content": "class PlatformOnly {}"
+        },
+        {
+          "path": "good_conditional/lib/src/stub.dart",
+          "content": "class StubClient {}"
+        },
+        {
+          "path": "good_conditional/lib/src/web.dart",
+          "content": "class WebClient {}"
+        },
+        {
+          "path": "good_conditional/pubspec.yaml",
+          "content": "name: conditional_api\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
+        },
+        {
+          "path": "good_cross_package/lib/api.dart",
+          "content": "export 'src/api.dart';"
+        },
+        {
+          "path": "good_cross_package/lib/src/api.dart",
+          "content": "class SharedName {}"
+        },
+        {
+          "path": "good_cross_package/nested/lib/api.dart",
+          "content": "export 'src/other.dart';"
+        },
+        {
+          "path": "good_cross_package/nested/lib/src/api.dart",
+          "content": "class SharedName {}"
+        },
+        {
+          "path": "good_cross_package/nested/lib/src/other.dart",
+          "content": "class Other {}"
+        },
+        {
+          "path": "good_cross_package/nested/pubspec.yaml",
+          "content": "name: inner"
+        },
+        {
+          "path": "good_cross_package/pubspec.yaml",
+          "content": "name: outer"
+        },
+        {
+          "path": "good_cycles/bin/use.dart",
+          "content": "CyclicApi? value;"
+        },
+        {
+          "path": "good_cycles/lib/a.dart",
+          "content": "export 'b.dart';\nexport 'src/api.dart';"
+        },
+        {
+          "path": "good_cycles/lib/b.dart",
+          "content": "export 'a.dart';"
+        },
+        {
+          "path": "good_cycles/lib/src/api.dart",
+          "content": "class CyclicApi {}"
+        },
+        {
+          "path": "good_cycles/pubspec.yaml",
+          "content": "name: barrel_example"
+        },
+        {
+          "path": "good_cycles/test/use.dart",
+          "content": "import '../lib/a.dart';\nCyclicApi? cyclic;"
+        },
+        {
+          "path": "good_implementation/lib/api.dart",
+          "content": "export 'src/client.dart' show Client;\nclass Widget { void log() {} }\nclass SameName {}"
+        },
+        {
+          "path": "good_implementation/lib/constructors.dart",
+          "content": "class Config {\n  Config();\n  factory Config.fromJson(Map value) => Config();\n}\nenum Named {\n  value.named();\n  const Named.named();\n}"
+        },
+        {
+          "path": "good_implementation/lib/src/client.dart",
+          "content": "import 'util.dart';\nclass Client { String format() => formatUrl(); }"
+        },
+        {
+          "path": "good_implementation/lib/src/converters.dart",
+          "content": "Object fromJson(Object value) => value;\nvoid named() {}"
+        },
+        {
+          "path": "good_implementation/lib/src/util.dart",
+          "content": "String formatUrl() => '';\nvoid log() {}\nclass SameName {}\nclass TestOnly {}"
+        },
+        {
+          "path": "good_implementation/pubspec.yaml",
+          "content": "name: implementation_sharing\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
+        },
+        {
+          "path": "good_implementation/test/util_test.dart",
+          "content": "TestOnly? value;"
+        },
+        {
+          "path": "good_implementation/tool/binders.dart",
+          "content": "void bind(Object record, Iterable<Object> values) {\n  final (log, _) = record as (Object, Object);\n  for (final formatUrl in values) {}\n  try {} catch (TestOnly, SameName) {}\n}"
+        },
+        {
+          "path": "good_implementation/tool/nested.dart",
+          "content": "void bind() {\n  void Function()? callback;\n  callback = () {\n    final (log, _) = (1, 2);\n  };\n}"
+        },
+        {
+          "path": "good_no_barrel/lib/src/api.dart",
+          "content": "class AppOnly {}"
+        },
+        {
+          "path": "good_no_barrel/main.dart",
+          "content": "import 'lib/src/api.dart';\nvoid main() { AppOnly(); }"
+        },
+        {
+          "path": "good_no_barrel/pubspec.yaml",
+          "content": "name: app_example"
+        },
+        {
+          "path": "good_parts/bin/use.dart",
+          "content": "PartApi? value;"
+        },
+        {
+          "path": "good_parts/lib/api.dart",
+          "content": "part 'src/%70art.dart';\nexport 'src/empty.dart';"
+        },
+        {
+          "path": "good_parts/lib/src/empty.dart",
+          "content": "class OtherApi {}"
+        },
+        {
+          "path": "good_parts/lib/src/part.dart",
+          "content": "part of '../api.dart';\nclass PartApi {}"
+        },
+        {
+          "path": "good_parts/pubspec.yaml",
+          "content": "name: barrel_example"
+        },
+        {
+          "path": "good_parts/test/use.dart",
+          "content": "import '../lib/api.dart';\nPartApi? part;"
+        }
+      ]
+    },
+    "diagnostics": [
+      {
+        "message": "Public `Hidden` is used across the package but not exported from any public library.",
+        "line": 1,
+        "column": 7,
+        "file": "bad/lib/src/hidden.dart"
+      },
+      {
+        "message": "Public `HiddenMixin` is used across the package but not exported from any public library.",
+        "line": 2,
+        "column": 7,
+        "file": "bad/lib/src/hidden.dart"
+      },
+      {
+        "message": "Public `HiddenAlias` is used across the package but not exported from any public library.",
+        "line": 3,
+        "column": 9,
+        "file": "bad/lib/src/hidden.dart"
+      },
+      {
+        "message": "Public `hiddenFunction` is used across the package but not exported from any public library.",
+        "line": 4,
+        "column": 6,
+        "file": "bad/lib/src/hidden.dart"
+      },
+      {
+        "message": "Public `hiddenValue` is used across the package but not exported from any public library.",
+        "line": 5,
+        "column": 7,
+        "file": "bad/lib/src/hidden.dart"
+      },
+      {
+        "message": "Public `current` is used across the package but not exported from any public library.",
+        "line": 1,
+        "column": 9,
+        "file": "bad/lib/src/state.dart"
+      },
+      {
+        "message": "Public `selected` is used across the package but not exported from any public library.",
+        "line": 2,
+        "column": 9,
+        "file": "bad/lib/src/state.dart"
+      },
+      {
+        "message": "Public `defaultTimeout` is used across the package but not exported from any public library.",
+        "line": 1,
+        "column": 7,
+        "file": "bad/lib/src/values.dart"
+      },
+      {
+        "message": "Public `defaultValue` is used across the package but not exported from any public library.",
+        "line": 2,
+        "column": 7,
+        "file": "bad/lib/src/values.dart"
+      },
+      {
+        "message": "Public `Hidden` is used across the package but not exported from any public library.",
+        "line": 1,
+        "column": 7,
+        "file": "bad_hidden/lib/src/api.dart"
+      },
+      {
+        "message": "Public `SameName` is used across the package but not exported from any public library.",
+        "line": 1,
+        "column": 7,
+        "file": "bad_same_name/lib/src/api.dart"
+      }
+    ]
+  },
+  {
     "name": "unintended-html-in-doc-comment",
     "group": "style",
     "domains": [],
@@ -44186,6 +46460,253 @@
     ]
   },
   {
+    "name": "duplicate-barrel-exports",
+    "group": "suspicious",
+    "domains": [],
+    "recommended": false,
+    "crossFile": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "sourcePath": "crates/falcon_rules/src/cross_file/duplicate_barrel_exports.rs",
+    "fixturePath": "crates/falcon_rules/tests/corpus/duplicate-barrel-exports",
+    "description": "Report conflicting declarations exported through independent public barrels.",
+    "docs": "Report conflicting declarations exported through independent public barrels.\n\nPublic barrels are analyzed non-part libraries under `lib/`, outside `lib/src/`,\ncontaining an export directive. Export namespaces include public declarations\nand transitive same-package exports, respecting `show`/`hide` and the default\nconditional URI. If either barrel transitively exports the other, they are exempt, so\numbrella barrels are allowed. Reports once per export directive in the later\nbarrel by path, choosing the first matching earlier barrel and name in sorted\norder. Private names, `main`, `@internal`, and `@visibleForTesting` declarations\nare excluded. Re-exporting the same declaration through independent barrels is allowed.\nOnly analyzed, successfully parsed same-package files participate;\nno SDK or dependency namespaces are inferred.",
+    "examples": {
+      "bad": null,
+      "good": null,
+      "crossFile": [
+        {
+          "path": "bad/lib/a.dart",
+          "content": "export 'src/bridge.dart' hide Hidden;\nexport 'src/first.dart' show Collision;"
+        },
+        {
+          "path": "bad/lib/b.dart",
+          "content": "export 'src/rival.dart' show Alpha;\nexport 'src/rival.dart' show Beta;\nexport 'src/rival.dart' show Gamma;\nexport 'src/rival.dart' show Delta;\nexport 'src/rival.dart' if (dart.library.io) 'src/alternate.dart' show Epsilon;\nexport 'src/second.dart' show Collision;"
+        },
+        {
+          "path": "bad/lib/src/alternate.dart",
+          "content": "class Alternate {}"
+        },
+        {
+          "path": "bad/lib/src/api.dart",
+          "content": "class Alpha {}\nclass Beta {}\nclass Gamma {}\nclass Delta {}\nclass Epsilon {}\nclass Hidden {}"
+        },
+        {
+          "path": "bad/lib/src/bridge.dart",
+          "content": "export 'api.dart';"
+        },
+        {
+          "path": "bad/lib/src/first.dart",
+          "content": "class Collision {}"
+        },
+        {
+          "path": "bad/lib/src/rival.dart",
+          "content": "class Alpha {}\nclass Beta {}\nclass Gamma {}\nclass Delta {}\nclass Epsilon {}"
+        },
+        {
+          "path": "bad/lib/src/second.dart",
+          "content": "class Collision {}"
+        },
+        {
+          "path": "bad/lib/z.dart",
+          "content": "export 'src/rival.dart' show Alpha;"
+        },
+        {
+          "path": "bad/main.dart",
+          "content": "import 'lib/a.dart';\nvoid main() {}"
+        },
+        {
+          "path": "bad/pubspec.yaml",
+          "content": "name: barrel_example"
+        },
+        {
+          "path": "bad/support.dart",
+          "content": "class Unrelated {}"
+        },
+        {
+          "path": "good/lib/a.dart",
+          "content": "export 'src/api.dart' show Alpha, Internal, Testing, _Private;"
+        },
+        {
+          "path": "good/lib/b.dart",
+          "content": "export 'src/api.dart' hide Alpha;\nexport 'src/default.dart' if (dart.library.io) 'src/api.dart';"
+        },
+        {
+          "path": "good/lib/src/api.dart",
+          "content": "class Alpha {}\nclass Beta {}\nclass _Private {}\nconst internal = 0;\nconst visibleForTesting = 0;\n@internal\nclass Internal {}\n@visibleForTesting\nclass Testing {}\nvoid main() {}"
+        },
+        {
+          "path": "good/lib/src/default.dart",
+          "content": "class PlatformDefault {}"
+        },
+        {
+          "path": "good/lib/umbrella.dart",
+          "content": "export 'a.dart';\nexport 'b.dart';"
+        },
+        {
+          "path": "good/main.dart",
+          "content": "import 'lib/umbrella.dart';\nvoid main() {}"
+        },
+        {
+          "path": "good/pubspec.yaml",
+          "content": "name: barrel_example"
+        },
+        {
+          "path": "good_cross_package/lib/api.dart",
+          "content": "export 'src/api.dart';"
+        },
+        {
+          "path": "good_cross_package/lib/src/api.dart",
+          "content": "class SharedName {}"
+        },
+        {
+          "path": "good_cross_package/nested/lib/api.dart",
+          "content": "export 'src/other.dart';"
+        },
+        {
+          "path": "good_cross_package/nested/lib/src/api.dart",
+          "content": "class SharedName {}"
+        },
+        {
+          "path": "good_cross_package/nested/lib/src/other.dart",
+          "content": "class Other {}"
+        },
+        {
+          "path": "good_cross_package/nested/pubspec.yaml",
+          "content": "name: inner"
+        },
+        {
+          "path": "good_cross_package/pubspec.yaml",
+          "content": "name: outer"
+        },
+        {
+          "path": "good_cycles/lib/a.dart",
+          "content": "export 'b.dart';\nexport 'src/api.dart';"
+        },
+        {
+          "path": "good_cycles/lib/b.dart",
+          "content": "export 'a.dart';"
+        },
+        {
+          "path": "good_cycles/lib/src/api.dart",
+          "content": "class CyclicApi {}"
+        },
+        {
+          "path": "good_cycles/pubspec.yaml",
+          "content": "name: barrel_example"
+        },
+        {
+          "path": "good_cycles/test/use.dart",
+          "content": "import '../lib/a.dart';\nCyclicApi? cyclic;"
+        },
+        {
+          "path": "good_no_barrel/lib/src/a.dart",
+          "content": "export 'api.dart';"
+        },
+        {
+          "path": "good_no_barrel/lib/src/api.dart",
+          "content": "class InternalApi {}"
+        },
+        {
+          "path": "good_no_barrel/lib/src/b.dart",
+          "content": "export 'api.dart';"
+        },
+        {
+          "path": "good_no_barrel/main.dart",
+          "content": "void main() {}"
+        },
+        {
+          "path": "good_no_barrel/pubspec.yaml",
+          "content": "name: app_example"
+        },
+        {
+          "path": "good_parts/lib/api.dart",
+          "content": "part 'src/part.dart';\nexport 'src/empty.dart';"
+        },
+        {
+          "path": "good_parts/lib/src/empty.dart",
+          "content": "class OtherApi {}"
+        },
+        {
+          "path": "good_parts/lib/src/part.dart",
+          "content": "part of '../api.dart';\nclass PartApi {}"
+        },
+        {
+          "path": "good_parts/pubspec.yaml",
+          "content": "name: barrel_example"
+        },
+        {
+          "path": "good_parts/test/use.dart",
+          "content": "import '../lib/api.dart';\nPartApi? part;"
+        },
+        {
+          "path": "good_shared/lib/auth.dart",
+          "content": "export 'core.dart';"
+        },
+        {
+          "path": "good_shared/lib/core.dart",
+          "content": "class Core {}"
+        },
+        {
+          "path": "good_shared/lib/shop.dart",
+          "content": "export 'core.dart';"
+        },
+        {
+          "path": "good_shared/pubspec.yaml",
+          "content": "name: shared_core\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
+        }
+      ]
+    },
+    "diagnostics": [
+      {
+        "message": "Another `Alpha` is exported by `lib/a.dart`; importing both barrels is ambiguous.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/b.dart"
+      },
+      {
+        "message": "Another `Beta` is exported by `lib/a.dart`; importing both barrels is ambiguous.",
+        "line": 2,
+        "column": 8,
+        "file": "bad/lib/b.dart"
+      },
+      {
+        "message": "Another `Gamma` is exported by `lib/a.dart`; importing both barrels is ambiguous.",
+        "line": 3,
+        "column": 8,
+        "file": "bad/lib/b.dart"
+      },
+      {
+        "message": "Another `Delta` is exported by `lib/a.dart`; importing both barrels is ambiguous.",
+        "line": 4,
+        "column": 8,
+        "file": "bad/lib/b.dart"
+      },
+      {
+        "message": "Another `Epsilon` is exported by `lib/a.dart`; importing both barrels is ambiguous.",
+        "line": 5,
+        "column": 8,
+        "file": "bad/lib/b.dart"
+      },
+      {
+        "message": "Another `Collision` is exported by `lib/a.dart`; importing both barrels is ambiguous.",
+        "line": 6,
+        "column": 8,
+        "file": "bad/lib/b.dart"
+      },
+      {
+        "message": "Another `Alpha` is exported by `lib/a.dart`; importing both barrels is ambiguous.",
+        "line": 1,
+        "column": 8,
+        "file": "bad/lib/z.dart"
+      }
+    ]
+  },
+  {
     "name": "empty-catches",
     "group": "suspicious",
     "domains": [],
@@ -44302,6 +46823,175 @@
         "line": 24,
         "column": 3,
         "file": null
+      }
+    ]
+  },
+  {
+    "name": "missing-assets",
+    "group": "suspicious",
+    "domains": [],
+    "recommended": false,
+    "crossFile": true,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "sourcePath": "crates/falcon_rules/src/cross_file/missing_assets.rs",
+    "fixturePath": "crates/falcon_rules/tests/corpus/missing-assets",
+    "description": "Report literal asset paths missing from the package's Flutter asset declarations.",
+    "docs": "Report literal asset paths missing from the package's Flutter asset declarations.\n\nOnly `lib/` sources in packages with a `flutter:` section are checked.\nLiteral `assets/` paths with a filename extension must be declared as assets,\nfonts, shaders or deferred-component assets, including direct directory children.\nLiteral adjacent strings are concatenated. Dynamic strings, directive URIs,\n`packages/` paths and arguments to calls with `package:` are exempt. Disk\nexistence is not checked; resolution variants are not independent declarations.",
+    "examples": {
+      "bad": null,
+      "good": null,
+      "crossFile": [
+        {
+          "path": "bad/lib/assets/import.dart",
+          "content": "const unrelated = 1;"
+        },
+        {
+          "path": "bad/lib/main.dart",
+          "content": "import 'support.dart';\nimport 'assets/import.dart';\nconst missing = 'assets/missing.png';\nconst nested = 'assets/icons/sub/deep.png';\nconst adjacent = 'assets/' 'joined.png';\nconst raw = r'assets/raw.png';"
+        },
+        {
+          "path": "bad/lib/support.dart",
+          "content": "const other = 'assets/other.svg';\nconst declared = 'assets/declared.png';\nconst map = 'assets/map.png';"
+        },
+        {
+          "path": "bad/pubspec.yaml",
+          "content": "name: sample\nflutter:\n  assets:\n    - assets/declared.png\n    - assets/icons/\n    - path: assets/map.png\n      flavors: [demo]"
+        },
+        {
+          "path": "bad_closure/lib/main.dart",
+          "content": "import 'support.dart';\nvoid main() { build(package: 'brand', builder: () => 'assets/missing.png'); }"
+        },
+        {
+          "path": "bad_closure/lib/support.dart",
+          "content": "void build({String? package, String Function()? builder}) {}"
+        },
+        {
+          "path": "bad_closure/pubspec.yaml",
+          "content": "name: app\nflutter: {}"
+        },
+        {
+          "path": "good/lib/assets/import.dart",
+          "content": "const unrelated = 1;"
+        },
+        {
+          "path": "good/lib/main.dart",
+          "content": "import 'support.dart';\nimport 'assets/import.dart';\nconst declared = 'assets/declared.png';\nconst map = 'assets/map.png';\nconst directory = 'assets/icons/direct.png';\nconst external = 'packages/other/assets/other.png';\nconst extensionless = 'assets/README';\nconst trailing = 'assets/icons/';\nconst ordinary = 'images/a.png';\nString dynamicAsset(String name) => 'assets/$name.png';\nconst adjacent = 'assets/' 'declared.png';"
+        },
+        {
+          "path": "good/lib/support.dart",
+          "content": "const escaped = 'assets/declared\\u002epng';"
+        },
+        {
+          "path": "good/pubspec.yaml",
+          "content": "name: sample\nflutter:\n  assets:\n    - assets/declared.png\n    - assets/icons/\n    - path: assets/map.png\n      transformers: []"
+        },
+        {
+          "path": "good_call_wrappers/lib/main.dart",
+          "content": "import 'support.dart';\nvoid use(bool dark) {\n  image(dark ? 'assets/dark.png' : 'assets/light.png', package: 'brand');\n  image(('assets/parenthesized.png'), package: 'brand');\n}"
+        },
+        {
+          "path": "good_call_wrappers/lib/support.dart",
+          "content": "void image(String asset, {String? package}) {}"
+        },
+        {
+          "path": "good_call_wrappers/pubspec.yaml",
+          "content": "name: app\nflutter: {}"
+        },
+        {
+          "path": "good_no_pubspec/lib/main.dart",
+          "content": "import 'support.dart';\nconst unowned = 'assets/unowned.png';"
+        },
+        {
+          "path": "good_no_pubspec/lib/support.dart",
+          "content": "const another = 'assets/another.png';"
+        },
+        {
+          "path": "good_other_declarations/lib/main.dart",
+          "content": "import 'support.dart';\nconst font = 'assets/demo.ttf';\nconst shader = 'assets/shader.frag';\nconst deferred = 'assets/deferred.png';\nvoid main() { image('assets/brand.png', package: 'brand'); }\nvoid named() { load(asset: 'assets/brand_named.png', package: 'brand'); }\nvoid load({String? asset, String? package}) {}"
+        },
+        {
+          "path": "good_other_declarations/lib/support.dart",
+          "content": "void image(String asset, {String? package}) {}"
+        },
+        {
+          "path": "good_other_declarations/pubspec.yaml",
+          "content": "name: sample\nflutter:\n  fonts:\n    - family: Demo\n      fonts:\n        - asset: assets/demo.ttf\n  shaders:\n    - assets/shader.frag\n  deferred-components:\n    - name: deferred\n      assets:\n        - assets/deferred.png"
+        },
+        {
+          "path": "good_other_declarations/test/check.dart",
+          "content": "const input = 'assets/test.json';"
+        },
+        {
+          "path": "good_other_declarations/tool/generate.dart",
+          "content": "const input = 'assets/tool.json';"
+        },
+        {
+          "path": "good_pure_dart/lib/main.dart",
+          "content": "import 'support.dart';\nconst asset = 'assets/index.html';"
+        },
+        {
+          "path": "good_pure_dart/lib/support.dart",
+          "content": "const helper = 1;"
+        },
+        {
+          "path": "good_pure_dart/pubspec.yaml",
+          "content": "name: server"
+        },
+        {
+          "path": "good_yaml_anchors/lib/main.dart",
+          "content": "import 'support.dart';\nconst asset = 'assets/declared.png';"
+        },
+        {
+          "path": "good_yaml_anchors/lib/support.dart",
+          "content": "const support = 1;"
+        },
+        {
+          "path": "good_yaml_anchors/pubspec.yaml",
+          "content": "name: sample\ndescription: &description Anchored description\nflutter:\n  assets:\n    - assets/declared.png"
+        }
+      ]
+    },
+    "diagnostics": [
+      {
+        "message": "Asset `assets/missing.png` is not declared under `flutter: assets:` in `pubspec.yaml`.",
+        "line": 3,
+        "column": 17,
+        "file": "bad/lib/main.dart"
+      },
+      {
+        "message": "Asset `assets/icons/sub/deep.png` is not declared under `flutter: assets:` in `pubspec.yaml`.",
+        "line": 4,
+        "column": 16,
+        "file": "bad/lib/main.dart"
+      },
+      {
+        "message": "Asset `assets/joined.png` is not declared under `flutter: assets:` in `pubspec.yaml`.",
+        "line": 5,
+        "column": 18,
+        "file": "bad/lib/main.dart"
+      },
+      {
+        "message": "Asset `assets/raw.png` is not declared under `flutter: assets:` in `pubspec.yaml`.",
+        "line": 6,
+        "column": 13,
+        "file": "bad/lib/main.dart"
+      },
+      {
+        "message": "Asset `assets/other.svg` is not declared under `flutter: assets:` in `pubspec.yaml`.",
+        "line": 1,
+        "column": 15,
+        "file": "bad/lib/support.dart"
+      },
+      {
+        "message": "Asset `assets/missing.png` is not declared under `flutter: assets:` in `pubspec.yaml`.",
+        "line": 2,
+        "column": 54,
+        "file": "bad_closure/lib/main.dart"
       }
     ]
   },

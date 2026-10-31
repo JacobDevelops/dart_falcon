@@ -1,0 +1,6 @@
+name: analyzer_plugins
+dev_dependencies:
+  custom_lint: any
+  riverpod_lint: any
+  top_plugin: any
+  dart_cli: any

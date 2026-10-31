@@ -1,0 +1,5 @@
+name: sample
+description: &description Anchored description
+flutter:
+  assets:
+    - assets/declared.png

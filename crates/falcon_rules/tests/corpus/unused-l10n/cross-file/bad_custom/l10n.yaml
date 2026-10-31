@@ -1,0 +1,5 @@
+arb-dir: translations
+template-arb-file: messages_en.arb
+output-class: Messages
+output-localization-file: messages.dart
+output-dir: lib/generated

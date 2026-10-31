@@ -1,0 +1,1 @@
+{"configVersion":2,"packages":[{"name":"missing_pubspec","rootUri":"../deps/missing","packageUri":"lib/"},{"name":"malformed_pubspec","rootUri":"../deps/malformed","packageUri":"lib/"}]}

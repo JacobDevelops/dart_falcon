@@ -1,0 +1,4 @@
+name: scalar_analyzer_plugin
+dev_dependencies:
+  custom_lint: any
+  riverpod_lint: any

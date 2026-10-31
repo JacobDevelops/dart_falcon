@@ -1,0 +1,6 @@
+name: sample
+flutter:
+  assets:
+    - assets/selected.png
+    - assets/wrong.svg # /* expect: unused-assets */
+    - assets/messages/ # /* expect: unused-assets */

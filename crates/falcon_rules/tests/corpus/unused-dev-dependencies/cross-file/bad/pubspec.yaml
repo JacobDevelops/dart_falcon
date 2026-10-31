@@ -1,0 +1,14 @@
+name: unused_dev_bad
+dev_dependencies:
+  never_used: any # /* expect: unused-dev-dependencies, msg: "No analyzed Dart source uses `never_used`; remove the dev dependency if it is not used by build tools." */
+  comment_only: any # /* expect: unused-dev-dependencies */
+  string_only: any # /* expect: unused-dev-dependencies */
+  build_runner: any
+  unresolved_cli: any
+  empty_cli: any # /* expect: unused-dev-dependencies */
+  not_included: any # /* expect: unused-dev-dependencies */
+  nested_only: any # /* expect: unused-dev-dependencies */
+  disabled_custom_lint: any # /* expect: unused-dev-dependencies */
+  not_a_cli: any # /* expect: unused-dev-dependencies */
+tool_settings:
+  nested_only: true
