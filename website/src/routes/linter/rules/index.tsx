@@ -1,104 +1,50 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { useDeferredValue, useState } from 'react'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { DocsLayout } from '../../../components/DocsLayout'
-import { RuleRow } from '../../../components/RuleRow'
-import { GROUPS, type RuleSummary } from '../../../lib/rules'
+import { RuleCatalog, catalogSearch } from '../../../components/RuleCatalog'
+import { CollapsibleSection } from '../../../components/CollapsibleSection'
+import { Toc } from '../../../components/Toc'
+import { domainLabel } from '../../../lib/rules'
 import { getRulesIndex } from '../../../lib/server'
 import { breadcrumbs, seo } from '../../../lib/seo'
 
 export const Route = createFileRoute('/linter/rules/')({
+  validateSearch: catalogSearch,
   loader: () => getRulesIndex(),
-  head: ({ loaderData }) =>
-    seo({
-      title: `Dart & Flutter lint rules: all ${loaderData?.coverage.total ?? ''} rules | falcon`,
-      description: `Every falcon lint rule for Dart and Flutter: ${loaderData?.coverage.total} rules across correctness, style, performance, security and more, each with real diagnostics, examples, and its dart analyze or DCM name.`,
-      path: '/linter/rules',
-      jsonLd: [breadcrumbs([['Rules', '/linter/rules']])],
-    }),
+  head: ({ loaderData }) => seo({
+    title: 'Dart lint rules | Dart Falcon',
+    description: `Explore ${loaderData?.coverage.total ?? ''} falcon lint rules for Dart and Flutter by group, framework, Dart alias, and recommended defaults, with diagnostics and examples.`,
+    path: '/linter/rules',
+    jsonLd: [breadcrumbs([['Rules', '/linter/rules']])],
+  }),
   component: RulesIndex,
 })
 
-function matches(rule: RuleSummary, q: string): boolean {
-  return [rule.name, rule.upstreamId ?? '', rule.description].some((s) => s.toLowerCase().includes(q))
-}
-
 function RulesIndex() {
   const { rules, coverage } = Route.useLoaderData()
-  const [query, setQuery] = useState('')
-  const raw = useDeferredValue(query).trim().toLowerCase()
-  const q = raw.replace(/_/g, '-')
-  const hits = q ? rules.filter((r) => matches(r, q) || matches(r, raw)) : []
-  const sections = [
-    ...GROUPS.map((g) => ({ ...g, rules: rules.filter((r) => r.group === g.id && !r.crossFile) })),
-    {
-      id: 'cross-file',
-      label: 'Cross-file',
-      blurb: "Rules that analyze relationships between files, run in falcon's whole-project pass.",
-      rules: rules.filter((r) => r.crossFile),
-    },
-  ]
-
+  const search = Route.useSearch()
+  const navigate = Route.useNavigate()
   return (
-    <DocsLayout
-      aside={
-        <nav className="toc" aria-label="Rule groups">
-          <p className="side-heading">On this page</p>
-          {sections.map((s) => (
-            <a href={`#${s.id}`} key={s.id}>
-              {s.label} <span className="num">{s.rules.length}</span>
-            </a>
-          ))}
-        </nav>
-      }
-    >
+    <DocsLayout aside={<Toc items={[{ id: 'rule-groups-heading', title: 'Browse by group' }, { id: 'frameworks', title: 'Browse by domain' }, { id: 'find-rules', title: 'Find a rule' }, { id: 'matching-rules', title: 'Rules' }]} />}>
       <header className="page-head">
         <h1>Dart &amp; Flutter lint rules</h1>
-        <p className="lede">
-          {coverage.total} rules, {coverage.recommended} on by default.{' '}
-          {coverage.mappedToOfficial} carry an official Dart lint name, shown
-          beside the falcon id. Every example below is falcon's real output.
-        </p>
-        <div className="search">
-          <label htmlFor="rule-search">Find a rule</label>
-          <input
-            id="rule-search"
-            type="search"
-            placeholder="avoid_print, unused-code, setState…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <p className="search-count" aria-live="polite">
-            {q ? `${hits.length} ${hits.length === 1 ? 'rule matches' : 'rules match'}` : ''}
-          </p>
-        </div>
+        <p className="lede">{coverage.total} rules, {coverage.recommended} recommended by default. Start with a group, browse your framework or package, or find the exact rule you need.</p>
+        <p><a href="#find-rules">Search and filter all rules →</a></p>
       </header>
-
-      {q ? (
-        <ul className="rule-list">
-          {hits.map((r) => (
-            <RuleRow key={r.name} rule={r} />
+      <CollapsibleSection id="rule-groups-heading" title="Browse by group" className="catalog-overview">
+        <div className="catalog-cards">
+          {coverage.groups.map((group) => (
+            <Link className="catalog-card" key={group.id} to="/linter/groups/$group" params={{ group: group.id }}>
+              <h3>{group.label}<span className="num">{group.count}</span></h3>
+              <p>{group.blurb}</p>
+              <span className="catalog-card-meta">{group.recommended} recommended</span>
+            </Link>
           ))}
-        </ul>
-      ) : (
-        sections.map((s) => (
-          <section className="group-block" id={s.id} key={s.id} aria-labelledby={`${s.id}-h`}>
-            <div className="group-title">
-              <h2 id={`${s.id}-h`}>{s.label}</h2>
-              <span className="num">
-                {s.rules.length} rules · {s.rules.filter((r) => r.recommended).length} recommended
-              </span>
-            </div>
-            <p className="blurb">{s.blurb}</p>
-            <ul className="rule-list">
-              {s.rules.map((r) => (
-                <RuleRow key={r.name} rule={r} />
-              ))}
-            </ul>
-          </section>
-        ))
-      )}
+        </div>
+      </CollapsibleSection>
+      <CollapsibleSection id="frameworks" title="Browse by domain" className="catalog-domains">
+        <div>{coverage.domains.map((domain) => <Link key={domain.name} to="/linter/domains/$domain" params={{ domain: domain.name }}>{domainLabel(domain.name)} <span className="num">{domain.count}</span></Link>)}</div>
+      </CollapsibleSection>
+      <RuleCatalog rules={rules} search={search} onChange={(next, replace) => { void navigate({ search: next, replace, resetScroll: false }) }} overview />
     </DocsLayout>
   )
 }

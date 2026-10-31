@@ -22,6 +22,13 @@ export function getRule(name: string): Rule | undefined {
   return byName.get(name)
 }
 
+export function resolveRule(name: string): Rule | undefined {
+  const normalized = name.replace(/_/g, '-')
+  return getRule(name) ?? getRule(normalized) ?? rules.find((rule) =>
+    rule.source.upstreamId === name || rule.source.upstreamId?.replace(/_/g, '-') === normalized,
+  )
+}
+
 export function coverage(): Coverage {
   const sources: Record<string, number> = {}
   for (const r of rules) sources[r.source.label] = (sources[r.source.label] ?? 0) + 1

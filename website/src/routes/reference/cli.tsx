@@ -2,13 +2,15 @@ import { createFileRoute } from '@tanstack/react-router'
 import { DocsLayout } from '../../components/DocsLayout'
 import { CodeBlock } from '../../components/CodeBlock'
 import { ValueList } from '../../components/ValueList'
+import { Toc } from '../../components/Toc'
+import { CollapsibleSection } from '../../components/CollapsibleSection'
 import { breadcrumbs, seo } from '../../lib/seo'
 import cliJson from '../../data/cli.json'
 
 export const Route = createFileRoute('/reference/cli')({
   head: () =>
     seo({
-      title: 'falcon CLI reference: check, lsp, migrate and every flag',
+      title: 'CLI reference | Dart Falcon',
       description: `Every falcon command and flag for linting Dart and Flutter from the terminal and CI: falcon check, falcon lsp, falcon migrate, output formats, and exit codes. Generated from falcon v${cli.version}.`,
       path: '/reference/cli',
       jsonLd: [breadcrumbs([['Reference', '/reference/cli'], ['CLI', '/reference/cli']])],
@@ -82,14 +84,15 @@ function CliReference() {
   return (
     <DocsLayout
       aside={
-        <nav className="toc" aria-label="Commands">
-          <p className="side-heading">Commands</p>
-          {cli.subcommands.map((c) => (
-            <a key={c.name} href={`#cmd-${c.name}`}>
-              {cli.name} {c.name}
-            </a>
-          ))}
-        </nav>
+        <Toc
+          items={[
+            { id: 'global-options', title: 'Global options' },
+            ...cli.subcommands.map((cmd) => ({
+              id: `cmd-${cmd.name}`,
+              title: `${cli.name} ${cmd.name}`,
+            })),
+          ]}
+        />
       }
     >
       <div className="reference">
@@ -102,21 +105,20 @@ function CliReference() {
 
         <CodeBlock code={cli.usage} lang="bash" filename="usage" />
 
-        <section className="ref-section">
-          <h2>Global options</h2>
+        <CollapsibleSection id="global-options" title="Global options" className="ref-section">
           <p className="blurb">Accepted by every subcommand.</p>
           {cli.globalArgs.map((a) => (
             <FlagEntry key={a.name} arg={a} />
           ))}
-        </section>
+        </CollapsibleSection>
 
         {cli.subcommands.map((cmd) => (
-          <section className="ref-section" id={`cmd-${cmd.name}`} key={cmd.name}>
-            <h2>
-              <code>
-                {cli.name} {cmd.name}
-              </code>
-            </h2>
+          <CollapsibleSection
+            id={`cmd-${cmd.name}`}
+            title={`${cli.name} ${cmd.name}`}
+            key={cmd.name}
+            className="ref-section"
+          >
             <p className="blurb">{cmd.about}</p>
             {cmd.usage ? (
               <CodeBlock code={cmd.usage} lang="bash" filename="usage" />
@@ -126,7 +128,7 @@ function CliReference() {
             ) : (
               <p className="blurb">No options.</p>
             )}
-          </section>
+          </CollapsibleSection>
         ))}
       </div>
     </DocsLayout>

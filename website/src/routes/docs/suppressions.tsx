@@ -6,10 +6,11 @@ import source from '../../content/suppressions.md?raw'
 export const Route = createFileRoute('/docs/suppressions')({
   head: () =>
     seo({
-      title: 'Suppress Dart lint warnings with falcon-ignore | falcon',
+      title: 'Suppressions | Dart Falcon',
       description:
         'Silence a single falcon lint diagnostic or a whole file with falcon-ignore and falcon-ignore-all comments. Every suppression names one rule and requires a reason.',
       path: '/docs/suppressions',
+      markdownPath: '/docs/suppressions.md',
       type: 'article',
       jsonLd: [breadcrumbs([['Docs', '/docs/getting-started'], ['Suppressions', '/docs/suppressions']])],
     }),

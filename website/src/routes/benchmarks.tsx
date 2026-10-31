@@ -1,7 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { BenchChart, BenchSummaryChart } from '../components/BenchChart'
 import { DocsLayout } from '../components/DocsLayout'
-import { markdown } from '../components/DocsPage'
+import { MarkdownContent } from '../components/DocsPage'
+import { CollapsibleSection } from '../components/CollapsibleSection'
+import { Toc } from '../components/Toc'
+import { extractHeadings } from '../lib/headings'
 import { corpusLabel, formatMs, scenarioSummaries, summaryText, unmeasuredTools, type BenchView } from '../lib/benchmarks'
 import { getBenchmarks } from '../lib/server'
 import { breadcrumbs, seo } from '../lib/seo'
@@ -14,14 +17,25 @@ function summarize(view: BenchView | undefined): string {
 
 const count = (n: number | undefined) => (n === undefined ? '–' : n.toLocaleString('en-US'))
 
+const methodologySource = methodology.replace(/^# .*\n/, '').replace(/^(#{2,5}) /gm, '#$1 ')
+const toc = [
+  { id: 'summary-h', title: 'Summary' },
+  { id: 'runs-h', title: 'Every run' },
+  { id: 'output-h', title: 'What each tool reported' },
+  { id: 'setup-h', title: 'Test setup' },
+  { id: 'methodology', title: 'Methodology' },
+  ...extractHeadings(methodologySource),
+]
+
 export const Route = createFileRoute('/benchmarks')({
   loader: () => getBenchmarks(),
   head: ({ loaderData }) =>
     seo({
-      title: 'Dart and Flutter linter benchmarks | falcon',
-      description: `${summarize(loaderData)} Wall-clock benchmarks of Dart and Flutter linters on real open-source codebases, with machine, versions, and commit SHAs.`,
+      title: 'Benchmarks | Dart Falcon',
+      description: `${summarize(loaderData)} Measured Dart and Flutter linter timings, versions and methodology.`,
       path: '/benchmarks',
       type: 'article',
+      markdownPath: '/docs/benchmarks.md',
       jsonLd: [breadcrumbs([['Benchmarks', '/benchmarks']])],
     }),
   component: Benchmarks,
@@ -41,7 +55,7 @@ function Benchmarks() {
   ) === i)
 
   return (
-    <DocsLayout>
+    <DocsLayout aside={<Toc items={toc} />}>
       <header className="page-head">
         <h1>Dart linter benchmarks</h1>
         <p className="lede">
@@ -69,14 +83,15 @@ function Benchmarks() {
         </p>
       </header>
 
-      <div className="bench-list">
-        {summaries.map((s) => (
-          <BenchSummaryChart key={s.scenario.id} summary={s} />
-        ))}
-      </div>
+      <CollapsibleSection id="summary-h" title="Summary" className="rule-section">
+        <div className="bench-list">
+          {summaries.map((s) => (
+            <BenchSummaryChart key={s.scenario.id} summary={s} />
+          ))}
+        </div>
+      </CollapsibleSection>
 
-      <section className="rule-section" aria-labelledby="runs-h">
-        <h2 id="runs-h">Every run</h2>
+      <CollapsibleSection id="runs-h" title="Every run" className="rule-section">
         <div className="bench-list">
           {runs.map((run) => (
             <BenchChart key={`${run.corpus.id}-${run.scenario.id}`} run={run} detailed />
@@ -127,10 +142,9 @@ function Benchmarks() {
             </tbody>
           </table>
         </div>
-      </section>
+      </CollapsibleSection>
 
-      <section className="rule-section" aria-labelledby="output-h">
-        <h2 id="output-h">What each tool reported</h2>
+      <CollapsibleSection id="output-h" title="What each tool reported" className="rule-section">
         <p>
           Diagnostics are grouped by corpus and rule family; cold and warm runs
           use the same rule configuration.{' '}
@@ -189,10 +203,9 @@ function Benchmarks() {
             </tbody>
           </table>
         </div>
-      </section>
+      </CollapsibleSection>
 
-      <section className="rule-section" aria-labelledby="setup-h">
-        <h2 id="setup-h">Test setup</h2>
+      <CollapsibleSection id="setup-h" title="Test setup" className="rule-section">
         <dl className="facts">
           <div>
             <dt>CPU</dt>
@@ -256,20 +269,13 @@ function Benchmarks() {
             </tbody>
           </table>
         </div>
-      </section>
+      </CollapsibleSection>
 
-      <section className="rule-section" aria-labelledby="methodology">
-        <h2 id="methodology">Methodology</h2>
-        <div
-          className="prose"
-          dangerouslySetInnerHTML={{
-            // The synced doc's own h1 is dropped; its sections nest under this h2.
-            __html: markdown.parse(methodology.replace(/^# .*\n/, '').replace(/^## /gm, '### '), {
-              async: false,
-            }),
-          }}
-        />
-      </section>
+      <CollapsibleSection id="methodology" title="Methodology" className="rule-section">
+        <div className="prose">
+          <MarkdownContent source={methodologySource} />
+        </div>
+      </CollapsibleSection>
     </DocsLayout>
   )
 }

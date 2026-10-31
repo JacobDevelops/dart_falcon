@@ -1,13 +1,16 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { DocsLayout } from '../../components/DocsLayout'
 import { ValueList } from '../../components/ValueList'
+import { Toc } from '../../components/Toc'
+import { CollapsibleSection } from '../../components/CollapsibleSection'
 import { breadcrumbs, seo } from '../../lib/seo'
+import { configKeyId } from '../../lib/headings'
 import configJson from '../../data/config-reference.json'
 
 export const Route = createFileRoute('/reference/configuration')({
   head: () =>
     seo({
-      title: 'falcon.json configuration reference: every key and default',
+      title: 'Config reference | Dart Falcon',
       description:
         'Every falcon.json key for the falcon Dart and Flutter linter, with its type, default, and accepted values, generated from the configuration schema.',
       path: '/reference/configuration',
@@ -35,7 +38,7 @@ const sections = [...new Set(config.map((key) => topLevel(key.path)))]
 function KeyEntry({ entry }: { entry: ConfigKey }) {
   const isRulePath = entry.path.includes('<rule>')
   return (
-    <div className="config-key" id={`key-${entry.path.replace(/[^a-z0-9]+/gi, '-')}`}>
+    <div className="config-key" id={configKeyId(entry.path)}>
       <div className="config-key-head">
         <code className="config-path">{entry.path}</code>
         <code className="config-type">{entry.type}</code>
@@ -62,14 +65,12 @@ function ConfigReference() {
   return (
     <DocsLayout
       aside={
-        <nav className="toc" aria-label="Config sections">
-          <p className="side-heading">Sections</p>
-          {sections.map((s) => (
-            <a key={s} href={`#sec-${s}`}>
-              {s}
-            </a>
-          ))}
-        </nav>
+        <Toc
+          items={sections.map((section) => ({
+            id: `sec-${section}`,
+            title: section,
+          }))}
+        />
       }
     >
       <div className="reference">
@@ -87,16 +88,13 @@ function ConfigReference() {
         </div>
 
         {sections.map((sec) => (
-          <section className="ref-section" id={`sec-${sec}`} key={sec}>
-            <h2>
-              <code>{sec}</code>
-            </h2>
+          <CollapsibleSection id={`sec-${sec}`} title={sec} key={sec} className="ref-section">
             {config
               .filter((k) => topLevel(k.path) === sec)
               .map((k) => (
                 <KeyEntry key={k.path} entry={k} />
               ))}
-          </section>
+          </CollapsibleSection>
         ))}
       </div>
     </DocsLayout>

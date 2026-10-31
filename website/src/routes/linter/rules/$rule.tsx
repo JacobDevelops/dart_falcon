@@ -1,11 +1,14 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { CodeBlock } from '../../../components/CodeBlock'
 import { DocsLayout } from '../../../components/DocsLayout'
-import { markdown } from '../../../components/DocsPage'
+import { MarkdownContent } from '../../../components/DocsPage'
+import { CollapsibleSection } from '../../../components/CollapsibleSection'
+import { Toc } from '../../../components/Toc'
+import { extractHeadings } from '../../../lib/headings'
 import { Tabs } from '../../../components/Tabs'
 import { DiagnosticFrame } from '../../../components/DiagnosticFrame'
 import { Described, RuleBadges, RuleRow } from '../../../components/RuleRow'
-import { groupLabel, type Rule, type RuleDiagnostic } from '../../../lib/rules'
+import { groupLabel, ruleGuidance, type Rule, type RuleDiagnostic } from '../../../lib/rules'
 import { getRuleDetail } from '../../../lib/server'
 import { breadcrumbs, seo, SITE_URL } from '../../../lib/seo'
 
@@ -17,16 +20,17 @@ export const Route = createFileRoute('/linter/rules/$rule')({
     const alias = rule.source.upstreamId ? ` (${rule.source.upstreamId})` : ''
     const path = `/linter/rules/${params.rule}`
     const group = groupLabel(rule.group)
-    const description = `${rule.description.replace(/`/g, '').replace(/\.?$/, '.')} A ${group.toLowerCase()} lint rule for Dart${rule.domains.includes('flutter') ? ' and Flutter' : ''} in falcon, with examples and configuration.`
+    const description = `${rule.name}: ${rule.description.replace(/`/g, '').replace(/\.?$/, '.')} ${group} lint rule for Dart${rule.domains.includes('flutter') ? ' and Flutter' : ''} in falcon.`
     return seo({
-      title: `${rule.name}${alias}: Dart lint rule | falcon`,
+      title: `${rule.name}${alias} | Dart Falcon`,
       description,
       path,
+      markdownPath: `${path}.md`,
       type: 'article',
       jsonLd: [
         breadcrumbs([
           ['Rules', '/linter/rules'],
-          [group, `/linter/rules#${rule.group}`],
+          [group, `/linter/groups/${rule.group}`],
           [rule.name, path],
         ]),
         {
@@ -45,10 +49,6 @@ export const Route = createFileRoute('/linter/rules/$rule')({
   component: RuleDetail,
 })
 
-function configSnippet(rule: Rule): string {
-  const section = rule.crossFile ? 'cross-file' : 'linter'
-  return JSON.stringify({ [section]: { rules: { [rule.group]: { [rule.name]: 'error' } } } }, null, 2)
-}
 
 function InvalidSingle({ rule }: { rule: Rule }) {
   const bad = rule.examples.bad
@@ -103,13 +103,20 @@ function InvalidCrossFile({ rule }: { rule: Rule }) {
 }
 
 function RuleDetail() {
-  const { rule, number, total, prev, next, related } = Route.useLoaderData()
-  const section = rule.crossFile ? 'cross-file' : 'lint'
+  const { rule, prev, next, related } = Route.useLoaderData()
+  const { configSnippet, suppression } = ruleGuidance(rule)
   const hasInvalid = !!rule.examples.bad || (rule.examples.crossFile?.length ?? 0) > 0
   const group = groupLabel(rule.group)
+  const toc = [
+    ...extractHeadings(rule.docs ?? ''),
+    ...(hasInvalid ? [{ id: 'invalid', title: 'Invalid' }] : []),
+    ...(rule.examples.good ? [{ id: 'valid', title: 'Valid' }] : []),
+    { id: 'configure', title: 'Configuration' },
+    ...(related.length ? [{ id: 'related', title: `More ${group.toLowerCase()} rules` }] : []),
+  ]
 
   return (
-    <DocsLayout>
+    <DocsLayout aside={<Toc items={toc} />}>
       <article className="rule-detail">
         <nav aria-label="Breadcrumb" className="crumbs">
           <ol>
@@ -117,7 +124,7 @@ function RuleDetail() {
               <Link to="/linter/rules">Rules</Link>
             </li>
             <li>
-              <Link to="/linter/rules" hash={rule.group}>
+              <Link to="/linter/groups/$group" params={{ group: rule.group }}>
                 {group}
               </Link>
             </li>
@@ -149,7 +156,7 @@ function RuleDetail() {
             <div>
               <dt>Group</dt>
               <dd>
-                <Link to="/linter/rules" hash={rule.group}>
+                <Link to="/linter/groups/$group" params={{ group: rule.group }}>
                   {group}
                 </Link>
               </dd>
@@ -158,7 +165,7 @@ function RuleDetail() {
               <dt>Path</dt>
               <dd>
                 <code>
-                  {section}/{rule.group}/{rule.name}
+                  {rule.crossFile ? 'cross-file' : 'lint'}/{rule.group}/{rule.name}
                 </code>
               </dd>
             </div>
@@ -177,7 +184,7 @@ function RuleDetail() {
                   {rule.domains.map((d, i) => (
                     <span key={d}>
                       {i > 0 ? ', ' : ''}
-                      <Link to="/linter/domains" hash={d}>
+                      <Link to="/linter/domains/$domain" params={{ domain: d }}>
                         {d}
                       </Link>
                     </span>
@@ -185,12 +192,6 @@ function RuleDetail() {
                 </dd>
               </div>
             ) : null}
-            <div>
-              <dt>Rule</dt>
-              <dd className="num">
-                {number} of {total}
-              </dd>
-            </div>
           </dl>
           <div className="rule-badges">
             <RuleBadges rule={rule} />
@@ -206,32 +207,24 @@ function RuleDetail() {
         ) : null}
 
         {rule.docs ? (
-          <div
-            className="prose rule-docs"
-            dangerouslySetInnerHTML={{ __html: markdown.parse(rule.docs, { async: false }) }}
-          />
+          <div className="prose rule-docs">
+            <MarkdownContent source={rule.docs} />
+          </div>
         ) : null}
 
         {hasInvalid ? (
-          <section className="rule-section example-invalid" aria-labelledby="invalid">
-            <h2 id="invalid">
-              <span className="mark-bad" aria-hidden="true" /> Invalid
-            </h2>
+          <CollapsibleSection id="invalid" title="Invalid" className="rule-section example-invalid">
             {(rule.examples.crossFile?.length ?? 0) > 0 ? <InvalidCrossFile rule={rule} /> : <InvalidSingle rule={rule} />}
-          </section>
+          </CollapsibleSection>
         ) : null}
 
         {rule.examples.good ? (
-          <section className="rule-section example-valid" aria-labelledby="valid">
-            <h2 id="valid">
-              <span className="mark-good" aria-hidden="true" /> Valid
-            </h2>
+          <CollapsibleSection id="valid" title="Valid" className="rule-section example-valid">
             <CodeBlock code={rule.examples.good} filename="example.dart" />
-          </section>
+          </CollapsibleSection>
         ) : null}
 
-        <section className="rule-section" aria-labelledby="configure">
-          <h2 id="configure">Configure {rule.name}</h2>
+        <CollapsibleSection id="configure" title={`Configure ${rule.name}`} className="rule-section">
           <p>
             Set its severity in <code>falcon.json</code>
             {rule.crossFile ? (
@@ -242,27 +235,24 @@ function RuleDetail() {
             ) : null}
             . See the <Link to="/docs/configuration">configuration guide</Link>.
           </p>
-          <CodeBlock code={configSnippet(rule)} lang="json" filename="falcon.json" />
-          <p>
-            Or silence one occurrence with a{' '}
-            <Link to="/docs/suppressions">suppression comment</Link>; the reason
-            is required.
-          </p>
+          <CodeBlock code={configSnippet} lang="json" filename="falcon.json" />
+          <p>{suppression.text}</p>
           <CodeBlock
-            code={`// falcon-ignore ${section}/${rule.group}/${rule.name}: <reason>`}
-            filename="example.dart"
+            code={suppression.code}
+            lang={suppression.lang}
+            filename={suppression.filename}
           />
-        </section>
+          <p>See the <Link to="/docs/suppressions">suppression guide</Link>.</p>
+        </CollapsibleSection>
 
         {related.length > 0 ? (
-          <section className="rule-section" aria-labelledby="related">
-            <h2 id="related">More {group.toLowerCase()} rules</h2>
+          <CollapsibleSection id="related" title={`More ${group.toLowerCase()} rules`} className="rule-section">
             <ul className="rule-list">
               {related.map((r) => (
                 <RuleRow key={r.name} rule={r} />
               ))}
             </ul>
-          </section>
+          </CollapsibleSection>
         ) : null}
 
         <nav className="pager" aria-label="Adjacent rules">

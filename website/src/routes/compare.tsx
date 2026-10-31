@@ -1,6 +1,8 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { DocsLayout } from '../components/DocsLayout'
+import { CollapsibleSection } from '../components/CollapsibleSection'
+import { Toc } from '../components/Toc'
 import { corpusLabel, formatSpeedup, headlineSummary, scenarioSummaries, unmeasuredTools, type ScenarioSummary } from '../lib/benchmarks'
 import { getCompareData } from '../lib/server'
 import { breadcrumbs, seo } from '../lib/seo'
@@ -16,7 +18,7 @@ const SOURCES = {
   serverPlugin: 'https://pub.dev/packages/analysis_server_plugin',
 }
 
-const FAQ: { q: string; a: string; link?: { to: '/docs/suppressions'; label: string } }[] = [
+const FAQ: { q: string; a: string; includeInSchema?: boolean; link?: { to: '/docs/suppressions'; label: string } }[] = [
   {
     q: 'Is falcon a replacement for dart analyze?',
     a: 'No, it complements it. dart analyze runs the full Dart analyzer, which type-checks your code and reports compile errors; keep it (or your IDE) for that. falcon runs lint rules, including the official Dart lints under their analyzer names, but it does not read // ignore: or // ignore_for_file: comments. It uses its own falcon-ignore comments, each with a required reason, so lint counts from the two tools can differ on the same code.',
@@ -25,6 +27,7 @@ const FAQ: { q: string; a: string; link?: { to: '/docs/suppressions'; label: str
   {
     q: 'Does falcon need the Dart SDK?',
     a: 'falcon parses Dart itself and never starts the Dart analyzer or analysis server. Rules that need SDK or package types need the Dart SDK installed and your dependencies resolved.',
+    includeInSchema: false,
   },
   {
     q: 'Can I migrate my analysis_options.yaml?',
@@ -33,6 +36,7 @@ const FAQ: { q: string; a: string; link?: { to: '/docs/suppressions'; label: str
   {
     q: 'Is falcon free?',
     a: 'Yes. falcon and every one of its rules are MIT licensed, with no seat or lines-of-code limits.',
+    includeInSchema: false,
   },
 ]
 
@@ -40,15 +44,15 @@ export const Route = createFileRoute('/compare')({
   loader: () => getCompareData(),
   head: ({ loaderData }) =>
     seo({
-      title: 'falcon vs dart analyze, DCM and custom_lint: Dart linter comparison',
-      description: `Compare Dart and Flutter linters: falcon (${loaderData?.coverage.total} free rules, Rust) against dart analyze, DCM and custom_lint on speed, rules, price, and configuration. Every competitor fact is sourced.`,
+      title: 'Compare Dart linters | Dart Falcon',
+      description: `Compare falcon with dart analyze, DCM and custom_lint: ${loaderData?.coverage.total ?? ''} free Dart lint rules, Flutter support, configuration and sourced benchmarks.`,
       path: '/compare',
       type: 'article',
       jsonLd: [
         breadcrumbs([['Compare', '/compare']]),
         {
           '@type': 'FAQPage',
-          mainEntity: FAQ.map(({ q, a }) => ({
+          mainEntity: FAQ.filter(({ includeInSchema }) => includeInSchema !== false).map(({ q, a }) => ({
             '@type': 'Question',
             name: q,
             acceptedAnswer: { '@type': 'Answer', text: a },
@@ -68,6 +72,15 @@ function Cite({ href, n }: { href: string; n: number }) {
     </sup>
   )
 }
+
+const toc = [
+  { id: 'performance-h', title: 'Measured performance' },
+  { id: 'comparison-h', title: 'At a glance' },
+  { id: 'alt-h', title: 'When to pick which' },
+  { id: 'faq-h', title: 'Questions' },
+  { id: 'src-h', title: 'Sources' },
+]
+const tocWithoutPerformance = toc.slice(1)
 
 function Compare() {
   const { coverage, bench } = Route.useLoaderData()
@@ -135,98 +148,102 @@ function Compare() {
   ]
 
   return (
-    <DocsLayout>
+    <DocsLayout aside={<Toc items={summaries.length ? toc : tocWithoutPerformance} />}>
       <header className="page-head">
-        <h1>falcon vs dart analyze, DCM and custom_lint</h1>
+        <h1>Dart linter comparison: falcon, dart analyze, DCM and custom_lint</h1>
         <p className="lede">
-          How falcon compares with the other ways to lint Dart and Flutter code.
-          falcon's numbers come from its own rule catalog and{' '}
-          <Link to="/benchmarks">benchmarks</Link>; every other claim links to
-          its public source.
+          Looking for a DCM alternative or a custom_lint alternative? Compare
+          falcon as a Dart linter and Flutter linter, including where a{' '}
+          <code>dart analyze</code> alternative for linting still needs the
+          analyzer for type checking. falcon's numbers come from its rule catalog
+          and <Link to="/benchmarks">benchmarks</Link>; other claims link to public sources.
           {` ${headlineSummary(bench)}`}
         </p>
       </header>
 
       {summaries.length > 0 ? (
+        <CollapsibleSection id="performance-h" title="Measured performance" className="rule-section">
+          <div className="table-scroll">
+            <table className="compare">
+              <caption>Measured performance; geometric-mean time ratios relative to falcon</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Measurement</th>
+                  {benchmarkTools.map((tool) => <th key={tool.id} scope="col">{tool.name}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {summaries.flatMap((s) => [
+                  <tr key={`${s.scenario.id}-speed`}>
+                    <th scope="row">Speed, {s.scenario.title}</th>
+                    {benchmarkTools.map((tool) => (
+                      <td key={tool.id}>
+                        {relativeSpeed(s, tool.id)}
+                        {s.runs.flatMap((run) =>
+                          unmeasuredTools(run).filter((entry) => entry.tool === tool.id).map((entry) => (
+                            <small key={run.corpus.id} className="scope">
+                              {corpusLabel(run.corpus)}: not measured — {entry.reason}.
+                            </small>
+                          )),
+                        )}
+                      </td>
+                    ))}
+                  </tr>,
+                  <tr key={`${s.scenario.id}-rss`}>
+                    <th scope="row">Largest-process peak RSS range, {s.scenario.title}</th>
+                    {benchmarkTools.map((tool) => (
+                      <td key={tool.id}>{rssRange(s, tool.id)}</td>
+                    ))}
+                  </tr>,
+                ])}
+              </tbody>
+            </table>
+          </div>
+        </CollapsibleSection>
+      ) : null}
+
+      <CollapsibleSection id="comparison-h" title="At a glance" className="rule-section">
         <div className="table-scroll">
           <table className="compare">
-            <caption>Measured performance; geometric-mean time ratios relative to falcon</caption>
+            <caption>Dart and Flutter linters at a glance</caption>
             <thead>
               <tr>
-                <th scope="col">Measurement</th>
-                {benchmarkTools.map((tool) => <th key={tool.id} scope="col">{tool.name}</th>)}
+                <th scope="col">
+                  <span className="visually-hidden">Aspect</span>
+                </th>
+                <th scope="col" className="is-falcon">falcon</th>
+                <th scope="col">dart analyze</th>
+                <th scope="col">DCM</th>
+                <th scope="col">custom_lint</th>
               </tr>
             </thead>
             <tbody>
-              {summaries.flatMap((s) => [
-                <tr key={`${s.scenario.id}-speed`}>
-                  <th scope="row">Speed, {s.scenario.title}</th>
-                  {benchmarkTools.map((tool) => (
-                    <td key={tool.id}>
-                      {relativeSpeed(s, tool.id)}
-                      {s.runs.flatMap((run) =>
-                        unmeasuredTools(run).filter((entry) => entry.tool === tool.id).map((entry) => (
-                          <small key={run.corpus.id} className="scope">
-                            {corpusLabel(run.corpus)}: not measured — {entry.reason}.
-                          </small>
-                        )),
-                      )}
+              {rows.map(([label, ...cells]) => (
+                <tr key={label}>
+                  <th scope="row">{label}</th>
+                  {cells.map((c, i) => (
+                    <td key={i} className={i === 0 ? 'is-falcon' : undefined}>
+                      {c}
                     </td>
                   ))}
-                </tr>,
-                <tr key={`${s.scenario.id}-rss`}>
-                  <th scope="row">Largest-process peak RSS range, {s.scenario.title}</th>
-                  {benchmarkTools.map((tool) => (
-                    <td key={tool.id}>{rssRange(s, tool.id)}</td>
-                  ))}
-                </tr>,
-              ])}
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
-      ) : null}
+        {summaries.length > 0 ? (
+          <p className="note">
+            Each timing is a mean of repeated runs. Speed cells use the geometric
+            mean of per-corpus time ratios against falcon on the matched corpora
+            shown; RSS cells show the range across measured corpora only. DCL is
+            the DCL-family speedup baseline in the{' '}
+            <Link to="/benchmarks">per-corpus charts and methodology</Link>, which
+            also list the machine, versions, and commands.
+          </p>
+        ) : null}
+      </CollapsibleSection>
 
-      <div className="table-scroll">
-        <table className="compare">
-          <caption>Dart and Flutter linters at a glance</caption>
-          <thead>
-            <tr>
-              <th scope="col">
-                <span className="visually-hidden">Aspect</span>
-              </th>
-              <th scope="col" className="is-falcon">falcon</th>
-              <th scope="col">dart analyze</th>
-              <th scope="col">DCM</th>
-              <th scope="col">custom_lint</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(([label, ...cells]) => (
-              <tr key={label}>
-                <th scope="row">{label}</th>
-                {cells.map((c, i) => (
-                  <td key={i} className={i === 0 ? 'is-falcon' : undefined}>
-                    {c}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {summaries.length > 0 ? (
-        <p className="note">
-          Each timing is a mean of repeated runs. Speed cells use the geometric
-          mean of per-corpus time ratios against falcon on the matched corpora
-          shown; RSS cells show the range across measured corpora only. DCL is
-          the DCL-family speedup baseline in the{' '}
-          <Link to="/benchmarks">per-corpus charts and methodology</Link>, which
-          also list the machine, versions, and commands.
-        </p>
-      ) : null}
-
-      <section className="rule-section" aria-labelledby="alt-h">
-        <h2 id="alt-h">When to pick which</h2>
+      <CollapsibleSection id="alt-h" title="When to pick which" className="rule-section">
         <h3>A dart analyze alternative for lint rules</h3>
         <p>
           Keep <code>dart analyze</code> for type checking and compile errors,
@@ -251,10 +268,9 @@ function Compare() {
           <Link to="/linter/domains">framework domains</Link> cover{' '}
           {coverage.domains.map((d) => d.name).join(', ')} out of the box.
         </p>
-      </section>
+      </CollapsibleSection>
 
-      <section className="rule-section faq" aria-labelledby="faq-h">
-        <h2 id="faq-h">Questions</h2>
+      <CollapsibleSection id="faq-h" title="Questions" className="rule-section faq">
         {FAQ.map(({ q, a, link }) => (
           <details key={q}>
             <summary>{q}</summary>
@@ -269,10 +285,9 @@ function Compare() {
             </p>
           </details>
         ))}
-      </section>
+      </CollapsibleSection>
 
-      <section className="rule-section" aria-labelledby="src-h">
-        <h2 id="src-h">Sources</h2>
+      <CollapsibleSection id="src-h" title="Sources" className="rule-section">
         <p className="note">Competitor details checked on October 21, 2026.</p>
         <ol className="sources-list">
           <li><a href={SOURCES.dartAnalyze}>dart.dev: dart analyze</a></li>
@@ -283,7 +298,7 @@ function Compare() {
           <li><a href={SOURCES.customLint}>GitHub: invertase/dart_custom_lint</a></li>
           <li><a href={SOURCES.dartAnalysis}>dart.dev: Customizing static analysis</a></li>
         </ol>
-      </section>
+      </CollapsibleSection>
     </DocsLayout>
   )
 }

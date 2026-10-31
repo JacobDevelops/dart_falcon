@@ -1,8 +1,8 @@
 import { createServerFn } from '@tanstack/react-start'
-import { notFound } from '@tanstack/react-router'
+import { notFound, redirect } from '@tanstack/react-router'
 import benchmarksJson from '../data/benchmarks.json'
 import type { BenchCorpus, BenchResult, Benchmarks, BenchView } from './benchmarks'
-import { coverage, domains, getRule, rules, summaries } from './rules.data'
+import { coverage, domains, getRule, resolveRule, rules, summaries } from './rules.data'
 
 // Route loaders call these; the Start compiler replaces each handler with an
 // RPC stub in the client build, which keeps rules.json out of the bundle.
@@ -90,6 +90,8 @@ export const getHomeData = createServerFn({ method: 'GET' }).handler(() => {
   }
 })
 
+export const getCatalogCoverage = createServerFn({ method: 'GET' }).handler(() => coverage())
+
 export const getRulesIndex = createServerFn({ method: 'GET' }).handler(() => ({
   rules: summaries,
   coverage: coverage(),
@@ -105,15 +107,16 @@ export const getDomains = createServerFn({ method: 'GET' }).handler(() =>
 export const getRuleDetail = createServerFn({ method: 'GET' })
   .validator((name: string) => name)
   .handler(({ data: name }) => {
-    const rule = getRule(name)
+    const rule = resolveRule(name)
     if (!rule) throw notFound()
+    if (rule.name !== name) {
+      throw redirect({ to: '/linter/rules/$rule', params: { rule: rule.name }, statusCode: 301 })
+    }
     const index = rules.indexOf(rule)
     const group = summaries.filter((s) => s.group === rule.group)
     const at = group.findIndex((s) => s.name === rule.name)
     return {
       rule,
-      number: index + 1,
-      total: rules.length,
       prev: summaries[index - 1] ?? null,
       next: summaries[index + 1] ?? null,
       related: [...group.slice(at + 1), ...group.slice(0, at)].slice(0, 8),

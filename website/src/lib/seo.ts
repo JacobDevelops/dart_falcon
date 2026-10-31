@@ -10,10 +10,11 @@ interface PageSeo {
   type?: 'website' | 'article'
   jsonLd?: object[]
   noindex?: boolean
+  markdownPath?: string
 }
 
 /** Per-route `head()` payload: title, description, canonical, OG/Twitter, JSON-LD. */
-export function seo({ title, description, path, type = 'website', jsonLd = [], noindex }: PageSeo) {
+export function seo({ title, description, path, type = 'website', jsonLd = [], noindex, markdownPath }: PageSeo) {
   const url = `${SITE_URL}${path}`
   return {
     meta: [
@@ -33,7 +34,10 @@ export function seo({ title, description, path, type = 'website', jsonLd = [], n
       { name: 'twitter:description', content: description },
       { name: 'twitter:image', content: OG_IMAGE },
     ],
-    links: noindex ? [] : [{ rel: 'canonical', href: url }],
+    links: [
+      ...(noindex ? [] : [{ rel: 'canonical', href: url }]),
+      ...(markdownPath ? [{ rel: 'alternate', type: 'text/markdown', href: `${SITE_URL}${markdownPath}` }] : []),
+    ],
     scripts: jsonLd.map((data) => ({
       type: 'application/ld+json',
       // `<` escaped so rule text can never close the script element.
@@ -61,6 +65,16 @@ export const SOFTWARE_APPLICATION = {
   description:
     'A fast, standalone linter and language server for Dart and Flutter, written in Rust.',
   url: SITE_URL,
+  sameAs: [REPO_URL, 'https://pub.dev/packages/falcon'],
+  author: { '@type': 'Person', name: 'Jacob Sanderson', url: 'https://github.com/JacobDevelops' },
+  publisher: { '@type': 'Person', name: 'Jacob Sanderson', url: 'https://github.com/JacobDevelops' },
+  featureList: [
+    'Dart and Flutter lint rules',
+    'Cross-file analysis',
+    'Language Server Protocol support',
+    'JSON configuration and analyzer configuration migration',
+    'Reason-required inline suppressions',
+  ],
   applicationCategory: 'DeveloperApplication',
   applicationSubCategory: 'Linter',
   operatingSystem: 'Linux, macOS',
@@ -69,4 +83,13 @@ export const SOFTWARE_APPLICATION = {
   downloadUrl: `${REPO_URL}/releases/latest`,
   programmingLanguage: 'Rust',
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+}
+
+export const WEBSITE = {
+  '@type': 'WebSite',
+  name: 'Dart Falcon',
+  alternateName: ['falcon', 'dart_falcon'],
+  url: SITE_URL,
+  description: 'Documentation, lint rules, and benchmarks for the falcon Dart and Flutter linter.',
+  inLanguage: 'en',
 }

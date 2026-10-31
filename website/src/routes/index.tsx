@@ -9,17 +9,37 @@ import { scenarioSummaries, summaryText } from '../lib/benchmarks'
 import { highlightDart } from '../lib/highlight'
 import { REPO_URL } from '../lib/rules'
 import { getHomeData } from '../lib/server'
-import { seo, SOFTWARE_APPLICATION } from '../lib/seo'
+import { seo, SOFTWARE_APPLICATION, WEBSITE } from '../lib/seo'
 import cli from '../data/cli.json'
+
+const FAQ = [
+  { q: 'What is falcon?', a: 'falcon is a free Dart linter and Flutter linter written in Rust. It runs built-in Dart lint rules and cross-file checks from a standalone binary, with a language server for editors.' },
+  { q: 'How is falcon different from dart analyze, DCM, and custom_lint?', a: 'falcon runs outside the Dart analyzer. It is a dart analyze alternative for linting, not type checking: keep dart analyze for compile errors. As a DCM alternative it offers MIT-licensed lint rules without seat or line limits. As a custom_lint alternative it provides built-in framework rules rather than an analyzer plugin framework.' },
+  { q: 'Does falcon need the Dart SDK?', a: 'falcon parses Dart itself without starting the Dart analyzer. Rules that need SDK or package types require the Dart SDK and resolved dependencies. Installing through dart pub also requires Dart; release binaries do not.' },
+  { q: 'Is falcon free?', a: 'Yes. falcon and all its rules are MIT licensed, with no seat or lines-of-code limits.' },
+  { q: 'How do I install falcon?', a: 'On Linux x86_64 or ARM64 and macOS Apple Silicon, run dart pub global activate falcon, add the pub cache bin directory to PATH, then run falcon check . in your project. Release binaries and source installation are also available; Windows and Intel Mac binaries are not currently distributed.' },
+  { q: 'Which editors work with falcon?', a: 'falcon provides a Language Server Protocol server, VS Code and Zed extensions, and documented Neovim configuration. Install the falcon binary on PATH before connecting your editor.' },
+]
 
 export const Route = createFileRoute('/')({
   loader: () => getHomeData(),
   head: ({ loaderData }) =>
     seo({
-      title: 'falcon: the fast Dart & Flutter linter, written in Rust',
-      description: `falcon is a fast, standalone Dart and Flutter linter and language server written in Rust. ${loaderData?.coverage.total} lint rules including the official Dart lints, cross-file checks, one falcon.json. A free dart analyze, DCM and custom_lint alternative.`,
+      title: 'Dart Falcon: the fast Dart linter',
+      description: `A free Dart linter and Flutter linter with ${loaderData?.coverage.total ?? ''} Dart lint rules, cross-file checks and editor support. Compare falcon with dart analyze, DCM and custom_lint.`,
       path: '/',
-      jsonLd: [{ ...SOFTWARE_APPLICATION, softwareVersion: cli.version }],
+      jsonLd: [
+        { ...SOFTWARE_APPLICATION, softwareVersion: cli.version },
+        WEBSITE,
+        {
+          '@type': 'FAQPage',
+          mainEntity: FAQ.map(({ q, a }) => ({
+            '@type': 'Question',
+            name: q,
+            acceptedAnswer: { '@type': 'Answer', text: a },
+          })),
+        },
+      ],
     }),
   component: Home,
 })
@@ -57,12 +77,12 @@ function Home() {
         <div className="wrap hero-grid">
           <div className="hero-copy">
             <h1 id="hero-h">
-              The fast linter for <span className="nowrap">Dart &amp; Flutter</span>
+              The fast Dart linter <span className="nowrap">&amp; Flutter linter</span>
             </h1>
             <p className="lede">
-              falcon lints Dart and Flutter projects with {coverage.total} rules
-              from a single Rust binary. It parses Dart itself, so it never boots
-              the Dart analyzer, and it speaks LSP for your editor.
+              falcon runs {coverage.total} Dart lint rules for Dart and Flutter
+              projects from a single Rust binary. It parses Dart itself, so it never
+              boots the Dart analyzer, and it speaks LSP for your editor.
             </p>
             <CopyCommand command="dart pub global activate falcon" />
             <div className="hero-cta">
@@ -141,7 +161,7 @@ function Home() {
             <ol className="ledger" aria-label="Rules per group">
               {coverage.groups.map((g) => (
                 <li key={g.id}>
-                  <Link to="/linter/rules" hash={g.id} className="ledger-name">
+                  <Link to="/linter/groups/$group" params={{ group: g.id }} className="ledger-name">
                     {g.label}
                   </Link>
                   <span className="ledger-bar" aria-hidden="true">
@@ -156,7 +176,7 @@ function Home() {
               <ul className="chips">
                 {coverage.domains.map((d) => (
                   <li key={d.name}>
-                    <Link to="/linter/domains" hash={d.name}>
+                    <Link to="/linter/domains/$domain" params={{ domain: d.name }}>
                       {d.name} <span className="num">{d.count}</span>
                     </Link>
                   </li>
@@ -203,6 +223,27 @@ function Home() {
             <Link to="/docs/installation" className="more-link">
               All platforms and editor extensions <Icon name="arrow" />
             </Link>
+          </div>
+        </div>
+      </section>
+
+      <section className="section section-band" aria-labelledby="home-faq-h">
+        <div className="wrap">
+          <div className="rule-section faq">
+            <h2 id="home-faq-h">Dart and Flutter linting questions</h2>
+            {FAQ.map(({ q, a }) => (
+              <details key={q}>
+                <summary>{q}</summary>
+                <p>{a}</p>
+              </details>
+            ))}
+            <p>
+              Explore <Link to="/linter/domains/$domain" params={{ domain: 'flutter' }}>Flutter lint rules</Link>,{' '}
+              <Link to="/linter/domains/$domain" params={{ domain: 'riverpod' }}>Riverpod rules</Link>,{' '}
+              <Link to="/linter/domains/$domain" params={{ domain: 'bloc' }}>Bloc rules</Link>, or the{' '}
+              <Link to="/linter/rules">complete Dart lint rules catalog</Link>.{' '}
+              <Link to="/compare">Compare Dart linters</Link> before migrating.
+            </p>
           </div>
         </div>
       </section>

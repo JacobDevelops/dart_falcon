@@ -63,6 +63,7 @@ export interface RuleSummary {
   crossFile: boolean
   domains: string[]
   upstreamId: string | null
+  sourceKind: string
 }
 
 export interface GroupMeta {
@@ -121,6 +122,21 @@ export const GROUPS: GroupMeta[] = [
   },
 ]
 
+export const DOMAIN_BLURBS: Record<string, string> = {
+  flutter: 'Widget construction, lifecycle, and Flutter framework APIs.',
+  test: 'Dart and Flutter test suites: assertions, matchers, and test structure.',
+  bloc: 'Blocs and Cubits from package:bloc: events, states, and emit discipline.',
+  riverpod: 'Providers and refs from package:riverpod and flutter_riverpod.',
+  provider: 'package:provider: reading, watching, and disposing providers.',
+  flutter_hooks: 'Hook rules for package:flutter_hooks.',
+  equatable: 'Value equality with package:equatable.',
+}
+
+export function domainLabel(name: string): string {
+  if (name === 'flutter_hooks') return 'Flutter Hooks'
+  return name.charAt(0).toUpperCase() + name.slice(1)
+}
+
 export function groupLabel(id: string): string {
   return GROUPS.find((g) => g.id === id)?.label ?? id
 }
@@ -134,5 +150,30 @@ export function summarize(rule: Rule): RuleSummary {
     crossFile: rule.crossFile,
     domains: rule.domains,
     upstreamId: rule.source.upstreamId,
+    sourceKind: rule.source.kind,
+  }
+}
+
+export function ruleGuidance(rule: Rule) {
+  const section = rule.crossFile ? 'cross-file' : 'linter'
+  const config = (severity: 'error' | 'off') =>
+    JSON.stringify({ [section]: { rules: { [rule.group]: { [rule.name]: severity } } } }, null, 2)
+  const pubspec = rule.diagnostics.length > 0 &&
+    rule.diagnostics.every(({ file }) => /(^|\/)pubspec\.yaml$/.test(file ?? ''))
+  return {
+    configSnippet: config('error'),
+    suppression: pubspec ? {
+      text: 'These diagnostics are reported on pubspec.yaml and cannot be suppressed with source comments. Disable this rule in falcon.json when necessary:',
+      code: config('off'),
+      lang: 'json',
+      filename: 'falcon.json',
+    } : {
+      text: rule.name === 'unused-files'
+        ? 'Use a file-wide suppression in the reported Dart file. A reason is required:'
+        : 'Place this comment above the affected line. A reason is required:',
+      code: `// falcon-ignore${rule.name === 'unused-files' ? '-all' : ''} ${rule.crossFile ? 'cross-file' : 'lint'}/${rule.group}/${rule.name}: explain why this is intentional`,
+      lang: 'dart',
+      filename: 'example.dart',
+    },
   }
 }
