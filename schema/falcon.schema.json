@@ -845,6 +845,12 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
+                "prefer-async-value-when": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-non-ascii-symbols": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
                 "prefer-void-callback": {
                   "$ref": "#/definitions/ruleWithoutOptions"
                 },
@@ -2663,6 +2669,12 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
+                "prefer-async-value-when": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
+                "avoid-non-ascii-symbols": {
+                  "$ref": "#/definitions/ruleWithoutOptions"
+                },
                 "prefer-void-callback": {
                   "$ref": "#/definitions/ruleWithoutOptions"
                 },

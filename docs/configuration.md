@@ -7,7 +7,7 @@ falcon reads `falcon.json`. Discovery order (first match wins):
 3. `~/.falcon.json`
 
 If no config is found, falcon enables its own recommended set: 215 recommended
-rules out of 536 shipped rules, at their default severity (warning), chosen independently of upstream presets.
+rules out of 538 shipped rules, at their default severity (warning), chosen independently of upstream presets.
 
 A config that **is** found but fails to load is a hard **error**: falcon prints
 a message and exits non-zero rather than silently falling back to defaults. This

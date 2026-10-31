@@ -19,22 +19,9 @@ style | suspicious`.
 | Source | remaining |
 |---|---:|
 | Cross-file additions | 8 |
-| Additional rules | 3 |
-| **Total** | **11** |
+| **Total** | **8** |
 
 Counts reflect remaining checklist rows.
-
-Additional rules are planned rows from outside the DCM catalog; their paywall column reads `n/a`. Requirements folded into existing rows are not counted again.
-
-## Remaining additional rules (3)
-
-These rules come from outside the DCM catalog.
-
-| rule | falcon group | analysis | paywall | description |
-|---|---|---|---|---|
-| `avoid-non-ascii-symbols` | style | S | n/a | Opt-in warning for non-ASCII symbols. |
-| `allow-top-level-test-helpers` | suspicious | S | n/a | Opt-in convention check for top-level helpers in test files. |
-| `prefer-async-value-when` | style | LT | n/a | Optional style preference for AsyncValue.when. |
 
 ## Planned cross-file rules (8)
 

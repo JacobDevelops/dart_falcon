@@ -4,6 +4,8 @@ use crate::meta::{Domain, RuleSource};
 
 crate::declare_rules! {
     Style;
+    prefer_async_value_when::PreferAsyncValueWhen => ("prefer-async-value-when", resolved, Some(Domain::Riverpod), false, RuleSource::Falcon);
+    avoid_non_ascii_symbols::AvoidNonAsciiSymbols => ("avoid-non-ascii-symbols", file, None, false, RuleSource::Falcon);
     prefer_void_callback::PreferVoidCallback => ("prefer-void-callback", file, Some(Domain::Flutter), false, RuleSource::Falcon);
     avoid_wrapping_in_padding::AvoidWrappingInPadding => ("avoid-wrapping-in-padding", resolved, Some(Domain::Flutter), false, RuleSource::Falcon);
     prefer_sized_box_square::PreferSizedBoxSquare => ("prefer-sized-box-square", resolved, Some(Domain::Flutter), false, RuleSource::Falcon);

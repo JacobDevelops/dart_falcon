@@ -22345,6 +22345,136 @@
     ]
   },
   {
+    "name": "avoid-non-ascii-symbols",
+    "group": "style",
+    "domains": [],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Flags non-ASCII characters written literally in strings, including raw and triple-quoted strings.",
+    "docs": "Flags non-ASCII characters written literally in strings, including raw and\ntriple-quoted strings. Each adjacent literal is checked independently.\n\nUnicode escapes are accepted. Interpolation expressions are excluded, while\nnested string literals are checked on their own.",
+    "examples": {
+      "bad": "void example(String name) {\n  final accented = 'café';\n  final emoji = \"hello 😀\";\n  final cjk = '你好';\n  final interpolated = 'héllo $name';\n  final braced = '${name} voilà';\n  final tripleSingle = '''résumé''';\n  final tripleDouble = \"\"\"日本語\"\"\";\n  final rawSingle = r'café\\n';\n  final rawDouble = r\"😀 $name\";\n  final rawTriple = r'''中文''';\n  final adjacent = 'ascii' 'é' \"😀\";\n  final nested = 'outer ${\"café\"}';\n  final multiple = '${name} x ${name} é';\n  final adjacentInterpolation = 'ascii' '${name}' 'é';\n  final both = 'é ${\"😀\"} à';\n  final multiline =  '''\n  café\n  ''';\n}",
+      "good": "void example(String name) {\n  // café 😀 日本語 are permitted in comments.\n  final ascii = 'hello';\n  final doubleQuoted = \"ASCII only\";\n  final unicodeEscape = '\\u00e9';\n  final unicodeBraceEscape = '\\u{1F600}';\n  final escapedInterpolation = '\\$name';\n  final interpolated = 'hello $name';\n  final braced = 'hello ${name.toUpperCase()}';\n  final expressionComment = 'hello ${name /* café */}';\n  final closingBrace = 'hello ${\"}\" /* café */}';\n  final openingBrace = 'hello ${\"{\" /* café */}';\n  final commentBrace = 'hello ${name /* } café */}';\n  final multiple = '${name} ${name /* café */}';\n  final adjacentInterpolation = 'prefix' '${name /* café */}';\n  final nestedEscape = 'hello ${\"\\u00e9\"}';\n  final raw = r'\\u00e9 $name';\n  final triple = '''ASCII\nonly''';\n  final adjacent = 'hello' \" world\" r'\\n';\n}",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 2,
+        "column": 20,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 3,
+        "column": 17,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 4,
+        "column": 15,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 5,
+        "column": 24,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 6,
+        "column": 18,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 7,
+        "column": 24,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 8,
+        "column": 24,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 9,
+        "column": 21,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 10,
+        "column": 21,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 11,
+        "column": 21,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 12,
+        "column": 28,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 12,
+        "column": 32,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 13,
+        "column": 27,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 14,
+        "column": 20,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 15,
+        "column": 51,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 16,
+        "column": 16,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 16,
+        "column": 21,
+        "file": null
+      },
+      {
+        "message": "Replace non-ASCII characters in this string with escapes or move it to localized resources.",
+        "line": 17,
+        "column": 22,
+        "file": null
+      }
+    ]
+  },
+  {
     "name": "avoid-non-null-assertion",
     "group": "style",
     "domains": [],
@@ -29555,6 +29685,126 @@
         "message": "Use `AsyncCallback` instead of `Future<void> Function()`.",
         "line": 14,
         "column": 3,
+        "file": null
+      }
+    ]
+  },
+  {
+    "name": "prefer-async-value-when",
+    "group": "style",
+    "domains": [
+      "riverpod"
+    ],
+    "recommended": false,
+    "crossFile": false,
+    "source": {
+      "kind": "Falcon",
+      "label": "Falcon",
+      "upstreamId": null,
+      "upstreamUrl": null
+    },
+    "description": "Prefer `AsyncValue.when` to manual loading, error, and data dispatch.",
+    "docs": "Prefer `AsyncValue.when` to manual loading, error, and data dispatch.\n\nReports once at the head of an if/else-if statement, collection-if element,\nor conditional-expression chain checking at least two distinct states of the\nsame resolved Riverpod value, including bounded type parameters.\nConditions must be individual state getters or type tests, optionally negated;\ncompound conditions, isolated checks, and switch patterns are left alone.\nNo fix is offered because `when` has different refresh/loading semantics.",
+    "examples": {
+      "bad": "import 'package:flutter_riverpod/flutter_riverpod.dart';\nimport 'package:hooks_riverpod/hooks_riverpod.dart' as hooks;\n\nString getters(AsyncValue<int> v) {\n  if (v.isLoading) {\n    return 'loading';\n  } else if (v.hasError) {\n    return 'error';\n  } else {\n    return 'data';\n  }\n}\nString ternary(AsyncValue<int> v) =>\n    v.isLoading ? 'loading' : v.hasError ? 'error' : 'data';\nString types(AsyncValue<int> v) {\n  if (v is AsyncLoading<int>) {\n    return 'loading';\n  } else if (v is AsyncError<int>) {\n    return 'error';\n  }\n  return 'data';\n}\nString negated(hooks.AsyncValue<int> v) {\n  if (!v.hasValue) {\n    return 'empty';\n  } else if (v.hasError) {\n    return 'error';\n  }\n  return 'data';\n}\nclass Screen {\n  final AsyncValue<int> value;\n  Screen(this.value);\n  String render() {\n    if (this.value.isLoading) {\n      return 'loading';\n    } else if (value.hasError) {\n      return 'error';\n    } else if (value.hasValue) {\n      return 'data';\n    }\n    return 'empty';\n  }\n}\nString dataTest(AsyncValue<int> v) =>\n    v is AsyncData<int> ? 'data' : v is AsyncLoading<int> ? 'loading' : 'error';\nclass Holder<T> {\n  final AsyncValue<T> value;\n  Holder(this.value);\n}\nString genericField(Holder<int> holder) =>\n    holder.value.isLoading ? 'loading' : holder.value.hasError ? 'error' : 'data';\nclass GenericScreen<T> {\n  final AsyncValue<T> value;\n  GenericScreen(this.value);\n  String render() =>\n      value.isLoading ? 'loading' : value.hasError ? 'error' : 'data';\n}\nclass State<T> {\n  final T widget;\n  State(this.widget);\n}\nclass GenericState extends State<Holder<int>> {\n  GenericState(super.widget);\n  String render() =>\n      widget.value.isLoading ? 'loading' : widget.value.hasError ? 'error' : 'data';\n}\nList<String> collection(AsyncValue<int> v) => [\n  if (v.isLoading) 'loading' else if (v.hasError) 'error' else 'data',\n];\nMap<String, String> mapCollection(AsyncValue<int> v) => {\n  if (v.isLoading) 'state': 'loading' else if (v.hasError) 'state': 'error' else 'state': 'data',\n};\nString bounded<T extends AsyncValue<int>>(T v) =>\n    v.isLoading ? 'loading' : v.hasError ? 'error' : 'data';\nSet<String> nestedCollection(AsyncValue<int> v) => {\n  for (final i in [1]) if (v.isLoading) 'loading' else if (v.hasError) 'error' else 'data',\n};\nList<String> spreadCollection(AsyncValue<int> v) => [\n  ...[if (v.isLoading) 'loading' else if (v.hasError) 'error' else 'data'],\n];\nString indirectBound<T extends AsyncValue<int>, U extends T>(U v) =>\n    v.isLoading ? 'loading' : v.hasError ? 'error' : 'data';\nString promotedBound<T extends AsyncValue<int>?>(T v) {\n  if (v != null) {\n    return v.isLoading ? 'loading' : v.hasError ? 'error' : 'data';\n  }\n  return 'absent';\n}",
+      "good": "import 'package:flutter_riverpod/flutter_riverpod.dart' as rp;\n\nString whenCall(rp.AsyncValue<int> v) => v.when(\n  loading: () => 'loading', error: (error, stack) => 'error', data: (value) => 'data');\nObject patterns(rp.AsyncValue<int> v) => switch (v) {\n  rp.AsyncData(:final value) => value,\n  rp.AsyncError() => 'error',\n  _ => 'loading',\n};\nvoid isolated(rp.AsyncValue<int> v) {\n  if (v.isLoading) return;\n}\nString different(rp.AsyncValue<int> a, rp.AsyncValue<int> b) {\n  if (a.isLoading) return 'loading';\n  else if (b.hasError) return 'error';\n  return 'data';\n}\nclass AsyncValue {\n  bool get isLoading => false;\n  bool get hasError => false;\n}\nString lookalike(AsyncValue v) => v.isLoading ? 'loading' : v.hasError ? 'error' : 'data';\nclass Flags {\n  bool get busy => false;\n  bool get failed => false;\n}\nString unrelated(Flags v) => v.busy ? 'loading' : v.failed ? 'error' : 'data';\nString compound(rp.AsyncValue<int> v, bool ready) {\n  if (v.isLoading && ready) return 'loading';\n  else if (v.hasError) return 'error';\n  return 'data';\n}\nString repeated(rp.AsyncValue<int> v) => v.isLoading ? 'one' : !v.isLoading ? 'two' : 'three';\nString unconfirmed(dynamic v) => v.isLoading ? 'loading' : v.hasError ? 'error' : 'data';\nString mixed(rp.AsyncValue<int> v, dynamic other) {\n  if (v.isLoading) return 'loading';\n  else if (v.hasError) return 'error';\n  else if (other.hasValue) return 'other';\n  return 'data';\n}\nclass Holder<T> {\n  final rp.AsyncValue<T> value;\n  Holder(this.value);\n}\nString genericDifferent(Holder<int> first, Holder<int> second) =>\n    first.value.isLoading ? 'loading' : second.value.hasError ? 'error' : 'data';\nString unrelatedHead(rp.AsyncValue<int> v, bool flag) {\n  if (flag) return 'other';\n  else if (v.isLoading) return 'loading';\n  else if (v.hasError) return 'error';\n  return 'data';\n}\nString compoundEquality(rp.AsyncValue<int>? v) =>\n    v?.isLoading == true ? 'loading' : v?.hasError == true ? 'error' : 'data';\nString caseCondition(rp.AsyncValue<int> v) {\n  if (v case rp.AsyncLoading<int>()) return 'loading';\n  else if (v.hasError) return 'error';\n  return 'data';\n}\nList<String> isolatedCollection(rp.AsyncValue<int> v) => [\n  if (v.isLoading) 'loading',\n];\nMap<String, String> differentCollection(rp.AsyncValue<int> a, rp.AsyncValue<int> b) => {\n  if (a.isLoading) 'state': 'loading' else if (b.hasError) 'state': 'error',\n};\nList<String> caseCollection(rp.AsyncValue<int> v) => [\n  if (v case rp.AsyncLoading<int>()) 'loading' else if (v.hasError) 'error',\n];\nList<String> unrelatedCollectionHead(rp.AsyncValue<int> v, bool flag) => [\n  if (flag) 'other' else if (v.isLoading) 'loading' else if (v.hasError) 'error',\n];\nList<String> collectionCaseTail(rp.AsyncValue<int> v) => [\n  if (v.isLoading) 'loading' else if (v.hasError) 'error' else if (v case rp.AsyncData<int>()) 'data',\n];\nString boundedLookalike<T extends AsyncValue>(T v) =>\n    v.isLoading ? 'loading' : v.hasError ? 'error' : 'data';",
+      "crossFile": null
+    },
+    "diagnostics": [
+      {
+        "message": "Use `AsyncValue.when` instead of branching on loading, error and data states manually.",
+        "line": 5,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Use `AsyncValue.when` instead of branching on loading, error and data states manually.",
+        "line": 14,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Use `AsyncValue.when` instead of branching on loading, error and data states manually.",
+        "line": 16,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Use `AsyncValue.when` instead of branching on loading, error and data states manually.",
+        "line": 24,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Use `AsyncValue.when` instead of branching on loading, error and data states manually.",
+        "line": 35,
+        "column": 9,
+        "file": null
+      },
+      {
+        "message": "Use `AsyncValue.when` instead of branching on loading, error and data states manually.",
+        "line": 46,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Use `AsyncValue.when` instead of branching on loading, error and data states manually.",
+        "line": 52,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Use `AsyncValue.when` instead of branching on loading, error and data states manually.",
+        "line": 57,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Use `AsyncValue.when` instead of branching on loading, error and data states manually.",
+        "line": 66,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Use `AsyncValue.when` instead of branching on loading, error and data states manually.",
+        "line": 69,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Use `AsyncValue.when` instead of branching on loading, error and data states manually.",
+        "line": 72,
+        "column": 7,
+        "file": null
+      },
+      {
+        "message": "Use `AsyncValue.when` instead of branching on loading, error and data states manually.",
+        "line": 75,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Use `AsyncValue.when` instead of branching on loading, error and data states manually.",
+        "line": 77,
+        "column": 28,
+        "file": null
+      },
+      {
+        "message": "Use `AsyncValue.when` instead of branching on loading, error and data states manually.",
+        "line": 80,
+        "column": 11,
+        "file": null
+      },
+      {
+        "message": "Use `AsyncValue.when` instead of branching on loading, error and data states manually.",
+        "line": 83,
+        "column": 5,
+        "file": null
+      },
+      {
+        "message": "Use `AsyncValue.when` instead of branching on loading, error and data states manually.",
+        "line": 86,
+        "column": 12,
         "file": null
       }
     ]

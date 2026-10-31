@@ -238,6 +238,8 @@
         "avoid-unnecessary-hook-widgets": "warn"
       },
       "style": {
+        "prefer-async-value-when": "warn",
+        "avoid-non-ascii-symbols": "warn",
         "avoid-unnecessary-block": "warn",
         "avoid-unnecessary-continue": "warn",
         "avoid-unnecessary-getter": "warn",

@@ -131,6 +131,7 @@
       "avoid-unnecessary-consumer-widgets",
       "dispose-provided-instances",
       "dispose-provider-resources",
+      "prefer-async-value-when",
       "prefer-correct-notifier-file-name",
       "prefer-correct-provider-file-name",
       "prefer-immutable-provider-arguments",
