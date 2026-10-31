@@ -115,8 +115,9 @@ export const getRuleDetail = createServerFn({ method: 'GET' })
     const index = rules.indexOf(rule)
     const group = summaries.filter((s) => s.group === rule.group)
     const at = group.findIndex((s) => s.name === rule.name)
+    const { sourcePath, fixturePath, ...detail } = rule
     return {
-      rule,
+      rule: detail,
       prev: summaries[index - 1] ?? null,
       next: summaries[index + 1] ?? null,
       related: [...group.slice(at + 1), ...group.slice(0, at)].slice(0, 8),

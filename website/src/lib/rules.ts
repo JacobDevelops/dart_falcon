@@ -43,11 +43,15 @@ export interface Rule {
   recommended: boolean
   crossFile: boolean
   source: RuleSource
+  sourcePath: string
+  fixturePath: string
   description: string
   docs: string
   examples: RuleExamples
   diagnostics: RuleDiagnostic[]
 }
+
+export type RuleDetail = Omit<Rule, 'sourcePath' | 'fixturePath'>
 
 export interface Domain {
   name: string
@@ -154,7 +158,7 @@ export function summarize(rule: Rule): RuleSummary {
   }
 }
 
-export function ruleGuidance(rule: Rule) {
+export function ruleGuidance(rule: RuleDetail) {
   const section = rule.crossFile ? 'cross-file' : 'linter'
   const config = (severity: 'error' | 'off') =>
     JSON.stringify({ [section]: { rules: { [rule.group]: { [rule.name]: severity } } } }, null, 2)

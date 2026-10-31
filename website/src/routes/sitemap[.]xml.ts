@@ -1,9 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { domains, rules } from '../lib/rules.data'
 import { GROUPS } from '../lib/rules'
-import benchmarks from '../data/benchmarks.json'
+import lastmodJson from '../generated/lastmod.json'
 import { SITE_URL } from '../lib/seo'
 import { DOC_PAGES } from '../lib/docs'
+
+const lastmod: Record<string, string> = lastmodJson
 
 const PAGES = [
   '/',
@@ -27,7 +29,7 @@ export const Route = createFileRoute('/sitemap.xml')({
         ]
         const body = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${urls.map((u) => `  <url><loc>${SITE_URL}${u}</loc>${u === '/benchmarks' ? `<lastmod>${benchmarks.generatedAt}</lastmod>` : ''}</url>`).join('\n')}
+${urls.map((u) => `  <url><loc>${SITE_URL}${u}</loc>${lastmod[u] ? `<lastmod>${lastmod[u]}</lastmod>` : ''}</url>`).join('\n')}
 </urlset>
 `
         return new Response(body, {

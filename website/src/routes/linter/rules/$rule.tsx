@@ -8,7 +8,7 @@ import { extractHeadings } from '../../../lib/headings'
 import { Tabs } from '../../../components/Tabs'
 import { DiagnosticFrame } from '../../../components/DiagnosticFrame'
 import { Described, RuleBadges, RuleRow } from '../../../components/RuleRow'
-import { groupLabel, ruleGuidance, type Rule, type RuleDiagnostic } from '../../../lib/rules'
+import { groupLabel, ruleGuidance, type RuleDetail as RuleDetailData, type RuleDiagnostic } from '../../../lib/rules'
 import { getRuleDetail } from '../../../lib/server'
 import { breadcrumbs, seo, SITE_URL } from '../../../lib/seo'
 
@@ -49,7 +49,7 @@ export const Route = createFileRoute('/linter/rules/$rule')({
 })
 
 
-function InvalidSingle({ rule }: { rule: Rule }) {
+function InvalidSingle({ rule }: { rule: RuleDetailData }) {
   const bad = rule.examples.bad
   if (!bad) return null
   return (
@@ -66,7 +66,7 @@ function InvalidSingle({ rule }: { rule: Rule }) {
   )
 }
 
-function InvalidCrossFile({ rule }: { rule: Rule }) {
+function InvalidCrossFile({ rule }: { rule: RuleDetailData }) {
   const fixtures = rule.examples.crossFile ?? []
   if (fixtures.length === 0) return null
   const byFile = new Map<string, RuleDiagnostic[]>()

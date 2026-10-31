@@ -925,6 +925,8 @@ fn collect_rule_records(
             "recommended": meta.recommended,
             "crossFile": meta.is_cross_file(),
             "source": source_json(&meta.source),
+            "sourcePath": rule_source_path(Path::new(""), meta),
+            "fixturePath": format!("crates/falcon_rules/tests/corpus/{}", meta.name),
             "description": description,
             "docs": docs,
             "examples": {

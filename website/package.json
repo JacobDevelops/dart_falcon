@@ -4,8 +4,9 @@
   "type": "module",
   "scripts": {
     "sync-docs": "bun run scripts/sync-docs.ts",
-    "predev": "bun run sync-docs",
-    "prebuild": "bun run sync-docs",
+    "lastmod": "bun run scripts/lastmod.ts",
+    "predev": "bun run sync-docs && bun run lastmod",
+    "prebuild": "bun run sync-docs && bun run lastmod",
     "pretypecheck": "bun run build",
     "typecheck": "tsc --noEmit",
     "dev": "vite dev",

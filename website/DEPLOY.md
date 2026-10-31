@@ -29,6 +29,8 @@ CI runs the frozen-lockfile install, typecheck, and build when website files,
 source docs, or the Bun tool selection change. Generated catalog drift is
 checked separately by `cargo xtask docgen --check` in the Rust validation job.
 
+Sitemap `lastmod` dates are generated before dev/build from the latest Git commits to each page's sources (and benchmark data timestamps), never the build time. Builds need full Git history (`fetch-depth: 0` in the publish website job); without Git or in shallow clones, dates are omitted with a warning.
+
 ## One-time account setup — REQUIRES THE OWNER (Jacob)
 
 These steps authenticate against and mutate a real Cloudflare account, so they
