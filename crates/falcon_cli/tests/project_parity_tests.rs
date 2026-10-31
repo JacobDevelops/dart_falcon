@@ -9,6 +9,110 @@ use falcon_lsp::LspState;
 use tempfile::tempdir;
 
 #[test]
+fn required_source_failure_blocks_partial_projects_and_recovers() {
+    let temp = tempdir().unwrap();
+    let root = fs::canonicalize(temp.path()).unwrap();
+    let lib = root.join("lib");
+    fs::create_dir_all(lib.join("src")).unwrap();
+    fs::write(root.join("pubspec.yaml"), "name: acquisition_fixture\n").unwrap();
+    let config = root.join("falcon.json");
+    fs::write(
+        &config,
+        r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        lib.join("main.dart"),
+        "import 'bridge.dart';\nvoid main() {}\n",
+    )
+    .unwrap();
+    let bridge = lib.join("bridge.dart");
+    let orphan = lib.join("src/orphan.dart");
+    fs::write(&bridge, "export 'src/orphan.dart';\n").unwrap();
+    fs::write(&orphan, "class Orphan {}\n").unwrap();
+    let options = CheckOptions {
+        paths: vec![root],
+        config_path: Some(config.clone()),
+        quiet: true,
+        ..Default::default()
+    };
+    let uri = format!("file://{}", orphan.display());
+    let mut lsp = LspState::new_with_sdk_locator(Some(config), |_| None);
+    lsp.open(&uri, "class Orphan {}\n".into(), Some(1));
+    assert!(
+        falcon_cli::collect_check_with_sdk_locator(&options, |_| None)
+            .unwrap()
+            .diagnostics
+            .is_empty()
+    );
+    assert!(
+        lsp.cross_file_pass()
+            .iter()
+            .all(|(_, diagnostics)| diagnostics.is_empty())
+    );
+    fs::write(&bridge, "// no export\n").unwrap();
+    lsp.watched_files_changed(std::slice::from_ref(&bridge));
+    let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+    let published = lsp.cross_file_pass();
+    let (_, editor) = published.iter().find(|(key, _)| key == &uri).unwrap();
+    for diagnostics in [&cli.diagnostics, editor] {
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.rule, "unused-files");
+        assert_eq!(diagnostic.file_path, orphan.to_string_lossy());
+        assert_eq!(diagnostic.severity, Severity::Warning);
+        assert!(diagnostic.message.contains("not reachable"));
+        assert_eq!((diagnostic.line, diagnostic.col), (1, 1));
+    }
+
+    // Without bridge.dart the orphan appears unreachable; failed acquisition
+    // must clear earlier project results instead of publishing that false claim.
+    fs::write(&bridge, [0xff]).unwrap();
+    let error = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap_err();
+    assert!(error.contains(&*bridge.to_string_lossy()), "{error}");
+    assert!(error.contains("UTF-8"), "{error}");
+    assert_ne!(
+        falcon_cli::run_check_with_sdk_locator(&options, |_| None),
+        0
+    );
+    lsp.watched_files_changed(std::slice::from_ref(&bridge));
+    let published = lsp.cross_file_pass();
+    let (_, diagnostics) = published.iter().find(|(key, _)| key == &uri).unwrap();
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+
+    // Restoring the export must not resurrect the pre-failure orphan warning.
+    fs::write(&bridge, "export 'src/orphan.dart';\n").unwrap();
+    lsp.watched_files_changed(std::slice::from_ref(&bridge));
+    let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+    assert_eq!(cli.exit_code, 0);
+    assert!(cli.diagnostics.is_empty(), "{:#?}", cli.diagnostics);
+    let published = lsp.cross_file_pass();
+    assert!(
+        published
+            .iter()
+            .all(|(_, diagnostics)| diagnostics.is_empty()),
+        "{published:#?}"
+    );
+
+    // A new absence warning proves recovery did not leave the LSP incomplete.
+    fs::write(&bridge, "// no export\n").unwrap();
+    lsp.watched_files_changed(std::slice::from_ref(&bridge));
+    let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+    assert_eq!(cli.exit_code, 0);
+    let published = lsp.cross_file_pass();
+    let (_, editor) = published.iter().find(|(key, _)| key == &uri).unwrap();
+    for diagnostics in [&cli.diagnostics, editor] {
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.rule, "unused-files");
+        assert_eq!(diagnostic.file_path, orphan.to_string_lossy());
+        assert_eq!(diagnostic.severity, Severity::Warning);
+        assert!(diagnostic.message.contains("not reachable"));
+        assert_eq!((diagnostic.line, diagnostic.col), (1, 1));
+    }
+}
+
+#[test]
 fn cli_and_lsp_have_full_project_diagnostic_parity() {
     let temp = tempdir().unwrap();
     let root = fs::canonicalize(temp.path()).unwrap();

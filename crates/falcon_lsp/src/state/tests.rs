@@ -1886,17 +1886,24 @@ mod source_size_tests {
     }
 
     #[test]
-    fn ordinary_disk_read_errors_keep_project_collection_complete() {
+    fn required_disk_read_errors_make_project_collection_incomplete() {
         let directory = tempfile::tempdir().unwrap();
         let valid = directory.path().join("main.dart");
         std::fs::write(&valid, "void main() {}").unwrap();
-        std::fs::write(directory.path().join("invalid.dart"), [0xff]).unwrap();
+        let invalid = directory.path().join("invalid.dart");
+        std::fs::write(&invalid, [0xff]).unwrap();
         std::fs::write(directory.path().join("pubspec.yaml"), [0xff]).unwrap();
         std::fs::create_dir(directory.path().join("directory.dart")).unwrap();
         let config = directory.path().join("falcon.json");
         std::fs::write(&config, "{}").unwrap();
         let mut state = LspState::new(Some(config));
         state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+        assert!(!complete);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path(), canonical_or_lexical(&valid));
+        std::fs::remove_file(&invalid).unwrap();
+        state.watched_files_changed(std::slice::from_ref(&invalid));
         let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
         assert!(complete);
         assert_eq!(files.len(), 1);
@@ -1993,6 +2000,28 @@ mod source_size_tests {
         let original = text.clone();
         assert!(reject_oversized_buffer(Path::new("main.dart"), &mut text).is_none());
         assert_eq!(text, original);
+    }
+
+    #[test]
+    fn failed_required_disk_reads_are_incomplete_but_optional_reads_are_not() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("source.dart");
+        for contents in [None, Some(vec![0xff]), Some(b"void main() {}".to_vec())] {
+            if let Some(contents) = &contents {
+                std::fs::write(&path, contents).unwrap();
+            }
+            let mut complete = true;
+            let result = LspState::read_project_source(&path, true, &mut complete);
+            let readable = contents.as_ref().is_some_and(|bytes| bytes.is_ascii());
+            assert_eq!(result.is_ok(), readable);
+            assert_eq!(complete, readable);
+            let mut optional_complete = true;
+            let _ = LspState::read_project_source(&path, false, &mut optional_complete);
+            assert!(optional_complete);
+        }
+        let mut complete = true;
+        assert!(LspState::read_project_source(directory.path(), true, &mut complete).is_err());
+        assert!(!complete);
     }
 
     #[test]

@@ -62,18 +62,25 @@ fn oversized_sources_and_manifests_abort_collection() {
 }
 
 #[test]
-fn ordinary_read_errors_skip_sources_and_ancestor_manifests() {
+fn required_read_errors_abort_but_ancestor_manifest_errors_are_skipped() {
     let temp = tempdir().unwrap();
     let lib = temp.path().join("lib");
     fs::create_dir(&lib).unwrap();
     let valid = lib.join("main.dart");
     fs::write(&valid, "void main() {}").unwrap();
-    fs::write(lib.join("invalid.dart"), [0xff]).unwrap();
+    let invalid = lib.join("invalid.dart");
+    fs::write(&invalid, [0xff]).unwrap();
     fs::create_dir(lib.join("directory.dart")).unwrap();
     fs::write(temp.path().join("pubspec.yaml"), [0xff]).unwrap();
     let manifest = lib.join("pubspec.yaml");
     fs::write(&manifest, "name: local\n").unwrap();
     let paths = [lib];
+    for collect_manifests in [false, true] {
+        let error = walk_project(&paths, &PathFilter::default(), collect_manifests).unwrap_err();
+        assert!(error.contains(&invalid.display().to_string()));
+        assert!(error.contains("UTF-8"));
+    }
+    fs::remove_file(&invalid).unwrap();
     assert_eq!(
         walk_project(&paths, &PathFilter::default(), false)
             .unwrap()

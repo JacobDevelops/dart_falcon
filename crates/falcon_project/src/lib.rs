@@ -12,8 +12,8 @@ pub use autofix::{
 pub use workspace::{Workspace, WorkspacePackage, discover_workspace};
 
 pub use discovery::{
-    DiscoveryWatch, ProjectDiscovery, WalkOutput, discover_project, discover_project_with_watches,
-    walk_project,
+    DiscoveryWatch, ProjectDiscovery, SourceAcquisition, WalkOutput, acquire_source,
+    discover_project, discover_project_with_watches, walk_project,
 };
 pub use falcon_rules::run_cross_file as cross_file_diagnostics;
 

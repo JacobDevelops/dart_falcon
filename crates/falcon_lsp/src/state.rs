@@ -2563,7 +2563,7 @@ impl LspState {
     /// on-disk copy. Semantic analysis also includes explicitly open buffers,
     /// including excluded, external and unsaved files, so imports use editor text.
     /// Cross-file analysis respects file includes and can include package manifests.
-    /// The boolean is false when oversized ingestion left the workspace incomplete;
+    /// The boolean is false when required source ingestion left the workspace incomplete;
     /// cross-file rules must not infer absence from that partial set.
     fn collect_project_files(&mut self, view: ProjectView) -> (Vec<ProjectFile>, bool) {
         let paths = self.discover_project_paths();
@@ -2621,7 +2621,7 @@ impl LspState {
                     .entry(path.to_path_buf())
                     .or_insert(fallback_stamp);
             }
-            let Ok(source) = Self::read_project_source(path, &mut complete) else {
+            let Ok(source) = Self::read_project_source(path, *is_dart, &mut complete) else {
                 continue;
             };
             if let Some(cached) = self.disk_files.get_mut(path)
@@ -2690,8 +2690,24 @@ impl LspState {
         (files, complete)
     }
 
-    fn read_project_source(path: &Path, complete: &mut bool) -> std::io::Result<String> {
-        match falcon_analyze::read_source(path) {
+    fn read_project_source(
+        path: &Path,
+        required: bool,
+        complete: &mut bool,
+    ) -> std::io::Result<String> {
+        let result = if required {
+            match falcon_project::acquire_source(path) {
+                falcon_project::SourceAcquisition::Acquired(source) => Ok(source),
+                falcon_project::SourceAcquisition::Oversized(error)
+                | falcon_project::SourceAcquisition::Failed(error) => {
+                    *complete = false;
+                    Err(error)
+                }
+            }
+        } else {
+            falcon_analyze::read_source(path)
+        };
+        match result {
             Ok(source) => Ok(source),
             Err(error) => {
                 warn!("failed to read {}: {}", path.display(), error);

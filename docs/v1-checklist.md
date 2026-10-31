@@ -34,14 +34,33 @@ These entries describe implemented foundation, not acceptance of the open items.
 
 ### V1-1 — Make analysis completeness explicit
 
-- [ ] Agree and implement a shared completeness contract. Evidence:
-  `crates/falcon_project/src/discovery.rs::read_source` warns/skips ordinary read
-  failures; `crates/falcon_analyze/src/parallel.rs` discards companion read errors;
-  `crates/falcon_lsp/src/state.rs::read_project_source` treats oversize specially.
-  First slice: typed acquisition outcomes and one CLI/LSP parity fixture; then
-  migrate remaining callers. Distinguish missing optional metadata from unreadable
-  required source and unsupported/failed analysis. Preserve deliberate frontend
-  differences explicitly.
+- [ ] Agree and implement a shared completeness contract. The required-project-source
+  first slice uses `falcon_project::SourceAcquisition` to distinguish acquired text,
+  oversized sources and failed reads retaining their I/O error kind.
+  CLI collection aborts on any required source read failure, naming the path and
+  reason; LSP deliberately stays live but marks collection incomplete and suppresses
+  all cross-file results. Oversize behavior and open-buffer handling are unchanged.
+  Optional metadata remains separate: ordinary manifest failures still warn/skip,
+  and oversized manifests retain their existing rejection behavior.
+  `required_source_acquisition_retains_read_outcomes` covers acquired text,
+  disappearance after discovery, invalid UTF-8, oversize and other I/O failure.
+  `failed_required_disk_reads_are_incomplete_but_optional_reads_are_not` checks
+  LSP completeness and readable-source recovery without permission-bit assumptions.
+  CLI/LSP fixture `required_source_failure_blocks_partial_projects_and_recovers`
+  checks invalid-UTF-8 CLI error/nonzero exit, clearing stale `unused-files`
+  publication while incomplete, and recovery to an exported orphan with no warning
+  (distinct from the pre-failure unreachable-orphan warning), then requires a new
+  absence warning from both frontends to prove recovery restored complete analysis.
+  Remaining callers include `falcon_analyze/src/parallel.rs` companion reads,
+  LSP semantic companion reads, `falcon_project/src/autofix_analysis.rs:275` and
+  `falcon_cli/src/analyze_pipeline.rs:649` (`FixExternals::load`).
+  Discovery still warns/skips `WalkDir` traversal errors and explicit-input
+  metadata errors other than `NotFound`/`NotADirectory`; these can hide required
+  sources before acquisition and remain part of V1-1.
+  Optional/external metadata, unsupported/failed analysis and an explicit
+  editor-facing incompleteness signal still need the broader contract (this slice
+  retains the existing log-only signal). This slice does not certify the overall
+  acceptance below.
 - Acceptance: unreadable, disappearing, invalid-UTF-8 and oversized sources plus
   worker failure cannot yield an unqualified clean complete-project result;
   recovery yields current diagnostics, not stale results. Assert exit/publication

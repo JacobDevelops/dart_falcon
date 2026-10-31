@@ -96,16 +96,36 @@ pub struct WalkOutput {
     pub filtered_paths: Vec<PathBuf>,
 }
 
+/// Acquisition of a required project source, retaining the underlying I/O reason.
+#[derive(Debug)]
+pub enum SourceAcquisition {
+    Acquired(String),
+    Oversized(std::io::Error),
+    Failed(std::io::Error),
+}
+
+/// Read a required source without treating a failed read as legitimate absence.
+#[must_use]
+pub fn acquire_source(path: &Path) -> SourceAcquisition {
+    match falcon_analyze::read_source(path) {
+        Ok(source) => SourceAcquisition::Acquired(source),
+        Err(error) if falcon_analyze::is_source_too_large(&error) => {
+            SourceAcquisition::Oversized(error)
+        }
+        Err(error) => SourceAcquisition::Failed(error),
+    }
+}
+
 /// Collect matching Dart sources and, when requested, package manifests.
 ///
 /// Includes select Dart files only. Exclusions prune directories and apply to
 /// manifests, including manifests discovered in input paths' ancestors.
-/// Ordinary source read and traversal errors warn and skip; oversized sources
-/// abort collection rather than analyzing a partial source.
+/// Required source read failures abort collection; ordinary optional manifest reads warn and skip.
+/// Discovery traversal/metadata errors still warn and skip: a known gap tracked in V1-1.
 ///
 /// # Errors
 ///
-/// Returns an error if a source exceeds the size limit.
+/// Returns an error if a required source cannot be read or a manifest exceeds the size limit.
 pub fn walk_project(
     paths: &[PathBuf],
     filter: &PathFilter,
@@ -117,14 +137,17 @@ pub fn walk_project(
         filtered_paths: discovery.filtered_paths,
         ..WalkOutput::default()
     };
-    for (paths, sources) in [
-        (discovery.files, &mut output.files),
-        (discovery.manifests, &mut output.manifests),
-    ] {
-        for path in paths {
-            if let Some(source) = read_source(&path)? {
-                sources.push((path, source));
+    for path in discovery.files {
+        match acquire_source(&path) {
+            SourceAcquisition::Acquired(source) => output.files.push((path, source)),
+            SourceAcquisition::Oversized(error) | SourceAcquisition::Failed(error) => {
+                return Err(format!("failed to read file {}: {error}", path.display()));
             }
+        }
+    }
+    for path in discovery.manifests {
+        if let Some(source) = read_manifest(&path)? {
+            output.manifests.push((path, source));
         }
     }
     Ok(output)
@@ -385,7 +408,7 @@ fn collect_file(
     results.push(path.to_path_buf());
 }
 
-fn read_source(path: &Path) -> Result<Option<String>, String> {
+fn read_manifest(path: &Path) -> Result<Option<String>, String> {
     match falcon_analyze::read_source(path) {
         Ok(source) => Ok(Some(source)),
         Err(error) if falcon_analyze::is_source_too_large(&error) => {
@@ -401,6 +424,45 @@ fn read_source(path: &Path) -> Result<Option<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn required_source_acquisition_retains_read_outcomes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("main.dart");
+        std::fs::write(&path, "void main() {}").unwrap();
+        assert!(matches!(
+            acquire_source(&path),
+            SourceAcquisition::Acquired(source) if source == "void main() {}"
+        ));
+        let discovery = discover_project(
+            &[directory.path().to_path_buf()],
+            &PathFilter::from_includes(&["**".into()]),
+            false,
+        );
+        assert_eq!(discovery.files, vec![path.clone()]);
+        std::fs::remove_file(&path).unwrap();
+        assert!(matches!(
+            acquire_source(&discovery.files[0]),
+            SourceAcquisition::Failed(error) if error.kind() == std::io::ErrorKind::NotFound
+        ));
+        std::fs::write(&path, [0xff]).unwrap();
+        assert!(matches!(
+            acquire_source(&path),
+            SourceAcquisition::Failed(error) if error.kind() == std::io::ErrorKind::InvalidData
+        ));
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(u64::from(u32::MAX) + 1)
+            .unwrap();
+        assert!(matches!(
+            acquire_source(&path),
+            SourceAcquisition::Oversized(error) if falcon_analyze::is_source_too_large(&error)
+        ));
+        assert!(matches!(
+            acquire_source(directory.path()),
+            SourceAcquisition::Failed(error) if error.kind() != std::io::ErrorKind::NotFound
+                && !falcon_analyze::is_source_too_large(&error)
+        ));
+    }
 
     #[test]
     fn excluded_directories_are_not_traversed() {
