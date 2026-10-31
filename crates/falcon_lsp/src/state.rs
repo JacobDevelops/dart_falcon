@@ -502,10 +502,9 @@ impl LspState {
             .map(|message| (message.typ, message.message.clone()))
             .collect();
         let analysis = ProjectAnalysis::new(&config);
-        let rules = analysis.registry;
-        let cross_file_rules = analysis.cross_file_registry;
-        let cross_file_resolve_semantics = analysis.cross_file_resolve;
-        let resolve_semantics = analysis.resolve;
+        let cross_file_resolve_semantics = analysis.cross_file_resolve();
+        let resolve_semantics = analysis.resolve();
+        let (rules, cross_file_rules) = analysis.into_registries();
         Self {
             documents: HashMap::new(),
             capabilities: ClientCapabilities {
@@ -636,8 +635,8 @@ impl LspState {
                     config
                 });
             let analysis = ProjectAnalysis::new(&config);
-            resolve_semantics |= analysis.resolve;
-            cross_file_resolve_semantics |= analysis.cross_file_resolve;
+            resolve_semantics |= analysis.resolve();
+            cross_file_resolve_semantics |= analysis.cross_file_resolve();
             let entry = RootConfig { config, analysis };
             if let Some(existing) = self.additional_root_configs.get_mut(index) {
                 *existing = entry;
@@ -1435,7 +1434,7 @@ impl LspState {
             (&self.config, &self.rules)
         } else {
             let entry = &self.additional_root_configs[root_index - 1];
-            (&entry.config, &entry.analysis.registry)
+            (&entry.config, entry.analysis.registry())
         };
         let Some(doc) = self.documents.get_mut(uri) else {
             return Vec::new();
@@ -1573,18 +1572,17 @@ impl LspState {
         self.project_paths = None;
         self.watched_dependency_generation += 1;
         let analysis = ProjectAnalysis::new(&self.config);
-        self.rules = analysis.registry;
-        self.cross_file_resolve_semantics = analysis.cross_file_resolve;
-        self.resolve_semantics = analysis.resolve;
-        self.cross_file_rules = analysis.cross_file_registry;
+        self.cross_file_resolve_semantics = analysis.cross_file_resolve();
+        self.resolve_semantics = analysis.resolve();
+        (self.rules, self.cross_file_rules) = analysis.into_registries();
         self.resolve_semantics |= self
             .additional_root_configs
             .iter()
-            .any(|entry| entry.analysis.resolve);
+            .any(|entry| entry.analysis.resolve());
         self.cross_file_resolve_semantics |= self
             .additional_root_configs
             .iter()
-            .any(|entry| entry.analysis.cross_file_resolve);
+            .any(|entry| entry.analysis.cross_file_resolve());
         self.cross_file_index_cache = None;
         self.cross_file_external_cache = None;
         self.pending_semantic_affected.clear();
@@ -1618,7 +1616,7 @@ impl LspState {
             || self
                 .additional_root_configs
                 .iter()
-                .any(|entry| !entry.analysis.cross_file_registry.is_empty())
+                .any(|entry| !entry.analysis.cross_file_registry().is_empty())
     }
 
     /// Run the cross-file rules over the whole workspace and republish the
@@ -1733,7 +1731,7 @@ impl LspState {
                 (&self.config, &self.cross_file_rules)
             } else {
                 let entry = &self.additional_root_configs[index - 1];
-                (&entry.config, &entry.analysis.cross_file_registry)
+                (&entry.config, entry.analysis.cross_file_registry())
             };
             if !rules.is_empty() {
                 let files = if self.workspace_roots.len() == 1 {

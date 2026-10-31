@@ -886,7 +886,7 @@ fn unnecessary_nullable_is_independent_of_enabled_file_rules() {
             falcon_rules::requires_resolution(&falcon_rules::build_registry(&loaded)),
             enabled
         );
-        assert!(falcon_rules::cross_file_requires_resolution(&loaded));
+        assert!(falcon_project::ProjectAnalysis::new(&loaded).cross_file_resolve());
         let out = collect_check(&options_for(&app, Some(config.clone()))).unwrap();
         results.push(
             out.diagnostics

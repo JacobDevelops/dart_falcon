@@ -259,9 +259,6 @@ fn collect_selected_check(
     let filter = cli_filter.as_ref().unwrap_or(&config.files.includes);
     let max_errors = options.max_errors.or(config.max_errors);
     let mut analysis = ProjectAnalysis::new(config);
-    let collect_programs = analysis.collect_programs;
-    // The fix pass shares the initial project snapshot and dependency closure.
-    analysis.collect_programs |= options.write && analysis.resolve;
     let walked = walk_project(paths, filter, true)?;
     let mut files = walked.files;
     let mut manifests = walked.manifests;
@@ -302,6 +299,8 @@ fn collect_selected_check(
     let mut diff = String::new();
     let mut fix_reports = Vec::new();
     if options.write {
+        // The fix pass shares the initial project snapshot and dependency closure.
+        analysis.set_autofix_snapshots(true);
         apply_selected_fixes(
             options,
             &analysis,
@@ -311,9 +310,7 @@ fn collect_selected_check(
             &root,
             (&mut diff, &mut fix_reports),
         );
-        // Project snapshots are retained only for fixing unless cross-file rules
-        // also need the final parsed files.
-        analysis.collect_programs = collect_programs;
+        analysis.set_autofix_snapshots(false);
     }
     let total_files = files.len();
     let (mut diagnostics, project_files, pipeline_failed, has_unmatched) = finish_project_analysis(
@@ -336,7 +333,7 @@ fn collect_selected_check(
         &mut diagnostics,
         &project_files,
         (&files, &manifests),
-        collect_programs,
+        analysis.collect_programs(),
     )?;
     crate::report::count_package_diagnostics(&mut packages, &diagnostics);
     let exit_code = check_exit_code(
@@ -490,7 +487,7 @@ fn apply_selected_fixes(
         })
         .map(|diagnostic| diagnostic.file_path)
         .collect();
-    let external = (analysis.resolve && !fixable.is_empty())
+    let external = (analysis.resolve() && !fixable.is_empty())
         .then(|| FixExternals::load(environment, &mut fix_files));
     for (path, source) in files {
         if !fixable.contains(path.to_string_lossy().as_ref()) {
@@ -558,7 +555,7 @@ fn finish_project_analysis(
     manifests: &mut Vec<(PathBuf, String)>,
     unmatched: &mut Vec<Diagnostic>,
 ) -> (Vec<Diagnostic>, Vec<ProjectFile>, bool, bool) {
-    let collect_programs = analysis.collect_programs;
+    let collect_programs = analysis.collect_programs();
     let (mut diagnostics, mut project_files, indexes) =
         analyze_sources(analysis, files, manifests, config, environment);
     if collect_programs {
@@ -572,7 +569,7 @@ fn finish_project_analysis(
 
     let pipeline_failed = complete_analysis(
         environment,
-        &analysis.cross_file_registry,
+        analysis.cross_file_registry(),
         &project_files,
         config,
         indexes.as_ref(),

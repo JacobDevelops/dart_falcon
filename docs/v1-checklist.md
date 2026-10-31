@@ -73,9 +73,22 @@ These entries describe implemented foundation, not acceptance of the open items.
   and `falcon_lsp` (230 tests). The root `dart_falcon` package passed clippy and all
   76 tests; its package wrapper then failed at `--doc` because it has no library
   target.
-- [ ] Encapsulate `ProjectAnalysis` registries and derived flags in
+- [x] Encapsulate `ProjectAnalysis` registries and derived flags in
   `crates/falcon_project/src/lib.rs`. Test structural, semantic and cross-file
   combinations; no caller can independently contradict resolution/collection needs.
+  Private fields and read-only accessors keep rule requirements together; the
+  named autofix snapshot intent cannot disable collection needed by cross-file
+  rules. A test-only semantic autofix constructor preserves custom rules' cache
+  requirements. Ten plan tests cover structural, semantic and both cross-file
+  modes, mixed configurations and autofix intents; three compile-fail doctests
+  reject independent flag writes and mutable registry access.
+  `numen run -- makers verify-package <pkg>` passed for `falcon_project`
+  (88 tests, 4 doctests), `falcon_cli` (200 tests) and `falcon_lsp` (230 tests).
+  No changeset: diagnostics, autofix output and frontend behavior are unchanged.
+  Boundary: the primary LSP root still takes ownership of the registries and
+  aggregates flags separately through `SemanticFlags`; its tests deliberately
+  exercise independent file/cross-file indexing. Closing that LSP-state gap
+  belongs with the R1 capability/Deref-chain cleanup, not this plan API migration.
 - Acceptance: invalid relationships cannot be constructed through supported APIs;
   existing syntax/visitor/corpus and CLI/LSP parity tests remain unchanged in meaning.
   Do these as separate coherent migrations, not a new generic planning framework.
@@ -144,8 +157,12 @@ These entries describe implemented foundation, not acceptance of the open items.
 
 - [ ] R1 — Replace the `LspState → ClientCapabilities → SemanticFlags →
   WorkspaceFlags` mutable `Deref` chain in `crates/falcon_lsp/src/state.rs` with
-  explicit ownership/access. This is maintainability debt, not by itself a proven
-  behavioral bug. Preserve capability/configuration lifecycle tests.
+  explicit ownership/access. Keep the primary root's registries and resolution
+  requirements together instead of splitting them via `into_registries` and
+  storing file/cross-file flags independently; migrate tests that set those flags
+  separately so they cannot contradict registered rule requirements. This is
+  maintainability debt, not by itself a proven behavioral bug. Preserve
+  capability/configuration lifecycle tests.
 - [ ] R2 — Remove repeated conversions/retained data only where callers and
   profiling justify them. Keep shared immutable indexes and useful caches; no
   blanket clone/Arc ban or byte-count-based redesign.

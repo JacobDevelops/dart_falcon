@@ -139,10 +139,10 @@ impl<'a> AutofixAnalyzer<'a> {
             Err(diagnostic) => return vec![*diagnostic],
         };
         let (file, diagnostics) = file;
-        if !self.analysis.resolve {
+        if !self.analysis.resolve() {
             let ctx = AnalyzeContext::new(self.path, self.config, file.parsed())
                 .with_environment(Some(self.environment));
-            return analyze_document(&self.analysis.registry, self.config, &ctx, diagnostics);
+            return analyze_document(self.analysis.registry(), self.config, &ctx, diagnostics);
         }
         if !self.initialized {
             self.load_external(&file);
@@ -225,7 +225,7 @@ impl<'a> AutofixAnalyzer<'a> {
             .with_signatures(&indexes.signatures)
             .with_library(&library)
             .with_environment(Some(self.environment));
-        analyze_document(&self.analysis.registry, self.config, &ctx, diagnostics)
+        analyze_document(self.analysis.registry(), self.config, &ctx, diagnostics)
     }
 
     fn parse(
@@ -314,8 +314,8 @@ mod tests {
     #[test]
     fn body_fix_passes_do_not_reindex_companions() {
         let config = FalconConfig::default();
-        let mut analysis = ProjectAnalysis::new(&config);
-        analysis.resolve = true;
+        let analysis =
+            ProjectAnalysis::for_semantic_autofix_tests(falcon_rules::build_registry(&config));
         let files: Vec<_> = (0..64)
             .map(|i| {
                 let source = format!("class Companion{i} {{}}");
@@ -390,12 +390,9 @@ mod tests {
     #[test]
     fn declaration_passes_update_dependents_without_rebuilding_unrelated_libraries() {
         let config = FalconConfig::default();
-        let mut analysis = ProjectAnalysis::new(&config);
-        analysis.resolve = true;
-        analysis.registry = falcon_analyze::RuleRegistry::new();
-        analysis
-            .registry
-            .register("semantic-snapshot", Box::new(SemanticSnapshot));
+        let mut registry = falcon_analyze::RuleRegistry::new();
+        registry.register("semantic-snapshot", Box::new(SemanticSnapshot));
+        let analysis = ProjectAnalysis::for_semantic_autofix_tests(registry);
         let files: Vec<_> = [
             ("/virtual/dependent.dart", "import 'main.dart';"),
             ("/virtual/unrelated.dart", "class Unrelated {}"),
@@ -500,11 +497,9 @@ mod tests {
     #[test]
     fn companion_failures_do_not_enter_the_target_fix_loop() {
         let config = FalconConfig::default();
-        let mut analysis = ProjectAnalysis::new(&config);
-        analysis.registry = falcon_analyze::RuleRegistry::new();
-        analysis
-            .registry
-            .register("companion-failure", Box::new(CompanionFailure));
+        let mut registry = falcon_analyze::RuleRegistry::new();
+        registry.register("companion-failure", Box::new(CompanionFailure));
+        let analysis = ProjectAnalysis::for_semantic_autofix_tests(registry);
         let mut environment = AnalysisEnvironment::default();
         let outcome = crate::fix_file(
             &analysis,
@@ -521,8 +516,8 @@ mod tests {
     #[test]
     fn successive_edits_reuse_external_indexes_and_report_fresh_syntax() {
         let config = FalconConfig::default();
-        let mut analysis = ProjectAnalysis::new(&config);
-        analysis.resolve = true;
+        let analysis =
+            ProjectAnalysis::for_semantic_autofix_tests(falcon_rules::build_registry(&config));
         let mut environment = AnalysisEnvironment::default();
         let mut analyzer = AutofixAnalyzer::new(
             &analysis,
@@ -555,8 +550,8 @@ mod tests {
     #[test]
     fn caller_graph_and_external_parts_are_reused_without_loading() {
         let config = FalconConfig::default();
-        let mut analysis = ProjectAnalysis::new(&config);
-        analysis.resolve = true;
+        let analysis =
+            ProjectAnalysis::for_semantic_autofix_tests(falcon_rules::build_registry(&config));
         let mut environment = AnalysisEnvironment::default();
         let libraries = ExternalLibraries::default();
         let indexes = ExternalIndexes::build(ExternalSources {
@@ -614,12 +609,9 @@ mod tests {
     #[test]
     fn borrowed_graph_retains_cached_imports_and_parts_without_disk_sources() {
         let config = FalconConfig::default();
-        let mut analysis = ProjectAnalysis::new(&config);
-        analysis.resolve = true;
-        analysis.registry = falcon_analyze::RuleRegistry::new();
-        analysis
-            .registry
-            .register("check-cached-project", Box::new(CheckCachedProject));
+        let mut registry = falcon_analyze::RuleRegistry::new();
+        registry.register("check-cached-project", Box::new(CheckCachedProject));
+        let analysis = ProjectAnalysis::for_semantic_autofix_tests(registry);
         let files: Vec<_> = [
             ("/virtual/main.dart", "class Stale {}"),
             ("/virtual/other.dart", "class Imported {}"),

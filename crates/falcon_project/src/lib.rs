@@ -214,12 +214,35 @@ fn load_member_config(path: &Path, is_explicit_base: bool) -> Result<LoadedConfi
 }
 
 /// Enabled rules and the project facts they require.
+///
+/// Requirements cannot be disabled independently of their rules.
+///
+/// ```
+/// let analysis = falcon_project::ProjectAnalysis::new(&Default::default());
+/// let _needs_resolution = analysis.resolve();
+/// let _retains_snapshots = analysis.collect_programs();
+/// ```
+///
+/// ```compile_fail,E0616
+/// let mut analysis = falcon_project::ProjectAnalysis::new(&Default::default());
+/// analysis.resolve = false;
+/// ```
+///
+/// ```compile_fail,E0616
+/// let mut analysis = falcon_project::ProjectAnalysis::new(&Default::default());
+/// analysis.collect_programs = false;
+/// ```
+///
+/// ```compile_fail,E0308
+/// let mut analysis = falcon_project::ProjectAnalysis::new(&Default::default());
+/// let _: &mut falcon_analyze::RuleRegistry = analysis.registry();
+/// ```
 pub struct ProjectAnalysis {
-    pub registry: RuleRegistry,
-    pub cross_file_registry: CrossFileRuleRegistry,
-    pub resolve: bool,
-    pub collect_programs: bool,
-    pub cross_file_resolve: bool,
+    registry: RuleRegistry,
+    cross_file_registry: CrossFileRuleRegistry,
+    resolve: bool,
+    collect_programs: bool,
+    cross_file_resolve: bool,
 }
 
 impl ProjectAnalysis {
@@ -227,7 +250,14 @@ impl ProjectAnalysis {
     pub fn new(config: &FalconConfig) -> Self {
         let registry = falcon_rules::build_registry(config);
         let cross_file_registry = falcon_rules::build_cross_file_registry(config);
-        let cross_file_resolve = falcon_rules::cross_file_requires_resolution(config);
+        Self::from_registries(registry, cross_file_registry)
+    }
+
+    fn from_registries(registry: RuleRegistry, cross_file_registry: CrossFileRuleRegistry) -> Self {
+        let cross_file_resolve = cross_file_registry
+            .rules()
+            .iter()
+            .any(|(name, _)| falcon_rules::rule_requires_resolution(name));
         let resolve = falcon_rules::requires_resolution(&registry) || cross_file_resolve;
         let collect_programs = !cross_file_registry.is_empty();
         Self {
@@ -237,6 +267,55 @@ impl ProjectAnalysis {
             collect_programs,
             cross_file_resolve,
         }
+    }
+
+    /// File rules enabled by this plan.
+    #[must_use]
+    pub fn registry(&self) -> &RuleRegistry {
+        &self.registry
+    }
+
+    /// Cross-file rules enabled by this plan.
+    #[must_use]
+    pub fn cross_file_registry(&self) -> &CrossFileRuleRegistry {
+        &self.cross_file_registry
+    }
+
+    /// Whether file or cross-file analysis requires semantic resolution.
+    #[must_use]
+    pub fn resolve(&self) -> bool {
+        self.resolve
+    }
+
+    /// Whether analysis retains project snapshots.
+    #[must_use]
+    pub fn collect_programs(&self) -> bool {
+        self.collect_programs
+    }
+
+    /// Whether cross-file rules require semantic resolution.
+    #[must_use]
+    pub fn cross_file_resolve(&self) -> bool {
+        self.cross_file_resolve
+    }
+
+    /// Retain resolving snapshots for the fix pass, without weakening rule requirements.
+    pub fn set_autofix_snapshots(&mut self, enabled: bool) {
+        self.collect_programs = !self.cross_file_registry.is_empty() || (enabled && self.resolve);
+    }
+
+    /// Transfer rule ownership to a frontend retaining its own analysis caches.
+    #[must_use]
+    pub fn into_registries(self) -> (RuleRegistry, CrossFileRuleRegistry) {
+        (self.registry, self.cross_file_registry)
+    }
+
+    #[cfg(test)]
+    fn for_semantic_autofix_tests(registry: RuleRegistry) -> Self {
+        // Custom test rules inspect semantic caches without production rule metadata.
+        let mut analysis = Self::from_registries(registry, CrossFileRuleRegistry::new());
+        analysis.resolve = true;
+        analysis
     }
 }
 
@@ -397,3 +476,6 @@ pub fn sort_diagnostics(diagnostics: &mut [Diagnostic]) {
             .then(a.message.cmp(&b.message))
     });
 }
+
+#[cfg(test)]
+mod analysis_plan_tests;

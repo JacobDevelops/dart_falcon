@@ -406,12 +406,6 @@ pub fn requires_resolution(registry: &RuleRegistry) -> bool {
         .any(|(name, _)| rule_requires_resolution(name))
 }
 
-/// Whether an enabled cross-file rule needs semantic resolution.
-#[must_use]
-pub fn cross_file_requires_resolution(config: &FalconConfig) -> bool {
-    enabled_cross_file_rules(config).any(|(_, _, needs_resolution)| needs_resolution)
-}
-
 fn resolve_rules(
     config: &FalconConfig,
 ) -> impl Iterator<Item = (&'static str, Box<dyn Rule>)> + '_ {
@@ -441,7 +435,7 @@ pub fn build_registry(config: &FalconConfig) -> RuleRegistry {
 #[must_use]
 pub fn build_cross_file_registry(config: &FalconConfig) -> CrossFileRuleRegistry {
     let mut registry = CrossFileRuleRegistry::new();
-    for (name, make, _) in enabled_cross_file_rules(config) {
+    for (name, make) in enabled_cross_file_rules(config) {
         registry.register(name, make());
     }
     registry
@@ -607,22 +601,18 @@ pub fn all_cross_file_rules() -> Vec<(&'static str, Box<dyn CrossFileRule>)> {
         .collect()
 }
 
-type EnabledCrossFileRule = (&'static str, fn() -> Box<dyn CrossFileRule>, bool);
-
 fn enabled_cross_file_rules(
     config: &FalconConfig,
-) -> impl Iterator<Item = EnabledCrossFileRule> + '_ {
+) -> impl Iterator<Item = (&'static str, fn() -> Box<dyn CrossFileRule>)> + '_ {
     RULE_METADATA.iter().filter_map(|meta| match meta.kind {
-        RuleKind::CrossFile {
-            make,
-            needs_resolution,
-        } if config.is_cross_file_rule_enabled_anywhere(
-            meta.group.as_str(),
-            meta.name,
-            meta.recommended,
-        ) =>
+        RuleKind::CrossFile { make, .. }
+            if config.is_cross_file_rule_enabled_anywhere(
+                meta.group.as_str(),
+                meta.name,
+                meta.recommended,
+            ) =>
         {
-            Some((meta.name, make, needs_resolution))
+            Some((meta.name, make))
         }
         _ => None,
     })
