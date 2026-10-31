@@ -309,6 +309,11 @@ These entries describe implemented foundation, not acceptance of the open items.
   release blocker, but cold Falcon beating warm analyzer remains an aspiration
   until this decision. Keep uncached full analysis measurable; no optimization
   campaign or persistent result caching is approved merely by this checklist.
+  Maintainer decision: the numerical regression margin is deferred until the
+  representative suite and measurement variability are established. Performance is
+  NOT deferred as a v1 release blocker. Keep uncached Falcon measurements, and define
+  comparative acceptance against the Dart analyzer separately from regression
+  against Falcon's own baseline.
 
 ### V1-6 — Certify the release candidate, not just rule count
 
