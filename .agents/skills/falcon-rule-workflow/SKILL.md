@@ -23,12 +23,14 @@ this skill covers the checks and generated surfaces it does not sequence.
 
 ## Exercise both harnesses
 
-- Iterate with `cargo xtask validate-rules --rule <rule-id>` and confirm the
+- Iterate with `makers verify-rule <rule-id>` and confirm the
   summary actually checked the intended fixtures. Filtering selects existing
   directories; a misspelled or missing directory is not coverage.
 - Default `validate-rules` builds Falcon itself. With `--falcon-bin`, the caller
-  owns binary freshness; `makers validate_rules` handles its build dependency.
-- Keep both `makers test` and `makers validate_rules` in final verification.
+  owns binary freshness; the default xtask path builds Falcon before validation.
+- Use `makers verify-package falcon_rules` for the in-process checks while iterating.
+  The coordinator runs `makers verify-full` on the final settled candidate; it
+  includes both `makers test` and CLI corpus validation.
   `crates/falcon_rules/tests/corpus_tests.rs` runs rules in-process and enforces
   registered-rule coverage, orphan-directory rejection, and non-placeholder
   fixtures. The xtask harness executes the CLI and iterates existing directories;

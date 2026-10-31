@@ -26,14 +26,33 @@ plain git works fine. Use whichever you prefer.
 
 ## The gates
 
-Run these checks before review. CI runs lint, tests, corpus validation, and benchmark compilation; `makers A` also checks the workspace and builds release binaries locally.
+Verification requires Python 3.11+ and Git as well as the tools above. Choose a
+scope while iterating, then run the full gate on the settled final change:
 
 ```sh
-makers lint            # rustfmt, taplo, clippy -D warnings
-makers test            # nextest + doctests
-makers validate_rules  # golden corpus: every rule vs. its fixtures
-makers A               # everything above plus check, bench compile and a release build
+makers verify-rule avoid-dynamic       # one CLI corpus; not registration coverage
+makers verify-package falcon_analyze   # package Clippy, nextest and doctests
+makers verify-fast                     # formatting, workspace Clippy and tests
+makers verify-full                     # final gate; makers A is an alias
+makers verify-tooling                  # small tests for the verification runner
 ```
+
+The full gate retains lint, workspace check, tests, CLI corpus validation,
+benchmark compilation and release builds, and adds `docgen --check`. Its shared
+validation build uses the existing `ci_validate` task to avoid separate CLI and
+benchmark builds with different dev-dependency features. The separate OSS corpus
+CI job still runs; a local full pass does not claim that job or website/Dart checks.
+
+The wrapper limits compile jobs, nextest processes, libtest threads and Rayon
+workers independently. It enables mbx test admission without creating another
+scheduler; separate checks/workspaces can progress together. It checks source
+bytes before and after commands and never reuses a previous passing result.
+See [verification scopes and resource budgets](docs/verification.md).
+
+Existing `makers lint`, `test`, `validate_rules`, `check` and build tasks remain
+available as low-level commands. They do not acquire the wrapper's budgets or
+source-drift checks when invoked directly. Do not run `makers A` after every edit
+or independently in every agent; the coordinator owns the final settled gate.
 
 If you add, remove, or rename a rule, regenerate the config schema and commit it:
 
@@ -289,7 +308,7 @@ Inline suppression is handled centrally by `crates/falcon_analyze/src/suppressio
 
 - Keep each commit to one logical change. Conventional commit prefixes are welcome, but release versions and notes come only from changesets, not commit messages or PR titles.
 - Include a changeset for each user-facing change, such as a new rule, diagnostic fix, CLI behavior, or installation change. Internal refactors, tests, and documentation-only changes do not need one unless they affect users.
-- Run the four gates before pushing.
+- Run the full gate before pushing, plus affected website/Dart/OSS checks as required by CI.
 - Keep PR descriptions concrete: what changed, why, and how you verified it.
 
 Each changeset becomes one bullet in `CHANGELOG.md`, so write one changeset per user-facing change: a short plain summary of what changed for users, usually one sentence, in a single paragraph with no headings, lists or code blocks. Knope turns a multi-paragraph changeset into a heading instead of a bullet, and `makers test` rejects one. A pull request with several user-facing changes adds several changesets. A fix to something that hasn't been released yet updates that feature's changeset instead of adding a new one. Name rule ids in backticks.

@@ -24,6 +24,13 @@ env:
 # main pushes write snapshots, so pull requests never seed what main restores.
 # MBX_GC_MAX_TOTAL_SIZE bounds each snapshot as main keeps adding to it.
 jobs:
+  verification-tooling:
+    name: Verification tooling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 -B -m unittest discover -s scripts -p 'test_*.py'
+
   changes:
     runs-on: ubuntu-latest
     permissions:

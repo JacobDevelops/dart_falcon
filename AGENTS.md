@@ -43,9 +43,21 @@ Project skills live in `.agents/skills/`.
 
 ## Completion
 
-For code changes, run CONTRIBUTING's **The gates** from the repository root;
-`makers A` runs all of them. The task file and `cargo xtask --help` are the
-command references.
+Read CONTRIBUTING's **The gates** before checks. Use `makers verify-rule <id>`
+or `makers verify-package <package>` while iterating; use `makers verify-fast`
+for a coherent settled slice. The coordinator runs `makers verify-full` (alias
+`makers A`) once on the settled final candidate, not once per agent or edit.
+Scoped/fast checks do not replace final coverage. Use `makers verify-tooling`
+for changes to verification tooling itself; report heavier gates not run.
+
+Keep writers out of the source being verified. Concurrent independent workspaces
+may run bounded checks; retain their own target directories and let mbx share
+compiler outputs. Do not start redundant aggregate gates, delete shared cache,
+or reuse an earlier success after source/config/toolchain changes. The wrapper
+fails on observed source drift and never caches a passing check result. Record
+command, checked source, observed result and review limitations in the handoff.
+See `docs/verification.md` for budgets, cancellation and scope. Personal agent
+loops, cowork coordination and model routing belong outside this OSS repository.
 
 For agent-documentation-only changes, check paths, commands, and symlink targets;
 Rust builds are not a substitute for checking the instructions themselves.
