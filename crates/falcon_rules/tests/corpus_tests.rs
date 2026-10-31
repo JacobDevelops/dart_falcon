@@ -38,7 +38,6 @@ use falcon_analyze::{
     TypeIndex,
 };
 use falcon_config::FalconConfig;
-use falcon_dart_parser::parser::parse;
 
 use falcon_rules::{all_cross_file_rules, all_rules, rule_requires_resolution};
 
@@ -370,11 +369,8 @@ fn run_rule(
     let diagnostics = if inference::requires_sdk(file) {
         inference::analyze(rule_name, rule, file, source, config)
     } else {
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let (parsed, errors) = ParsedFile::parse_for_package(source, None);
+        let parsed = Arc::new(parsed);
         let program = parsed.program();
         let resolver_dependent = rule_requires_resolution(rule_name);
         let environment =
@@ -896,13 +892,12 @@ fn append_pubspec_files(fixture_sources: &[(PathBuf, String)], files: &mut Vec<P
             .filter(|(path, _)| {
                 path.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml")
             })
-            .map(|(path, source)| ProjectFile {
-                path: path.clone(),
-                parsed: Arc::new(ParsedFile {
-                    source: source.clone().into_boxed_str(),
-                    tree: falcon_dart_parser::lex_tree(source),
-                }),
-                has_parse_errors: false,
+            .map(|(path, source)| {
+                ProjectFile::new(
+                    path.clone(),
+                    Arc::new(ParsedFile::lexical(source.clone().into_boxed_str())),
+                )
+                .expect("parsed fixture must be accepted by the project")
             }),
     );
 }
@@ -1074,21 +1069,11 @@ fn resolver_project_paths(dir: &Path) -> (Vec<PathBuf>, Vec<PathBuf>, Option<tem
 }
 
 fn parse_project_sources(sources: &[String]) -> (Vec<bool>, Vec<Arc<ParsedFile>>) {
-    let results: Vec<_> = sources.iter().map(|source| parse(source)).collect();
-    let has_parse_errors: Vec<_> = results
+    let parsed: Vec<_> = sources
         .iter()
-        .map(|result| !result.errors.is_empty())
+        .map(|source| Arc::new(ParsedFile::parse(source.clone().into_boxed_str())))
         .collect();
-    let parsed: Vec<_> = results
-        .into_iter()
-        .zip(sources)
-        .map(|(result, source)| {
-            Arc::new(ParsedFile {
-                source: source.clone().into_boxed_str(),
-                tree: result.tree,
-            })
-        })
-        .collect();
+    let has_parse_errors = parsed.iter().map(|file| file.has_parse_errors()).collect();
     (has_parse_errors, parsed)
 }
 

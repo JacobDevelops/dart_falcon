@@ -738,30 +738,22 @@ mod tests {
     use falcon_analyze::ParsedFile;
     use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::Path;
     use std::sync::Arc;
 
     fn diagnostics(source: &str, imported: &str) -> Vec<Diagnostic> {
         let path = Path::new("/project/lib/main.dart");
         let imported_path = Path::new("/project/lib/output.dart");
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let (parsed, parsed_errors) = ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = Arc::new(parsed);
         let program = parsed.program();
-        let parsed_output = parse(imported);
+        let (parsed_output, parsed_output_errors) = ParsedFile::parse_for_package(imported, None);
         assert!(
-            parsed_output.errors.is_empty(),
-            "{:?}",
-            parsed_output.errors
-        );
-        let parsed_output = Arc::new(ParsedFile {
-            source: imported.into(),
-            tree: parsed_output.tree,
-        });
+                            parsed_output_errors.is_empty(),
+                            "{parsed_output_errors:?}"
+                        );
+        let parsed_output = Arc::new(parsed_output);
         let files = [(path, &parsed), (imported_path, &parsed_output)];
         let indexes = crate::lint::test_support::TestIndexes::new(&files);
         let config = FalconConfig::default();

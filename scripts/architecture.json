@@ -12,7 +12,6 @@
     "falcon_cli": [
       "falcon_analyze",
       "falcon_config",
-      "falcon_dart_parser",
       "falcon_diagnostics",
       "falcon_lsp",
       "falcon_project",

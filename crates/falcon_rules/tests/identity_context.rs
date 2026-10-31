@@ -6,7 +6,6 @@ use falcon_analyze::{
     SignatureIndex, TypeIndex, group_libraries, library_unit,
 };
 use falcon_config::FalconConfig;
-use falcon_dart_parser::parse;
 use falcon_rules::lint::{
     correctness::diagnostic_describe_all_properties::DiagnosticDescribeAllProperties,
     style::{
@@ -16,12 +15,9 @@ use falcon_rules::lint::{
 };
 
 fn parsed(source: &str) -> Arc<ParsedFile> {
-    let result = parse(source);
-    assert!(result.errors.is_empty(), "{:?}", result.errors);
-    Arc::new(ParsedFile {
-        source: source.into(),
-        tree: result.tree,
-    })
+    let (parsed, errors) = ParsedFile::parse_for_package(source, None);
+    assert!(errors.is_empty(), "{errors:?}");
+    Arc::new(parsed)
 }
 
 #[test]
@@ -362,7 +358,7 @@ fn late_candidates_use_part_loop_writes_not_owner_loop_writes() {
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
     assert_eq!(
         diagnostics[0].span.start,
-        files[0].source.find("_safe").unwrap(),
+        files[0].source().find("_safe").unwrap(),
         "{diagnostics:?}",
     );
 }

@@ -134,24 +134,16 @@ fn fact_summary(index: &SignatureIndex, provenance_free: bool) -> (usize, usize,
 
 fn benchmark(label: &str, sources: Vec<(PathBuf, String)>, require_clean_parse: bool) {
     let mut input_hash = 0xcbf2_9ce4_8422_2325;
-    let mut parse_errors = Vec::with_capacity(sources.len());
     let files: Vec<_> = sources
         .into_iter()
         .map(|(path, source)| {
             checksum(path.to_string_lossy().as_bytes(), &mut input_hash);
             checksum(source.as_bytes(), &mut input_hash);
-            let parsed = falcon_dart_parser::parse(&source);
+            let (parsed, errors) = crate::ParsedFile::parse_for_package(source, None);
             if require_clean_parse {
-                assert!(parsed.errors.is_empty(), "{path:?}: {:?}", parsed.errors);
+                assert!(errors.is_empty(), "{path:?}: {errors:?}");
             }
-            parse_errors.push(!parsed.errors.is_empty());
-            (
-                path,
-                Arc::new(crate::ParsedFile {
-                    source: source.into(),
-                    tree: parsed.tree,
-                }),
-            )
+            (path, Arc::new(parsed))
         })
         .collect();
     assert!(!files.is_empty(), "benchmark corpus must not be empty");
@@ -161,11 +153,10 @@ fn benchmark(label: &str, sources: Vec<(PathBuf, String)>, require_clean_parse: 
         .sum();
     let identity_sources: Vec<_> = files
         .iter()
-        .zip(&parse_errors)
-        .map(|((path, parsed), &has_parse_errors)| IdentitySource {
+        .map(|(path, parsed)| IdentitySource {
             path,
             parsed,
-            has_parse_errors,
+            has_parse_errors: parsed.has_parse_errors(),
         })
         .collect();
     let identities = IdentityIndex::from_project_files(&identity_sources, &[]);
@@ -194,7 +185,10 @@ fn benchmark(label: &str, sources: Vec<(PathBuf, String)>, require_clean_parse: 
     println!(
         "{label}: files={} top_level_declarations={declarations} parse_recovery_files={} input_fnv1a={input_hash:016x}",
         files.len(),
-        parse_errors.iter().filter(|&&errors| errors).count(),
+        identity_sources
+            .iter()
+            .filter(|source| source.has_parse_errors)
+            .count(),
     );
     let mut samples = Vec::with_capacity(SAMPLES);
     let mut expected = None;

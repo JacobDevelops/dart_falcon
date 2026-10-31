@@ -87,14 +87,10 @@ mod tests {
     use falcon_analyze::visit_program;
 
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::Path;
 
     fn resolving(source: &str, check: impl for<'a> FnOnce(Program<'a>, &'a AnalyzeContext<'a>)) {
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parse(source).tree,
-        });
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile::parse(source));
         let program = parsed.program();
         let path = Path::new("test.dart");
         let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, true);

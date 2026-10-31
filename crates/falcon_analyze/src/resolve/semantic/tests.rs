@@ -3,19 +3,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use falcon_dart_parser::parse;
-
 use super::*;
-use crate::resolve::{IdentitySource, LibrarySource};
-
-fn parsed(source: &str) -> Arc<crate::ParsedFile> {
-    let result = parse(source);
-    assert!(result.errors.is_empty(), "{:?}", result.errors);
-    Arc::new(crate::ParsedFile {
-        source: source.into(),
-        tree: result.tree,
-    })
-}
+use crate::resolve::{IdentitySource, LibrarySource, parsed_fixture as parsed};
 
 fn build_project_indexes(
     files: &[(PathBuf, Arc<crate::ParsedFile>)],
@@ -553,13 +542,8 @@ fn sdk_identities_remain_canonical_across_plain_and_embedded_contexts() {
                   final done = Completer<void>(); class LocalError extends Error {} \
                   class NotAnError {}";
     write_canonical_sdk_projects(root, &paths, source);
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-    let parsed = Arc::new(crate::ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let parsed = crate::resolve::parsed_fixture(source);
     let program = parsed.program();
-    assert!(errors.is_empty(), "{errors:?}");
     let environment = crate::AnalysisEnvironment::discover_with_sdk_locator(
         paths.iter().map(PathBuf::as_path),
         |config| {
@@ -968,25 +952,9 @@ fn external_overlays_share_facts_and_replace_project_snapshots() {
         final viaNullable = GenericTools(maybeBase)?.chosen(); \
         final viaNonNull = GenericTools(Base<int>(1))?.chosen(); \
         final viaInferredMethod = GenericTools(Base<int>(1)).choose('value');";
-    let falcon_dart_parser::ParseResult {
-        tree: old_program_tree,
-        errors,
-    } = parse(old_source);
-    let old_program_parsed = Arc::new(crate::ParsedFile {
-        source: old_source.into(),
-        tree: old_program_tree,
-    });
+    let old_program_parsed = crate::resolve::parsed_fixture(old_source);
     let old_program = old_program_parsed.program();
-    assert!(errors.is_empty(), "{errors:?}");
-    let falcon_dart_parser::ParseResult {
-        tree: new_program_tree,
-        errors,
-    } = parse(new_source);
-    let new_program_parsed = Arc::new(crate::ParsedFile {
-        source: new_source.into(),
-        tree: new_program_tree,
-    });
-    assert!(errors.is_empty(), "{errors:?}");
+    let new_program_parsed = crate::resolve::parsed_fixture(new_source);
     std::fs::write(&path, old_source).unwrap();
     let environment =
         crate::AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);
@@ -1835,14 +1803,7 @@ fn closure_loop_writes_are_cached_per_file() {
         "dynamic f() => () { int? x = 1; while (true) { x = null; } return x; };",
         "dynamic f() => () { int? y = 1; while (true) { y = null; } return y; };",
     ];
-    let parsed = sources.map(|source| {
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        Arc::new(crate::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        })
-    });
+    let parsed = sources.map(crate::resolve::parsed_fixture);
     let programs = parsed.each_ref().map(|parsed| parsed.program());
     let identities = IdentityIndex::from_project_files(
         &[
@@ -2501,13 +2462,8 @@ pub(crate) fn with_model_at(
     source: &str,
     test: impl FnOnce(Program<'_>, &SemanticModel<'_>),
 ) {
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-    let parsed = Arc::new(crate::ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let parsed = crate::resolve::parsed_fixture(source);
     let program = parsed.program();
-    assert!(errors.is_empty(), "parse errors: {errors:?}");
     let sources = [IdentitySource {
         path,
         parsed: &parsed,
@@ -2992,13 +2948,8 @@ fn with_parsed_core(
     let path = root.join("app/lib/main.dart");
     std::fs::write(&path, source).unwrap();
     let path = crate::canonical_or_lexical(&path);
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-    let parsed = Arc::new(crate::ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let parsed = crate::resolve::parsed_fixture(source);
     let program = parsed.program();
-    assert!(errors.is_empty(), "parse errors: {errors:?}");
     let environment =
         crate::AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |config| {
             let root = config?.flutter_root.as_ref()?;
@@ -4115,13 +4066,8 @@ fn assert_collection_literal_cases(cases: &[(&str, &str, &[Option<&str>])]) {
             for (actual, expected) in actual.arguments().iter().zip(*arguments) {
                 let expected = expected.map_or(ResolvedType::UNKNOWN, |ty| {
                     let program_source = format!("{ty} expected;");
-                    let falcon_dart_parser::ParseResult { tree, errors } = parse(&program_source);
-                    let parsed = Arc::new(crate::ParsedFile {
-                        source: program_source.into(),
-                        tree,
-                    });
+                    let parsed = crate::resolve::parsed_fixture(&program_source);
                     let program = parsed.program();
-                    assert!(errors.is_empty(), "{errors:?}");
                     let TopLevelDecl::Variable(variable) = program.declarations().next().unwrap()
                     else {
                         panic!()
@@ -4808,25 +4754,9 @@ fn mixin_application_private_constructors_are_library_scoped() {
         "class Base { Base(); Base._private(); } mixin Extra {} ",
         "class LocalAlias = Base with Extra;",
     );
-    let falcon_dart_parser::ParseResult {
-        tree: base_tree,
-        errors: base_errors,
-    } = parse(base_source);
-    let base_parsed = Arc::new(crate::ParsedFile {
-        source: base_source.into(),
-        tree: base_tree,
-    });
+    let base_parsed = crate::resolve::parsed_fixture(base_source);
     let alias_source = "import 'base.dart'; class ImportedAlias = Base with Extra;";
-    let falcon_dart_parser::ParseResult {
-        tree: alias_tree,
-        errors: alias_errors,
-    } = parse(alias_source);
-    let alias_parsed = Arc::new(crate::ParsedFile {
-        source: alias_source.into(),
-        tree: alias_tree,
-    });
-    assert!(base_errors.is_empty());
-    assert!(alias_errors.is_empty());
+    let alias_parsed = crate::resolve::parsed_fixture(alias_source);
     let sources = [
         IdentitySource {
             path: &alias_path,
@@ -6131,15 +6061,7 @@ fn imported_declaration_parameters_use_their_source_file() {
     ];
     let parsed: Vec<_> = inputs
         .iter()
-        .map(|(_, source)| {
-            let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-            let parsed = Arc::new(crate::ParsedFile {
-                source: (*source).into(),
-                tree,
-            });
-            assert!(errors.is_empty(), "{errors:?}");
-            parsed
-        })
+        .map(|(_, source)| crate::resolve::parsed_fixture(source))
         .collect();
     let sources: Vec<_> = inputs
         .iter()
@@ -7418,14 +7340,7 @@ fn negative_supertype_queries_visit_each_diamond_declaration_once() {
 #[test]
 fn signature_index_retains_caller_arenas_independently_of_identity_sources() {
     let source = "void local({int count = 7}) {} const value = 9;";
-    let parse_file = || {
-        let result = parse(source);
-        assert!(result.errors.is_empty(), "{:?}", result.errors);
-        Arc::new(crate::ParsedFile {
-            source: source.into(),
-            tree: result.tree,
-        })
-    };
+    let parse_file = || crate::resolve::parsed_fixture(source);
     let caller = parse_file();
     let indexed = parse_file();
     let path = PathBuf::from("/project/lib/main.dart");
@@ -7487,16 +7402,7 @@ fn signature_index_retains_caller_arenas_independently_of_identity_sources() {
 #[test]
 fn local_callable_retains_defaults_without_a_file_identity() {
     let source = "void local({int count = 7}) {}";
-    let parsed_result = parse(source);
-    assert!(
-        parsed_result.errors.is_empty(),
-        "{:?}",
-        parsed_result.errors
-    );
-    let parsed = Arc::new(crate::ParsedFile {
-        source: source.into(),
-        tree: parsed_result.tree,
-    });
+    let parsed = crate::resolve::parsed_fixture(source);
     let identities = IdentityIndex::from_project_files(&[], &[]);
     let path = PathBuf::from("/project/lib/main.dart");
     let model = SemanticModel::new(&path, &parsed, &identities, None);
@@ -8178,25 +8084,9 @@ fn private_inherited_members_are_visible_from_same_library_parts() {
     let part_path = PathBuf::from("/project/lib/part.dart");
     let root_source =
         "library shared; part 'part.dart'; class Base { int _method() => 0; int _field = 0; }";
-    let falcon_dart_parser::ParseResult {
-        tree: root_tree,
-        errors: root_errors,
-    } = parse(root_source);
-    let root_parsed = Arc::new(crate::ParsedFile {
-        source: root_source.into(),
-        tree: root_tree,
-    });
+    let root_parsed = crate::resolve::parsed_fixture(root_source);
     let part_source = "part of shared; class Child extends Base {}";
-    let falcon_dart_parser::ParseResult {
-        tree: part_tree,
-        errors: part_errors,
-    } = parse(part_source);
-    let part_parsed = Arc::new(crate::ParsedFile {
-        source: part_source.into(),
-        tree: part_tree,
-    });
-    assert!(root_errors.is_empty());
-    assert!(part_errors.is_empty());
+    let part_parsed = crate::resolve::parsed_fixture(part_source);
     let sources = [
         IdentitySource {
             path: &root_path,
@@ -8261,25 +8151,9 @@ fn private_inherited_members_are_hidden_across_libraries() {
     let base_path = PathBuf::from("/project/lib/base.dart");
     let child_path = PathBuf::from("/project/lib/child.dart");
     let base_source = "class Base { int _method() => 0; int _field = 0; }";
-    let falcon_dart_parser::ParseResult {
-        tree: base_tree,
-        errors: base_errors,
-    } = parse(base_source);
-    let base_parsed = Arc::new(crate::ParsedFile {
-        source: base_source.into(),
-        tree: base_tree,
-    });
+    let base_parsed = crate::resolve::parsed_fixture(base_source);
     let child_program_source = "import 'base.dart'; class Child extends Base {}";
-    let falcon_dart_parser::ParseResult {
-        tree: child_program_tree,
-        errors: child_errors,
-    } = parse(child_program_source);
-    let child_program_parsed = Arc::new(crate::ParsedFile {
-        source: child_program_source.into(),
-        tree: child_program_tree,
-    });
-    assert!(base_errors.is_empty());
-    assert!(child_errors.is_empty());
+    let child_program_parsed = crate::resolve::parsed_fixture(child_program_source);
     let sources = [
         IdentitySource {
             path: &base_path,
@@ -8349,26 +8223,10 @@ fn private_inherited_lookup_skips_invisible_override() {
     let base_path = PathBuf::from("/project/lib/a.dart");
     let middle_path = PathBuf::from("/project/lib/b.dart");
     let base_source = "import 'b.dart'; class Base { int _method() => 0; int _field = 0; } class Child extends Middle {}";
-    let falcon_dart_parser::ParseResult {
-        tree: base_tree,
-        errors: base_errors,
-    } = parse(base_source);
-    let base_parsed = Arc::new(crate::ParsedFile {
-        source: base_source.into(),
-        tree: base_tree,
-    });
+    let base_parsed = crate::resolve::parsed_fixture(base_source);
     let middle_source =
         "import 'a.dart'; class Middle extends Base { int _method() => 1; int _field = 1; }";
-    let falcon_dart_parser::ParseResult {
-        tree: middle_tree,
-        errors: middle_errors,
-    } = parse(middle_source);
-    let middle_parsed = Arc::new(crate::ParsedFile {
-        source: middle_source.into(),
-        tree: middle_tree,
-    });
-    assert!(base_errors.is_empty());
-    assert!(middle_errors.is_empty());
+    let middle_parsed = crate::resolve::parsed_fixture(middle_source);
     let sources = [
         IdentitySource {
             path: &base_path,
@@ -8540,36 +8398,12 @@ fn super_formal_chains_resolve_across_files_regardless_of_index_order() {
     let middle_path = PathBuf::from("/project/lib/middle.dart");
     let leaf_path = PathBuf::from("/project/lib/leaf.dart");
     let base_source = "class Base<T> { final T value; Base(this.value); }";
-    let falcon_dart_parser::ParseResult {
-        tree: base_tree,
-        errors: base_errors,
-    } = parse(base_source);
-    let base_parsed = Arc::new(crate::ParsedFile {
-        source: base_source.into(),
-        tree: base_tree,
-    });
+    let base_parsed = crate::resolve::parsed_fixture(base_source);
     let middle_source =
         "import 'base.dart'; class Middle extends Base<String> { Middle(super.value); }";
-    let falcon_dart_parser::ParseResult {
-        tree: middle_tree,
-        errors: middle_errors,
-    } = parse(middle_source);
-    let middle_parsed = Arc::new(crate::ParsedFile {
-        source: middle_source.into(),
-        tree: middle_tree,
-    });
+    let middle_parsed = crate::resolve::parsed_fixture(middle_source);
     let leaf_source = "import 'middle.dart'; class Leaf extends Middle { Leaf(super.value); }";
-    let falcon_dart_parser::ParseResult {
-        tree: leaf_tree,
-        errors: leaf_errors,
-    } = parse(leaf_source);
-    let leaf_parsed = Arc::new(crate::ParsedFile {
-        source: leaf_source.into(),
-        tree: leaf_tree,
-    });
-    assert!(base_errors.is_empty());
-    assert!(middle_errors.is_empty());
-    assert!(leaf_errors.is_empty());
+    let leaf_parsed = crate::resolve::parsed_fixture(leaf_source);
     let sources = [
         IdentitySource {
             path: &leaf_path,
@@ -8628,25 +8462,9 @@ fn constructor_formal_fixpoint_handles_deep_chains_across_two_files() {
     let a_path = PathBuf::from("/project/lib/a.dart");
     let b_path = PathBuf::from("/project/lib/b.dart");
     let a_source = "import 'b.dart'; class A0<T> { final T value; A0(this.value); } class A2 extends B1 { A2(super.value); } class A4 extends B3 { A4(super.value); } class A6 extends B5 { A6(super.value); }";
-    let falcon_dart_parser::ParseResult {
-        tree: a_tree,
-        errors: a_errors,
-    } = parse(a_source);
-    let a_parsed = Arc::new(crate::ParsedFile {
-        source: a_source.into(),
-        tree: a_tree,
-    });
+    let a_parsed = crate::resolve::parsed_fixture(a_source);
     let b_source = "import 'a.dart'; class B1 extends A0<String> { B1(super.value); } class B3 extends A2 { B3(super.value); } class B5 extends A4 { B5(super.value); }";
-    let falcon_dart_parser::ParseResult {
-        tree: b_tree,
-        errors: b_errors,
-    } = parse(b_source);
-    let b_parsed = Arc::new(crate::ParsedFile {
-        source: b_source.into(),
-        tree: b_tree,
-    });
-    assert!(a_errors.is_empty());
-    assert!(b_errors.is_empty());
+    let b_parsed = crate::resolve::parsed_fixture(b_source);
     let sources = [
         IdentitySource {
             path: &a_path,
@@ -8699,25 +8517,9 @@ fn field_forwarders_check_private_getters_from_their_own_library() {
     let other_path = PathBuf::from("/project/lib/other.dart");
     let fake_path = PathBuf::from("/project/lib/fake.dart");
     let other_source = "class Other {}";
-    let falcon_dart_parser::ParseResult {
-        tree: other_tree,
-        errors: other_errors,
-    } = parse(other_source);
-    let other_parsed = Arc::new(crate::ParsedFile {
-        source: other_source.into(),
-        tree: other_tree,
-    });
+    let other_parsed = crate::resolve::parsed_fixture(other_source);
     let fake_source = "abstract class Api { int? get _value; } class Fake { dynamic noSuchMethod(Invocation invocation) => null; } class Impl extends Fake implements Api { final int? _value; Impl(this._value); }";
-    let falcon_dart_parser::ParseResult {
-        tree: fake_tree,
-        errors: fake_errors,
-    } = parse(fake_source);
-    let fake_parsed = Arc::new(crate::ParsedFile {
-        source: fake_source.into(),
-        tree: fake_tree,
-    });
-    assert!(other_errors.is_empty());
-    assert!(fake_errors.is_empty());
+    let fake_parsed = crate::resolve::parsed_fixture(fake_source);
     let sources = [
         IdentitySource {
             path: &other_path,

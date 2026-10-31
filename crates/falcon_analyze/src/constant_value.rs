@@ -2808,7 +2808,7 @@ mod tests {
     use falcon_dart_parser::parse;
 
     use super::*;
-    use crate::{IdentityIndex, IdentitySource, ParsedFile, QualifiedName, TypeIndex};
+    use crate::{IdentityIndex, IdentitySource, QualifiedName, TypeIndex};
 
     #[test]
     fn argument_type_fallback_matches_source_nodes_to_borrowed_values() {
@@ -4035,19 +4035,9 @@ const futureOrCast = null as FutureOr<int?>;
         ];
         let parsed_files: Vec<_> = inputs
             .iter()
-            .map(|(_, source)| {
-                let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-                assert!(errors.is_empty(), "{errors:?}");
-                Arc::new(ParsedFile {
-                    source: (*source).into(),
-                    tree,
-                })
-            })
+            .map(|(_, source)| crate::resolve::parsed_fixture(source))
             .collect();
-        let programs: Vec<_> = parsed_files
-            .iter()
-            .map(|parsed| parsed.tree.program(&parsed.source))
-            .collect();
+        let programs: Vec<_> = parsed_files.iter().map(|parsed| parsed.program()).collect();
         let sources: Vec<_> = inputs
             .iter()
             .zip(&parsed_files)

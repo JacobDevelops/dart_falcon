@@ -133,26 +133,22 @@ mod tests {
     use super::*;
     use falcon_analyze::{AnalyzeContext, ParsedFile, RuleAnalysis};
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::{path::Path, sync::Arc};
 
     #[test]
     fn use_design_system_item_fires_only_when_configured() {
         let src = r"
     import 'package:flutter/material.dart';
-    
+
     Widget build(BuildContext context) {
       return Container(child: Text('hi'));
     }
     ";
-        let falcon_dart_parser::ParseResult { tree, .. } = parse(src);
-        let parsed = Arc::new(ParsedFile {
-            source: src.into(),
-            tree,
-        });
+        let snapshot = ParsedFile::parse(src);
+        let parsed = Arc::new(snapshot);
         let program = parsed.program();
         let rule = UseDesignSystemItem;
-    
+
         // Without configuration the rule is a no-op.
         let default_cfg = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("t.dart"), &default_cfg, &parsed);
@@ -161,7 +157,7 @@ mod tests {
                 .is_empty(),
             "rule must be a no-op without configuration"
         );
-    
+
         // With a configured item it flags the disallowed construction and names the replacement.
         let configured: FalconConfig = serde_json::from_value(serde_json::json!({
             "linter": {
@@ -193,14 +189,11 @@ mod tests {
             "message should name the replacement: {}",
             diags[0].message
         );
-    
+
         // Static calls are not constructions.
         let static_src = "Widget f(BuildContext c) => Container.of(c);";
-        let falcon_dart_parser::ParseResult { tree, .. } = parse(static_src);
-        let parsed = Arc::new(ParsedFile {
-            source: static_src.into(),
-            tree,
-        });
+        let snapshot = ParsedFile::parse(static_src);
+        let parsed = Arc::new(snapshot);
         let static_program = parsed.program();
         let ctx = AnalyzeContext::new(Path::new("t.dart"), &configured, &parsed);
         assert!(

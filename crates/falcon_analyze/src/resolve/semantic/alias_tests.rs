@@ -1,15 +1,9 @@
 use std::fmt::Write;
 
 use super::*;
-use crate::resolve::IdentitySource;
-use falcon_dart_parser::parse;
+use crate::resolve::{IdentitySource, parsed_fixture};
 fn with_model(source: &str, test: impl FnOnce(&SemanticModel<'_>)) {
-    let parsed = parse(source);
-    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-    let parsed = Arc::new(crate::ParsedFile {
-        source: source.into(),
-        tree: parsed.tree,
-    });
+    let parsed = parsed_fixture(source);
     let path = Path::new("/project/aliases.dart");
     let identities = IdentityIndex::build(
         &[IdentitySource {
@@ -26,15 +20,6 @@ fn with_model(source: &str, test: impl FnOnce(&SemanticModel<'_>)) {
 
 #[test]
 fn retained_type_occurrences_survive_body_shifts_without_conflating_alias_uses() {
-    fn parsed(source: String) -> Arc<crate::ParsedFile> {
-        let result = parse(&source);
-        assert!(result.errors.is_empty(), "{:?}", result.errors);
-        Arc::new(crate::ParsedFile {
-            source: source.into_boxed_str(),
-            tree: result.tree,
-        })
-    }
-
     fn facts(
         parsed: &Arc<crate::ParsedFile>,
         identities: &IdentityIndex,
@@ -73,7 +58,7 @@ fn retained_type_occurrences_survive_body_shifts_without_conflating_alias_uses()
              class Box<T> {{ T identity(T value) => value; }}"
         )
     };
-    let original = parsed(source(""));
+    let original = parsed_fixture(&source(""));
     let path = Path::new("/project/aliases.dart");
     let mut identities = IdentityIndex::build(
         &[IdentitySource {
@@ -93,14 +78,14 @@ fn retained_type_occurrences_survive_body_shifts_without_conflating_alias_uses()
         "final items = <int>[1, 2, 3]; // a longer body\n",
         "",
     ] {
-        let edited = parsed(source(body));
+        let edited = parsed_fixture(&source(body));
         assert_eq!(
             original.declaration_signature(),
             edited.declaration_signature()
         );
         identities.refresh_file_body(file, &edited);
         assert_eq!(facts(&edited, &identities), expected);
-        let reread = parsed(edited.source.to_string());
+        let reread = parsed_fixture(edited.source());
         assert!(!Arc::ptr_eq(&edited, &reread));
         assert_eq!(facts(&reread, &identities), expected);
         assert_eq!(

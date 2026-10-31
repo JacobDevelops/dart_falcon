@@ -281,7 +281,6 @@ mod tests {
 
     use falcon_analyze::{ParsedFile, TypeIndex};
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
 
     use super::*;
 
@@ -293,13 +292,10 @@ mod tests {
             "switch ( /* before */ (token) /* after */ )",
         );
         let source = source.as_str();
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        let (snapshot, errors) = ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("owner-dependencies.dart");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = Arc::new(snapshot);
         let program = parsed.program();
         let identities = crate::lint::test_support::identities(&[(path, &parsed)]);
         let types = TypeIndex::from_resolved_files(
@@ -331,13 +327,10 @@ mod tests {
     fn missing_cases_follow_declaration_order_with_preferred_aliases() {
         let source =
             include_str!("../../../tests/corpus/exhaustive-cases/review_declaration_order.dart");
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        let (snapshot, errors) = ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("review_declaration_order.dart");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = Arc::new(snapshot);
         let program = parsed.program();
         let identities = crate::lint::test_support::identities(&[(path, &parsed)]);
         let types = TypeIndex::from_program(program);

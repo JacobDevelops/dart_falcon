@@ -198,7 +198,6 @@ mod tests {
     use std::path::Path;
 
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
 
     use super::*;
     use falcon_analyze::RuleAnalysis;
@@ -206,13 +205,10 @@ mod tests {
     #[test]
     fn includes_method_arguments_without_extending_property_accesses() {
         let source = "class Box { bool operator ==(Object? other) => other?.toString() == other?.hashCode.toString(); }";
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
-        let program = parsed.tree.program(source);
+        let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = std::sync::Arc::new(parsed);
+        let program = parsed.program();
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let diagnostics = AvoidNullChecksInEqualityOperators.analyze(AvoidNullChecksInEqualityOperators::NAME, program, &ctx);

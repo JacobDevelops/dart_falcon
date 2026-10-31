@@ -44,12 +44,12 @@ impl CrossFileRule for AvoidImportingEntrypointExports {
         let mut barrels: HashMap<_, _> = files
             .iter()
             .filter(|file| file.program().exports().next().is_some())
-            .map(|file| (super::canonical_package_path(&file.path), true))
+            .map(|file| (super::canonical_package_path(file.path()), true))
             .collect();
         let mut analyzed_seeded = false;
         let mut diagnostics = Vec::new();
         for file in files {
-            let path = file.path.to_string_lossy();
+            let path = file.path().to_string_lossy();
             let settings = match options::cross_file::<Options>(config, &path, Self::NAME) {
                 Ok(settings) => settings,
                 Err(error) => {
@@ -63,11 +63,11 @@ impl CrossFileRule for AvoidImportingEntrypointExports {
                     continue;
                 }
             };
-            let file_package = environment.file_package(&file.path);
+            let file_package = environment.file_package(file.path());
             let Some(package) = file_package.identity() else {
                 continue;
             };
-            let source = super::canonical_package_path(&file.path);
+            let source = super::canonical_package_path(file.path());
             if settings.only_in_src
                 && !source
                     .strip_prefix(&package.lib_root)
@@ -100,7 +100,7 @@ impl CrossFileRule for AvoidImportingEntrypointExports {
                         analyzed_seeded = true;
                         for file in files {
                             barrels
-                                .entry(super::canonical_package_path(&file.path))
+                                .entry(super::canonical_package_path(file.path()))
                                 .or_insert(false);
                         }
                     }
@@ -142,17 +142,11 @@ mod tests {
             "tests/corpus/avoid-importing-entrypoint-exports/cross-file/bad/lib/src/consumer.dart",
         );
         let source = std::fs::read_to_string(&path).unwrap();
-        let parsed = falcon_dart_parser::parser::parse(&source);
-        let files = [ProjectFile {
-            path,
-            parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-                source: source.into_boxed_str(),
-                tree: parsed.tree,
-            }),
-            has_parse_errors: false,
-        }];
+        let parsed = falcon_analyze::ParsedFile::parse(source);
+        let files = [ProjectFile::new(path, std::sync::Arc::new(parsed))
+            .expect("parsed fixture must be accepted by the project")];
         let environment = AnalysisEnvironment::discover_with_sdk_locator(
-            files.iter().map(|file| file.path.as_path()),
+            files.iter().map(falcon_analyze::ProjectFile::path),
             |_| None,
         );
         let diagnostics = AvoidImportingEntrypointExports.prepare_project(
@@ -174,19 +168,13 @@ mod tests {
         ]
         .into_iter()
         .map(|(path, source)| {
-            let parsed = falcon_dart_parser::parser::parse(source);
-            ProjectFile {
-                path,
-                parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-                    source: source.into(),
-                    tree: parsed.tree,
-                }),
-                has_parse_errors: false,
-            }
+            let parsed = falcon_analyze::ParsedFile::parse(source);
+            ProjectFile::new(path, std::sync::Arc::new(parsed))
+                .expect("parsed fixture must be accepted by the project")
         })
         .collect();
         let environment = AnalysisEnvironment::discover_with_sdk_locator(
-            files.iter().map(|file| file.path.as_path()),
+            files.iter().map(falcon_analyze::ProjectFile::path),
             |_| None,
         );
         assert!(

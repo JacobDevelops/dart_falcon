@@ -85,10 +85,7 @@ mod tests {
     use std::path::Path;
 
     fn normalized(source: &str) -> Vec<u8> {
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: falcon_dart_parser::parse(source).tree,
-        });
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile::parse(source));
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         normalize(&ctx, Span::new(0, source.len())).collect()

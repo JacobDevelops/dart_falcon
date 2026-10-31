@@ -1328,7 +1328,6 @@ mod tests {
     use super::*;
     use crate::ParsedFile;
     use crate::resolve::parsed_fixture;
-    use falcon_dart_parser::parse;
     use std::sync::Arc;
 
     #[test]
@@ -1429,7 +1428,7 @@ mod tests {
 
     fn index(src: &str) -> TypeIndex {
         let parsed = parsed_fixture(src);
-        TypeIndex::from_program(parsed.tree.program(&parsed.source))
+        TypeIndex::from_program(parsed.program())
     }
 
     // ── Recording ───────────────────────────────────────────────────────────────
@@ -1699,10 +1698,7 @@ mod tests {
         use super::super::IdentitySource;
         let path = Path::new("/project/bad.dart");
         let source = "class Bad extends {";
-        let bad = Arc::new(ParsedFile {
-            source: source.into(),
-            tree: parse(source).tree,
-        });
+        let bad = Arc::new(ParsedFile::parse(source));
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path,
@@ -1715,7 +1711,7 @@ mod tests {
             [(
                 path,
                 LibrarySource {
-                    program: bad.tree.program(&bad.source),
+                    program: bad.program(),
                     has_parse_errors: true,
                     has_unresolved_parts: false,
                 },
@@ -1743,7 +1739,7 @@ mod tests {
     #[test]
     fn no_parse_errors_leaves_index_complete() {
         let good = parsed_fixture("class Good { void m() {} }");
-        let idx = TypeIndex::from_program(good.tree.program(&good.source));
+        let idx = TypeIndex::from_program(good.program());
         assert_eq!(
             idx.member_lookup("Good", "m"),
             MemberResult::Found(MemberKind::Method)
@@ -1812,7 +1808,7 @@ mod tests {
                 (
                     source.path,
                     LibrarySource {
-                        program: source.parsed.tree.program(&source.parsed.source),
+                        program: source.parsed.program(),
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -1874,7 +1870,7 @@ mod tests {
                 (
                     *path,
                     LibrarySource {
-                        program: parsed.tree.program(&parsed.source),
+                        program: parsed.program(),
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -1957,7 +1953,7 @@ mod tests {
                 (
                     good_path,
                     LibrarySource {
-                        program: good.tree.program(&good.source),
+                        program: good.program(),
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -1965,7 +1961,7 @@ mod tests {
                 (
                     bad_path,
                     LibrarySource {
-                        program: bad.tree.program(&bad.source),
+                        program: bad.program(),
                         has_parse_errors: true,
                         has_unresolved_parts: false,
                     },
@@ -2063,7 +2059,7 @@ mod tests {
                 [(
                     path,
                     LibrarySource {
-                        program: program.tree.program(&program.source),
+                        program: program.program(),
                         has_parse_errors: false,
                         has_unresolved_parts: false,
                     },
@@ -2133,7 +2129,7 @@ mod tests {
                     (
                         source.path,
                         LibrarySource {
-                            program: source.parsed.tree.program(&source.parsed.source),
+                            program: source.parsed.program(),
                             has_parse_errors: source.has_parse_errors,
                             has_unresolved_parts: source.path == bad_path && !parse_error,
                         },
@@ -2209,7 +2205,7 @@ mod tests {
                     (
                         source.path,
                         LibrarySource {
-                            program: source.parsed.tree.program(&source.parsed.source),
+                            program: source.parsed.program(),
                             has_parse_errors: false,
                             has_unresolved_parts: false,
                         },

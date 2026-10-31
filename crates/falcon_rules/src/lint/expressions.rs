@@ -218,12 +218,9 @@ mod tests {
 
     fn compare(left: &str, right: &str) -> bool {
         let source = format!("void f() {{ consume({left}, {right}); }}");
-        let parsed = falcon_dart_parser::parse(&source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into_boxed_str(),
-            tree: parsed.tree,
-        });
+        let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = std::sync::Arc::new(parsed);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let start = "void f() { consume(".len();
@@ -255,12 +252,9 @@ mod tests {
     #[test]
     fn normalization_preserves_literal_chunks_in_nested_interpolations() {
         let source = r#"final text = 'a ${ "b c ${ d }" } e';"#;
-        let parsed = falcon_dart_parser::parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = std::sync::Arc::new(parsed);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let span = Span::new("final text = ".len(), source.len() - 1);

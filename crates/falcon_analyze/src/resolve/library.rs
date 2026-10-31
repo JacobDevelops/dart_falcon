@@ -346,12 +346,9 @@ impl UnionFind {
 /// Parse a valid Dart source fixture shared by resolver unit tests.
 #[cfg(test)]
 pub(crate) fn parsed_fixture(source: &str) -> Arc<ParsedFile> {
-    let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
+    let (parsed, errors) = ParsedFile::parse_for_package(source, None);
     assert!(errors.is_empty(), "parse errors: {errors:?}");
-    Arc::new(ParsedFile {
-        source: source.into(),
-        tree,
-    })
+    Arc::new(parsed)
 }
 
 #[cfg(test)]
@@ -496,7 +493,7 @@ mod tests {
         let parsed = [&owner, &part];
         let unit = library_unit(&g, &parsed, 0);
         assert_eq!(unit.siblings().len(), 1);
-        assert_eq!(unit.sibling_parsed()[0].source.as_ref(), sources[1]);
+        assert_eq!(unit.sibling_parsed()[0].source(), sources[1]);
         assert!(Arc::ptr_eq(unit.sibling_parsed()[0], &part));
         assert_eq!(unit.sibling_paths(), [Path::new("/proj/part.dart")]);
         let part_unit = library_unit(&g, &parsed, 1);

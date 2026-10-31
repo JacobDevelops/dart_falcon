@@ -219,16 +219,12 @@ mod tests {
     use super::*;
     use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::PathBuf;
 
     /// Text each diagnostic actually spans, sliced back out of the source. A
     /// wrong byte offset yields wrong text, so this checks spans, not just count.
     fn spanned(source: &str) -> Vec<&str> {
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parse(source).tree,
-        });
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile::parse(source));
         let program = parsed.program();
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");

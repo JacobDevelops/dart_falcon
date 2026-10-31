@@ -482,10 +482,7 @@ fn invalid_unloaded_options_report_config_errors_instead_of_panicking() {
     }))
     .unwrap();
     let source = "void main() {}";
-    let parsed = std::sync::Arc::new(ParsedFile {
-        source: source.into(),
-        tree: falcon_dart_parser::parser::parse(source).tree,
-    });
+    let parsed = std::sync::Arc::new(ParsedFile::parse(source));
     let path = std::path::Path::new("main.dart");
     let context = AnalyzeContext::new(path, &config, &parsed);
     let falcon_rules::meta::RuleKind::File { make, .. } =
@@ -519,10 +516,7 @@ fn repeated_lazy_option_errors_are_reported_once_with_their_origin() {
         "void fourth(bool flag) { if (flag) {} }\n",
         "void fifth(bool flag) { if (flag) {} }\n",
     );
-    let parsed = std::sync::Arc::new(ParsedFile {
-        source: source.into(),
-        tree: falcon_dart_parser::parser::parse(source).tree,
-    });
+    let parsed = std::sync::Arc::new(ParsedFile::parse(source));
     let path = std::path::Path::new("lib/main.dart");
     let falcon_rules::meta::RuleKind::File { make, .. } =
         meta_for("cyclomatic-complexity").unwrap().kind
@@ -581,14 +575,11 @@ fn cross_file_lazy_option_errors_report_base_and_override_origins() {
     use serde_json::json;
 
     let source = "import 'dart:async';\nvoid main() {}\n";
-    let files = [ProjectFile {
-        path: "lib/main.dart".into(),
-        parsed: std::sync::Arc::new(ParsedFile {
-            source: source.into(),
-            tree: falcon_dart_parser::parser::parse(source).tree,
-        }),
-        has_parse_errors: false,
-    }];
+    let files = [ProjectFile::new(
+        "lib/main.dart".into(),
+        std::sync::Arc::new(ParsedFile::parse(source)),
+    )
+    .expect("parsed fixture must be accepted by the project")];
     for in_override in [false, true] {
         let mut value = json!({
             "cross-file": {"rules": {
@@ -1339,13 +1330,10 @@ fn check_collector_probe(
         AnalyzeContext, IdentityIndex, IdentitySource, LibrarySource, SemanticModel,
         SignatureIndex, TypeIndex, group_libraries, library_unit,
     };
-    use falcon_dart_parser::parse;
-    let parsed = parse(&source);
-    assert!(parsed.errors.is_empty());
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into_boxed_str(),
-        tree: parsed.tree,
-    });
+    let (parsed, errors) =
+        falcon_analyze::ParsedFile::parse_for_package(source.into_boxed_str(), None);
+    assert!(errors.is_empty());
+    let parsed = std::sync::Arc::new(parsed);
     let program = parsed.program();
     let (sibling_name, sibling_source) = if part_directive.is_empty() {
         ("probe_part.dart", "")
@@ -1355,10 +1343,7 @@ fn check_collector_probe(
         ("probe_part.dart", "part of 'structural_collectors.dart';")
     };
     let sibling_path = path.with_file_name(sibling_name);
-    let sibling = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: sibling_source.into(),
-        tree: parse(sibling_source).tree,
-    });
+    let sibling = std::sync::Arc::new(falcon_analyze::ParsedFile::parse(sibling_source));
     let grouping = group_libraries(&[
         (path.to_path_buf(), program),
         (sibling_path, sibling.program()),

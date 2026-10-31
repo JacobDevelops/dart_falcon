@@ -32,10 +32,7 @@ pub fn build_semantic_indexes(
         .map(|file| (file.path.to_path_buf(), file.parsed.program()))
         .collect();
     let grouping = group_libraries(&grouping_files);
-    let sources: Vec<_> = files
-        .iter()
-        .map(|file| file.parsed.source.as_ref())
-        .collect();
+    let sources: Vec<_> = files.iter().map(|file| file.parsed.source()).collect();
     let identities = IdentityIndex::build_layer(
         files,
         &sources,

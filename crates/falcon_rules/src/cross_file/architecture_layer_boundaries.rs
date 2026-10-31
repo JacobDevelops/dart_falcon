@@ -41,11 +41,11 @@ impl CrossFileRule for ArchitectureLayerBoundaries {
         let mut diagnostics = Vec::new();
         let mut target_packages: HashMap<PathBuf, Option<PathBuf>> = HashMap::new();
         for file in files {
-            let file_package = environment.file_package(&file.path);
+            let file_package = environment.file_package(file.path());
             let Some(package) = file_package.identity() else {
                 continue;
             };
-            let source = canonical_package_path(&file.path);
+            let source = canonical_package_path(file.path());
             let Ok(source_relative) = source.strip_prefix(&package.lib_root) else {
                 continue;
             };
@@ -105,7 +105,7 @@ impl CrossFileRule for ArchitectureLayerBoundaries {
                     "",
                     Severity::Warning,
                     message,
-                    file.path.to_string_lossy().as_ref(),
+                    file.path().to_string_lossy().as_ref(),
                     uri.span(),
                 ));
             }

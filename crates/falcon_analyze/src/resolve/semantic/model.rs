@@ -237,7 +237,7 @@ impl<'a> SemanticModel<'a> {
             .parsed
             .expect("syntax retention requires a source-backed model");
         let retained = crate::NodeRef::new(Arc::clone(parsed), node.id());
-        debug_assert!(std::ptr::eq(node.tree(), &raw const retained.file.tree));
+        debug_assert!(std::ptr::eq(node.tree(), retained.file.tree()));
         retained
     }
 

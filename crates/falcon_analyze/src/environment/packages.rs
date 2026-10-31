@@ -251,10 +251,7 @@ mod tests {
     use falcon_config::FalconConfig;
 
     fn parsed() -> Arc<ParsedFile> {
-        Arc::new(ParsedFile {
-            source: "".into(),
-            tree: falcon_dart_parser::parse("").tree,
-        })
+        Arc::new(ParsedFile::parse(""))
     }
 
     #[test]

@@ -445,18 +445,14 @@ mod tests {
     use std::{path::Path, sync::Arc};
 
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
 
     use super::*;
     use falcon_analyze::{ParsedFile, RuleAnalysis};
 
     fn lines(source: &str) -> Vec<usize> {
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        let (snapshot, errors) = ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = Arc::new(snapshot);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("a.dart"), &config, &parsed);
         PreferFinalLocals.analyze(PreferFinalLocals::NAME, parsed.program(), &ctx)
@@ -492,12 +488,9 @@ mod tests {
   var [first, second] = [inferred, typed];
   print(first + second);
 }";
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        let (snapshot, errors) = ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = Arc::new(snapshot);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let diagnostics = PreferFinalLocals.analyze(PreferFinalLocals::NAME, parsed.program(), &ctx);

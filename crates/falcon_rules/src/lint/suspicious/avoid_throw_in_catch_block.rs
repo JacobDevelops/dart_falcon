@@ -117,17 +117,13 @@ mod tests {
     use super::AvoidThrowInCatchBlock;
     use falcon_analyze::{AnalyzeContext, RuleAnalysis};
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::Path;
 
     #[test]
     fn preserves_catch_scan_order_across_nested_and_delayed_scopes() {
         let source =
             include_str!("../../../tests/corpus/avoid-throw-in-catch-block/bad_traversal.dart");
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parse(source).tree,
-        });
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile::parse(source));
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("catch_order.dart"), &config, &parsed);
         let actual: Vec<_> = AvoidThrowInCatchBlock.analyze(AvoidThrowInCatchBlock::NAME, parsed.program(), &ctx)

@@ -218,7 +218,6 @@ fn dependency_frontend_fail_uses_its_declaring_library() {
         IdentitySource, LibrarySource, SignatureIndex, TypeIndex,
     };
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use falcon_rules::lint::style::use_test_throws_matchers::UseTestThrowsMatchers;
 
     let directory = tempfile::tempdir().unwrap();
@@ -243,11 +242,8 @@ void shadowed() {
 ";
     let path = app.join("lib/main.dart");
     std::fs::write(&path, source).unwrap();
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let (parsed, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+    let parsed = std::sync::Arc::new(parsed);
     let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |config| {

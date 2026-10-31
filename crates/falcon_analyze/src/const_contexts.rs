@@ -257,11 +257,8 @@ mod tests {
     #[test]
     fn caches_indexes_per_file_and_rebinds_to_fresh_facts() {
         let source = "void f() { const x = 1; print(x); }";
-        let parsed = falcon_dart_parser::parse(source);
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let (parsed, _) = ParsedFile::parse_for_package(source, None);
+        let parsed = Arc::new(parsed);
         let config = falcon_config::FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("first.dart"), &config, &parsed);
         let program = parsed.program();
@@ -284,11 +281,8 @@ mod tests {
                 .is_some()
         );
         let other_source = "void other() {}";
-        let other = falcon_dart_parser::parse(other_source);
-        let other = Arc::new(ParsedFile {
-            source: other_source.into(),
-            tree: other.tree,
-        });
+        let (other, _) = ParsedFile::parse_for_package(other_source, None);
+        let other = Arc::new(other);
         let rebound = ctx.for_file(Path::new("other.dart"), &other);
         assert!(rebound.local_declarations(other.program()).is_empty());
         assert!(

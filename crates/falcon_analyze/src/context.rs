@@ -78,7 +78,7 @@ impl<'a> AnalyzeContext<'a> {
     ) -> Self {
         Self {
             file_path,
-            source: &parsed.source,
+            source: parsed.source(),
             parsed,
             config,
             types: None,
@@ -212,7 +212,7 @@ impl<'a> AnalyzeContext<'a> {
     }
 
     pub fn tree(&self) -> &'a SyntaxTree {
-        &self.parsed.tree
+        self.parsed.tree()
     }
 
     /// Function ownership and try boundaries collected once for this file.

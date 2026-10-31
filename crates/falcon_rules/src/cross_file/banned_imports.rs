@@ -78,7 +78,7 @@ impl CrossFileRule for BannedImports {
         let mut packages: HashMap<PathBuf, PackageIdentity> = HashMap::new();
         let mut diagnostics = Vec::new();
         for file in files {
-            let file_path = file.path.to_string_lossy();
+            let file_path = file.path().to_string_lossy();
             let boundaries = match options::cross_file::<Options>(config, &file_path, Self::NAME) {
                 Ok(options) => &options.rules,
                 Err(error) => {
@@ -95,14 +95,14 @@ impl CrossFileRule for BannedImports {
             if boundaries.is_empty() {
                 continue;
             }
-            let Some(manifest) = enclosing_pubspec(&file.path) else {
+            let Some(manifest) = enclosing_pubspec(file.path()) else {
                 continue;
             };
             let package = packages
                 .entry(manifest.clone())
                 .or_insert_with(|| super::package_identity(&manifest));
             let root = manifest.parent().unwrap();
-            let Some(relative) = package_relative(&file.path, root, package) else {
+            let Some(relative) = package_relative(file.path(), root, package) else {
                 continue;
             };
             let mut applicable = boundaries
@@ -122,7 +122,7 @@ impl CrossFileRule for BannedImports {
                     let value = uri.value();
                     let target = if !value.contains(':') || value.starts_with("package:") {
                         match resolve_directive_uri(
-                            &file.path,
+                            file.path(),
                             &value,
                             Some(package),
                             std::slice::from_ref(package),

@@ -132,12 +132,9 @@ mod tests {
             ("final x = call(\n  '''it's'''\n);", true),
             ("final x = call(\n  \"${f(\")\")}\"\n);", true),
         ] {
-            let parsed = falcon_dart_parser::parse(source);
-            assert!(parsed.errors.is_empty(), "{source}: {:?}", parsed.errors);
-            let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-                source: source.into(),
-                tree: parsed.tree,
-            });
+            let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+            assert!(parsed_errors.is_empty(), "{source}: {parsed_errors:?}");
+            let parsed = std::sync::Arc::new(parsed);
             let config = FalconConfig::default();
             let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
             let diagnostics = PreferTrailingComma.analyze(PreferTrailingComma::NAME, parsed.program(), &ctx);

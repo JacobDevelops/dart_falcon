@@ -1,14 +1,14 @@
 //! Invocation metadata is resolved before null-chain result lifting.
 
-#[cfg(test)]
-use super::{
-    Arc, FunctionBody, IdentityIndex, Path, Program, TopLevelDecl, TypeParameterScope, null_shorted,
-};
 use super::{
     AstChildren, Cow, DartType, DeclarationIdentity, Expr, FxHashMap, InferenceContext, MemberKind,
     QualifiedName, ResolvedSignature, ResolvedType, SemanticModel, SignatureIndex,
     SubstitutionMemo, TypeEnvironment, TypeParameterId, expression_has_dot_shorthand_base,
     expression_qualified_name, expression_segments, resolve_call_constructor,
+};
+#[cfg(test)]
+use super::{
+    FunctionBody, IdentityIndex, Path, Program, TopLevelDecl, TypeParameterScope, null_shorted,
 };
 use crate::resolve::semantic::ResolvedTypeKind;
 
@@ -496,13 +496,8 @@ mod tests {
         source: &str,
         test: impl FnOnce(Program<'_>, &SemanticModel<'_>, &SignatureIndex),
     ) {
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-        let parsed = Arc::new(crate::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = crate::resolve::parsed_fixture(source);
         let program = parsed.program();
-        assert!(errors.is_empty(), "{errors:?}");
         let path = Path::new("/project/queries.dart");
         let identities = IdentityIndex::build(
             &[IdentitySource {

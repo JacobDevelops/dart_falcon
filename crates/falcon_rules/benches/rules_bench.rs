@@ -1,7 +1,6 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use falcon_analyze::{AnalyzeContext, Rule, RuleAnalysis};
 use falcon_config::FalconConfig;
-use falcon_dart_parser::parser::parse;
 use falcon_rules::all_rules;
 use std::path::Path;
 
@@ -176,11 +175,8 @@ class AppConfig {
 ];
 
 fn run_all_rules_on_source(rules: &[(&'static str, Box<dyn Rule>)], path: &Path, source: &str) {
-    let falcon_dart_parser::ParseResult { tree, .. } = parse(source);
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let snapshot = falcon_analyze::ParsedFile::parse(source);
+    let parsed = std::sync::Arc::new(snapshot);
     let program = parsed.program();
     let config = FalconConfig::default();
     let ctx = AnalyzeContext::new(path, &config, &parsed);
@@ -244,11 +240,8 @@ fn bench_per_rule(c: &mut Criterion) {
     let rules = all_rules();
     let snippet = SNIPPETS[0];
     let path = std::path::PathBuf::from("benchmark.dart");
-    let falcon_dart_parser::ParseResult { tree, .. } = parse(snippet);
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: snippet.into(),
-        tree,
-    });
+    let snapshot = falcon_analyze::ParsedFile::parse(snippet);
+    let parsed = std::sync::Arc::new(snapshot);
     let program = parsed.program();
     let config = FalconConfig::default();
 

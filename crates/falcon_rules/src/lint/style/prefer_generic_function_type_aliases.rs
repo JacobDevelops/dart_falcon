@@ -80,11 +80,8 @@ mod tests {
     #[test]
     fn incomplete_alias_without_parameter_list_is_not_a_legacy_function_alias() {
         let source = "typedef F;";
-        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let (snapshot, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        let parsed = std::sync::Arc::new(snapshot);
         let program = parsed.program();
         assert!(!errors.is_empty());
         let config = falcon_config::FalconConfig::default();

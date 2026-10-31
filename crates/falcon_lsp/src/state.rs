@@ -21,7 +21,7 @@ use falcon_analyze::{
     update_semantic_indexes,
 };
 use falcon_config::FalconConfig;
-use falcon_dart_parser::try_parse_for_package;
+use falcon_dart_parser::ParseError;
 use falcon_diagnostics::Diagnostic;
 use falcon_project::{
     DiscoveryWatch, ProjectAnalysis, analyze_document, cross_file_diagnostics,
@@ -34,37 +34,24 @@ use tracing::{debug, warn};
 pub(crate) mod code_actions;
 
 struct DocumentParse {
-    tree: falcon_syntax::cst::SyntaxTree,
+    parsed: ParsedFile,
     diagnostics: Vec<Diagnostic>,
-    has_errors: bool,
-    worker_failed: bool,
 }
 
 fn document_parse_result(
     path: &Path,
-    result: std::io::Result<falcon_dart_parser::ParseResult>,
+    result: Result<(ParsedFile, Vec<ParseError>), (Box<str>, std::io::Error)>,
 ) -> DocumentParse {
     match result {
-        Ok(parsed) => DocumentParse {
-            diagnostics: syntax_error_diagnostics(path, &parsed.errors),
-            has_errors: !parsed.errors.is_empty(),
-            tree: parsed.tree,
-            worker_failed: false,
+        Ok((parsed, errors)) => DocumentParse {
+            diagnostics: syntax_error_diagnostics(path, &errors),
+            parsed,
         },
-        Err(error) => DocumentParse {
-            tree: falcon_syntax::cst::SyntaxTree::build("", &[], Vec::new()),
+        Err((source, error)) => DocumentParse {
+            parsed: ParsedFile::rejected(source),
             diagnostics: vec![falcon_analyze::rules_thread_diagnostic(path, &error)],
-            has_errors: true,
-            worker_failed: true,
         },
     }
-}
-
-/// Parse-derived document state that is updated together after each parse.
-#[derive(Default)]
-pub struct DocumentParseState {
-    has_parse_errors: bool,
-    source_rejected: bool,
 }
 
 /// One open document: full text, cached syntax tree, and instrumentation counters.
@@ -76,7 +63,6 @@ pub struct DocumentState {
     unresolved_path: bool,
     pub version: Option<i32>,
     language_version: LanguageVersion,
-    parse_state: DocumentParseState,
     /// Parse and worker diagnostics from the last parse, kept so `analyze` can
     /// publish them alongside lints without re-parsing (parity with the CLI).
     syntax_diagnostics: Vec<Diagnostic>,
@@ -102,24 +88,14 @@ pub struct DocumentState {
     pub analyze_count: u64,
 }
 
-impl std::ops::Deref for DocumentState {
-    type Target = DocumentParseState;
-
-    fn deref(&self) -> &Self::Target {
-        &self.parse_state
-    }
-}
-
-impl std::ops::DerefMut for DocumentState {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.parse_state
-    }
-}
-
 impl DocumentState {
     #[must_use]
     pub fn text(&self) -> &str {
-        &self.parsed.source
+        self.parsed.source()
+    }
+
+    fn has_parse_errors(&self) -> bool {
+        self.parsed.has_parse_errors()
     }
 }
 
@@ -313,7 +289,6 @@ enum DiskFileStamp {
 
 struct CachedDiskFile {
     parsed: Arc<ParsedFile>,
-    has_parse_errors: bool,
     language_version: Option<LanguageVersion>,
     stamp: Option<FileStamp>,
 }
@@ -325,19 +300,15 @@ impl CachedDiskFile {
         stamp: Option<FileStamp>,
     ) -> Self {
         Self {
-            parsed: Arc::clone(&file.parsed),
-            has_parse_errors: file.has_parse_errors,
+            parsed: Arc::clone(file.parsed()),
             language_version,
             stamp,
         }
     }
 
     fn project_file(&self, path: &Path) -> ProjectFile {
-        ProjectFile {
-            path: path.to_path_buf(),
-            parsed: Arc::clone(&self.parsed),
-            has_parse_errors: self.has_parse_errors,
-        }
+        ProjectFile::new(path.to_path_buf(), Arc::clone(&self.parsed))
+            .expect("cached disk parses are not rejected")
     }
 }
 
@@ -864,9 +835,9 @@ impl LspState {
         let discovery_needed = self.project_paths.is_none()
             && self.semantic_snapshot_error.is_none()
             && ((self.resolve_semantics
-                && self.documents.values().any(|doc| !doc.source_rejected))
+                && self.documents.values().any(|doc| !doc.parsed.is_rejected()))
                 || (self.cross_file_rules_enabled()
-                    && self.documents.values().all(|doc| !doc.source_rejected)));
+                    && self.documents.values().all(|doc| !doc.parsed.is_rejected())));
         if unresolved_changed || discovery_needed {
             return self
                 .open_uris()
@@ -1084,43 +1055,49 @@ impl LspState {
 
     /// Keep cached grammar in sync with package ownership and marker overrides.
     fn refresh_document_versions(&mut self) {
-        let mut changed = false;
+        let changed = self.documents.values().any(|doc| {
+            !doc.parsed.is_rejected()
+                && self.environment.language_version(&doc.path, doc.text()) != doc.language_version
+        });
+        if !changed {
+            return;
+        }
+        // Release old snapshot owners before trying to reuse document source.
+        self.cross_file_index_cache = None;
+        self.invalidate_semantic_snapshot();
+        let mut placeholder = None;
         for doc in self.documents.values_mut() {
-            if doc.source_rejected {
+            if doc.parsed.is_rejected() {
                 continue;
             }
             let language_version = self.environment.language_version(&doc.path, doc.text());
             if language_version == doc.language_version {
                 continue;
             }
-            let parsed = document_parse_result(
-                &doc.path,
-                try_parse_for_package(doc.text(), Some(language_version)),
+            // One temporary owner lets unique snapshots give their source to the reparse.
+            let previous = std::mem::replace(
+                &mut doc.parsed,
+                Arc::clone(placeholder.get_or_insert_with(|| Arc::new(ParsedFile::rejected("")))),
             );
-            let tree = parsed.tree;
-            if let Some(parsed) = Arc::get_mut(&mut doc.parsed) {
-                parsed.tree = tree;
-            } else {
-                doc.parsed = Arc::new(ParsedFile {
-                    source: doc.text().into(),
-                    tree,
-                });
-            }
-            doc.declaration_signature = if parsed.worker_failed {
+            let result = match Arc::try_unwrap(previous) {
+                Ok(parsed) => parsed.try_reparse_for_package(Some(language_version)),
+                Err(parsed) => {
+                    ParsedFile::try_parse_for_package(parsed.source(), Some(language_version))
+                }
+            };
+            #[cfg(test)]
+            let result =
+                Self::inject_parser_failure(&doc.path, self.parser_failure_path.as_deref(), result);
+            let parsed = document_parse_result(&doc.path, result);
+            doc.parsed = Arc::new(parsed.parsed);
+            doc.declaration_signature = if doc.parsed.is_rejected() {
                 0
             } else {
                 doc.parsed.declaration_signature()
             };
-            doc.has_parse_errors = parsed.has_errors;
-            doc.source_rejected = parsed.worker_failed;
             doc.syntax_diagnostics = parsed.diagnostics;
             doc.language_version = language_version;
             doc.parse_count += 1;
-            changed = true;
-        }
-        if changed {
-            self.cross_file_index_cache = None;
-            self.invalidate_semantic_snapshot();
         }
     }
 
@@ -1155,6 +1132,24 @@ impl LspState {
         self.semantic_topology_build_count
     }
 
+    fn parse_document(
+        path: &Path,
+        source: Box<str>,
+        package_version: Option<LanguageVersion>,
+        source_error: Option<Diagnostic>,
+        parser_failure_path: Option<&Path>,
+    ) -> DocumentParse {
+        if let Some(diagnostic) = source_error {
+            return DocumentParse {
+                parsed: ParsedFile::rejected(source),
+                diagnostics: vec![diagnostic],
+            };
+        }
+        let result = ParsedFile::try_parse_for_package(source, package_version);
+        let result = Self::inject_parser_failure(path, parser_failure_path, result);
+        document_parse_result(path, result)
+    }
+
     /// `textDocument/didOpen`: cache and parse the document, then analyze it.
     pub fn open(&mut self, uri: &str, mut text: String, version: Option<i32>) -> Vec<Diagnostic> {
         let (path, unresolved_path) = document_path(uri, &self.workspace_roots);
@@ -1165,38 +1160,38 @@ impl LspState {
         }
         self.refresh_environment(std::iter::once(path.as_path()));
         let package_version = self.environment.package_language_version(&path);
-        let result = try_parse_for_package(&text, package_version);
-        #[cfg(test)]
-        let result = self.inject_parser_failure(&path, result);
-        let parsed = document_parse_result(&path, result);
-        let tree = parsed.tree;
         let language_version = self.environment.language_version(&path, &text);
-        let mut syntax_diagnostics = parsed.diagnostics;
-        let source_rejected = source_error.is_some() || parsed.worker_failed;
-        syntax_diagnostics.extend(source_error);
-        let next_parsed = Arc::new(ParsedFile {
-            source: text.into_boxed_str(),
-            tree,
-        });
-        // A failed parser worker supplies an empty fallback tree, not a tree
-        // for this source. It must never be inspected for declaration reuse.
-        let next_signature = if source_rejected {
+        let source = text.into_boxed_str();
+        #[cfg(test)]
+        let parser_failure_path = self.parser_failure_path.as_deref();
+        #[cfg(not(test))]
+        let parser_failure_path = None;
+        let parsed = Self::parse_document(
+            &path,
+            source,
+            package_version,
+            source_error,
+            parser_failure_path,
+        );
+        let syntax_diagnostics = parsed.diagnostics;
+        let next_parsed = Arc::new(parsed.parsed);
+        // Rejected source must never be inspected for declaration reuse.
+        let next_signature = if next_parsed.is_rejected() {
             0
         } else {
             next_parsed.declaration_signature()
         };
-        let unchanged_api = !source_rejected
-            && !parsed.has_errors
+        let unchanged_api = !next_parsed.has_parse_errors()
             && self.semantic_snapshot.as_ref().is_some_and(|snapshot| {
                 snapshot.by_path.get(&path).is_some_and(|&index| {
                     let previous = &snapshot.files[index];
-                    !previous.has_parse_errors
+                    !previous.has_parse_errors()
                         && self
                             .documents
                             .get(uri)
                             .filter(|doc| doc.path == path)
                             .map_or_else(
-                                || previous.parsed.declaration_signature(),
+                                || previous.parsed().declaration_signature(),
                                 |doc| doc.declaration_signature,
                             )
                             == next_signature
@@ -1211,10 +1206,6 @@ impl LspState {
                 declaration_signature: next_signature,
                 version,
                 language_version,
-                parse_state: DocumentParseState {
-                    has_parse_errors: source_rejected || parsed.has_errors,
-                    source_rejected,
-                },
                 syntax_diagnostics,
                 last_diagnostics: Vec::new(),
                 diagnostics_parse_count: 0,
@@ -1247,35 +1238,33 @@ impl LspState {
         let source_error = reject_oversized_buffer(&path, &mut text);
         self.refresh_environment(std::iter::once(path.as_path()));
         let package_version = self.environment.package_language_version(&path);
-        let result = try_parse_for_package(&text, package_version);
+        let source = text.into_boxed_str();
         #[cfg(test)]
-        let result = self.inject_parser_failure(&path, result);
-        let parsed = document_parse_result(&path, result);
+        let parser_failure_path = self.parser_failure_path.as_deref();
+        #[cfg(not(test))]
+        let parser_failure_path = None;
+        let parsed = Self::parse_document(
+            &path,
+            source,
+            package_version,
+            source_error,
+            parser_failure_path,
+        );
         let doc = self.documents.get_mut(uri).expect("document checked above");
-        let tree = parsed.tree;
-        let next_parsed = Arc::new(ParsedFile {
-            source: text.into_boxed_str(),
-            tree,
-        });
-        let next_signature = if source_error.is_some() || parsed.worker_failed {
+        let next_parsed = Arc::new(parsed.parsed);
+        let next_signature = if next_parsed.is_rejected() {
             0
         } else {
             next_parsed.declaration_signature()
         };
-        let unchanged_api = !doc.has_parse_errors
-            && !doc.source_rejected
-            && source_error.is_none()
-            && !parsed.has_errors
-            && !parsed.worker_failed
+        let unchanged_api = !doc.has_parse_errors()
+            && !next_parsed.has_parse_errors()
             && doc.declaration_signature == next_signature;
         doc.syntax_diagnostics = parsed.diagnostics;
-        doc.source_rejected = source_error.is_some() || parsed.worker_failed;
-        doc.syntax_diagnostics.extend(source_error);
         doc.parsed = next_parsed;
         doc.declaration_signature = next_signature;
         doc.version = version;
         doc.language_version = self.environment.language_version(&doc.path, doc.text());
-        doc.has_parse_errors = doc.source_rejected || parsed.has_errors;
         doc.parse_count += 1;
         self.update_document_snapshot(uri, unchanged_api);
         true
@@ -1353,8 +1342,7 @@ impl LspState {
             return;
         }
         let buffer = Arc::clone(&document.parsed);
-        let buffer_has_parse_errors = document.has_parse_errors;
-        let buffer_rejected = document.source_rejected;
+        let buffer_rejected = document.parsed.is_rejected();
         let language_version = self.environment.package_language_version(&path);
         // Read only this file: an unsaved buffer is never evidence of disk contents.
         self.disk_read_count += 1;
@@ -1365,42 +1353,32 @@ impl LspState {
         let disk = falcon_analyze::read_source(&path).ok().and_then(|source| {
             if let Some(cached) = self.disk_files.get(&path)
                 && cached.language_version == language_version
-                && cached.parsed.source.as_ref() == source
+                && cached.parsed.source() == source
             {
-                return Some((Arc::clone(&cached.parsed), cached.has_parse_errors));
+                return Some(Arc::clone(&cached.parsed));
             }
-            if !buffer_rejected && buffer.source.as_ref() == source {
-                return Some((buffer, buffer_has_parse_errors));
+            if !buffer_rejected && buffer.source() == source {
+                return Some(buffer);
             }
             self.disk_parse_count += 1;
-            let result = try_parse_for_package(&source, language_version);
+            let result = ParsedFile::try_parse_for_package(source, language_version);
             #[cfg(test)]
-            let result = self.inject_parser_failure(&path, result);
-            result.ok().map(|parsed| {
-                (
-                    Arc::new(ParsedFile {
-                        source: source.into_boxed_str(),
-                        tree: parsed.tree,
-                    }),
-                    !parsed.errors.is_empty(),
-                )
-            })
+            let result =
+                Self::inject_parser_failure(&path, self.parser_failure_path.as_deref(), result);
+            result.ok().map(|(parsed, _)| Arc::new(parsed))
         });
-        if let Some((parsed, has_parse_errors)) = disk {
+        if let Some(parsed) = disk {
             let next_signature = parsed.declaration_signature();
             let document = self.documents.get_mut(uri).expect("open document");
-            let unchanged_api = !document.source_rejected
-                && !document.has_parse_errors
-                && !has_parse_errors
+            let unchanged_api = !document.has_parse_errors()
+                && !parsed.has_parse_errors()
                 && document.declaration_signature == next_signature;
             document.parsed = Arc::clone(&parsed);
             document.declaration_signature = next_signature;
-            document.has_parse_errors = has_parse_errors;
             self.disk_files.insert(
                 path,
                 CachedDiskFile {
                     parsed,
-                    has_parse_errors,
                     language_version,
                     stamp,
                 },
@@ -1422,29 +1400,28 @@ impl LspState {
         if !self.documents.contains_key(uri) {
             return Vec::new();
         }
+        if !self.documents[uri].parsed.is_rejected() {
+            if self.resolve_semantics {
+                self.ensure_semantic_snapshot();
+            }
+            let file_path = self.documents[uri].path.clone();
+            self.refresh_environment(std::iter::once(file_path.as_path()));
+            self.refresh_document_versions();
+        }
         let doc = self.documents.get_mut(uri).expect("open document");
         doc.diagnostics_parse_count = doc.parse_count;
-        if let Some(doc) = self
-            .documents
-            .get_mut(uri)
-            .filter(|doc| doc.source_rejected)
-        {
+        if doc.parsed.is_rejected() {
             doc.analyze_count += 1;
             doc.last_diagnostics = doc.syntax_diagnostics.clone();
             return doc.last_diagnostics.clone();
         }
-        if self.resolve_semantics {
-            self.ensure_semantic_snapshot();
-        }
+        let file_path = self.documents[uri].path.clone();
         if !self.admits_project_dart(&self.documents[uri].path) {
             let doc = self.documents.get_mut(uri).expect("open document");
             doc.analyze_count += 1;
             doc.last_diagnostics.clear();
             return Vec::new();
         }
-        let file_path = self.documents[uri].path.clone();
-        self.refresh_environment(std::iter::once(file_path.as_path()));
-        self.refresh_document_versions();
 
         let semantic = self.semantic_snapshot.as_ref().and_then(|snapshot| {
             snapshot
@@ -1471,7 +1448,7 @@ impl LspState {
             parsed = snapshot
                 .files
                 .iter()
-                .map(|file| &file.parsed)
+                .map(ProjectFile::parsed)
                 .collect::<Vec<_>>();
             library = library_unit(&snapshot.grouping, &parsed, file_index);
             ctx = ctx
@@ -1697,7 +1674,7 @@ impl LspState {
         // Rejected references are unknown, not absent: a partial workspace must
         // not produce unused-file/declaration diagnostics for otherwise valid files.
         if !self.cross_file_rules_enabled()
-            || self.documents.values().any(|doc| doc.source_rejected)
+            || self.documents.values().any(|doc| doc.parsed.is_rejected())
         {
             return HashMap::new();
         }
@@ -1714,18 +1691,18 @@ impl LspState {
         // Semantic views include unsaved buffers; cross-file views include manifests.
         // Reuse facts only when Dart revisions and package identities agree exactly.
         let indexes = self.semantic_snapshot.as_ref().and_then(|snapshot| {
-            let mut dart_files = files.iter().filter(|file| is_dart_file(&file.path));
+            let mut dart_files = files.iter().filter(|file| is_dart_file(file.path()));
             let same_files = dart_files.clone().count() == snapshot.files.len()
                 && dart_files.all(|file| {
                     snapshot
                         .by_path
-                        .get(&file.path)
+                        .get(file.path())
                         .is_some_and(|&index| same_revision(&snapshot.files[index], file))
                 });
             if !same_files {
                 return None;
             }
-            let packages = package_identities(files.iter().map(|file| file.path.as_path()));
+            let packages = package_identities(files.iter().map(ProjectFile::path));
             same_packages(&packages, &snapshot.packages).then_some(&snapshot.indexes)
         });
         let reuse_snapshot = indexes.is_some();
@@ -1763,9 +1740,9 @@ impl LspState {
                     files.as_slice()
                 } else {
                     let root = &self.workspace_roots[index];
-                    let start = files.partition_point(|file| file.path < *root);
-                    let end =
-                        start + files[start..].partition_point(|file| file.path.starts_with(root));
+                    let start = files.partition_point(|file| file.path() < root.as_path());
+                    let end = start
+                        + files[start..].partition_point(|file| file.path().starts_with(root));
                     &files[start..end]
                 };
                 let diagnostics =
@@ -1806,19 +1783,19 @@ impl LspState {
     fn ensure_cross_file_indexes(&mut self, files: &[ProjectFile]) {
         #[cfg(test)]
         assert!(!self.build_panic, "semantic build regression");
-        let dart_files = || files.iter().filter(|file| is_dart_file(&file.path));
-        let packages = package_identities(files.iter().map(|file| file.path.as_path()));
+        let dart_files = || files.iter().filter(|file| is_dart_file(file.path()));
+        let packages = package_identities(files.iter().map(ProjectFile::path));
         if self.cross_file_index_cache.as_ref().is_some_and(|cache| {
             dart_files().count() == cache.files.len()
                 && same_packages(&packages, &cache.packages)
                 && dart_files().zip(&cache.files).all(|(file, cached)| {
-                    file.path == cached.path
+                    file.path() == cached.path()
                         && (same_revision(file, cached)
-                            || (!file.has_parse_errors
-                                && !cached.has_parse_errors
-                                && file.parsed.declaration_signature()
-                                    == cached.parsed.declaration_signature()
-                                && cache.indexes.identities.file(&file.path).is_some()))
+                            || (!file.has_parse_errors()
+                                && !cached.has_parse_errors()
+                                && file.parsed().declaration_signature()
+                                    == cached.parsed().declaration_signature()
+                                && cache.indexes.identities.file(file.path()).is_some()))
                 })
         }) {
             let cache = self.cross_file_index_cache.as_mut().expect("cache checked");
@@ -1829,11 +1806,12 @@ impl LspState {
                 let id = cache
                     .indexes
                     .identities
-                    .file(&file.path)
+                    .file(file.path())
                     .expect("identity checked");
-                cache.indexes.refresh_file_body(id, &file.parsed);
-                cached.parsed = Arc::clone(&file.parsed);
-                cached.has_parse_errors = file.has_parse_errors;
+                cache.indexes.refresh_file_body(id, file.parsed());
+                cached
+                    .replace_parsed(Arc::clone(file.parsed()))
+                    .expect("project parses are not rejected");
             }
             return;
         }
@@ -1841,10 +1819,9 @@ impl LspState {
         let (indexes, rebuilt, external_identity) = self.cross_file_indexes(files, previous);
         self.cross_file_index_cache = Some(CrossFileIndexCache {
             files: dart_files()
-                .map(|file| ProjectFile {
-                    path: file.path.clone(),
-                    parsed: Arc::clone(&file.parsed),
-                    has_parse_errors: file.has_parse_errors,
+                .map(|file| {
+                    ProjectFile::new(file.path().to_path_buf(), Arc::clone(file.parsed()))
+                        .expect("project parses are not rejected")
                 })
                 .collect(),
             indexes,
@@ -1864,9 +1841,9 @@ impl LspState {
     ) -> (SemanticIndexes, usize, Option<Arc<IdentityIndex>>) {
         let files: Vec<_> = files
             .iter()
-            .filter(|file| is_dart_file(&file.path))
+            .filter(|file| is_dart_file(file.path()))
             .collect();
-        let paths: HashSet<_> = files.iter().map(|file| file.path.as_path()).collect();
+        let paths: HashSet<_> = files.iter().copied().map(ProjectFile::path).collect();
         // The external layer excludes semantic project files. URI imports of
         // removed SDK/package files may be absent from the local dependency graph.
         let cache = self.external_indexes.as_ref().filter(|_| {
@@ -1874,27 +1851,25 @@ impl LspState {
                 files.iter().all(|file| {
                     snapshot
                         .by_path
-                        .get(&file.path)
+                        .get(file.path())
                         .is_some_and(|&index| same_revision(&snapshot.files[index], file))
                 }) && snapshot.files.iter().enumerate().all(|(index, file)| {
-                    paths.contains(file.path.as_path())
+                    paths.contains(file.path())
                         || (!files.iter().any(|retained| {
                             self.environment
-                                .sdk(&retained.path)
-                                .is_some_and(|sdk| file.path.starts_with(&sdk.root))
-                                || self.environment.package_config(&retained.path).is_some_and(
-                                    |config| {
-                                        config
-                                            .packages
-                                            .iter()
-                                            .any(|package| file.path.starts_with(&package.lib_root))
-                                    },
-                                )
+                                .sdk(retained.path())
+                                .is_some_and(|sdk| file.path().starts_with(&sdk.root))
+                                || self
+                                    .environment
+                                    .package_config(retained.path())
+                                    .is_some_and(|config| {
+                                        config.packages.iter().any(|package| {
+                                            file.path().starts_with(&package.lib_root)
+                                        })
+                                    })
                         }) && snapshot.reverse_dependencies[index]
                             .iter()
-                            .all(|&dependent| {
-                                !paths.contains(snapshot.files[dependent].path.as_path())
-                            }))
+                            .all(|&dependent| !paths.contains(snapshot.files[dependent].path())))
                 })
             })
         });
@@ -1972,7 +1947,7 @@ impl LspState {
                     uris.push(uri.value().into_owned());
                 }
                 uris.extend(falcon_analyze::doc_imports(program, file.source()).map(str::to_owned));
-                (file.path.clone(), uris)
+                (file.path().to_path_buf(), uris)
             })
             .collect()
     }
@@ -1986,7 +1961,7 @@ impl LspState {
         self.capture_fallback_dependency_watches();
         let roots: Vec<_> = files
             .iter()
-            .map(|file| (file.path.as_path(), file.program(), file.source()))
+            .map(|file| (file.path(), file.program(), file.source()))
             .collect();
         let dynamic = self.dynamic_file_watching;
         let environment = &self.environment;
@@ -2013,7 +1988,7 @@ impl LspState {
         let topology = ExternalTopology::build(&libraries, &self.environment);
         let depends_on_project = files
             .iter()
-            .any(|file| topology.project_dependency_targets.contains(&file.path));
+            .any(|file| topology.project_dependency_targets.contains(file.path()));
         let watched_paths = libraries
             .libraries()
             .iter()
@@ -2074,12 +2049,12 @@ impl LspState {
         let identity_sources: Vec<_> = files
             .iter()
             .map(|file| IdentitySource {
-                path: &file.path,
-                parsed: &file.parsed,
-                has_parse_errors: file.has_parse_errors,
+                path: file.path(),
+                parsed: file.parsed(),
+                has_parse_errors: file.has_parse_errors(),
             })
             .collect();
-        let packages = package_identities(files.iter().map(|file| file.path.as_path()));
+        let packages = package_identities(files.iter().copied().map(ProjectFile::path));
         let external = Some(ExternalSources {
             libraries: external,
             environment: &self.environment,
@@ -2130,8 +2105,9 @@ impl LspState {
             && let Some(file) = snapshot.indexes.identities.file(&doc.path)
         {
             snapshot.indexes.refresh_file_body(file, &doc.parsed);
-            snapshot.files[index].parsed = Arc::clone(&doc.parsed);
-            snapshot.files[index].has_parse_errors = doc.has_parse_errors;
+            snapshot.files[index]
+                .replace_parsed(Arc::clone(&doc.parsed))
+                .expect("body-only updates are not rejected");
             self.body_only_changes.insert(uri.to_string(), index);
             return;
         }
@@ -2153,7 +2129,7 @@ impl LspState {
             .semantic_snapshot
             .as_ref()
             .or(self.previous_semantic_snapshot.as_ref());
-        if doc.source_rejected
+        if doc.parsed.is_rejected()
             || retained.is_some_and(|snapshot| !snapshot.by_path.contains_key(&doc.path))
         {
             self.invalidate_semantic_snapshot();
@@ -2188,14 +2164,18 @@ impl LspState {
         }
     }
 
-    #[cfg(test)]
     fn inject_parser_failure(
-        &self,
         path: &Path,
-        result: std::io::Result<falcon_dart_parser::ParseResult>,
-    ) -> std::io::Result<falcon_dart_parser::ParseResult> {
-        if self.parser_failure_path.as_deref() == Some(path) {
+        parser_failure_path: Option<&Path>,
+        result: Result<(ParsedFile, Vec<ParseError>), (Box<str>, std::io::Error)>,
+    ) -> Result<(ParsedFile, Vec<ParseError>), (Box<str>, std::io::Error)> {
+        if parser_failure_path == Some(path) {
+            let source = match result {
+                Ok((parsed, _)) => parsed.source().into(),
+                Err((source, _)) => source,
+            };
             falcon_dart_parser::with_stack(|| panic!("project parser regression"))
+                .map_err(|error| (source, error))
         } else {
             result
         }
@@ -2287,7 +2267,7 @@ impl LspState {
         }
         // Open buffers and promoted companions can arrive in graph traversal
         // order. Declaration edits must not renumber unchanged project files.
-        files.sort_unstable_by(|left, right| left.path.cmp(&right.path));
+        files.sort_unstable_by(|left, right| left.path().cmp(right.path()));
         // A dependency importing a project file depends on mutable buffer facts.
         // Keep the ordinary combined build for that graph instead of freezing
         // unresolved/project references into the immutable external layer.
@@ -2307,7 +2287,7 @@ impl LspState {
         let external_depends_on_project = self.external_topology.as_ref().is_some_and(|cache| {
             files
                 .iter()
-                .any(|file| cache.project_dependency_targets.contains(&file.path))
+                .any(|file| cache.project_dependency_targets.contains(file.path()))
         });
         if external_depends_on_project {
             self.external_indexes = None;
@@ -2329,17 +2309,17 @@ impl LspState {
         {
             let project_paths: HashSet<&Path> = files
                 .iter()
-                .map(|file| file.path.as_path())
+                .map(ProjectFile::path)
                 .chain(
                     self.documents
                         .values()
-                        .filter(|doc| doc.source_rejected)
+                        .filter(|doc| doc.parsed.is_rejected())
                         .map(|doc| doc.path.as_path()),
                 )
                 .collect();
             let roots: Vec<(&Path, Program<'_>, &str)> = files
                 .iter()
-                .map(|file| (file.path.as_path(), file.program(), file.source()))
+                .map(|file| (file.path(), file.program(), file.source()))
                 .collect();
             let dynamic = self.dynamic_file_watching;
             let environment = &self.environment;
@@ -2386,11 +2366,12 @@ impl LspState {
     ) -> Option<(PathBuf, std::io::Error)> {
         // An open dependency part promotes its whole library to the project
         // view. Keep the buffered member and read only its unopened companions.
-        let mut seen: HashSet<PathBuf> = files.iter().map(|file| file.path.clone()).collect();
+        let mut seen: HashSet<PathBuf> =
+            files.iter().map(|file| file.path().to_path_buf()).collect();
         seen.extend(
             self.documents
                 .values()
-                .filter(|doc| doc.source_rejected)
+                .filter(|doc| doc.parsed.is_rejected())
                 .map(|doc| doc.path.clone()),
         );
         let mut companion_failure = None;
@@ -2404,11 +2385,7 @@ impl LspState {
                 && cached.language_version == language_version
                 && cached.stamp == stamp
             {
-                files.push(ProjectFile {
-                    path: path.to_path_buf(),
-                    parsed: Arc::clone(&cached.parsed),
-                    has_parse_errors: cached.has_parse_errors,
-                });
+                files.push(cached.project_file(path));
                 continue;
             }
             self.disk_read_count += 1;
@@ -2422,23 +2399,23 @@ impl LspState {
                 Ok(source) => {
                     if let Some(cached) = self.disk_files.get_mut(path)
                         && cached.language_version == language_version
-                        && cached.parsed.source.as_ref() == source
+                        && cached.parsed.source() == source
                     {
                         cached.stamp = stamp;
-                        files.push(ProjectFile {
-                            path: path.to_path_buf(),
-                            parsed: Arc::clone(&cached.parsed),
-                            has_parse_errors: cached.has_parse_errors,
-                        });
+                        files.push(cached.project_file(path));
                         continue;
                     }
                     self.disk_parse_count += 1;
-                    let result = try_parse_for_package(&source, language_version);
+                    let result = ParsedFile::try_parse_for_package(source, language_version);
                     #[cfg(test)]
-                    let result = self.inject_parser_failure(path, result);
+                    let result = Self::inject_parser_failure(
+                        path,
+                        self.parser_failure_path.as_deref(),
+                        result,
+                    );
                     let parsed = match result {
-                        Ok(parsed) => parsed,
-                        Err(error) => {
+                        Ok((parsed, _)) => parsed,
+                        Err((_, error)) => {
                             companion_failure = Some((
                                 path.to_path_buf(),
                                 std::io::Error::other(format!(
@@ -2449,26 +2426,19 @@ impl LspState {
                             break;
                         }
                     };
-                    let falcon_dart_parser::ParseResult { tree, errors } = parsed;
-                    let parsed = Arc::new(ParsedFile {
-                        source: source.into_boxed_str(),
-                        tree,
-                    });
-                    let has_parse_errors = !errors.is_empty();
+                    let parsed = Arc::new(parsed);
                     self.disk_files.insert(
                         path.to_path_buf(),
                         CachedDiskFile {
                             parsed: Arc::clone(&parsed),
-                            has_parse_errors,
                             language_version,
                             stamp,
                         },
                     );
-                    files.push(ProjectFile {
-                        path: path.to_path_buf(),
-                        parsed,
-                        has_parse_errors,
-                    });
+                    files.push(
+                        ProjectFile::new(path.to_path_buf(), parsed)
+                            .expect("successful companion parses are not rejected"),
+                    );
                 }
                 Err(error) => warn!("failed to read {}: {}", path.display(), error),
             }
@@ -2522,7 +2492,7 @@ impl LspState {
                     .files
                     .iter()
                     .zip(&files)
-                    .all(|(before, after)| before.path == after.path)
+                    .all(|(before, after)| before.path() == after.path())
         });
         let (indexes, grouping, packages, rebuilt) = self.semantic_indexes(
             &project_files,
@@ -2533,7 +2503,7 @@ impl LspState {
         let by_path: HashMap<_, _> = files
             .iter()
             .enumerate()
-            .map(|(index, file)| (file.path.clone(), index))
+            .map(|(index, file)| (file.path().to_path_buf(), index))
             .collect();
         self.disk_files.retain(|path, _| {
             by_path.contains_key(path)
@@ -2620,15 +2590,14 @@ impl LspState {
             let path = normalized.as_path();
             seen.insert(path);
             if let Some(doc) = open_by_path.get(path) {
-                if doc.source_rejected {
+                if doc.parsed.is_rejected() {
                     complete = false;
                     continue;
                 }
-                files.push(ProjectFile {
-                    path: normalized.clone(),
-                    parsed: Arc::clone(&doc.parsed),
-                    has_parse_errors: doc.has_parse_errors,
-                });
+                files.push(
+                    ProjectFile::new(normalized.clone(), Arc::clone(&doc.parsed))
+                        .expect("rejected documents were excluded"),
+                );
                 continue;
             }
             let (language_version, stamp) = self.project_disk_revision(path, *is_dart);
@@ -2659,7 +2628,7 @@ impl LspState {
             };
             if let Some(cached) = self.disk_files.get_mut(path)
                 && cached.language_version == language_version
-                && cached.parsed.source.as_ref() == source
+                && cached.parsed.source() == source
             {
                 cached.stamp = stamp;
                 files.push(cached.project_file(normalized));
@@ -2817,23 +2786,18 @@ impl LspState {
         if !is_dart {
             return Ok(manifest_file(path.to_path_buf(), source));
         }
-        let result = try_parse_for_package(&source, language_version);
+        let result = ParsedFile::try_parse_for_package(source, language_version);
+        let result = result.map_err(|(_, error)| error);
         let result = if parser_failure_path == Some(path) {
             falcon_dart_parser::with_stack(|| panic!("project parser regression"))
         } else {
             result
         };
-        let parsed = result.map_err(|error| {
+        let (parsed, _) = result.map_err(|error| {
             std::io::Error::other(format!("parsing {}: {error}", path.display()))
         })?;
-        Ok(ProjectFile {
-            path: path.to_path_buf(),
-            has_parse_errors: !parsed.errors.is_empty(),
-            parsed: Arc::new(ParsedFile {
-                source: source.into_boxed_str(),
-                tree: parsed.tree,
-            }),
-        })
+        Ok(ProjectFile::new(path.to_path_buf(), Arc::new(parsed))
+            .expect("successful project parses are not rejected"))
     }
 
     fn append_open_semantic_files(
@@ -2842,12 +2806,11 @@ impl LspState {
         seen: &HashSet<&Path>,
     ) {
         for (path, doc) in open_by_path {
-            if !doc.source_rejected && !seen.contains(path) {
-                files.push(ProjectFile {
-                    path: path.to_path_buf(),
-                    parsed: Arc::clone(&doc.parsed),
-                    has_parse_errors: doc.has_parse_errors,
-                });
+            if !doc.parsed.is_rejected() && !seen.contains(path) {
+                files.push(
+                    ProjectFile::new(path.to_path_buf(), Arc::clone(&doc.parsed))
+                        .expect("rejected documents were excluded"),
+                );
             }
         }
     }
@@ -2896,7 +2859,7 @@ fn build_reverse_dependencies(
                     .map(|directive| directive.uri().value()),
             )
         {
-            if let Some(target) = resolve_dependency(&file.path, &dependency, by_path, packages) {
+            if let Some(target) = resolve_dependency(file.path(), &dependency, by_path, packages) {
                 reverse_dependencies[target].push(index);
             }
         }
@@ -2925,11 +2888,11 @@ fn affected_open_uris_in_snapshot(
 
     let open_by_path = documents
         .iter()
-        .map(|(open_uri, doc)| (&doc.path, open_uri))
+        .map(|(open_uri, doc)| (doc.path.as_path(), open_uri))
         .collect::<HashMap<_, _>>();
     affected
         .into_iter()
-        .filter_map(|index| open_by_path.get(&snapshot.files[index].path).copied())
+        .filter_map(|index| open_by_path.get(snapshot.files[index].path()).copied())
         .cloned()
         .collect()
 }
@@ -3053,8 +3016,8 @@ fn is_dart_file(path: &Path) -> bool {
 
 /// Whether two parses of one path carry the same source and recovery state.
 fn same_revision(file: &ProjectFile, other: &ProjectFile) -> bool {
-    (Arc::ptr_eq(&file.parsed, &other.parsed) || file.source() == other.source())
-        && file.has_parse_errors == other.has_parse_errors
+    (Arc::ptr_eq(file.parsed(), other.parsed()) || file.source() == other.source())
+        && file.has_parse_errors() == other.has_parse_errors()
 }
 
 fn same_packages(current: &[PackageIdentity], cached: &[PackageIdentity]) -> bool {

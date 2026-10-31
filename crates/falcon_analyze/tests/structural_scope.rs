@@ -120,10 +120,7 @@ falcon_analyze::structural_visitor! {
 }
 
 fn run(source: &str, policies: &[u8]) -> (Vec<Diagnostic>, Vec<Event>) {
-    let parsed = Arc::new(ParsedFile {
-        source: source.into(),
-        tree: falcon_dart_parser::parse(source).tree,
-    });
+    let parsed = Arc::new(ParsedFile::parse(source));
     let config = FalconConfig::default();
     let context = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
     let (events, receiver) = mpsc::channel();
@@ -159,10 +156,7 @@ fn shared_collectors_preserve_existing_source_order_and_node_identity() {
         }
     }
     let source = "void f() { for (var i = 0; i < 2; i += 1) { print(3); } var (a, b) = (4, 5); }";
-    let parsed = Arc::new(ParsedFile {
-        source: source.into(),
-        tree: falcon_dart_parser::parse(source).tree,
-    });
+    let parsed = Arc::new(ParsedFile::parse(source));
     let mut baseline = Baseline(Vec::new());
     baseline.visit_program(parsed.program());
     let (diagnostics, events) = run(source, &[0, 0]);
@@ -234,10 +228,7 @@ fn pruning_and_child_routing_are_collector_local_and_restore_at_siblings() {
 #[test]
 fn standalone_and_registry_finalize_once_even_for_empty_programs() {
     for source in ["", "void f() { print(1); }"] {
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree: falcon_dart_parser::parse(source).tree,
-        });
+        let parsed = Arc::new(ParsedFile::parse(source));
         let config = FalconConfig::default();
         let context = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let (direct_events, receiver) = mpsc::channel();
@@ -296,10 +287,7 @@ fn direct_trait_implementations_receive_all_hooks_without_subscriptions() {
         }
     }
     let source = "var x = 1 + 2;";
-    let parsed = Arc::new(ParsedFile {
-        source: source.into(),
-        tree: falcon_dart_parser::parse(source).tree,
-    });
+    let parsed = Arc::new(ParsedFile::parse(source));
     let config = FalconConfig::default();
     let context = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
     let (events, receiver) = mpsc::channel();

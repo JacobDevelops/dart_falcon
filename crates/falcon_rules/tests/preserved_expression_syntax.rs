@@ -4,7 +4,6 @@ use std::path::Path;
 
 use falcon_analyze::{AnalyzeContext, IdentityIndex, IdentitySource, Rule, RuleAnalysis};
 use falcon_config::FalconConfig;
-use falcon_dart_parser::parse;
 use falcon_rules::lint::correctness::avoid_duplicate_map_keys::AvoidDuplicateMapKeys;
 use falcon_rules::lint::correctness::avoid_unused_parameters::AvoidUnusedParameters;
 use falcon_rules::lint::correctness::no_adjacent_strings_in_list::NoAdjacentStringsInList;
@@ -21,11 +20,8 @@ use falcon_rules::lint::suspicious::avoid_negated_conditions::AvoidNegatedCondit
 use falcon_rules::lint::suspicious::no_equal_arguments::NoEqualArguments;
 
 fn reports(name: &'static str, rule: &dyn Rule, source: &str) -> Vec<String> {
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let (parsed, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+    let parsed = std::sync::Arc::new(parsed);
     let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let path = Path::new("syntax.dart");
@@ -324,11 +320,8 @@ void pattern<T>(T? value) {
   if (value case final captured /* ! */ !) {}
 }
 ";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let (parsed, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+    let parsed = std::sync::Arc::new(parsed);
     let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let path = Path::new("syntax.dart");

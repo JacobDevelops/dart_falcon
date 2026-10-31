@@ -480,11 +480,8 @@ mod tests {
     #[test]
     fn carriage_return_line_comments_do_not_hide_public_declarations() {
         let source = "// ordinary comment\rvoid visible() {}";
-        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let (snapshot, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        let parsed = std::sync::Arc::new(snapshot);
         let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
         let config = falcon_config::FalconConfig::default();
@@ -509,18 +506,15 @@ mod tests {
             sealed class Closed();\n\
             class _Private();\n\
             extension type Wrapper(int value) {}";
-        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let (snapshot, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        let parsed = std::sync::Arc::new(snapshot);
         let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
         let mut declarations = Vec::with_capacity(program.declarations().len() * 2);
         for decl in program.declarations() {
             declaration_candidates(decl, None, |declaration| declarations.push(declaration));
         }
-        let tokens: Vec<_> = parsed.tree.tokens(&parsed.source).collect();
+        let tokens: Vec<_> = parsed.tree().tokens(parsed.source()).collect();
         let constructor = declarations.iter().find(|d| d.name == "named").unwrap();
         assert_eq!(
             &source[constructor.span.start..constructor.span.end],
@@ -563,11 +557,8 @@ mod tests {
             class C();\n\
             /// Documents only the mixin class.\n\
             mixin class M();";
-        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let (snapshot, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        let parsed = std::sync::Arc::new(snapshot);
         let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
         let config = falcon_config::FalconConfig::default();
@@ -592,11 +583,8 @@ class Accessors {
 set top(int next) {}
 int get top => 0;
 ";
-        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let (snapshot, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        let parsed = std::sync::Arc::new(snapshot);
         let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
         let config = falcon_config::FalconConfig::default();

@@ -47,7 +47,7 @@ fn snapshot_rebuild_revalidates_disk_parses_without_a_watcher_event() {
     assert_eq!(state.disk_read_count, reads + 2);
     assert_eq!(state.disk_parse_count, parses + 1);
     assert_eq!(
-        state.disk_files[&closed].parsed.source.as_ref(),
+        state.disk_files[&closed].parsed.source(),
         "class ChangedWithoutAnEvent {}"
     );
 }
@@ -77,7 +77,7 @@ fn directory_deletion_event_removes_all_closed_sources() {
             .unwrap()
             .files
             .iter()
-            .all(|file| !file.path.starts_with(&nested))
+            .all(|file| !file.path().starts_with(&nested))
     );
 }
 
@@ -91,7 +91,7 @@ fn fallback_boundary_refreshes_closed_edits_deletions_and_new_directories() {
     let updates = state.revalidate_disk();
     assert!(updates.iter().any(|(updated, _)| updated == &uri));
     assert_eq!(
-        state.disk_files[&closed].parsed.source.as_ref(),
+        state.disk_files[&closed].parsed.source(),
         "class AfterLongerName {}"
     );
 
@@ -215,10 +215,7 @@ fn text_changes_and_normal_ensure_never_scan_fallback_stamps() {
         assert_eq!(state.fallback_scan_count, 0);
         assert_eq!(state.disk_read_count, reads);
         assert_eq!(state.workspace_walk_count, walks);
-        assert_eq!(
-            state.disk_files[&closed].parsed.source.as_ref(),
-            "class Before {}"
-        );
+        assert_eq!(state.disk_files[&closed].parsed.source(), "class Before {}");
         if dynamic {
             assert_eq!(state.project_discovery_watches, []);
             assert!(state.fallback_stamps.is_empty());
@@ -275,7 +272,7 @@ fn rejected_dynamic_watching_discovers_sources_at_idle() {
     std::fs::write(&closed, "class ChangedAfterRejection {}").unwrap();
     assert!(!state.revalidate_disk().is_empty());
     assert_eq!(
-        state.disk_files[&closed].parsed.source.as_ref(),
+        state.disk_files[&closed].parsed.source(),
         "class ChangedAfterRejection {}"
     );
     assert_ne!(state.project_discovery_watches, []);
@@ -340,7 +337,7 @@ fn fallback_refreshes_mutable_dependencies_and_package_configuration() {
         library
             .files
             .iter()
-            .any(|file| file.parsed.source.contains("ChangedDependency"))
+            .any(|file| file.parsed.source().contains("ChangedDependency"))
     }));
     assert!(state.fallback_stamps.contains_key(&local));
     std::fs::write(&local, "class LocalChangedOnDisk {}").unwrap();
@@ -349,7 +346,7 @@ fn fallback_refreshes_mutable_dependencies_and_package_configuration() {
         library
             .files
             .iter()
-            .any(|file| file.parsed.source.contains("LocalChangedOnDisk"))
+            .any(|file| file.parsed.source().contains("LocalChangedOnDisk"))
     }));
     std::fs::write(
         &packages,
@@ -361,7 +358,7 @@ fn fallback_refreshes_mutable_dependencies_and_package_configuration() {
         library
             .files
             .iter()
-            .any(|file| file.parsed.source.contains("Replacement"))
+            .any(|file| file.parsed.source().contains("Replacement"))
     }));
     assert!(state.revalidate_disk().is_empty());
 }
@@ -404,7 +401,7 @@ fn fallback_repairs_rejected_closed_sources_without_directory_changes() {
     std::fs::write(&rejected, "class Repaired {}").unwrap();
     assert!(!state.revalidate_disk().is_empty());
     assert_eq!(
-        state.disk_files[&rejected].parsed.source.as_ref(),
+        state.disk_files[&rejected].parsed.source(),
         "class Repaired {}"
     );
     assert!(state.revalidate_disk().is_empty());
@@ -620,7 +617,7 @@ fn rejected_buffers_do_not_trigger_idle_discovery_publications() {
             assert!(state.cross_file_rules_enabled());
         }
         state.open(&uri, "void main() {}".into(), Some(1));
-        state.documents.get_mut(&uri).unwrap().source_rejected = true;
+        state.documents.get_mut(&uri).unwrap().parsed = Arc::new(ParsedFile::rejected(""));
         state.project_paths = None;
         state.invalidate_semantic_snapshot();
         let analyses = state.documents[&uri].analyze_count;
@@ -647,7 +644,7 @@ fn rejected_watcher_registration_reloads_previously_loaded_local_sources() {
             .libraries()
             .iter()
             .flat_map(|library| library.files.iter())
-            .any(|file| file.parsed.source.contains("BeforeRejection"))
+            .any(|file| file.parsed.source().contains("BeforeRejection"))
     );
     std::fs::write(&source, "class ChangedBeforeFallback {}").unwrap();
     state.set_dynamic_file_watching(false);
@@ -658,7 +655,7 @@ fn rejected_watcher_registration_reloads_previously_loaded_local_sources() {
             .libraries()
             .iter()
             .flat_map(|library| library.files.iter())
-            .any(|file| file.parsed.source.contains("ChangedBeforeFallback"))
+            .any(|file| file.parsed.source().contains("ChangedBeforeFallback"))
     );
     assert!(state.revalidate_disk().is_empty());
 }
@@ -689,7 +686,7 @@ fn deprecated_external_api_does_not_cause_idle_package_discovery_resets() {
             .libraries()
             .iter()
             .flat_map(|library| library.files.iter())
-            .any(|file| file.parsed.source.contains("oldApi"))
+            .any(|file| file.parsed.source().contains("oldApi"))
     );
     let resets = state.external_reset_count;
     assert!(state.revalidate_disk().is_empty());
@@ -822,11 +819,8 @@ fn fallback_saves_outside_project_membership_do_not_repeat_idle_publications() {
                     directory.path().join("rejected.dart").display()
                 );
                 state.open(&rejected_uri, String::new(), Some(1));
-                state
-                    .documents
-                    .get_mut(&rejected_uri)
-                    .unwrap()
-                    .source_rejected = true;
+                state.documents.get_mut(&rejected_uri).unwrap().parsed =
+                    Arc::new(ParsedFile::rejected(""));
             }
             assert!(state.semantic_snapshot.is_some());
             assert!(state.project_paths.is_some());

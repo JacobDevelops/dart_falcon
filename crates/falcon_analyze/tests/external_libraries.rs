@@ -27,7 +27,7 @@ fn external_indexes(
     app: &Path,
     parsed: &Arc<ParsedFile>,
 ) -> (ExternalLibraries, IdentityIndex, TypeIndex) {
-    let source = parsed.source.as_ref();
+    let source = parsed.source();
     let program = parsed.program();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app], fixture_sdk);
     let externals =
@@ -61,12 +61,9 @@ fn external_indexes(
 }
 
 fn parsed_fixture(source: &str) -> Arc<ParsedFile> {
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+    let (tree, errors) = ParsedFile::parse_for_package(source, None);
     assert!(errors.is_empty(), "{errors:?}");
-    Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree,
-    })
+    Arc::new(tree)
 }
 
 fn external_types<'a>(
@@ -889,12 +886,9 @@ fn empty_uri_self_imports_resolve_project_and_external_declarations_without_warn
         "cache/dep/lib/dep.dart",
         "import '' as self; class Generated {} self.Generated? binding;",
     );
-    let parsed_result = parse(source);
-    assert!(parsed_result.errors.is_empty());
-    let parsed = Arc::new(ParsedFile {
-        source: source.into(),
-        tree: parsed_result.tree,
-    });
+    let (parsed_result, parsed_result_errors) = ParsedFile::parse_for_package(source, None);
+    assert!(parsed_result_errors.is_empty());
+    let parsed = Arc::new(parsed_result);
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     let mut external =
         ExternalLibraries::load(&environment, &[(&app, parsed.program(), source)], |path| {
@@ -1018,14 +1012,8 @@ fn absent_sdk_parts_do_not_hide_missing_doc_names() {
             fs::write(sdk.join(part), [0xff]).unwrap();
         }
         let source = "/// [Object] exists, but [Missing] does not.\nvoid f() {}\n";
-        let falcon_dart_parser::ParseResult {
-            tree: parsed_tree,
-            errors,
-        } = parse(source);
-        let parsed = Arc::new(ParsedFile {
-            source: source.to_string().into_boxed_str(),
-            tree: parsed_tree,
-        });
+        let (parsed_tree, errors) = ParsedFile::parse_for_package(source, None);
+        let parsed = Arc::new(parsed_tree);
         let program = parsed.program();
         assert!(errors.is_empty());
         let environment =
@@ -1357,14 +1345,8 @@ fn compact_external_types_do_not_collide_with_project_names() {
     let source = "import 'package:dep/dep.dart' as dep;\n\
                   class Base { void local() {} }\n\
                   class App extends dep.Base {}\n";
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (parsed_tree, errors) = ParsedFile::parse_for_package(source, None);
+    let parsed = Arc::new(parsed_tree);
     assert!(errors.is_empty());
     let (_externals, identities, types) = external_indexes(&app, &parsed);
     let model = SemanticModel::new(&app, &parsed, &identities, Some(&types));
@@ -1483,14 +1465,9 @@ fn compact_external_facts_keep_body_errors_separate_from_header_errors() {
     let falcon_dart_parser::ParseResult { errors, .. } = parse(&dep_source);
     assert!(!errors.is_empty());
     let source = fs::read_to_string(&app).unwrap();
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(&source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.clone().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (parsed_tree, errors) =
+        ParsedFile::parse_for_package(source.clone().into_boxed_str(), None);
+    let parsed = Arc::new(parsed_tree);
     let program = parsed.program();
     assert!(errors.is_empty());
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
@@ -1622,14 +1599,8 @@ fn compact_external_const_constructors_preserve_instance_values() {
         const formalOther = Formal(value: 2); const invalid = Value(0); \
         const expectedSeed = 42; const expectedValue = 1;";
     fs::write(&app, source).unwrap();
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (parsed_tree, errors) = ParsedFile::parse_for_package(source, None);
+    let parsed = Arc::new(parsed_tree);
     let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let (externals, identities, types) = external_indexes(&app, &parsed);
@@ -1714,19 +1685,13 @@ fn analyze_context_caches_the_package_version_and_prefers_the_file_override() {
     let config = falcon_config::FalconConfig::default();
     let package_version = LanguageVersion::new(2, 19);
 
-    let parsed = Arc::new(ParsedFile {
-        source: "void main() {}".into(),
-        tree: parse("void main() {}").tree,
-    });
+    let parsed = Arc::new(ParsedFile::parse("void main() {}"));
     let ctx = falcon_analyze::AnalyzeContext::new(&file, &config, &parsed)
         .with_environment(Some(&environment));
     assert_eq!(ctx.language_version(), package_version);
 
     let source = "// @dart = 2.12\nvoid main() {}";
-    let overridden_parsed = Arc::new(ParsedFile {
-        source: source.into(),
-        tree: parse(source).tree,
-    });
+    let overridden_parsed = Arc::new(ParsedFile::parse(source));
     let overridden = falcon_analyze::AnalyzeContext::new(&file, &config, &overridden_parsed)
         .with_environment(Some(&environment));
     assert_eq!(overridden.language_version(), LanguageVersion::new(2, 12));
@@ -1871,14 +1836,8 @@ abstract class SameLeft implements Generic<FirstValue> {}
 abstract class SameRight implements Generic<FirstValue> {}
 abstract class EquivalentDiamond implements SameLeft, SameRight {}
 ";
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (parsed_tree, errors) = ParsedFile::parse_for_package(source, None);
+    let parsed = Arc::new(parsed_tree);
     assert!(errors.is_empty(), "{errors:?}");
     let (externals, identities, types) = external_indexes(&app, &parsed);
     let signatures = SignatureIndex::build(
@@ -1932,14 +1891,8 @@ fn doc_imports_share_the_transitive_external_loader() {
         "export 'dep.dart'; class Documented {}",
     );
     let source = "/// @docImport 'package:dep/doc.dart';\nlibrary;\n/// [Documented]\nvoid f() {}";
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (parsed_tree, errors) = ParsedFile::parse_for_package(source, None);
+    let parsed = Arc::new(parsed_tree);
     let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
@@ -1971,14 +1924,8 @@ fn unindexed_project_package_imports_and_exports_in_dependencies_remain_uncertai
         );
         let known = write(dir.path(), "cache/dep/lib/known.dart", "class Known {}");
         let source = "import 'package:dep/dep.dart';";
-        let falcon_dart_parser::ParseResult {
-            tree: parsed_tree,
-            errors,
-        } = parse(source);
-        let parsed = Arc::new(ParsedFile {
-            source: source.to_string().into_boxed_str(),
-            tree: parsed_tree,
-        });
+        let (parsed_tree, errors) = ParsedFile::parse_for_package(source, None);
+        let parsed = Arc::new(parsed_tree);
         let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
         let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
@@ -2051,14 +1998,8 @@ fn external_doc_imports_keep_package_fallback_unless_configuration_proves_absenc
             "/// @docImport 'package:meta/meta.dart';\nlibrary;\nclass Documented {}",
         );
         let source = "import '../../cache/dep/lib/dep.dart';";
-        let falcon_dart_parser::ParseResult {
-            tree: parsed_tree,
-            errors,
-        } = parse(source);
-        let parsed = Arc::new(ParsedFile {
-            source: source.to_string().into_boxed_str(),
-            tree: parsed_tree,
-        });
+        let (parsed_tree, errors) = ParsedFile::parse_for_package(source, None);
+        let parsed = Arc::new(parsed_tree);
         let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
         let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
@@ -2105,13 +2046,8 @@ fn opening_external_files_evicts_the_disk_copy_and_allows_reloading_after_close(
     let (dir, app) = workspace();
     let dependency = canonical_or_lexical(&dir.path().join("cache/dep/lib/dep.dart"));
     let source = fs::read_to_string(&app).unwrap();
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree, ..
-    } = parse(&source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.clone().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (parsed_tree, _) = ParsedFile::parse_for_package(source.clone().into_boxed_str(), None);
+    let parsed = Arc::new(parsed_tree);
     let program = parsed.program();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let roots = [(app.as_path(), program, source.as_str())];
@@ -2142,13 +2078,8 @@ fn external_snapshots_reload_dependency_edits_and_removal_explicitly() {
     let (dir, app) = workspace();
     let dependency = dir.path().join("cache/dep/lib/dep.dart");
     let source = fs::read_to_string(&app).unwrap();
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree, ..
-    } = parse(&source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.clone().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (parsed_tree, _) = ParsedFile::parse_for_package(source.clone().into_boxed_str(), None);
+    let parsed = Arc::new(parsed_tree);
     let program = parsed.program();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let roots = [(app.as_path(), program, source.as_str())];
@@ -2230,13 +2161,8 @@ fn explicit_reload_observes_same_time_same_size_rewrites_and_atomic_replacements
     let (dir, app) = workspace();
     let dependency = dir.path().join("cache/dep/lib/dep.dart");
     let source = fs::read_to_string(&app).unwrap();
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree, ..
-    } = parse(&source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.clone().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (parsed_tree, _) = ParsedFile::parse_for_package(source.clone().into_boxed_str(), None);
+    let parsed = Arc::new(parsed_tree);
     let program = parsed.program();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let roots = [(app.as_path(), program, source.as_str())];
@@ -2339,13 +2265,8 @@ fn external_documentation_imports_load_transitively_and_resolve_in_overlays() {
     );
     write(dir.path(), "cache/dep/lib/leaf.dart", "class Leaf {}");
     let source = fs::read_to_string(&app).unwrap();
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree, ..
-    } = parse(&source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.clone().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (parsed_tree, _) = ParsedFile::parse_for_package(source.clone().into_boxed_str(), None);
+    let parsed = Arc::new(parsed_tree);
     let program = parsed.program();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let external =
@@ -2405,13 +2326,8 @@ fn configuration_stamps_detect_same_time_sdk_manifest_changes_without_installed_
 fn missing_external_package_sources_and_parts_are_available_after_explicit_reload() {
     let (dir, app) = workspace();
     let source = "import 'package:dep/generated.dart';";
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree, ..
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (parsed_tree, _) = ParsedFile::parse_for_package(source, None);
+    let parsed = Arc::new(parsed_tree);
     let program = parsed.program();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let roots = [(app.as_path(), program, source)];
@@ -2451,13 +2367,8 @@ fn missing_external_package_sources_and_parts_are_available_after_explicit_reloa
 fn replacing_package_directory_refreshes_facts_on_explicit_reload() {
     let (dir, app) = workspace();
     let source = fs::read_to_string(&app).unwrap();
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree, ..
-    } = parse(&source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.clone().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (parsed_tree, _) = ParsedFile::parse_for_package(source.clone().into_boxed_str(), None);
+    let parsed = Arc::new(parsed_tree);
     let program = parsed.program();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
     let external = ExternalLibraries::load(
@@ -2513,14 +2424,8 @@ fn transitive_libraries_and_parts_reload_after_project_buffers_close_without_sdk
     );
     let part = part.canonicalize().unwrap();
     let source = "import 'package:dep/bridge.dart';";
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (parsed_tree, errors) = ParsedFile::parse_for_package(source, None);
+    let parsed = Arc::new(parsed_tree);
     let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
@@ -2615,14 +2520,8 @@ fn executable_library_names_preserve_collisions_without_documentation_imports() 
     let parseds: Vec<_> = texts
         .iter()
         .map(|(_, text)| {
-            let falcon_dart_parser::ParseResult {
-                tree: parsed_tree,
-                errors,
-            } = parse(text);
-            let parsed = Arc::new(ParsedFile {
-                source: text.to_string().into_boxed_str(),
-                tree: parsed_tree,
-            });
+            let (parsed_tree, errors) = ParsedFile::parse_for_package(*text, None);
+            let parsed = Arc::new(parsed_tree);
             assert!(errors.is_empty(), "{errors:?}");
             parsed
         })
@@ -3112,14 +3011,8 @@ fn documentation_imports_split_shared_dependency_instances() {
         );
         canonical_or_lexical(&write(dir.path(), &format!("{name}/lib/main.dart"), source))
     });
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree,
-        errors,
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (parsed_tree, errors) = ParsedFile::parse_for_package(source, None);
+    let parsed = Arc::new(parsed_tree);
     let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     for order in [[0, 1], [1, 0]] {
@@ -3193,13 +3086,8 @@ fn package_copies_keep_package_identities_when_a_declaration_moves_between_versi
             ("new", "export 'src/foo.dart';", Some("class Foo {}")),
         ],
     );
-    let falcon_dart_parser::ParseResult {
-        tree: parsed_tree, ..
-    } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.to_string().into_boxed_str(),
-        tree: parsed_tree,
-    });
+    let (parsed_tree, _) = ParsedFile::parse_for_package(source, None);
+    let parsed = Arc::new(parsed_tree);
     let program = parsed.program();
     let paths = apps.each_ref().map(PathBuf::as_path);
     let environment = AnalysisEnvironment::discover_with_sdk_locator(paths, fixture_sdk);

@@ -123,6 +123,49 @@ pub struct SyntaxTree {
 }
 
 impl SyntaxTree {
+    /// Retain an unparsed source as a program without invoking the lexer or event sink.
+    ///
+    /// Representable sources have one opaque error token and EOF. Sources beyond
+    /// the token coordinate capacity retain a source-spanning root without tokens.
+    #[must_use]
+    pub fn unparsed(source: &str) -> Self {
+        Self::unparsed_len(source.len())
+    }
+
+    fn unparsed_len(len: usize) -> Self {
+        let (tokens, elements, token_parents, token_count) = if u32::try_from(len).is_ok() {
+            (
+                vec![
+                    Token::new(TokenKind::Error, 0, len),
+                    Token::new(TokenKind::Eof, len, 0),
+                ],
+                vec![Element::token(TokenId(0)), Element::token(TokenId(1))],
+                vec![NodeId(0), NodeId(0)],
+                2,
+            )
+        } else {
+            (Vec::new(), Vec::new(), Vec::new(), 0)
+        };
+        Self {
+            source_len: len,
+            nodes: vec![NodeData {
+                kind: NodeKind::Program,
+                parent: None,
+                children: 0..token_count,
+                tokens: 0..token_count,
+                span: Span::new(0, len),
+                subtree_end: 1,
+                flags: NodeData::SIGNIFICANT,
+            }]
+            .into_boxed_slice(),
+            elements: elements.into_boxed_slice(),
+            tokens: tokens.into_boxed_slice(),
+            token_parents: token_parents.into_boxed_slice(),
+            delimiter_pairs: OnceLock::new(),
+            recovery_spans: Box::new([]),
+        }
+    }
+
     pub fn root<'a>(&'a self, source: &'a str) -> SyntaxNode<'a> {
         debug_assert_eq!(source.len(), self.source_len);
         SyntaxNode {
@@ -438,6 +481,35 @@ impl Sink<'_> {
 mod tests {
     use super::super::node::{AstChildren, AstNode};
     use super::*;
+
+    #[test]
+    fn unparsed_tree_preserves_source_without_lexing() {
+        for source in ["", " \n\t", "class C { /*", "\u{1f980}\0'${"] {
+            let tree = SyntaxTree::unparsed(source);
+            let program = tree.program(source);
+            assert_eq!(program.syntax().text(), source);
+            assert_eq!(program.syntax().full_span(), Span::new(0, source.len()));
+            assert_eq!(program.declarations().count(), 0);
+            assert!(tree.is_lossless(source));
+            let tokens: Vec<_> = program.syntax().tokens().collect();
+            assert_eq!(tokens.len(), 2);
+            assert_eq!(tokens[0].kind(), TokenKind::Error);
+            assert_eq!(tokens[0].text(), source);
+            assert_eq!(tokens[1].kind(), TokenKind::Eof);
+        }
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn unparsed_tree_beyond_token_capacity_retains_source_span() {
+        let len = u32::MAX as usize + 1;
+        let tree = SyntaxTree::unparsed_len(len);
+        assert_eq!(tree.source_len, len);
+        assert_eq!(tree.nodes[0].span, Span::new(0, len));
+        assert!(tree.tokens.is_empty());
+        assert!(tree.elements.is_empty());
+        assert_eq!(tree.nodes[0].subtree_end, 1);
+    }
 
     fn start(kind: NodeKind, offset: usize) -> Event {
         Event::Start {

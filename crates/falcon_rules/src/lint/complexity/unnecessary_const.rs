@@ -121,19 +121,15 @@ mod tests {
     use super::*;
     use falcon_analyze::{ParsedFile, RuleAnalysis};
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::Path;
     use std::sync::Arc;
 
     #[test]
     fn reports_only_the_redundant_keyword() {
         let source = "const values = const [const <int>[1], const Duration(seconds: 1)];";
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let (parsed, parsed_errors) = ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = Arc::new(parsed);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let diagnostics = UnnecessaryConst.analyze(UnnecessaryConst::NAME, parsed.program(), &ctx);

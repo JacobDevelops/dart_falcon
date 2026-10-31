@@ -1,6 +1,5 @@
 use falcon_analyze::AnalyzeContext;
 use falcon_analyze::RuleAnalysis;
-use falcon_dart_parser::parse;
 
 #[test]
 fn real_semantic_rules_match_standalone_diagnostics_with_suppressions() {
@@ -28,12 +27,9 @@ void f(dynamic target, Value value) {
 }
 ";
     let path = Path::new("/project/lib/main.dart");
-    let parsed = parse(source);
-    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree: parsed.tree,
-    });
+    let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+    assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+    let parsed = std::sync::Arc::new(parsed);
     let program = parsed.program();
     let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
     let config = FalconConfig::default();
@@ -99,12 +95,9 @@ fn real_structural_rules_match_standalone_diagnostics_with_suppressions() {
 
     let source = structural_rule_source();
     let path = Path::new("/project/lib/structural.dart");
-    let parsed = parse(source);
-    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree: parsed.tree,
-    });
+    let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+    assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+    let parsed = std::sync::Arc::new(parsed);
     let program = parsed.program();
     let config = FalconConfig::default();
     let context = AnalyzeContext::new(path, &config, &parsed);

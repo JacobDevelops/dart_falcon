@@ -33,7 +33,7 @@ impl CrossFileRule for AvoidMissingTestFiles {
     ) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
         for file in files {
-            let path = file.path.to_string_lossy();
+            let path = file.path().to_string_lossy();
             let settings = match options::cross_file::<Options>(config, &path, Self::NAME) {
                 Ok(settings) => settings,
                 Err(error) => {
@@ -50,11 +50,11 @@ impl CrossFileRule for AvoidMissingTestFiles {
             if settings.patterns.is_empty() {
                 continue;
             }
-            let file_package = environment.file_package(&file.path);
+            let file_package = environment.file_package(file.path());
             let Some(package) = file_package.identity() else {
                 continue;
             };
-            let source = super::canonical_package_path(&file.path);
+            let source = super::canonical_package_path(file.path());
             let Ok(relative) = source.strip_prefix(&package.lib_root) else {
                 continue;
             };

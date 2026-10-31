@@ -1,6 +1,5 @@
 use super::*;
 use crate::resolve::IdentitySource;
-use falcon_dart_parser::parse;
 
 fn with_relations(source: &str, test: impl FnOnce(&mut SignatureIndex, &SemanticModel<'_>)) {
     super::tests::with_model_at(
@@ -273,15 +272,8 @@ fn declaration_relations_follow_parts_and_complete_external_snapshots() {
         };
         let files: Vec<_> = [("app.dart", root_source), ("base.dart", base_source)]
             .map(|(name, source)| {
-                let parsed = parse(source);
-                assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-                (
-                    Path::new("/project").join(name),
-                    Arc::new(crate::ParsedFile {
-                        source: source.into(),
-                        tree: parsed.tree,
-                    }),
-                )
+                let parsed = crate::resolve::parsed_fixture(source);
+                (Path::new("/project").join(name), parsed)
             })
             .into();
         let sources: Vec<_> = files
@@ -383,12 +375,7 @@ fn declaration_negative_proofs_accept_complete_loaded_package_facts() {
     let path = root.join("lib/app.dart");
     std::fs::write(&path, source).unwrap();
     let path = crate::canonical_or_lexical(&path);
-    let parsed = parse(source);
-    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-    let parsed = Arc::new(crate::ParsedFile {
-        source: source.into(),
-        tree: parsed.tree,
-    });
+    let parsed = crate::resolve::parsed_fixture(source);
     let program = parsed.program();
     let environment =
         crate::AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);

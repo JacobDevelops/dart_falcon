@@ -289,12 +289,9 @@ mod tests {
     #[test]
     fn duplicate_class_names_check_only_the_last_declaration_once() {
         let source = "class C { int x; C(int this.x); }\nclass C { int y; C(int this.y); }";
-        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
+        let (snapshot, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = std::sync::Arc::new(snapshot);
         let config = falcon_config::FalconConfig::default();
         let context = AnalyzeContext::new(std::path::Path::new("test.dart"), &config, &parsed);
         let diagnostics = TypeInitFormals.analyze(TypeInitFormals::NAME, parsed.program(), &context);

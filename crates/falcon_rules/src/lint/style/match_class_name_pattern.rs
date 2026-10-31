@@ -154,10 +154,7 @@ mod tests {
         let absolute = root.join("lib/bad_package.dart");
         let cwd = std::env::current_dir().unwrap();
         let relative = absolute.strip_prefix(&cwd).unwrap();
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: "".into(),
-            tree: falcon_dart_parser::parser::parse("").tree,
-        });
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile::parse(""));
         let config = falcon_config::FalconConfig::default();
         for path in [absolute.as_path(), relative] {
             let ctx = falcon_analyze::AnalyzeContext::new(path, &config, &parsed);
@@ -180,10 +177,7 @@ mod tests {
             [path.as_path()],
             |_| None,
         );
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: "".into(),
-            tree: falcon_dart_parser::parser::parse("").tree,
-        });
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile::parse(""));
         let config = falcon_config::FalconConfig::default();
         let ctx = falcon_analyze::AnalyzeContext::new(&path, &config, &parsed)
             .with_environment(Some(&environment));

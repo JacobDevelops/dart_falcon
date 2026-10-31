@@ -181,7 +181,6 @@ mod tests {
     use super::*;
     use falcon_analyze::{AnalyzeContext, ParsedFile, RuleAnalysis};
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::{path::Path, sync::Arc};
 
     #[test]
@@ -200,14 +199,11 @@ mod tests {
       void run() {}
     }
     ";
-        let falcon_dart_parser::ParseResult { tree, .. } = parse(src);
-        let parsed = Arc::new(ParsedFile {
-            source: src.into(),
-            tree,
-        });
+        let snapshot = ParsedFile::parse(src);
+        let parsed = Arc::new(snapshot);
         let program = parsed.program();
         let rule = ClassMembersOrdering;
-    
+
         // Default config → built-in pyramid order (fields → constructors → methods).
         // `Foo.run` (a method before a field/constructor) is flagged; `Bar` is fine.
         let default_cfg = FalconConfig::default();
@@ -223,7 +219,7 @@ mod tests {
                 .all(|d| !d.message.contains("configured order")),
             "default path must use the built-in message, got {default_diags:?}"
         );
-    
+
         // Custom `order` → `Foo` is now correctly ordered (0 diagnostics for it) and
         // `Bar` (constructor before method) is the out-of-order one.
         let configured: FalconConfig = serde_json::from_value(serde_json::json!({

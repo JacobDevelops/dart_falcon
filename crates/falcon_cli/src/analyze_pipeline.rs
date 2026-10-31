@@ -387,7 +387,7 @@ fn apply_check_baseline(
         let sources = if collect_programs {
             project_files
                 .iter()
-                .map(|file| (file.path.to_string_lossy(), file.source()))
+                .map(|file| (file.path().to_string_lossy(), file.source()))
                 .collect()
         } else {
             files
@@ -529,7 +529,7 @@ fn apply_selected_fixes(
         if outcome.source == *source {
             continue;
         }
-        let project_file = fix_files.iter_mut().find(|file| file.path == *path);
+        let project_file = fix_files.iter_mut().find(|file| file.path() == path);
         if let Err(message) = WriteSnapshot::apply_with_project_snapshot(
             snapshot,
             path,
@@ -591,7 +591,7 @@ fn finish_project_analysis(
             filter,
             project_files
                 .iter()
-                .map(|file| (file.path.as_path(), file.source())),
+                .map(|file| (file.path(), file.source())),
         );
     } else {
         finalize_diagnostics(
@@ -636,11 +636,11 @@ impl FixExternals {
         FIX_EXTERNAL_LOADS.with(|loads| loads.set(loads.get() + 1));
         let paths: HashSet<_> = files
             .iter()
-            .map(|file| falcon_analyze::canonical_or_lexical(&file.path))
+            .map(|file| falcon_analyze::canonical_or_lexical(file.path()))
             .collect();
         let roots: Vec<_> = files
             .iter()
-            .map(|file| (file.path.as_path(), file.program(), file.source()))
+            .map(|file| (file.path(), file.program(), file.source()))
             .collect();
         let libraries = ExternalLibraries::load(environment, &roots, |path| paths.contains(path));
         // A selected part can promote its unopened library companions out of
@@ -652,20 +652,16 @@ impl FixExternals {
             let Ok(source) = falcon_analyze::read_source(path) else {
                 continue;
             };
-            let Ok(parsed) = falcon_dart_parser::try_parse_for_package(
-                &source,
+            let Ok((parsed, _)) = ParsedFile::try_parse_for_package(
+                source,
                 environment.package_language_version(path),
             ) else {
                 continue;
             };
-            files.push(ProjectFile {
-                path: path.to_path_buf(),
-                has_parse_errors: !parsed.errors.is_empty(),
-                parsed: Arc::new(ParsedFile {
-                    source: source.into(),
-                    tree: parsed.tree,
-                }),
-            });
+            files.push(
+                ProjectFile::new(path.to_path_buf(), Arc::new(parsed))
+                    .expect("a successful parse produces a project snapshot"),
+            );
         }
         let external = ExternalSources {
             libraries: &libraries,
@@ -755,27 +751,21 @@ impl WriteSnapshot {
         // Prepare the snapshot before committing. Preview advances the same
         // in-memory project state without changing disk or report sources.
         let updated = if project_file.is_some() {
-            let parsed = falcon_dart_parser::try_parse_for_package(
+            let (parsed, _) = ParsedFile::try_parse_for_package(
                 source,
                 environment.package_language_version(path),
             )
-            .map_err(|error| format!("could not refresh fixed project snapshot: {error}"))?;
-            Some((
-                Arc::new(ParsedFile {
-                    source: source.into(),
-                    tree: parsed.tree,
-                }),
-                !parsed.errors.is_empty(),
-            ))
+            .map_err(|(_, error)| format!("could not refresh fixed project snapshot: {error}"))?;
+            Some(Arc::new(parsed))
         } else {
             None
         };
         if let Some(snapshot) = snapshot {
             snapshot.write(path, source)?;
         }
-        if let (Some(file), Some((parsed, has_parse_errors))) = (project_file, updated) {
-            file.parsed = parsed;
-            file.has_parse_errors = has_parse_errors;
+        if let (Some(file), Some(parsed)) = (project_file, updated) {
+            file.replace_parsed(parsed)
+                .expect("a successful parse produces a project snapshot");
         }
         Ok(())
     }

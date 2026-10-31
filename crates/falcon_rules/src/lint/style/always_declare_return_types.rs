@@ -129,19 +129,15 @@ mod test_directories {
     use crate::lint::declarations::in_test_directory as is_test_file;
     use falcon_analyze::{AnalyzeContext, RuleAnalysis};
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
 
     #[test]
     fn test_directory_exemptions_are_package_root_relative() {
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(directory.path().join("pubspec.yaml"), "name: example\n").unwrap();
         let source = "class Suite { test_example() {} solo_test_example() {} }";
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        let (snapshot, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = std::sync::Arc::new(snapshot);
         let program = parsed.program();
         let config = FalconConfig::default();
         for (relative, expected) in [

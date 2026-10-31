@@ -88,11 +88,8 @@ mod tests {
             ),
             ("test/fixtures/app/testing/helper.dart", "void main() {}", 0),
         ] {
-            let result = falcon_dart_parser::parse(source);
-            let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-                source: source.into(),
-                tree: result.tree,
-            });
+            let result = falcon_analyze::ParsedFile::parse(source);
+            let parsed = std::sync::Arc::new(result);
             let config = falcon_config::FalconConfig::default();
             let path = root.join(path);
             let ctx = AnalyzeContext::new(&path, &config, &parsed);

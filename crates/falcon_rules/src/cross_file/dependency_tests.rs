@@ -22,13 +22,9 @@ fn undeclared_rule_owns_overlap_but_not_executable_dev_dependencies() {
         ("bin/main.dart", "import 'package:dev/api.dart';"),
     ]
     .into_iter()
-    .map(|(path, source)| ProjectFile {
-        path: root.path().join(path),
-        parsed: Arc::new(ParsedFile {
-            source: source.into(),
-            tree: falcon_dart_parser::parse(source).tree,
-        }),
-        has_parse_errors: false,
+    .map(|(path, source)| {
+        ProjectFile::new(root.path().join(path), Arc::new(ParsedFile::parse(source)))
+            .expect("parsed fixture must be accepted by the project")
     })
     .collect();
     let config: FalconConfig = serde_json::from_value(serde_json::json!({

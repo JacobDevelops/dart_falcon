@@ -290,8 +290,8 @@ fn starting_inside_non_git_workspace_member_preserves_shared_loader_root_and_ove
     }));
     let (files, complete) = state.collect_project_files(ProjectView::Semantic);
     assert!(complete);
-    assert!(files.iter().any(|file| file.path == shared));
-    assert!(files.iter().any(|file| file.path == path));
+    assert!(files.iter().any(|file| file.path() == shared));
+    assert!(files.iter().any(|file| file.path() == path));
     state.reload_config();
     assert_eq!(state.workspace_root, canonical_or_lexical(root));
 }
@@ -387,9 +387,13 @@ fn initialized_roots_replace_cwd_discovery_and_report_each_config_error() {
         assert!(complete);
         assert_eq!(files.len(), 2);
         for root in [&first, &second] {
-            assert!(files.iter().any(|file| file.path == root.join("main.dart")));
+            assert!(
+                files
+                    .iter()
+                    .any(|file| file.path() == root.join("main.dart"))
+            );
         }
-        assert!(files.iter().all(|file| !file.path.starts_with(&cwd)));
+        assert!(files.iter().all(|file| !file.path().starts_with(&cwd)));
     }
     state.reload_config();
     assert_eq!(
@@ -446,7 +450,10 @@ fn initialized_roots_use_independent_rules_and_file_includes_after_reload() {
     for view in [ProjectView::Semantic, ProjectView::CrossFile] {
         let (files, complete) = state.collect_project_files(view);
         assert!(complete);
-        let paths: HashSet<_> = files.into_iter().map(|file| file.path).collect();
+        let paths: HashSet<_> = files
+            .into_iter()
+            .map(|file| file.path().to_path_buf())
+            .collect();
         assert_eq!(
             paths,
             HashSet::from([
@@ -478,7 +485,7 @@ fn initialized_roots_use_independent_rules_and_file_includes_after_reload() {
         assert!(complete);
         let excluded = canonical_or_lexical(&second.join("lib/main.dart"));
         assert_eq!(
-            files.iter().any(|file| file.path == excluded),
+            files.iter().any(|file| file.path() == excluded),
             semantic,
             "explicitly open excluded buffers belong only to the semantic view"
         );
@@ -499,7 +506,7 @@ fn initialized_root_does_not_expand_to_ancestor_configuration_directory() {
     let (files, complete) = state.collect_project_files(ProjectView::Semantic);
     assert!(complete);
     assert_eq!(files.len(), 1);
-    assert_eq!(files[0].path, root.join("inside.dart"));
+    assert_eq!(files[0].path(), root.join("inside.dart"));
     state.reload_config();
     assert_eq!(state.workspace_root, canonical_or_lexical(&root));
 }
@@ -561,7 +568,7 @@ fn edit_reuses_workspace_disk_parses_and_discovery() {
     assert_eq!(
         files
             .iter()
-            .find(|file| file.path == support)
+            .find(|file| file.path() == support)
             .unwrap()
             .source(),
         "class Before {}",
@@ -589,7 +596,7 @@ fn edit_reuses_workspace_disk_parses_and_discovery() {
     assert_eq!(
         files
             .iter()
-            .find(|file| file.path == support)
+            .find(|file| file.path() == support)
             .unwrap()
             .source(),
         "class AfterDiskChange {}"
@@ -948,17 +955,17 @@ fn coalesced_declaration_and_directive_edits_match_fresh_semantics() {
             let fresh_file = rebuilt
                 .files
                 .iter()
-                .find(|candidate| candidate.path == file.path)
+                .find(|candidate| candidate.path() == file.path())
                 .unwrap();
             let cached = SemanticModel::new(
-                &file.path,
-                &file.parsed,
+                file.path(),
+                file.parsed(),
                 &cache.indexes.identities,
                 Some(&cache.indexes.types),
             );
             let model = SemanticModel::new(
-                &file.path,
-                &fresh_file.parsed,
+                file.path(),
+                fresh_file.parsed(),
                 &rebuilt.indexes.identities,
                 Some(&rebuilt.indexes.types),
             );
@@ -976,15 +983,15 @@ fn assert_semantic_snapshot_values_match(state: &LspState, fresh: &LspState) {
     let rebuilt = fresh.semantic_snapshot.as_ref().unwrap();
     for file in &snapshot.files {
         let cached = SemanticModel::new(
-            &file.path,
-            &file.parsed,
+            file.path(),
+            file.parsed(),
             &snapshot.indexes.identities,
             Some(&snapshot.indexes.types),
         );
-        let fresh_file = &rebuilt.files[rebuilt.by_path[&file.path]];
+        let fresh_file = &rebuilt.files[rebuilt.by_path[file.path()]];
         let model = SemanticModel::new(
-            &file.path,
-            &fresh_file.parsed,
+            file.path(),
+            fresh_file.parsed(),
             &rebuilt.indexes.identities,
             Some(&rebuilt.indexes.types),
         );
@@ -1103,9 +1110,13 @@ fn cross_file_only_indexes_reuse_explicit_bodies_but_rebuild_changed_return_type
             "{source}"
         );
         let cached = state.cross_file_index_cache.as_ref().unwrap();
-        let cached_file = cached.files.iter().find(|file| file.path == path).unwrap();
+        let cached_file = cached
+            .files
+            .iter()
+            .find(|file| file.path() == path)
+            .unwrap();
         assert!(Arc::ptr_eq(
-            &cached_file.parsed,
+            cached_file.parsed(),
             &state.documents[&uri].parsed
         ));
         assert!(state.semantic_snapshot.is_none());
@@ -1140,7 +1151,7 @@ fn atomic_source_replacement_reuses_discovery() {
     assert_eq!(
         files
             .iter()
-            .find(|file| file.path == support)
+            .find(|file| file.path() == support)
             .unwrap()
             .source(),
         changed
@@ -1229,7 +1240,7 @@ fn new_and_renamed_directories_refresh_discovery() {
     assert!(
         files
             .iter()
-            .any(|file| file.path == nested.join("added.dart"))
+            .any(|file| file.path() == nested.join("added.dart"))
     );
     assert_eq!(state.workspace_walk_count, walks + 1);
     std::fs::rename(
@@ -1246,12 +1257,12 @@ fn new_and_renamed_directories_refresh_discovery() {
     assert!(
         files
             .iter()
-            .any(|file| file.path == directory.path().join("renamed/nested/added.dart"))
+            .any(|file| file.path() == directory.path().join("renamed/nested/added.dart"))
     );
     assert!(
         !files
             .iter()
-            .any(|file| file.path.starts_with(directory.path().join("new")))
+            .any(|file| file.path().starts_with(directory.path().join("new")))
     );
     assert_eq!(state.workspace_walk_count, walks + 2);
 }
@@ -1288,7 +1299,7 @@ fn watched_disk_changes_refresh_cached_cross_file_input() {
     state.watched_files_changed(std::slice::from_ref(&support));
     let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
     assert!(complete);
-    let file = files.iter().find(|file| file.path == support).unwrap();
+    let file = files.iter().find(|file| file.path() == support).unwrap();
     assert_eq!(file.source(), changed);
     assert_eq!(state.disk_parse_count, parses + 1);
     assert_eq!(state.workspace_walk_count, walks);
@@ -1297,7 +1308,7 @@ fn watched_disk_changes_refresh_cached_cross_file_input() {
     state.watched_files_changed(std::slice::from_ref(&added));
     let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
     assert!(complete);
-    assert!(files.iter().any(|file| file.path == added));
+    assert!(files.iter().any(|file| file.path() == added));
 }
 
 #[test]
@@ -1311,7 +1322,7 @@ fn changed_disk_mtime_reuses_unchanged_parsed_source() {
     let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
     let (before, complete) = state.collect_project_files(ProjectView::CrossFile);
     assert!(complete);
-    let before = before.iter().find(|file| file.path == support).unwrap();
+    let before = before.iter().find(|file| file.path() == support).unwrap();
     let parses = state.disk_parse_count;
     assert_eq!(parses, 1);
     let modified = std::fs::metadata(&support).unwrap().modified().unwrap();
@@ -1328,9 +1339,9 @@ fn changed_disk_mtime_reuses_unchanged_parsed_source() {
 
     let (after, complete) = state.collect_project_files(ProjectView::CrossFile);
     assert!(complete);
-    let after = after.iter().find(|file| file.path == support).unwrap();
+    let after = after.iter().find(|file| file.path() == support).unwrap();
     assert_eq!(after.source(), source);
-    assert!(Arc::ptr_eq(&before.parsed, &after.parsed));
+    assert!(Arc::ptr_eq(before.parsed(), after.parsed()));
     assert_eq!(state.disk_parse_count, parses);
 }
 
@@ -1351,7 +1362,7 @@ fn save_invalidates_cached_disk_source_with_unchanged_metadata() {
     assert_eq!(
         files
             .iter()
-            .find(|file| file.path == support)
+            .find(|file| file.path() == support)
             .unwrap()
             .source(),
         original
@@ -1379,7 +1390,7 @@ fn save_invalidates_cached_disk_source_with_unchanged_metadata() {
     assert_eq!(
         files
             .iter()
-            .find(|file| file.path == support)
+            .find(|file| file.path() == support)
             .unwrap()
             .source(),
         changed
@@ -1404,7 +1415,7 @@ fn close_refreshes_cached_disk_source_with_unchanged_metadata() {
     assert_eq!(
         files
             .iter()
-            .find(|file| file.path == support)
+            .find(|file| file.path() == support)
             .unwrap()
             .source(),
         original
@@ -1429,7 +1440,7 @@ fn close_refreshes_cached_disk_source_with_unchanged_metadata() {
     assert_eq!(
         files
             .iter()
-            .find(|file| file.path == support)
+            .find(|file| file.path() == support)
             .unwrap()
             .source(),
         "class Buffered {}"
@@ -1442,7 +1453,7 @@ fn close_refreshes_cached_disk_source_with_unchanged_metadata() {
     assert_eq!(
         files
             .iter()
-            .find(|file| file.path == support)
+            .find(|file| file.path() == support)
             .unwrap()
             .source(),
         changed
@@ -1536,14 +1547,39 @@ mod source_size_tests {
         }
     }
 
+    fn assert_rejected_snapshot(parsed: &ParsedFile, source: &str) {
+        assert_eq!(parsed.source(), source);
+        assert!(parsed.is_rejected());
+        assert!(parsed.has_parse_errors());
+        assert_eq!(
+            parsed
+                .tree()
+                .tokens(parsed.source())
+                .map(|token| (token.kind(), token.text()))
+                .collect::<Vec<_>>(),
+            [
+                (falcon_syntax::TokenKind::Error, source),
+                (falcon_syntax::TokenKind::Eof, ""),
+            ]
+        );
+        assert!(parsed.program().declarations().next().is_none());
+    }
+
     #[test]
     fn parser_worker_panics_publish_worker_diagnostics_not_syntax_errors() {
+        const SOURCE: &str = "void main() { dynamic value = 1; }";
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("main.dart");
         let uri = format!("file://{}", path.display());
         let config = directory.path().join("falcon.json");
-        std::fs::write(&config, "{}").unwrap();
-        std::fs::write(&path, "void main() {}").unwrap();
+        std::fs::write(
+            &config,
+            r#"{"linter":{"rules":{"recommended":false,"style":{"eol-at-end-of-file":"warn"},"suspicious":{"avoid-dynamic":"warn"}}}}"#,
+        )
+        .unwrap();
+        std::fs::write(&path, SOURCE).unwrap();
+        let healthy = directory.path().join("healthy.dart");
+        std::fs::write(&healthy, "class Healthy {}\n").unwrap();
         let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
         let failure_path = canonical_or_lexical(&path);
         let assert_failure = |diagnostics: &[Diagnostic]| {
@@ -1555,22 +1591,136 @@ mod source_size_tests {
             assert!(diagnostics[0].message.contains("project parser regression"));
         };
         state.parser_failure_path = Some(failure_path.clone());
-        assert_failure(&state.open(&uri, "void main() {}".into(), Some(1)));
-        assert!(state.document(&uri).unwrap().source_rejected);
-        state.parser_failure_path = None;
-        assert!(state.change(&uri, "void main() {}".into(), Some(2)));
-        assert!(!state.document(&uri).unwrap().source_rejected);
-        state.parser_failure_path = Some(failure_path);
-        assert!(state.change(&uri, "void main() {}".into(), Some(3)));
+        assert_failure(&state.open(&uri, SOURCE.into(), Some(1)));
+        assert!(state.document(&uri).unwrap().parsed.is_rejected());
+        let rejected = Arc::clone(&state.document(&uri).unwrap().parsed);
+        assert_rejected_snapshot(&rejected, SOURCE);
         assert_failure(&state.analyze(&uri));
-        assert!(state.document(&uri).unwrap().source_rejected);
+        state.resolve_semantics = true;
+        state.ensure_semantic_snapshot();
+        let snapshot = state.semantic_snapshot.as_ref().unwrap();
+        assert!(!snapshot.by_path.contains_key(&failure_path));
+        assert!(
+            snapshot
+                .by_path
+                .contains_key(&canonical_or_lexical(&healthy))
+        );
+        for view in [ProjectView::Semantic, ProjectView::CrossFile] {
+            let (files, complete) = state.collect_project_files(view);
+            assert!(!complete);
+            assert!(files.iter().all(|file| file.path() != failure_path));
+        }
+        let runs = Arc::new(AtomicUsize::new(0));
+        state.cross_file_rules.register(
+            "count-cross-runs",
+            Box::new(CountCrossRuns(Arc::clone(&runs))),
+        );
+        assert!(state.cross_file_diagnostics().is_empty());
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
         state.parser_failure_path = None;
-        assert!(state.change(&uri, "void main() {}".into(), Some(4)));
-        assert!(!state.document(&uri).unwrap().source_rejected);
+        assert!(state.change(&uri, SOURCE.into(), Some(2)));
+        assert!(!state.document(&uri).unwrap().parsed.is_rejected());
+        let recovered = &state.document(&uri).unwrap().parsed;
+        assert!(!recovered.has_parse_errors());
+        assert_eq!(recovered.source(), rejected.source());
+        assert_rejected_snapshot(&rejected, SOURCE);
+        let recovered_diagnostics = state.analyze(&uri);
+        assert!(
+            recovered_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.rule == "avoid-dynamic")
+        );
+        assert!(
+            recovered_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.rule == "eol-at-end-of-file")
+        );
+        state.parser_failure_path = Some(failure_path);
+        assert!(state.change(&uri, SOURCE.into(), Some(3)));
+        assert_failure(&state.analyze(&uri));
+        assert!(state.document(&uri).unwrap().parsed.is_rejected());
+        state.parser_failure_path = None;
+        assert!(state.change(&uri, SOURCE.into(), Some(4)));
+        assert!(!state.document(&uri).unwrap().parsed.is_rejected());
         assert!(
             state.analyze(&uri).iter().all(|diagnostic| diagnostic.rule
                 != falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID)
         );
+        assert!(
+            state
+                .analyze(&uri)
+                .iter()
+                .any(|diagnostic| diagnostic.rule == "avoid-dynamic")
+        );
+    }
+
+    #[test]
+    fn package_refresh_worker_failure_skips_rules_and_retains_previous_snapshot() {
+        const SOURCE: &str = "void main() { dynamic value = 1; }";
+        for resolve_semantics in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path();
+            let path = root.join("main.dart");
+            let uri = format!("file://{}", path.display());
+            let config = root.join("falcon.json");
+            std::fs::write(
+                &config,
+                r#"{"linter":{"rules":{"recommended":false,"style":{"eol-at-end-of-file":"warn"},"suspicious":{"avoid-dynamic":"warn"}}}}"#,
+            ).unwrap();
+            std::fs::write(&path, SOURCE).unwrap();
+            super::dependency_tests::write_package_version(root, "2.19");
+            let mut state = LspState::new_from(Some(config), |_| None, root.to_path_buf());
+            state.resolve_semantics = resolve_semantics;
+            let before = state.open(&uri, SOURCE.into(), Some(1));
+            assert!(
+                before
+                    .iter()
+                    .any(|diagnostic| diagnostic.rule == "eol-at-end-of-file")
+            );
+            assert!(
+                before
+                    .iter()
+                    .any(|diagnostic| diagnostic.rule == "avoid-dynamic")
+            );
+            let retained = Arc::clone(&state.documents[&uri].parsed);
+            let signature = retained.declaration_signature();
+            state.parser_failure_path = Some(canonical_or_lexical(&path));
+            super::dependency_tests::write_package_version(root, "3.0");
+            state.watched_files_changed(&[root.join(".dart_tool/package_config.json")]);
+            assert_eq!(state.resolve_semantics, resolve_semantics);
+            let diagnostics = state.analyze(&uri);
+            assert_eq!(diagnostics.len(), 1);
+            assert_eq!(
+                diagnostics[0].rule,
+                falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
+            );
+            assert!(diagnostics[0].message.contains("project parser regression"));
+            let rejected = &state.documents[&uri].parsed;
+            assert_rejected_snapshot(rejected, SOURCE);
+            assert_eq!(retained.source(), SOURCE);
+            assert!(!retained.is_rejected());
+            assert!(!retained.has_parse_errors());
+            assert_eq!(retained.declaration_signature(), signature);
+            assert_eq!(state.analyze(&uri).len(), 1);
+            state.parser_failure_path = None;
+            assert!(state.change(&uri, SOURCE.into(), Some(2)));
+            let recovered = state.analyze(&uri);
+            assert!(recovered.iter().all(|diagnostic| {
+                diagnostic.rule != falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
+            }));
+            assert!(
+                recovered
+                    .iter()
+                    .any(|diagnostic| diagnostic.rule == "eol-at-end-of-file")
+            );
+            assert!(
+                recovered
+                    .iter()
+                    .any(|diagnostic| diagnostic.rule == "avoid-dynamic")
+            );
+            assert!(!state.documents[&uri].parsed.is_rejected());
+            assert!(!state.documents[&uri].parsed.has_parse_errors());
+        }
     }
 
     #[test]
@@ -1750,7 +1900,7 @@ mod source_size_tests {
         let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
         assert!(complete);
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0].path, canonical_or_lexical(&valid));
+        assert_eq!(files[0].path(), canonical_or_lexical(&valid));
     }
 
     #[test]
@@ -1769,7 +1919,7 @@ mod source_size_tests {
         state.watched_files_changed(std::slice::from_ref(&created));
         let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
         assert!(complete);
-        assert!(files.iter().any(|file| file.path == created));
+        assert!(files.iter().any(|file| file.path() == created));
     }
 
     #[test]
@@ -1781,12 +1931,19 @@ mod source_size_tests {
         state.initialize_workspace_roots(vec![directory.path().to_path_buf()]);
         state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
         state.open(&uri, String::new(), Some(1));
+        let path = state.documents[&uri].path.clone();
+        let parsed = LspState::parse_document(
+            &path,
+            "".into(),
+            None,
+            falcon_analyze::source_size_diagnostic(&path, u64::from(u32::MAX) + 1),
+            Some(&path),
+        );
+        assert_rejected_snapshot(&parsed.parsed, "");
+        assert_eq!(parsed.diagnostics.len(), 1);
         let doc = state.documents.get_mut(&uri).unwrap();
-        doc.source_rejected = true;
-        doc.has_parse_errors = true;
-        doc.syntax_diagnostics = vec![
-            falcon_analyze::source_size_diagnostic(&doc.path, u64::from(u32::MAX) + 1).unwrap(),
-        ];
+        doc.parsed = Arc::new(parsed.parsed);
+        doc.syntax_diagnostics = parsed.diagnostics;
         let parse_count = doc.parse_count;
         let diagnostics = state.analyze(&uri);
         assert!(
@@ -1817,11 +1974,11 @@ mod source_size_tests {
         state.ensure_semantic_snapshot();
         let snapshot = state.semantic_snapshot.as_ref().unwrap();
         assert_eq!(snapshot.files.len(), 1);
-        assert_eq!(snapshot.files[0].path, healthy);
+        assert_eq!(snapshot.files[0].path(), healthy);
         assert!(state.semantic_snapshot_error.is_none());
 
         assert!(state.change(&uri, "void main() {}".into(), Some(2)));
-        assert!(!state.document(&uri).unwrap().source_rejected);
+        assert!(!state.document(&uri).unwrap().parsed.is_rejected());
         assert!(
             !state
                 .analyze(&uri)
@@ -1871,7 +2028,7 @@ mod source_size_tests {
             state.watched_files_changed(std::slice::from_ref(&rejected));
             let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
             assert!(!complete);
-            assert!(files.iter().all(|file| file.path != rejected));
+            assert!(files.iter().all(|file| file.path() != rejected));
             assert!(state.cross_file_diagnostics().is_empty());
             let published = state.cross_file_pass();
             let (_, diagnostics) = published.iter().find(|(key, _)| key == &uri).unwrap();
@@ -1888,9 +2045,9 @@ mod source_size_tests {
                 snapshot
                     .files
                     .iter()
-                    .any(|file| file.path == canonical_or_lexical(&orphan))
+                    .any(|file| file.path() == canonical_or_lexical(&orphan))
             );
-            assert!(snapshot.files.iter().all(|file| file.path != rejected));
+            assert!(snapshot.files.iter().all(|file| file.path() != rejected));
             assert!(state.semantic_snapshot_error.is_none());
 
             std::fs::remove_file(&rejected).unwrap();
@@ -1998,7 +2155,7 @@ mod config_tests {
         assert!(
             files
                 .iter()
-                .any(|file| file.path == canonical_or_lexical(&main))
+                .any(|file| file.path() == canonical_or_lexical(&main))
         );
     }
 
@@ -2030,7 +2187,7 @@ mod config_tests {
             let (files, complete) = state.collect_project_files(view);
             assert!(complete);
             assert_eq!(files.len(), 1);
-            assert_eq!(files[0].path, canonical_or_lexical(&main));
+            assert_eq!(files[0].path(), canonical_or_lexical(&main));
         }
     }
 
@@ -2317,17 +2474,12 @@ mod dependency_tests {
         std::fs::write(outer.join("pubspec.yaml"), "name: outer\n").unwrap();
         std::fs::write(nested.join("pubspec.yaml"), [0xff, 0xfe]).unwrap();
         let path = nested.join("lib/main.dart");
-        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse("");
-        let files = [ProjectFile {
-            path: path.clone(),
-            parsed: Arc::new(ParsedFile {
-                source: "".into(),
-                tree,
-            }),
-            has_parse_errors: !errors.is_empty(),
-        }];
+        let files = [
+            ProjectFile::new(path.clone(), Arc::new(ParsedFile::parse("")))
+                .expect("empty source is not rejected"),
+        ];
 
-        let packages = package_identities(files.iter().map(|file| file.path.as_path()));
+        let packages = package_identities(files.iter().map(ProjectFile::path));
         let nested_lib = canonical_or_lexical(&nested.join("lib"));
         let owner = packages
             .iter()
@@ -2338,7 +2490,7 @@ mod dependency_tests {
 
     const VERSIONED_SWITCH: &str = "void f(Object o) { switch (o) { case 1 + 2: break; } }\n";
 
-    fn write_package_version(root: &Path, version: &str) {
+    pub(super) fn write_package_version(root: &Path, version: &str) {
         let directory = root.join(".dart_tool");
         std::fs::create_dir_all(&directory).unwrap();
         let path = directory.join("package_config.json");
@@ -2410,6 +2562,12 @@ mod dependency_tests {
             assert!(!initial.iter().any(|diag| diag.rule == "syntax-error"));
             assert!(!switch_has_pattern(state.documents[&uri].parsed.program()));
             assert_eq!(state.documents[&uri].parse_count, 1);
+            let source_pointer = state.documents[&uri].text().as_ptr();
+            if semantic {
+                assert!(Arc::strong_count(&state.documents[&uri].parsed) > 1);
+            } else {
+                assert_eq!(Arc::strong_count(&state.documents[&uri].parsed), 1);
+            }
 
             write_package_version(dir.path(), "3.0");
             let published = state.reload_config();
@@ -2417,6 +2575,7 @@ mod dependency_tests {
             assert!(diagnostics.iter().any(|diag| diag.rule == "syntax-error"));
             assert!(switch_has_pattern(state.documents[&uri].parsed.program()));
             assert_eq!(state.documents[&uri].parse_count, 2);
+            assert_eq!(state.documents[&uri].text().as_ptr(), source_pointer);
             assert_eq!(state.documents[&marker_uri].parse_count, 1);
             assert_eq!(state.documents[&unrelated_uri].parse_count, 1);
             assert!(!switch_has_pattern(
@@ -2434,7 +2593,7 @@ mod dependency_tests {
                 let snapshot = state.semantic_snapshot.as_ref().unwrap();
                 let file = &snapshot.files[snapshot.by_path[&state.documents[&uri].path]];
                 assert!(switch_has_pattern(file.program()));
-                assert!(file.has_parse_errors);
+                assert!(file.has_parse_errors());
             }
 
             write_package_version(dir.path(), "2.19");
@@ -2475,13 +2634,13 @@ mod dependency_tests {
         for (path, pattern) in paths.iter().zip([false, true]) {
             let file = &snapshot.files[snapshot.by_path[path]];
             assert_eq!(switch_has_pattern(file.program()), pattern);
-            assert_eq!(file.has_parse_errors, pattern);
+            assert_eq!(file.has_parse_errors(), pattern);
         }
         let (files, _) = state.collect_project_files(ProjectView::CrossFile);
         for (path, pattern) in paths.iter().zip([false, true]) {
-            let file = files.iter().find(|file| &file.path == path).unwrap();
+            let file = files.iter().find(|file| file.path() == path).unwrap();
             assert_eq!(switch_has_pattern(file.program()), pattern);
-            assert_eq!(file.has_parse_errors, pattern);
+            assert_eq!(file.has_parse_errors(), pattern);
         }
         assert_eq!(state.documents[&uri].parse_count, 1);
     }
@@ -2553,10 +2712,10 @@ mod dependency_tests {
         assert!(complete);
         let manifest = files
             .iter()
-            .find(|file| file.path == canonical_or_lexical(&manifest_path))
+            .find(|file| file.path() == canonical_or_lexical(&manifest_path))
             .expect("pubspec.yaml must be included in the cross-file project view");
         assert_eq!(manifest.source(), source);
-        assert!(!manifest.has_parse_errors);
+        assert!(!manifest.has_parse_errors());
         assert!(manifest.program().declarations().is_empty());
         assert_eq!(
             manifest
@@ -2836,7 +2995,7 @@ mod dependency_tests {
                 .libraries
                 .libraries()
                 .iter()
-                .any(|library| library.files.iter().any(|file| file.path == path))
+                .any(|library| library.files.iter().any(|file| file.path.as_path() == path))
         };
         state.cross_file_diagnostics();
         assert!(has_external(&state, &first));
@@ -3007,7 +3166,7 @@ mod dependency_tests {
             for view in [ProjectView::Semantic, ProjectView::CrossFile] {
                 let (files, _) = state.collect_project_files(view);
                 assert_eq!(files.len(), 2);
-                let file = files.iter().find(|file| file.path == canonical).unwrap();
+                let file = files.iter().find(|file| file.path() == canonical).unwrap();
                 assert_eq!(file.source(), buffer);
             }
             let published = state.cross_file_pass();
@@ -3062,7 +3221,7 @@ mod dependency_tests {
             2,
             "saved alias must not duplicate the disk file"
         );
-        assert!(files.iter().all(|file| file.path != old_path));
+        assert!(files.iter().all(|file| file.path() != old_path));
         let published = state.cross_file_pass();
         let (_, diagnostics) = published
             .iter()
@@ -4203,7 +4362,7 @@ mod environment_regressions {
             let functions = apps.each_ref().map(|app| {
                 let model = SemanticModel::new(
                     app,
-                    &snapshot.files[snapshot.by_path[app]].parsed,
+                    snapshot.files[snapshot.by_path[app]].parsed(),
                     &indexes.identities,
                     Some(&indexes.types),
                 );
@@ -4220,7 +4379,7 @@ mod environment_regressions {
             for (app, copy) in apps.iter().zip(copies) {
                 let model = SemanticModel::new(
                     app,
-                    &snapshot.files[snapshot.by_path[app]].parsed,
+                    snapshot.files[snapshot.by_path[app]].parsed(),
                     &indexes.identities,
                     Some(&indexes.types),
                 );
@@ -4285,7 +4444,7 @@ mod environment_regressions {
             let indexes = &snapshot.indexes;
             let owner = SemanticModel::new(
                 &shared,
-                &snapshot.files[snapshot.by_path[&shared]].parsed,
+                snapshot.files[snapshot.by_path[&shared]].parsed(),
                 &indexes.identities,
                 Some(&indexes.types),
             );
@@ -4294,7 +4453,7 @@ mod environment_regressions {
             for app in &apps {
                 let model = SemanticModel::new(
                     app,
-                    &snapshot.files[snapshot.by_path[app]].parsed,
+                    snapshot.files[snapshot.by_path[app]].parsed(),
                     &indexes.identities,
                     Some(&indexes.types),
                 );
@@ -4345,7 +4504,7 @@ mod environment_regressions {
             let indexes = &snapshot.indexes;
             SemanticModel::new(
                 &apps[2],
-                &snapshot.files[snapshot.by_path[&apps[2]]].parsed,
+                snapshot.files[snapshot.by_path[&apps[2]]].parsed(),
                 &indexes.identities,
                 Some(&indexes.types),
             )
@@ -4379,7 +4538,7 @@ mod environment_regressions {
             Some(&fresh_external),
         );
         for app in &apps {
-            let parsed = &snapshot.files[snapshot.by_path[app]].parsed;
+            let parsed = snapshot.files[snapshot.by_path[app]].parsed();
             let cached = SemanticModel::new(
                 app,
                 parsed,
@@ -4433,11 +4592,11 @@ mod environment_regressions {
             }
             state.ensure_semantic_snapshot();
             let snapshot = state.semantic_snapshot.as_ref().unwrap();
-            assert!(snapshot.files.iter().any(|file| file.path == defining));
+            assert!(snapshot.files.iter().any(|file| file.path() == defining));
             let parts: Vec<_> = snapshot
                 .files
                 .iter()
-                .filter(|file| file.path == part)
+                .filter(|file| file.path() == part)
                 .collect();
             assert_eq!(parts.len(), 1);
             assert_eq!(parts[0].source(), buffered);
@@ -4447,7 +4606,7 @@ mod environment_regressions {
                     .iter()
                     .all(|file| file.path != defining && file.path != part)
             }));
-            let defining_parse = Arc::clone(&snapshot.files[snapshot.by_path[&defining]].parsed);
+            let defining_parse = Arc::clone(snapshot.files[snapshot.by_path[&defining]].parsed());
             let parses = state.disk_parse_count;
             let reads = state.disk_read_count;
             assert!(parses > 0, "the unopened defining companion was not parsed");
@@ -4463,7 +4622,7 @@ mod environment_regressions {
                 companion.source(),
                 "library leaf; part 'leaf_part.dart'; class Leaf {}"
             );
-            assert!(Arc::ptr_eq(&defining_parse, &companion.parsed));
+            assert!(Arc::ptr_eq(&defining_parse, companion.parsed()));
             assert_eq!(
                 state.disk_parse_count, parses,
                 "unchanged companion was reparsed"

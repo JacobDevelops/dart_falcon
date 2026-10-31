@@ -43,7 +43,7 @@ impl CrossFileRule for UnusedAssets {
         let references = references(files);
         let mut diagnostics = Vec::new();
         for package in packages {
-            let own: HashSet<_> = package.files.iter().map(|file| &file.path).collect();
+            let own: HashSet<_> = package.files.iter().map(|file| file.path()).collect();
             let expanded: Vec<_> = package
                 .entries
                 .iter()
@@ -141,11 +141,11 @@ struct Reference<'a> {
     package: Option<Cow<'a, str>>,
 }
 
-fn references(files: &[ProjectFile]) -> Vec<(&std::path::PathBuf, Vec<Reference<'_>>)> {
+fn references(files: &[ProjectFile]) -> Vec<(&Path, Vec<Reference<'_>>)> {
     files
         .iter()
         .filter(|file| {
-            file.path
+            file.path()
                 .extension()
                 .is_some_and(|extension| extension == "dart")
         })
@@ -164,7 +164,7 @@ fn references(files: &[ProjectFile]) -> Vec<(&std::path::PathBuf, Vec<Reference<
                     })
                 })
                 .collect();
-            (&file.path, strings)
+            (file.path(), strings)
         })
         .collect()
 }

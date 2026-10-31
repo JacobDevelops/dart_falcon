@@ -121,12 +121,9 @@ mod tests {
     #[test]
     fn exact_block_end_excludes_following_comment_and_preserves_inner_comment() {
         let source = "void empty() {} /* trailing } */\nvoid intentional() { /* } */ }\n";
-        let falcon_dart_parser::ParseResult { errors, tree } = falcon_dart_parser::parse(source);
+        let (snapshot, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = std::sync::Arc::new(snapshot);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("/project/lib/test.dart"), &config, &parsed);
         let diagnostics = NoEmptyBlock.analyze(NoEmptyBlock::NAME, parsed.program(), &ctx);

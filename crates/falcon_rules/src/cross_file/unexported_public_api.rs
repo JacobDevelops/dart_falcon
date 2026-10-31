@@ -48,7 +48,7 @@ impl CrossFileRule for UnexportedPublicApi {
         let malformed_packages: HashSet<_> = files
             .iter()
             .enumerate()
-            .filter(|(_, file)| file.has_parse_errors)
+            .filter(|(_, file)| file.has_parse_errors())
             .filter_map(|(index, _)| project.packages[index])
             .collect();
         let mut candidates: HashMap<_, Vec<usize>> = HashMap::new();
@@ -81,7 +81,7 @@ impl CrossFileRule for UnexportedPublicApi {
                     "",
                     Severity::Warning,
                     format!("Public `{}` is used across the package but not exported from any public library.", declaration.name),
-                    files[declaration.file].path.to_string_lossy().as_ref(),
+                    files[declaration.file].path().to_string_lossy().as_ref(),
                     declaration.span,
                 ));
             }
@@ -103,7 +103,7 @@ fn used_candidates(
         };
         if project.internal[index]
             || environment
-                .file_package(&file.path)
+                .file_package(file.path())
                 .identity()
                 .is_some_and(|identity| {
                     identity.lib_root.parent().is_some_and(|root| {
@@ -249,19 +249,13 @@ mod tests {
                 } else {
                     source
                 };
-                let parsed = falcon_dart_parser::parser::parse(source);
-                ProjectFile {
-                    path: root.join(path),
-                    parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-                        source: source.into(),
-                        tree: parsed.tree,
-                    }),
-                    has_parse_errors,
-                }
+                let parsed = falcon_analyze::ParsedFile::parse(source);
+                ProjectFile::new(root.join(path), std::sync::Arc::new(parsed))
+                    .expect("parsed fixture must be accepted by the project")
             })
             .collect();
             let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
-                files.iter().map(|file| file.path.as_path()),
+                files.iter().map(falcon_analyze::ProjectFile::path),
                 |_| None,
             );
             let diagnostics = UnexportedPublicApi.prepare_project(

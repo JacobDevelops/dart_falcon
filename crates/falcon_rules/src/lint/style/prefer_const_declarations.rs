@@ -225,7 +225,6 @@ mod tests {
     use falcon_analyze::RuleAnalysis;
 
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::PathBuf;
 
     #[test]
@@ -247,13 +246,10 @@ void f() {
 }
 ";
         let path = PathBuf::from("/project/lib/test.dart");
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            tree: parsed.tree,
-            source: source.into(),
-        });
-        let program = parsed.tree.program(source);
+        let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = std::sync::Arc::new(parsed);
+        let program = parsed.program();
         let indexes = crate::lint::test_support::TestIndexes::new(&[(&path, &parsed)]);
         let config = FalconConfig::default();
         let ctx = indexes.context(&path, &config, &parsed);

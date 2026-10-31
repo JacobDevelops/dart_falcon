@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 
-use falcon_dart_parser::{ParseError, ParseErrorKind, try_parse_for_package};
+use falcon_dart_parser::{ParseError, ParseErrorKind};
 use falcon_syntax::cst::visit::{Visitor, walk_top_level_decl};
 use falcon_syntax::cst::{ClassMember, FunctionDecl, Program, Span, TopLevelDecl};
 use rayon::prelude::*;
@@ -970,7 +970,7 @@ impl ExternalLibraries {
                                     && cached.has_parse_errors == current.has_parse_errors
                                     && cached.doc_imports == current.doc_imports
                                     && (Arc::ptr_eq(&cached.parsed, &current.parsed)
-                                        || cached.parsed.source == current.parsed.source)
+                                        || cached.parsed.source() == current.parsed.source())
                             })
                 })
     }
@@ -1335,9 +1335,9 @@ fn read_source(
     source: &str,
     package_version: Option<LanguageVersion>,
 ) -> std::io::Result<ExternalFile> {
-    let falcon_dart_parser::ParseResult { tree, errors } =
-        try_parse_for_package(source, package_version)?;
-    let program = tree.program(source);
+    let (parsed, errors) = crate::ParsedFile::try_parse_for_package(source, package_version)
+        .map_err(|(_, error)| error)?;
+    let program = parsed.program();
     let has_parse_errors = !declarations_intact(program, &errors);
     if has_parse_errors && let Some(error) = errors.first() {
         environment.warn(
@@ -1350,10 +1350,7 @@ fn read_source(
         .collect();
     Ok(ExternalFile {
         path: path.to_path_buf(),
-        parsed: Arc::new(crate::ParsedFile {
-            source: source.into(),
-            tree,
-        }),
+        parsed: Arc::new(parsed),
         doc_imports,
         has_parse_errors,
     })
@@ -1587,7 +1584,7 @@ mod tests {
         for declaration in ["Observed", "ObservedPart", "CompanionDependency"] {
             assert!(files.iter().any(|file| {
                 file.parsed
-                    .source
+                    .source()
                     .contains(&format!("class {declaration} {{}}"))
             }));
         }

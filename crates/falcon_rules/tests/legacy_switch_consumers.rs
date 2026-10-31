@@ -8,14 +8,13 @@ use falcon_analyze::{
     AnalyzeContext, IdentityIndex, IdentitySource, Rule, RuleAnalysis, TypeIndex,
 };
 use falcon_config::FalconConfig;
-use falcon_dart_parser::parse;
 use falcon_rules::lint::complexity::max_switch_cases::MaxSwitchCases;
 use falcon_rules::lint::correctness::exhaustive_cases::ExhaustiveCases;
 use falcon_rules::lint::correctness::no_adjacent_strings_in_list::NoAdjacentStringsInList;
 use falcon_syntax::cst::visit::{Visitor, walk_stmt};
 use falcon_syntax::cst::{Stmt, SwitchCase, SwitchCaseKind};
 
-fn case_program(source: &str, legacy: bool) -> falcon_dart_parser::ParseResult {
+fn case_program(source: &str, legacy: bool) -> falcon_analyze::ParsedFile {
     struct CaseKinds(bool, usize);
     impl<'a> Visitor<'a> for CaseKinds {
         fn visit_stmt(&mut self, node: Stmt<'a>) {
@@ -35,24 +34,17 @@ fn case_program(source: &str, legacy: bool) -> falcon_dart_parser::ParseResult {
         "// @dart = {}\n{source}",
         if legacy { "2.19" } else { "3.13" }
     );
-    let parsed = parse(&source);
-    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let (parsed, errors) =
+        falcon_analyze::ParsedFile::parse_for_package(source.into_boxed_str(), None);
+    assert!(errors.is_empty(), "{errors:?}");
     let mut kinds = CaseKinds(legacy, 0);
-    kinds.visit_program(parsed.tree.program(&source));
+    kinds.visit_program(parsed.program());
     assert!(kinds.1 > 0);
     parsed
 }
 
 fn diagnostics(name: &'static str, rule: &dyn Rule, source: &str, legacy: bool) -> Vec<String> {
-    let falcon_dart_parser::ParseResult { tree, .. } = case_program(source, legacy);
-    let source = format!(
-        "// @dart = {}\n{source}",
-        if legacy { "2.19" } else { "3.13" }
-    );
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into_boxed_str(),
-        tree,
-    });
+    let parsed = std::sync::Arc::new(case_program(source, legacy));
     let program = parsed.program();
     let path = Path::new("legacy-switch.dart");
     let identities = IdentityIndex::from_project_files(

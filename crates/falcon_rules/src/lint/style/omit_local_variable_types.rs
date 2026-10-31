@@ -210,18 +210,14 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
 mod tests {
     use super::*;
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::Path;
 
     #[test]
     fn annotation_spans_exclude_trailing_comments_and_whitespace() {
         let source = "void f() { List<int> /* named */ a; int Function() /* function */ b; (int, String) /* record */ c; }";
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        let (snapshot, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = std::sync::Arc::new(snapshot);
         let program = parsed.program();
         let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {
             panic!("expected function");

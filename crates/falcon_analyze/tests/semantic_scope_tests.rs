@@ -4,7 +4,6 @@ use falcon_analyze::{
     AnalyzeContext, ResolvedType, ResolvedTypeView, RuleAnalysis, RulePreparation,
     SemanticRuleVisitor, SemanticState, SignatureIndex, returned_expressions, visit_program,
 };
-use falcon_dart_parser::parse;
 use falcon_syntax::cst::*;
 
 fn visit_with_signatures(
@@ -16,12 +15,9 @@ fn visit_with_signatures(
     use falcon_config::FalconConfig;
     use std::sync::Arc;
 
-    let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
+    let (tree, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
     assert!(errors.is_empty(), "{errors:?}");
-    let parsed = Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let parsed = Arc::new(tree);
     let program = parsed.program();
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
@@ -462,12 +458,9 @@ fn legacy_switch_case_expressions_reach_semantic_visitors() {
 
     let source = "// @dart=2.19\nvoid f(int x) { switch (x) { case 7: break; } }";
     let path = PathBuf::from("/project/lib/main.dart");
-    let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
+    let (tree, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
     assert!(errors.is_empty(), "{errors:?}");
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let parsed = std::sync::Arc::new(tree);
     let program = parsed.program();
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
@@ -642,12 +635,9 @@ fn finds_nested_returns_without_crossing_function_boundaries() {
             () { return 13; };
             return () { return 14; };
         }";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+    let (tree, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
     assert!(errors.is_empty(), "{errors:?}");
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let parsed = std::sync::Arc::new(tree);
     let program = parsed.program();
     let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {
         panic!()
@@ -666,12 +656,9 @@ fn finds_nested_returns_without_crossing_function_boundaries() {
 #[test]
 fn returns_borrowed_block_and_arrow_expressions() {
     let source = "int block() { return 1; } int arrow() => 2;";
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+    let (tree, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
     assert!(errors.is_empty(), "{errors:?}");
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let parsed = std::sync::Arc::new(tree);
     let program = parsed.program();
     for declaration in program.declarations() {
         let TopLevelDecl::Function(function) = declaration else {
@@ -770,12 +757,9 @@ fn registry_shares_semantic_state_and_preserves_collector_lifecycle() {
 
     let source = "class Root {} int root = 1; void f() { int inner = root; }";
     let path = PathBuf::from("/project/lib/main.dart");
-    let parsed = parse(source);
-    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree: parsed.tree,
-    });
+    let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+    assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+    let parsed = std::sync::Arc::new(parsed);
     let program = parsed.program();
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
@@ -874,12 +858,9 @@ fn semantic_collectors_finish_without_identities() {
 
     let source = "void f() => 1;";
     let path = PathBuf::from("/project/lib/main.dart");
-    let parsed = parse(source);
-    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree: parsed.tree,
-    });
+    let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+    assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+    let parsed = std::sync::Arc::new(parsed);
     let program = parsed.program();
     let config = FalconConfig::default();
     let context = AnalyzeContext::new(&path, &config, &parsed);
@@ -953,12 +934,9 @@ fn rules_prepare_syntax_or_semantics_exactly_once() {
 
     let source = "void f() => 1;";
     let path = Path::new("/project/lib/main.dart");
-    let parsed = parse(source);
-    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree: parsed.tree,
-    });
+    let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+    assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+    let parsed = std::sync::Arc::new(parsed);
     let program = parsed.program();
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
@@ -1183,12 +1161,9 @@ fn binary_chain_visits_on_the_normal_stack() {
          void h(dynamic a) {{ if (a is A) {{ a + (a = B()) + a; }} }}",
         vec!["a"; operands].join(" + ")
     );
-    let result = parse(&source);
-    assert!(result.errors.is_empty(), "{:?}", result.errors);
-    let parsed = Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree: result.tree,
-    });
+    let (result, result_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+    assert!(result_errors.is_empty(), "{result_errors:?}");
+    let parsed = Arc::new(result);
     let path = Path::new("/project/main.dart");
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
@@ -1237,12 +1212,9 @@ fn optional_binary_chains_visit_every_operand_on_the_normal_stack() {
         let chain = vec!["a"; operands].join(&format!(" {operator} "));
         let source =
             format!("void f({parameter} a) {{ var value = {chain}; consume({chain}); {chain}; }}");
-        let result = parse(&source);
-        assert!(result.errors.is_empty(), "{operator}: {:?}", result.errors);
-        let parsed = Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: result.tree,
-        });
+        let (result, result_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        assert!(result_errors.is_empty(), "{operator}: {result_errors:?}");
+        let parsed = Arc::new(result);
         let path = Path::new("/project/main.dart");
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
@@ -1325,12 +1297,9 @@ void f(bool flag, Object? value, int? n) {
   expectInt(n);
 }
 ";
-    let result = parse(source);
-    assert!(result.errors.is_empty(), "{:?}", result.errors);
-    let parsed = Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree: result.tree,
-    });
+    let (result, result_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+    assert!(result_errors.is_empty(), "{result_errors:?}");
+    let parsed = Arc::new(result);
     let path = Path::new("/project/main.dart");
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
@@ -1457,12 +1426,9 @@ void g(Box? box, int index) {
   Box? result = box?.child[index]!.child;
 }
 ";
-    let result = parse(source);
-    assert!(result.errors.is_empty(), "{:?}", result.errors);
-    let parsed = Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree: result.tree,
-    });
+    let (result, result_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+    assert!(result_errors.is_empty(), "{result_errors:?}");
+    let parsed = Arc::new(result);
     let path = Path::new("/project/main.dart");
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
@@ -1554,12 +1520,9 @@ void f(bool a, bool b, bool c, int? n, int? m, int tail, Object? value) {
   value is String && ((value = 0) == 0 && afterWrite(value));
 }
 ";
-    let result = parse(source);
-    assert!(result.errors.is_empty(), "{:?}", result.errors);
-    let parsed = Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree: result.tree,
-    });
+    let (result, result_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+    assert!(result_errors.is_empty(), "{result_errors:?}");
+    let parsed = Arc::new(result);
     let path = Path::new("/project/main.dart");
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
@@ -1658,12 +1621,9 @@ void optional(bool flag) {
   expectNullable(value);
 }
 ";
-    let result = parse(source);
-    assert!(result.errors.is_empty(), "{:?}", result.errors);
-    let parsed = Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree: result.tree,
-    });
+    let (result, result_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+    assert!(result_errors.is_empty(), "{result_errors:?}");
+    let parsed = Arc::new(result);
     let path = Path::new("/project/main.dart");
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {
@@ -1841,12 +1801,9 @@ fn binary_chains_carry_evaluated_receiver_types_across_local_writes() {
         "a + (".repeat(16),
         ")".repeat(16),
     );
-    let result = parse(&source);
-    assert!(result.errors.is_empty(), "{:?}", result.errors);
-    let parsed = Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree: result.tree,
-    });
+    let (result, result_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+    assert!(result_errors.is_empty(), "{result_errors:?}");
+    let parsed = Arc::new(result);
     let path = Path::new("/project/main.dart");
     let identities = IdentityIndex::from_project_files(
         &[IdentitySource {

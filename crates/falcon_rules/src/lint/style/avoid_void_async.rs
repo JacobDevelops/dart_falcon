@@ -115,19 +115,15 @@ mod tests {
     use super::*;
     use falcon_analyze::{ParsedFile, RuleAnalysis};
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::Path;
     use std::sync::Arc;
 
     #[test]
     fn operator_diagnostic_points_to_keyword() {
         let source = "class C { void operator []=(int i, int v) async {} }";
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let (parsed, parsed_errors) = ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = Arc::new(parsed);
         let config = FalconConfig::default();
         let context = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
 

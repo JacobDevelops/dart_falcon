@@ -29,7 +29,7 @@ impl CrossFileRule for UnnecessaryNullable {
         // about names that resolve to exactly one declaration.
         let mut decl_count: HashMap<&str, usize> = HashMap::new();
         for f in files {
-            if f.has_parse_errors {
+            if f.has_parse_errors() {
                 continue;
             }
             for name in decl_names(f.program()) {
@@ -41,15 +41,14 @@ impl CrossFileRule for UnnecessaryNullable {
         let mut tear_offs = HashSet::new();
         let mut writes = HashMap::new();
         for file in files {
-            if file
-                .path
+            if file.path()
                 .extension()
                 .and_then(|extension| extension.to_str())
                 != Some("dart")
             {
                 continue;
             }
-            let ctx = AnalyzeContext::new(&file.path, config, &file.parsed)
+            let ctx = AnalyzeContext::new(file.path(), config, file.parsed())
                 .with_types(&indexes.types)
                 .with_identities(&indexes.identities)
                 .with_signatures(&indexes.signatures);
@@ -71,15 +70,15 @@ impl CrossFileRule for UnnecessaryNullable {
             collector.visit_program(file.program());
             calls.extend(collector.calls);
             tear_offs.extend(collector.tear_offs);
-            writes.insert(file.path.as_path(), nullability.values);
+            writes.insert(file.path(), nullability.values);
         }
 
         let mut diags = Vec::new();
         for f in files {
-            if f.has_parse_errors {
+            if f.has_parse_errors() {
                 continue;
             }
-            let Some(file_writes) = writes.get(f.path.as_path()) else {
+            let Some(file_writes) = writes.get(f.path()) else {
                 continue;
             };
             for target in private_targets(f.program()) {
@@ -118,7 +117,7 @@ impl CrossFileRule for UnnecessaryNullable {
                              remove the unnecessary `?`.",
                             param.name
                         ),
-                        f.path.to_string_lossy().into_owned(),
+                        f.path().to_string_lossy().into_owned(),
                         param.span,
                     ));
                 }
@@ -709,14 +708,11 @@ mod tests {
     #[test]
     fn property_reads_only_record_declared_callable_names() {
         let source = "void _top(int? value) {} class C { int _field = 1; void _method(int? value) {} void _called(int? value) {} void use(C c) { c._field; c.._field; c._method; c.._method; c._called(1); (c._called)(2); c.._called(3); _top(4); (_top)(5); } }";
-        let file = ProjectFile {
-            path: "test.dart".into(),
-            parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-                source: source.into(),
-                tree: falcon_dart_parser::parse(source).tree,
-            }),
-            has_parse_errors: false,
-        };
+        let file = ProjectFile::new(
+            "test.dart".into(),
+            std::sync::Arc::new(falcon_analyze::ParsedFile::parse(source)),
+        )
+        .expect("parsed fixture must be accepted by the project");
         let declarations = decl_names(file.program())
             .into_iter()
             .map(|name| (name, 1))
@@ -972,15 +968,11 @@ mod tests {
                     },
                 );
             assert!(diagnostics.is_empty(), "{diagnostics:?}");
-            let tree = falcon_dart_parser::lex_tree("name: app\n");
-            files.push(ProjectFile {
-                path: manifest.clone(),
-                parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-                    source: "name: app\n".into(),
-                    tree,
-                }),
-                has_parse_errors: false,
-            });
+            let snapshot = falcon_analyze::ParsedFile::lexical("name: app\n");
+            files.push(
+                ProjectFile::new(manifest.clone(), std::sync::Arc::new(snapshot))
+                    .expect("parsed fixture must be accepted by the project"),
+            );
             let diagnostics = registry
                 .run_all(
                     &falcon_analyze::AnalysisEnvironment::default(),

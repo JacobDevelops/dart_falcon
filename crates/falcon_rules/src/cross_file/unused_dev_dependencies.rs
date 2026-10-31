@@ -42,13 +42,13 @@ impl CrossFileRule for UnusedDevDependencies {
         let non_library_packages: HashSet<_> = files
             .iter()
             .filter(|file| {
-                file.path
+                file.path()
                     .extension()
                     .is_some_and(|extension| extension == "dart")
             })
             .filter_map(|file| {
-                let pubspec = enclosing_pubspec(&file.path)?;
-                (!is_library_file(&file.path, &pubspec)).then_some(pubspec)
+                let pubspec = enclosing_pubspec(file.path())?;
+                (!is_library_file(file.path(), &pubspec)).then_some(pubspec)
             })
             .collect();
         let mut diagnostics = Vec::new();

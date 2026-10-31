@@ -29,7 +29,7 @@ impl CrossFileRule for UndeclaredDependencies {
         let mut manifests = HashMap::new();
         let mut diagnostics = Vec::new();
         for file in files {
-            let Some(pubspec) = enclosing_pubspec(&file.path) else {
+            let Some(pubspec) = enclosing_pubspec(file.path()) else {
                 continue;
             };
             let Some(manifest) = manifests
@@ -38,7 +38,7 @@ impl CrossFileRule for UndeclaredDependencies {
             else {
                 continue;
             };
-            let is_library = is_library_file(&file.path, &pubspec);
+            let is_library = is_library_file(file.path(), &pubspec);
             let imports = file.program().imports().flat_map(|directive| {
                 std::iter::once(directive.uri()).chain(
                     directive
@@ -76,7 +76,7 @@ impl CrossFileRule for UndeclaredDependencies {
                             "dependencies or dev_dependencies"
                         }
                     ),
-                    file.path.to_string_lossy().into_owned(),
+                    file.path().to_string_lossy().into_owned(),
                     uri.span(),
                 ));
             }

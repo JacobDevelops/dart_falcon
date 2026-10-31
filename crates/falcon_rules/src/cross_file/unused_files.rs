@@ -39,12 +39,12 @@ impl CrossFileRule for UnusedFiles {
     ) -> Vec<Diagnostic> {
         let file_packages: Vec<_> = files
             .iter()
-            .map(|file| environment.file_package(&file.path))
+            .map(|file| environment.file_package(file.path()))
             .collect();
         let packages = project_packages(&file_packages);
         let canons: Vec<PathBuf> = files
             .iter()
-            .map(|f| canonical_package_path(&f.path))
+            .map(|f| canonical_package_path(f.path()))
             .collect();
         let adj = build_reference_graph(files, &canons, &file_packages, &packages);
 
@@ -107,7 +107,7 @@ impl CrossFileRule for UnusedFiles {
                 Severity::Warning,
                 "File is not reachable from any entrypoint (main, a non-lib file, or the public \
                  library surface); it may be dead code.",
-                f.path.to_string_lossy().into_owned(),
+                f.path().to_string_lossy().into_owned(),
                 DiagSpan { start: 0, end: 0 },
             ));
         }
@@ -148,18 +148,11 @@ fn has_main(program: Program<'_>) -> bool {
 mod tests {
     use super::*;
     use falcon_analyze::CrossFileRuleAnalysis;
-    use falcon_dart_parser::parser::parse;
 
     fn pf(path: &str, src: &str) -> ProjectFile {
-        let falcon_dart_parser::ParseResult { tree, .. } = parse(src);
-        ProjectFile {
-            path: PathBuf::from(path),
-            parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-                source: src.into(),
-                tree,
-            }),
-            has_parse_errors: false,
-        }
+        let snapshot = falcon_analyze::ParsedFile::parse(src);
+        ProjectFile::new(PathBuf::from(path), std::sync::Arc::new(snapshot))
+            .expect("parsed fixture must be accepted by the project")
     }
 
     fn flagged(files: &[ProjectFile]) -> Vec<String> {
@@ -415,7 +408,7 @@ mod tests {
             pf(dead.to_str().unwrap(), "void dead() {}\n"),
         ];
 
-        assert!(files.iter().all(|file| !file.path.exists()));
+        assert!(files.iter().all(|file| !file.path().exists()));
         assert_eq!(flagged(&files), vec![dead.to_string_lossy().into_owned()]);
     }
 

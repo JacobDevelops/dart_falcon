@@ -168,22 +168,18 @@ mod tests {
     use super::*;
     use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::Path;
 
     #[test]
     fn declaration_initializers_precede_constructor_initializers() {
         let source = "class A { const A() : x = 1; final int x; final int y = 2; }";
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = std::sync::Arc::new(parsed);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let diagnostics =
-            AvoidFieldInitializersInConstClasses.analyze(AvoidFieldInitializersInConstClasses::NAME, parsed.tree.program(source), &ctx);
+            AvoidFieldInitializersInConstClasses.analyze(AvoidFieldInitializersInConstClasses::NAME, parsed.program(), &ctx);
         assert_eq!(diagnostics.len(), 2);
         assert_eq!(diagnostics[0].span.start, source.find("y = 2").unwrap());
         assert_eq!(diagnostics[1].span.start, source.find("x = 1").unwrap());
@@ -193,16 +189,13 @@ mod tests {
     fn multiple_constructors_exclude_initializer_lists() {
         let source =
             "class A { const A() : x = 1; const A.named() : x = 2; final int x; final int y = 3; }";
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = std::sync::Arc::new(parsed);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let diagnostics =
-            AvoidFieldInitializersInConstClasses.analyze(AvoidFieldInitializersInConstClasses::NAME, parsed.tree.program(source), &ctx);
+            AvoidFieldInitializersInConstClasses.analyze(AvoidFieldInitializersInConstClasses::NAME, parsed.program(), &ctx);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].span.start, source.find("y = 3").unwrap());
     }
@@ -210,16 +203,13 @@ mod tests {
     #[test]
     fn parameter_reads_do_not_leak_between_initializers() {
         let source = "class Base { const Base(int v); } class A extends Base { final int x, y, z; const A(int v) : assert(v > 0), x = 1, y = v, z = 2, super(v); }";
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = std::sync::Arc::new(parsed);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let diagnostics =
-            AvoidFieldInitializersInConstClasses.analyze(AvoidFieldInitializersInConstClasses::NAME, parsed.tree.program(source), &ctx);
+            AvoidFieldInitializersInConstClasses.analyze(AvoidFieldInitializersInConstClasses::NAME, parsed.program(), &ctx);
         assert_eq!(diagnostics.len(), 2);
         assert_eq!(diagnostics[0].span.start, source.find("x = 1").unwrap());
         assert_eq!(diagnostics[1].span.start, source.find("z = 2").unwrap());
@@ -228,16 +218,13 @@ mod tests {
     #[test]
     fn mixin_class_initializers_reset_parameter_reference_state() {
         let source = "mixin class A { final int x, y; const A(int v) : x = v, y = 1; }";
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = std::sync::Arc::new(parsed);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let diagnostics =
-            AvoidFieldInitializersInConstClasses.analyze(AvoidFieldInitializersInConstClasses::NAME, parsed.tree.program(source), &ctx);
+            AvoidFieldInitializersInConstClasses.analyze(AvoidFieldInitializersInConstClasses::NAME, parsed.program(), &ctx);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].span.start, source.find("y = 1").unwrap());
     }

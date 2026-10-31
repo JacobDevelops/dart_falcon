@@ -15,13 +15,9 @@ fn uri(path: &Path) -> String {
 }
 
 fn signature(source: &str) -> u64 {
-    let parsed = try_parse_for_package(source, None).unwrap();
-    assert!(parsed.errors.is_empty(), "{source}: {:?}", parsed.errors);
-    ParsedFile {
-        source: source.into(),
-        tree: parsed.tree,
-    }
-    .declaration_signature()
+    let (parsed, errors) = ParsedFile::try_parse_for_package(source, None).unwrap();
+    assert!(errors.is_empty(), "{source}: {errors:?}");
+    parsed.declaration_signature()
 }
 
 fn assert_shifted_invocation_types(
@@ -87,7 +83,7 @@ fn assert_shifted_invocation_types(
     let mut parameters = TypeParameterScope::default();
     parameters.push(class.type_params(), &semantic.model);
     let mut check = Check {
-        source: &parsed.source,
+        source: parsed.source(),
         integer: semantic.model.core_type("int", false),
         alias: semantic.model.resolve_type_name(&["Builder"]).unwrap(),
         parameter: parameters.lookup("T").unwrap(),
@@ -317,7 +313,7 @@ fn cross_file_only_body_reuse_preserves_types_after_save_close_and_same_text_rer
     assert_shifted_invocation_types(
         &state,
         &path,
-        &files[0].parsed,
+        files[0].parsed(),
         &state.cross_file_index_cache.as_ref().unwrap().indexes,
     );
 
@@ -340,8 +336,12 @@ fn cross_file_only_body_reuse_preserves_types_after_save_close_and_same_text_rer
     state.close(&uri);
     let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
     assert!(complete);
-    let reread = &files.iter().find(|file| file.path == path).unwrap().parsed;
-    assert_eq!(reread.source, edited.source);
+    let reread = files
+        .iter()
+        .find(|file| file.path() == path)
+        .unwrap()
+        .parsed();
+    assert_eq!(reread.source(), edited.source());
     assert!(!Arc::ptr_eq(reread, &edited));
     state.ensure_cross_file_indexes(&files);
     assert_shifted_invocation_types(

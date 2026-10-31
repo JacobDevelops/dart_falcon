@@ -62,11 +62,8 @@ pub fn analyze(
     fs::create_dir_all(app.parent().unwrap()).unwrap();
     fs::write(&app, source).unwrap();
     let app = canonical_or_lexical(&app);
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let (parsed, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+    let parsed = std::sync::Arc::new(parsed);
     let program = parsed.program();
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |config| {
         let root = config?.flutter_root.as_ref()?;

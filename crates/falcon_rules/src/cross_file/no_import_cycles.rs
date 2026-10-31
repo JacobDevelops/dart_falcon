@@ -34,7 +34,7 @@ impl CrossFileRule for NoImportCycles {
         let (paths, representatives) = canonical_representatives(files);
         let file_packages: Vec<_> = files
             .iter()
-            .map(|file| environment.file_package(&file.path))
+            .map(|file| environment.file_package(file.path()))
             .collect();
         let packages = project_packages(&file_packages);
         let by_path: HashMap<&Path, usize> = paths
@@ -124,8 +124,7 @@ impl CrossFileRule for NoImportCycles {
                 "",
                 Severity::Warning,
                 message,
-                files[representatives[start]]
-                    .path
+                files[representatives[start]].path()
                     .to_string_lossy()
                     .into_owned(),
                 span,
@@ -138,10 +137,10 @@ impl CrossFileRule for NoImportCycles {
 fn canonical_representatives(files: &[ProjectFile]) -> (Vec<PathBuf>, Vec<usize>) {
     let mut representatives = BTreeMap::new();
     for (index, file) in files.iter().enumerate() {
-        let canonical = canonical_package_path(&file.path);
+        let canonical = canonical_package_path(file.path());
         let representative = representatives.entry(canonical).or_insert(index);
         // Path ordering normalizes `.` components; compare original spellings.
-        if file.path.as_os_str() < files[*representative].path.as_os_str() {
+        if file.path().as_os_str() < files[*representative].path().as_os_str() {
             *representative = index;
         }
     }
@@ -284,18 +283,11 @@ mod cycle_regressions {
 mod tests {
     use super::*;
     use falcon_analyze::CrossFileRuleAnalysis;
-    use falcon_dart_parser::parser::parse;
 
     fn file(path: &str, source: &str) -> ProjectFile {
-        let falcon_dart_parser::ParseResult { tree, .. } = parse(source);
-        ProjectFile {
-            path: PathBuf::from(path),
-            parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-                source: source.into(),
-                tree,
-            }),
-            has_parse_errors: false,
-        }
+        let snapshot = falcon_analyze::ParsedFile::parse(source);
+        ProjectFile::new(PathBuf::from(path), std::sync::Arc::new(snapshot))
+            .expect("parsed fixture must be accepted by the project")
     }
 
     fn diagnostics(files: &[ProjectFile]) -> Vec<Diagnostic> {
@@ -325,7 +317,7 @@ mod tests {
             ),
         ];
         let environment = AnalysisEnvironment::discover_with_sdk_locator(
-            files.iter().map(|file| file.path.as_path()),
+            files.iter().map(falcon_analyze::ProjectFile::path),
             |_| None,
         );
         std::fs::remove_file(&manifest).unwrap();
@@ -461,9 +453,9 @@ mod tests {
             let diagnostics = diagnostics(&files);
             assert_eq!(diagnostics.len(), 1);
             assert_eq!(
-                &files[0].parsed.source[diagnostics[0].span.start..diagnostics[0].span.end],
-                "'b.dart'"
-            );
+                            &files[0].source()[diagnostics[0].span.start..diagnostics[0].span.end],
+                            "'b.dart'"
+                        );
         }
     }
 

@@ -346,7 +346,6 @@ mod tests {
     use super::*;
     use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::PathBuf;
 
     /// Without a resolver the rule falls back to `declared_names` to decide whether
@@ -354,17 +353,14 @@ mod tests {
     #[test]
     fn shadowing_pragma_suppresses_late_trust_without_a_resolver() {
         let source = "var other, pragma;\n@pragma('dart2js:late:trust')\nimport 'a.dart';\n";
-        let parsed = parse(source);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let parsed = falcon_analyze::ParsedFile::parse(source);
+        let parsed = std::sync::Arc::new(parsed);
         let config = FalconConfig::default();
         let path = PathBuf::from("shadowed.dart");
         let ctx = AnalyzeContext::new(&path, &config, &parsed);
         assert!(
             LibraryAnnotations
-                .analyze(LibraryAnnotations::NAME, parsed.tree.program(source), &ctx)
+                .analyze(LibraryAnnotations::NAME, parsed.program(), &ctx)
                 .is_empty()
         );
     }

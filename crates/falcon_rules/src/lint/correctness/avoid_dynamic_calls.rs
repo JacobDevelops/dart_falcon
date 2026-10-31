@@ -389,7 +389,6 @@ mod tests {
     use falcon_analyze::ParsedFile;
     use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::{path::Path, sync::Arc};
 
     #[test]
@@ -494,19 +493,13 @@ void use(dynamic value) {
         let path = Path::new("/project/lib/test.dart");
         let expect_path = Path::new("/project/lib/expect.dart");
         let expect_source = "void expect(dynamic actual) {}";
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(expect_source);
+        let (snapshot, errors) = ParsedFile::parse_for_package(expect_source, None);
         assert!(errors.is_empty(), "{errors:?}");
-        let expect_parsed = Arc::new(ParsedFile {
-            source: expect_source.into(),
-            tree,
-        });
+        let expect_parsed = Arc::new(snapshot);
 
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        let (snapshot, errors) = ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = Arc::new(snapshot);
         let program = parsed.program();
         let indexes = crate::lint::test_support::TestIndexes::new(&[
             (path, &parsed),
@@ -570,12 +563,9 @@ void use(dynamic value) {
     fn cascade_receivers_and_updates_keep_exact_spans_through_registry() {
         let source = "class SpanOps {\n  dynamic a;\n  Function f;\n  SpanOps(this.a, this.f);\n}\nvoid cascadeSpanWitness(SpanOps o, dynamic e) {\n  o..f.call();\n  ++e;\n  e--;\n  o..a.x += 1;\n  o..a.b();\n  o..a[0].x;\n  o..a[0].x += 1;\n}\n";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        let (snapshot, errors) = ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = Arc::new(snapshot);
         let program = parsed.program();
         let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
         let config = FalconConfig::default();
@@ -652,12 +642,9 @@ void groupedCallWitness(Function fn, dynamic d, SpanCallable o) {
 }
 ";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        let (snapshot, errors) = ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = Arc::new(snapshot);
         let program = parsed.program();
         let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
         let config = FalconConfig::default();
@@ -741,12 +728,9 @@ void cases(dynamic d, Function fn, Holder h) {
 }
 ";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        let (snapshot, errors) = ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = Arc::new(snapshot);
         let program = parsed.program();
         let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
         let config = FalconConfig::default();

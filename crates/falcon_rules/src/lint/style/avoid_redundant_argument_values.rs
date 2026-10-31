@@ -745,7 +745,6 @@ mod tests {
     use falcon_analyze::RuleAnalysis;
     use falcon_analyze::{IdentityIndex, IdentitySource, ParsedFile, SignatureIndex, TypeIndex};
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::PathBuf;
     use std::sync::Arc;
 
@@ -753,18 +752,12 @@ mod tests {
     fn reports(source: &str, imported: &str) -> Vec<String> {
         let path = PathBuf::from("/project/lib/main.dart");
         let imported_path = PathBuf::from("/project/lib/imported.dart");
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
-        let dependency = parse(imported);
-        assert!(dependency.errors.is_empty(), "{:?}", dependency.errors);
-        let dependency = Arc::new(ParsedFile {
-            source: imported.into(),
-            tree: dependency.tree,
-        });
+        let (parsed, parsed_errors) = ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = Arc::new(parsed);
+        let (dependency, dependency_errors) = ParsedFile::parse_for_package(imported, None);
+        assert!(dependency_errors.is_empty(), "{dependency_errors:?}");
+        let dependency = Arc::new(dependency);
         let indexes = crate::lint::test_support::TestIndexes::new(&[(&path, &parsed), (&imported_path, &dependency)]);
         let config = FalconConfig::default();
         let context = indexes.context(&path, &config, &parsed);
@@ -821,12 +814,9 @@ void run() {
 }
 ";
         std::fs::write(&path, source).unwrap();
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let (parsed, parsed_errors) = ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = Arc::new(parsed);
         let environment =
             AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);
         let external = ExternalLibraries::load(

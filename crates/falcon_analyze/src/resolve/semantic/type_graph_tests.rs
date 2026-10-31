@@ -3,12 +3,8 @@ use super::types::SharedIdentity;
 use super::*;
 
 fn parsed() -> &'static Arc<crate::ParsedFile> {
-    static PARSED: std::sync::LazyLock<Arc<crate::ParsedFile>> = std::sync::LazyLock::new(|| {
-        Arc::new(crate::ParsedFile {
-            source: "".into(),
-            tree: falcon_dart_parser::parse("").tree,
-        })
-    });
+    static PARSED: std::sync::LazyLock<Arc<crate::ParsedFile>> =
+        std::sync::LazyLock::new(|| Arc::new(crate::ParsedFile::parse("")));
     &PARSED
 }
 

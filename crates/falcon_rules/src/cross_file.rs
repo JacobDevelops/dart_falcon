@@ -258,7 +258,7 @@ fn project_pubspecs(files: &[ProjectFile]) -> Vec<PathBuf> {
     let mut seen = HashSet::new();
     files
         .iter()
-        .filter_map(|file| enclosing_pubspec(&file.path))
+        .filter_map(|file| enclosing_pubspec(file.path()))
         .filter(|path| seen.insert(path.clone()))
         .collect()
 }
@@ -323,12 +323,12 @@ fn program_reference_uris(
 fn analyzed_package_usage(files: &[ProjectFile]) -> BTreeMap<PathBuf, HashSet<String>> {
     let mut usage: BTreeMap<PathBuf, HashSet<String>> = BTreeMap::new();
     for file in files {
-        let Some(pubspec) = enclosing_pubspec(&file.path) else {
+        let Some(pubspec) = enclosing_pubspec(file.path()) else {
             continue;
         };
         let used = usage.entry(pubspec).or_default();
         if file
-            .path
+            .path()
             .extension()
             .and_then(|extension| extension.to_str())
             != Some("dart")
@@ -550,13 +550,9 @@ pub(crate) fn assert_project_fixture(rule_name: &'static str, rule: &dyn falcon_
     let mut failures = Vec::new();
     for path in files {
         let source = std::fs::read_to_string(&path).unwrap();
-        let falcon_dart_parser::ParseResult { tree, .. } =
-            falcon_dart_parser::parser::parse(&source);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into_boxed_str(),
-            tree,
-        });
-        let source = parsed.source.as_ref();
+        let snapshot = falcon_analyze::ParsedFile::parse(source);
+        let parsed = std::sync::Arc::new(snapshot);
+        let source = parsed.source();
         let program = parsed.program();
         let ctx = falcon_analyze::AnalyzeContext::new(&path, &config, &parsed)
             .with_environment(Some(&environment));
@@ -601,10 +597,7 @@ mod tests {
     use falcon_dart_parser::parser::parse;
 
     fn package_at(path: &Path, in_lib: bool) -> Option<PackageIdentity> {
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: "".into(),
-            tree: parse("").tree,
-        });
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile::parse(""));
         let config = falcon_config::FalconConfig::default();
         let context = falcon_analyze::AnalyzeContext::new(path, &config, &parsed);
         if in_lib {
@@ -771,20 +764,17 @@ mod tests {
         std::fs::create_dir(&sources).unwrap();
         std::fs::write(package_root.join("pubspec.yaml"), "name: 'pkg' # comment\n").unwrap();
         std::os::unix::fs::symlink(&sources, package_root.join("lib")).unwrap();
-        let falcon_dart_parser::ParseResult { tree, errors } = parse("");
+        let (snapshot, errors) = falcon_analyze::ParsedFile::parse_for_package("", None);
         assert!(errors.is_empty());
-        let files = [ProjectFile {
-            path: package_root.join("test.dart"),
-            parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-                source: "".into(),
-                tree,
-            }),
-            has_parse_errors: false,
-        }];
+        let files = [ProjectFile::new(
+            package_root.join("test.dart"),
+            std::sync::Arc::new(snapshot),
+        )
+        .expect("parsed fixture must be accepted by the project")];
         let environment = falcon_analyze::AnalysisEnvironment::default();
         let file_packages: Vec<_> = files
             .iter()
-            .map(|file| environment.file_package(&file.path))
+            .map(|file| environment.file_package(file.path()))
             .collect();
         let packages = project_packages(&file_packages);
         let expected_root = canonical_or_lexical(&sources);

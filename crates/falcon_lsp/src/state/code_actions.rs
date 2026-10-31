@@ -216,7 +216,7 @@ impl LspState {
             return Ok(Vec::new());
         };
         if cancelled()
-            || document.source_rejected
+            || document.parsed.is_rejected()
             || document.version.is_none()
             || document.diagnostics_parse_count != document.parse_count
         {
@@ -236,7 +236,7 @@ impl LspState {
             + usize::from(safe)
             + usize::from(unsafe_fixes);
         let mut actions = Vec::with_capacity(capacity);
-        if quickfix && !document.has_parse_errors {
+        if quickfix && !document.has_parse_errors() {
             QuickFixContext {
                 document,
                 config,
@@ -247,7 +247,7 @@ impl LspState {
         }
         // Admission checks and fix suppression happen in the normal diagnostic
         // pipeline; do not run the standalone engine on an excluded document.
-        if !document.has_parse_errors
+        if !document.has_parse_errors()
             && !diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic.fix.is_some())
@@ -261,7 +261,7 @@ impl LspState {
             if (include_unsafe && !unsafe_fixes) || (!include_unsafe && !safe) {
                 continue;
             }
-            if !document.has_parse_errors
+            if !document.has_parse_errors()
                 && !diagnostics.iter().any(|diagnostic| {
                     diagnostic.fix.as_ref().is_some_and(|fix| {
                         effective_fix_kind(config, &document.path, diagnostic.rule, fix.kind)
@@ -281,7 +281,7 @@ impl LspState {
                 })),
                 ..Default::default()
             };
-            if document.has_parse_errors {
+            if document.has_parse_errors() {
                 action.disabled = Some(lsp_types::CodeActionDisabled {
                     reason: "Falcon cannot fix a document with syntax errors".to_owned(),
                 });
@@ -323,7 +323,7 @@ impl LspState {
         if cancelled() {
             return Err("Falcon fix all cancelled".to_owned());
         }
-        if document.has_parse_errors {
+        if document.has_parse_errors() {
             return Err("Falcon cannot fix a document with syntax errors".to_owned());
         }
         if self.resolve_semantics && self.semantic_snapshot.is_none() {

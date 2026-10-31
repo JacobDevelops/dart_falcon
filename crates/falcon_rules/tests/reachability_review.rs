@@ -75,11 +75,8 @@ fn assert_without_external_sources(rule_name: &'static str, source: &str) {
     use std::path::Path;
 
     let path = Path::new("/unloaded_project/main.dart");
-    let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let (parsed, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+    let parsed = std::sync::Arc::new(parsed);
     let program = parsed.program();
     assert!(errors.is_empty(), "{errors:?}");
     let identities = IdentityIndex::build(

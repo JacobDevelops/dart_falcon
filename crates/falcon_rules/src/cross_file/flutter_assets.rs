@@ -38,12 +38,12 @@ pub(super) struct AssetPackage<'a> {
 pub(super) fn asset_packages(files: &[ProjectFile], include_spans: bool) -> Vec<AssetPackage<'_>> {
     let mut packages: BTreeMap<PathBuf, Vec<&ProjectFile>> = BTreeMap::new();
     for file in files {
-        let Some(pubspec) = enclosing_pubspec(&file.path) else {
+        let Some(pubspec) = enclosing_pubspec(file.path()) else {
             continue;
         };
         let package = packages.entry(pubspec).or_default();
         if file
-            .path
+            .path()
             .extension()
             .is_some_and(|extension| extension == "dart")
         {
@@ -241,9 +241,8 @@ fn fallback_asset_package(
 }
 
 pub(super) fn asset_strings(file: &ProjectFile) -> impl Iterator<Item = StringLitNode<'_>> {
-    file.parsed
-        .tree
-        .root(&file.parsed.source)
+    file.tree()
+        .root(file.source())
         .descendants()
         .filter_map(StringLitNode::cast)
         .filter(|literal| {

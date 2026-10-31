@@ -1265,12 +1265,7 @@ mod tests {
               @override
               Future<void> onLoad() async {}
             }";
-        let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let parsed = std::sync::Arc::new(crate::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = crate::resolve::parsed_fixture(source);
         let path = Path::new("/project/future_or.dart");
         let identities = IdentityIndex::build(
             &[IdentitySource {

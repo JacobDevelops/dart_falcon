@@ -45,7 +45,11 @@ impl SignatureIndex {
     }
 
     /// Replace body-local flow facts while retaining unchanged declaration indexes.
+    ///
+    /// # Panics
+    /// Panics if the snapshot is rejected.
     pub fn refresh_file_body(&mut self, file: FileId, parsed: &Arc<crate::ParsedFile>) {
+        assert!(!parsed.is_rejected(), "cannot index a rejected snapshot");
         self.flow_writes.insert(
             Some(file),
             Arc::new(super::flow_writes::FlowWrites::from_parsed(parsed)),

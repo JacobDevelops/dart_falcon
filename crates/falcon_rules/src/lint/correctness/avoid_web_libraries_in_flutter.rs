@@ -43,7 +43,6 @@ mod tests {
     use super::*;
     use falcon_analyze::{ParsedFile, RuleAnalysis};
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::Path;
     use std::sync::Arc;
 
@@ -59,12 +58,9 @@ mod tests {
         ] {
             let path = root.join(file);
             let source = std::fs::read_to_string(&path).unwrap();
-            let tree = parse(&source).tree;
-            let parsed = Arc::new(ParsedFile {
-                source: source.into_boxed_str(),
-                tree,
-            });
-            let source = &parsed.source;
+            let snapshot = ParsedFile::parse(source);
+            let parsed = Arc::new(snapshot);
+            let source = parsed.source();
             let config = FalconConfig::default();
             let ctx = AnalyzeContext::new(&path, &config, &parsed);
             let lines: Vec<_> = AvoidWebLibrariesInFlutter.analyze(AvoidWebLibrariesInFlutter::NAME, parsed.program(), &ctx)

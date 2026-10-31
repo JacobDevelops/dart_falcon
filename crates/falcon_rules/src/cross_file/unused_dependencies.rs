@@ -126,14 +126,11 @@ mod tests {
         let package = config.package("arbitrary_font_bundle").unwrap();
         assert!(has_flutter_resources(&package.root));
         let source = "void main() {}";
-        let files = [ProjectFile {
-            path: app.join("main.dart"),
-            parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-                source: source.into(),
-                tree: falcon_dart_parser::parse(source).tree,
-            }),
-            has_parse_errors: false,
-        }];
+        let files = [ProjectFile::new(
+            app.join("main.dart"),
+            std::sync::Arc::new(falcon_analyze::ParsedFile::parse(source)),
+        )
+        .expect("parsed fixture must be accepted by the project")];
         assert!(
             UnusedDependencies
                 .analyze_project(

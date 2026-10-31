@@ -1359,7 +1359,6 @@ impl<'tree> Visitor<'tree> for Jumps {
 
 #[cfg(test)]
 mod tests {
-    use falcon_dart_parser::parse;
     use falcon_syntax::cst::{FunctionBody, TopLevelDecl};
 
     use super::{ResolvedTypeKind, completes_normally};
@@ -1478,12 +1477,7 @@ mod tests {
 
         for pattern in ["final y!", "1!", "(final y!)"] {
             let source = format!("void f(Object? x) {{ if (x case {pattern}) {{}} }}");
-            let parsed = parse(&source);
-            assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-            let parsed = std::sync::Arc::new(crate::ParsedFile {
-                source: source.into_boxed_str(),
-                tree: parsed.tree,
-            });
+            let parsed = crate::resolve::parsed_fixture(&source);
             let program = parsed.program();
             let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {
                 panic!("function");
@@ -1709,12 +1703,9 @@ mod tests {
         ];
         for (body, expected) in cases {
             let source = format!("f(bool flag) {body}");
-            let parsed = parse(&source);
-            assert!(parsed.errors.is_empty(), "{body}: {:?}", parsed.errors);
-            let parsed = std::sync::Arc::new(crate::ParsedFile {
-                source: source.into_boxed_str(),
-                tree: parsed.tree,
-            });
+            let (parsed, errors) = crate::ParsedFile::parse_for_package(source, None);
+            assert!(errors.is_empty(), "{body}: {errors:?}");
+            let parsed = std::sync::Arc::new(parsed);
             let program = parsed.program();
             let Some(TopLevelDecl::Function(function)) = program.declarations().next() else {
                 panic!("{body}")

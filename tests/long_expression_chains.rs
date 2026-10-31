@@ -430,19 +430,11 @@ mod guard_walkers {
             "@A() import 'dart:core'; \
              @Target([{chain}, TargetKind.library]) class A {{ const A(); }}"
         );
-        let parsed = falcon_dart_parser::parse(&source);
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let parsed = Arc::new(ParsedFile::parse(source));
         let config = FalconConfig::default();
         let path = PathBuf::from("main.dart");
         let ctx = AnalyzeContext::new(&path, &config, &parsed);
-        let diagnostics = LibraryAnnotations.analyze(
-            "library-annotations",
-            parsed.tree.program(&parsed.source),
-            &ctx,
-        );
+        let diagnostics = LibraryAnnotations.analyze("library-annotations", parsed.program(), &ctx);
         assert_eq!(diagnostics.len(), 1);
     }
 }

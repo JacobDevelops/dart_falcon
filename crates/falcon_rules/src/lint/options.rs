@@ -356,10 +356,7 @@ mod tests {
         }))
         .unwrap();
         let source = "void main() {\n}\n";
-        let parsed = std::sync::Arc::new(ParsedFile {
-            source: source.into(),
-            tree: falcon_dart_parser::parser::parse(source).tree,
-        });
+        let parsed = std::sync::Arc::new(ParsedFile::parse(source));
         let context = AnalyzeContext::new(std::path::Path::new("main.dart"), &config, &parsed);
         let crate::meta::RuleKind::File { make, .. } =
             crate::meta::meta_for("max-lines-for-file").unwrap().kind

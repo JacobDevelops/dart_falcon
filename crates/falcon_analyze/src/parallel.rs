@@ -7,7 +7,6 @@ use tracing::{info, info_span};
 
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::ParseError;
-use falcon_dart_parser::try_parse_for_package;
 use falcon_diagnostics::{Diagnostic, SYNTAX_ERROR_DIAGNOSTIC_ID, Severity, Span};
 use falcon_syntax::cst::Program;
 use falcon_syntax::language_version::LanguageVersion;
@@ -49,10 +48,9 @@ fn analyze_file(
     let mut diagnostics = syntax_error_diagnostics(path, &parse_errors);
     diagnostics.extend(registry.run_all(parsed.program(), &ctx));
     info!(file = %path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");
-    let retained = collect_programs.then(|| ProjectFile {
-        path: path.to_path_buf(),
-        parsed,
-        has_parse_errors: !parse_errors.is_empty(),
+    let retained = collect_programs.then(|| {
+        ProjectFile::new(path.to_path_buf(), parsed)
+            .expect("successful parser result must be accepted by the project")
     });
     (diagnostics, retained)
 }
@@ -111,15 +109,11 @@ fn parse_one(
     if let Some(diagnostic) = source_size_diagnostic(path, source.as_ref().len() as u64) {
         return Err(Box::new(diagnostic));
     }
-    let source = source.into();
-    let falcon_dart_parser::ParseResult {
-        errors: parse_errors,
-        tree,
-    } = try_parse_for_package(&source, package_version)
-        .map_err(|error| Box::new(crate::rules_thread_diagnostic(path, &error)))?;
+    let (parsed, parse_errors) = ParsedFile::try_parse_for_package(source, package_version)
+        .map_err(|(_, error)| Box::new(crate::rules_thread_diagnostic(path, &error)))?;
     Ok(SourceParse {
         path,
-        parsed: Arc::new(ParsedFile { source, tree }),
+        parsed: Arc::new(parsed),
         parse_errors,
     })
 }
@@ -132,10 +126,9 @@ fn retain(parsed: Vec<SourceParse<'_>>, collect_programs: bool) -> Vec<ProjectFi
     }
     parsed
         .into_iter()
-        .map(|p| ProjectFile {
-            path: p.path.to_path_buf(),
-            parsed: p.parsed,
-            has_parse_errors: !p.parse_errors.is_empty(),
+        .map(|p| {
+            ProjectFile::new(p.path.to_path_buf(), p.parsed)
+                .expect("successful parser result must be accepted by the project")
         })
         .collect()
 }
@@ -190,7 +183,7 @@ fn analyze_indexed(
         .map(|p| IdentitySource {
             path: p.path,
             parsed: &p.parsed,
-            has_parse_errors: !p.parse_errors.is_empty(),
+            has_parse_errors: p.parsed.has_parse_errors(),
         })
         .collect();
     let (
@@ -263,7 +256,7 @@ fn load_indexed_externals<'a>(
                 .collect();
             let roots: Vec<(&Path, Program<'_>, &str)> = parsed
                 .iter()
-                .map(|p| (p.path, p.parsed.program(), p.parsed.source.as_ref()))
+                .map(|p| (p.path, p.parsed.program(), p.parsed.source()))
                 .collect();
             let libraries =
                 ExternalLibraries::load(environment, &roots, |path| project_paths.contains(path));

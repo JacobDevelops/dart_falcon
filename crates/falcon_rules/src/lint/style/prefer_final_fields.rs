@@ -227,7 +227,6 @@ mod tests {
     use falcon_analyze::RuleAnalysis;
     use falcon_analyze::{group_libraries, library_unit};
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::PathBuf;
 
     /// Run the rule over file `target`, building the real library grouping so
@@ -236,10 +235,7 @@ mod tests {
         let parsed: Vec<_> = files
             .iter()
             .map(|(_, source)| {
-                std::sync::Arc::new(falcon_analyze::ParsedFile {
-                    source: (*source).into(),
-                    tree: parse(source).tree,
-                })
+                std::sync::Arc::new(falcon_analyze::ParsedFile::parse(*source))
             })
             .collect();
         let programs: Vec<Program<'_>> = parsed.iter().map(|file| file.program()).collect();
@@ -259,10 +255,7 @@ mod tests {
 
     /// Run with no library context at all (standalone / degraded single-file).
     fn run_standalone(source: &str) -> usize {
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parse(source).tree,
-        });
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile::parse(source));
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
         let ctx = AnalyzeContext::new(&path, &config, &parsed);

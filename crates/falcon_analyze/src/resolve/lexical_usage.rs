@@ -739,12 +739,7 @@ mod tests {
     #[test]
     fn context_shares_exact_writes_and_mutated_declarations() {
         let source = "class C { int value; C(int p) : value = p { p++; } } void f() { var x = 0; () { x++; }; ((int x) { x++; })(0); for (x in [1]) {} }";
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = std::sync::Arc::new(crate::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let parsed = crate::resolve::parsed_fixture(source);
         let program = parsed.program();
         let config = falcon_config::FalconConfig::default();
         let context =

@@ -49,9 +49,30 @@ These entries describe implemented foundation, not acceptance of the open items.
 
 ### V1-2 — Enforce snapshot and plan invariants at their owners
 
-- [ ] Encapsulate `ParsedFile.source/tree` and `ProjectFile` relationships in
+- [x] Encapsulate `ParsedFile.source/tree` and `ProjectFile` relationships in
   `crates/falcon_analyze/src/cross_file.rs`; migrate real callers through validated
   construction and borrowed accessors. Test retained nodes and source replacement.
+  Private snapshot fields and source-owning constructors prevent foreign
+  source/tree pairs. A closed parse outcome distinguishes recovered syntax from
+  rejected sources; `ProjectFile` construction and replacement refuse rejected
+  snapshots. Rejected LSP snapshots retain matching trees without retrying the
+  failed lexer, and cannot enter rule analysis or semantic indexing.
+  `retained_node_owns_its_source_and_arena` and
+  `retained_node_keeps_original_snapshot_after_source_replacement` cover retained
+  nodes; `parser_worker_panics_publish_worker_diagnostics_not_syntax_errors` covers
+  failed-worker snapshot coherence, rule exclusion and valid-edit recovery.
+  `package_refresh_worker_failure_skips_rules_and_retains_previous_snapshot`
+  covers rejection during package-version refresh.
+  `rejected_snapshots_cannot_enter_a_project`,
+  `rejected_body_refresh_preserves_previous_facts` and
+  `rejected_signature_refresh_preserves_previous_body_facts` cover admission and
+  refresh boundaries. `unparsed_tree_preserves_source_without_lexing` covers the
+  opaque fallback. `numen run -- makers verify-package <pkg>` passed for
+  `falcon_syntax` (85 tests), `falcon_analyze` (679 tests, 14 doctests),
+  `falcon_rules` (1138 tests), `falcon_project` (78 tests), `falcon_cli` (200 tests)
+  and `falcon_lsp` (230 tests). The root `dart_falcon` package passed clippy and all
+  76 tests; its package wrapper then failed at `--doc` because it has no library
+  target.
 - [ ] Encapsulate `ProjectAnalysis` registries and derived flags in
   `crates/falcon_project/src/lib.rs`. Test structural, semantic and cross-file
   combinations; no caller can independently contradict resolution/collection needs.

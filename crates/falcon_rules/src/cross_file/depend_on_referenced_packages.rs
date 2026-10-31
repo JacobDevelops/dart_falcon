@@ -37,7 +37,7 @@ impl CrossFileRule for DependOnReferencedPackages {
         let replacement = crate::meta::meta_for("undeclared-dependencies");
 
         for file in files {
-            let Some(pubspec) = enclosing_pubspec(&file.path) else {
+            let Some(pubspec) = enclosing_pubspec(file.path()) else {
                 continue;
             };
             let manifest = manifests
@@ -46,11 +46,11 @@ impl CrossFileRule for DependOnReferencedPackages {
             let Some(manifest) = manifest else {
                 continue;
             };
-            let regular_dependency_required = is_public_or_executable(&file.path, &pubspec);
+            let regular_dependency_required = is_public_or_executable(file.path(), &pubspec);
             let replacement_enabled = replacement.is_some_and(|meta| {
                 config
                     .resolve_cross_file_rule_for(
-                        &file.path.to_string_lossy(),
+                        &file.path().to_string_lossy(),
                         meta.group.as_str(),
                         meta.name,
                         meta.recommended,
@@ -80,7 +80,7 @@ impl CrossFileRule for DependOnReferencedPackages {
                 }
                 if replacement_enabled
                     && (!manifest.dev_dependencies.contains(package)
-                        || is_library_file(&file.path, &pubspec))
+                        || is_library_file(file.path(), &pubspec))
                 {
                     continue;
                 }
@@ -91,7 +91,7 @@ impl CrossFileRule for DependOnReferencedPackages {
                     format!(
                         "The imported package `{package}` isn't a dependency of the importing package."
                     ),
-                    file.path.to_string_lossy().into_owned(),
+                    file.path().to_string_lossy().into_owned(),
                     uri.span(),
                 ));
             }
@@ -181,17 +181,10 @@ mod tests {
             .map(|relative| {
                 let path = root.join(relative);
                 let source = std::fs::read_to_string(&path).unwrap();
-                let falcon_dart_parser::ParseResult { tree, errors } =
-                    falcon_dart_parser::parse(&source);
+                let (snapshot, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
                 assert!(errors.is_empty());
-                ProjectFile {
-                    path,
-                    parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-                        source: source.into(),
-                        tree,
-                    }),
-                    has_parse_errors: false,
-                }
+                ProjectFile::new(path, std::sync::Arc::new(snapshot))
+                    .expect("parsed fixture must be accepted by the project")
             })
             .collect();
         assert_eq!(

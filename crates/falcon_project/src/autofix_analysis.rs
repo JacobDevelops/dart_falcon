@@ -89,18 +89,16 @@ impl<'a> AutofixAnalyzer<'a> {
         context: FixContext<'a>,
     ) -> Self {
         environment.extend(
-            std::iter::once(path)
-                .chain(context.project_files.iter().map(|file| file.path.as_path())),
+            std::iter::once(path).chain(context.project_files.iter().map(ProjectFile::path)),
         );
         let target = canonical_or_lexical(path);
         let companions = context
             .project_files
             .iter()
-            .filter(|file| canonical_or_lexical(&file.path) != target)
-            .map(|file| ProjectFile {
-                path: file.path.clone(),
-                parsed: Arc::clone(&file.parsed),
-                has_parse_errors: file.has_parse_errors,
+            .filter(|file| canonical_or_lexical(file.path()) != target)
+            .map(|file| {
+                ProjectFile::new(file.path().to_path_buf(), Arc::clone(file.parsed()))
+                    .expect("an existing project file has a parsed snapshot")
             })
             .collect();
         Self {
@@ -142,21 +140,21 @@ impl<'a> AutofixAnalyzer<'a> {
         };
         let (file, diagnostics) = file;
         if !self.analysis.resolve {
-            let ctx = AnalyzeContext::new(self.path, self.config, &file.parsed)
+            let ctx = AnalyzeContext::new(self.path, self.config, file.parsed())
                 .with_environment(Some(self.environment));
             return analyze_document(&self.analysis.registry, self.config, &ctx, diagnostics);
         }
         if !self.initialized {
             self.load_external(&file);
         }
-        let declaration_signature = file.parsed.declaration_signature();
+        let declaration_signature = file.parsed().declaration_signature();
         if let Some(overlay) = self.overlay.as_mut().filter(|overlay| {
-            !file.has_parse_errors
+            !file.has_parse_errors()
                 && !overlay.has_parse_errors
                 && overlay.declaration_signature == declaration_signature
         }) {
             let id = overlay.indexes.identities.file(self.path).unwrap();
-            overlay.indexes.refresh_file_body(id, &file.parsed);
+            overlay.indexes.refresh_file_body(id, file.parsed());
             #[cfg(test)]
             {
                 self.body_refreshes += 1;
@@ -165,9 +163,9 @@ impl<'a> AutofixAnalyzer<'a> {
             let sources: Vec<_> = std::iter::once(&file)
                 .chain(&self.companions)
                 .map(|file| IdentitySource {
-                    path: &file.path,
-                    parsed: &file.parsed,
-                    has_parse_errors: file.has_parse_errors,
+                    path: file.path(),
+                    parsed: file.parsed(),
+                    has_parse_errors: file.has_parse_errors(),
                 })
                 .collect();
             let external = self
@@ -190,7 +188,7 @@ impl<'a> AutofixAnalyzer<'a> {
                 );
                 overlay.grouping = grouping;
                 overlay.declaration_signature = declaration_signature;
-                overlay.has_parse_errors = file.has_parse_errors;
+                overlay.has_parse_errors = file.has_parse_errors();
                 #[cfg(test)]
                 {
                     self.declaration_library_rebuilds += rebuilt;
@@ -204,7 +202,7 @@ impl<'a> AutofixAnalyzer<'a> {
                     indexes,
                     grouping,
                     declaration_signature,
-                    has_parse_errors: file.has_parse_errors,
+                    has_parse_errors: file.has_parse_errors(),
                 });
                 #[cfg(test)]
                 {
@@ -216,12 +214,12 @@ impl<'a> AutofixAnalyzer<'a> {
         let indexes = &overlay.indexes;
         let library = library_unit_by(&overlay.grouping, 0, |i| {
             if i == 0 {
-                &file.parsed
+                file.parsed()
             } else {
-                &self.companions[i - 1].parsed
+                self.companions[i - 1].parsed()
             }
         });
-        let ctx = AnalyzeContext::new(self.path, self.config, &file.parsed)
+        let ctx = AnalyzeContext::new(self.path, self.config, file.parsed())
             .with_types(&indexes.types)
             .with_identities(&indexes.identities)
             .with_signatures(&indexes.signatures)
@@ -238,21 +236,15 @@ impl<'a> AutofixAnalyzer<'a> {
         if let Some(diagnostic) = source_size_diagnostic(path, source.len() as u64) {
             return Err(Box::new(diagnostic));
         }
-        let parsed = falcon_dart_parser::try_parse_for_package(
+        let (parsed, errors) = ParsedFile::try_parse_for_package(
             source,
             self.environment.package_language_version(path),
         )
-        .map_err(|error| Box::new(rules_thread_diagnostic(path, &error)))?;
-        let diagnostics = syntax_error_diagnostics(path, &parsed.errors);
+        .map_err(|(_, error)| Box::new(rules_thread_diagnostic(path, &error)))?;
+        let diagnostics = syntax_error_diagnostics(path, &errors);
         Ok((
-            ProjectFile {
-                path: path.to_path_buf(),
-                has_parse_errors: !parsed.errors.is_empty(),
-                parsed: Arc::new(ParsedFile {
-                    source: source.into(),
-                    tree: parsed.tree,
-                }),
-            },
+            ProjectFile::new(path.to_path_buf(), Arc::new(parsed))
+                .expect("a successful parse produces a project snapshot"),
             diagnostics,
         ))
     }
@@ -263,12 +255,12 @@ impl<'a> AutofixAnalyzer<'a> {
             .chain(
                 self.companions
                     .iter()
-                    .map(|file| canonical_or_lexical(&file.path)),
+                    .map(|file| canonical_or_lexical(file.path())),
             )
             .collect();
         let roots: Vec<_> = std::iter::once(file)
             .chain(&self.companions)
-            .map(|file| (file.path.as_path(), file.program(), file.source()))
+            .map(|file| (file.path(), file.program(), file.source()))
             .collect();
         let owned = self.external_libraries.is_none().then(|| {
             ExternalLibraries::load(self.environment, &roots, |candidate| {
@@ -287,8 +279,7 @@ impl<'a> AutofixAnalyzer<'a> {
             }
         }
         self.packages = package_identities(
-            std::iter::once(self.path)
-                .chain(self.companions.iter().map(|file| file.path.as_path())),
+            std::iter::once(self.path).chain(self.companions.iter().map(ProjectFile::path)),
         );
         // An external library importing a project file must resolve against the
         // current overlay, rather than freezing that edge in the external layer.
@@ -328,14 +319,11 @@ mod tests {
         let files: Vec<_> = (0..64)
             .map(|i| {
                 let source = format!("class Companion{i} {{}}");
-                ProjectFile {
-                    path: format!("/virtual/companion{i}.dart").into(),
-                    parsed: Arc::new(ParsedFile {
-                        tree: falcon_dart_parser::parse(&source).tree,
-                        source: source.into(),
-                    }),
-                    has_parse_errors: false,
-                }
+                ProjectFile::new(
+                    format!("/virtual/companion{i}.dart").into(),
+                    Arc::new(ParsedFile::parse(source)),
+                )
+                .expect("companion fixture parses successfully")
             })
             .collect();
         let mut environment = AnalysisEnvironment::default();
@@ -416,13 +404,9 @@ mod tests {
             ("/virtual/shared.dart", "part of shared; class FromPart {}"),
         ]
         .into_iter()
-        .map(|(path, source)| ProjectFile {
-            path: path.into(),
-            parsed: Arc::new(ParsedFile {
-                source: source.into(),
-                tree: falcon_dart_parser::parse(source).tree,
-            }),
-            has_parse_errors: false,
+        .map(|(path, source)| {
+            ProjectFile::new(path.into(), Arc::new(ParsedFile::parse(source)))
+                .expect("project fixture parses successfully")
         })
         .collect();
         let libraries = ExternalLibraries::default();
@@ -645,13 +629,9 @@ mod tests {
             ),
         ]
         .into_iter()
-        .map(|(path, source)| ProjectFile {
-            path: path.into(),
-            parsed: Arc::new(ParsedFile {
-                source: source.into(),
-                tree: falcon_dart_parser::parse(source).tree,
-            }),
-            has_parse_errors: false,
+        .map(|(path, source)| {
+            ProjectFile::new(path.into(), Arc::new(ParsedFile::parse(source)))
+                .expect("project fixture parses successfully")
         })
         .collect();
         let mut environment = AnalysisEnvironment::default();

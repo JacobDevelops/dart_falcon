@@ -56,7 +56,6 @@ mod tests {
     use std::path::Path;
 
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
 
     use super::*;
     use falcon_analyze::RuleAnalysis;
@@ -70,14 +69,11 @@ mod tests {
             ("void f() {}\r\n\r\n", Some("\r")),
             ("void f() {}\u{3000}", Some("\u{3000}")),
         ] {
-            let parsed = parse(source);
-            let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-                source: source.into(),
-                tree: parsed.tree,
-            });
+            let parsed = falcon_analyze::ParsedFile::parse(source);
+            let parsed = std::sync::Arc::new(parsed);
             let config = FalconConfig::default();
             let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
-            let diagnostics = EolAtEndOfFile.analyze(EolAtEndOfFile::NAME, parsed.tree.program(source), &ctx);
+            let diagnostics = EolAtEndOfFile.analyze(EolAtEndOfFile::NAME, parsed.program(), &ctx);
             assert_eq!(diagnostics.len(), 1);
             let span = &diagnostics[0].span;
             assert_eq!(&source[..span.start], "void f() {}");

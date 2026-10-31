@@ -282,7 +282,6 @@ impl<'a> SemanticRuleVisitor<'a> for ArgumentContexts<'a> {
 mod tests {
     use super::*;
     use falcon_analyze::RuleAnalysis;
-    use falcon_dart_parser::parse;
 
     #[test]
     fn binary_operands_use_operator_parameters_not_the_result_context() {
@@ -299,12 +298,9 @@ void run(Numeric number) {
 }
 ";
         let path = std::path::Path::new("/project/lib/main.dart");
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = std::sync::Arc::new(parsed);
         let indexes = crate::lint::test_support::TestIndexes::new(&[(path, &parsed)]);
         let config = falcon_config::FalconConfig::default();
         let context = indexes.context(path, &config, &parsed);

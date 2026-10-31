@@ -64,7 +64,7 @@ impl CrossFileRule for UnusedL10n {
     ) -> Vec<Diagnostic> {
         let packages: BTreeSet<_> = files
             .iter()
-            .filter_map(|file| enclosing_pubspec(&file.path))
+            .filter_map(|file| enclosing_pubspec(file.path()))
             .collect();
         let mut templates = Vec::with_capacity(packages.len());
         for pubspec in packages {
@@ -112,14 +112,13 @@ impl CrossFileRule for UnusedL10n {
         }
         let mut used = HashSet::new();
         for file in files {
-            if file
-                .path
+            if file.path()
                 .extension()
                 .is_none_or(|extension| extension != "dart")
             {
                 continue;
             }
-            let path = canonical_package_path(&file.path);
+            let path = canonical_package_path(file.path());
             if templates
                 .iter()
                 .any(|template| is_generated(&path, &template.output_file, &template.locales))

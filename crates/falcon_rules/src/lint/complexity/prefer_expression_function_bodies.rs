@@ -119,18 +119,14 @@ mod tests {
     use super::*;
     use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::Path;
 
     #[test]
     fn body_ranges_include_async_modifiers_and_comments() {
         let source = "int f() { return 1; } Future<int> g() async /* body */ { return 2; } void h() { final cb = () async { return 3; }; }";
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = std::sync::Arc::new(parsed);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let diagnostics = PreferExpressionFunctionBodies.analyze(PreferExpressionFunctionBodies::NAME, parsed.program(), &ctx);
@@ -151,12 +147,9 @@ mod tests {
     #[test]
     fn contextual_getter_names_are_not_body_modifiers() {
         let source = "class C { int get async { return 1; } int get sync { return 2; } }";
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = std::sync::Arc::new(parsed);
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         let diagnostics = PreferExpressionFunctionBodies.analyze(PreferExpressionFunctionBodies::NAME, parsed.program(), &ctx);

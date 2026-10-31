@@ -14,7 +14,6 @@ use falcon_analyze::{
     TypeIndex,
 };
 use falcon_config::FalconConfig;
-use falcon_dart_parser::parse;
 use falcon_rules::all_rules;
 use falcon_rules::lint::correctness::discarded_futures::DiscardedFutures;
 
@@ -358,12 +357,9 @@ fn prefixed_extensions_obey_show_and_hide_without_explicit_extension_access() {
     let parsed: Vec<_> = inputs
         .iter()
         .map(|(path, source)| {
-            let result = parse(source);
-            assert!(result.errors.is_empty(), "{path}: {:?}", result.errors);
-            std::sync::Arc::new(falcon_analyze::ParsedFile {
-                source: (*source).into(),
-                tree: result.tree,
-            })
+            let (parsed, errors) = falcon_analyze::ParsedFile::parse_for_package(*source, None);
+            assert!(errors.is_empty(), "{path}: {errors:?}");
+            std::sync::Arc::new(parsed)
         })
         .collect();
     let sources: Vec<_> = inputs

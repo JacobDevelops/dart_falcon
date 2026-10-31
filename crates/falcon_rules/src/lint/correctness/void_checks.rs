@@ -522,7 +522,6 @@ mod tests {
     use falcon_analyze::RuleAnalysis;
     use falcon_analyze::{IdentityIndex, IdentitySource, ParsedFile, SignatureIndex};
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::Path;
     use std::sync::Arc;
 
@@ -587,12 +586,9 @@ void use() {
 }
 ";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        let (snapshot, errors) = ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = Arc::new(snapshot);
         let program = parsed.program();
         let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
         let config = FalconConfig::default();
@@ -642,12 +638,9 @@ void use() {
 ";
         std::fs::write(&path, source).unwrap();
         let path = falcon_analyze::canonical_or_lexical(&path);
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        let (snapshot, errors) = ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = Arc::new(snapshot);
         let program = parsed.program();
         let environment =
             AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |config| {
@@ -763,12 +756,9 @@ void cases(Factory owner, Object value) {
 }
 ";
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        let (snapshot, errors) = ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = Arc::new(snapshot);
         let program = parsed.program();
         let indexes = crate::lint::test_support::TestIndexes::single(path, &parsed, false);
         let config = FalconConfig::default();

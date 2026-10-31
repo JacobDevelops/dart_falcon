@@ -247,11 +247,8 @@ mod tests {
     use std::path::PathBuf;
 
     fn diags(source: &str) -> Vec<Diagnostic> {
-        let falcon_dart_parser::ParseResult { tree, .. } = parse(source);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let snapshot = falcon_analyze::ParsedFile::parse(source);
+        let parsed = std::sync::Arc::new(snapshot);
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
         let ctx = AnalyzeContext::new(&path, &config, &parsed);

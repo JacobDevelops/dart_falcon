@@ -349,15 +349,9 @@ impl<'a> Visitor<'a> for SyntaxCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use falcon_dart_parser::parse;
 
     fn key(source: &str) -> DefaultSyntaxKey {
-        let parsed = parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = Arc::new(crate::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let parsed = crate::resolve::parsed_fixture(source);
         let program = parsed.program();
         let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {
             panic!("expected function");
@@ -471,14 +465,10 @@ mod tests {
     #[test]
     fn recovery_never_equates_separately_ingested_defaults() {
         let source = "void f([Object? value = ;]) {}";
-        let parsed = parse(source);
-        let parsed = Arc::new(crate::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let parsed = Arc::new(crate::ParsedFile::parse(source));
         let expression = parsed
-            .tree
-            .root(&parsed.source)
+            .tree()
+            .root(parsed.source())
             .descendants()
             .find_map(|node| Expr::cast(node).filter(|expr| matches!(expr, Expr::Error(_))))
             .expect("expected recovered expression");

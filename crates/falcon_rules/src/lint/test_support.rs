@@ -5,7 +5,7 @@ use falcon_analyze::{
     SemanticModel, SignatureIndex, TypeIndex,
 };
 use falcon_config::FalconConfig;
-use falcon_dart_parser::parse;
+
 use std::path::Path;
 use std::sync::Arc;
 
@@ -103,12 +103,9 @@ pub fn diagnostics(
     source: &str,
     with_types: bool,
 ) -> Vec<falcon_diagnostics::Diagnostic> {
-    let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+    let (snapshot, errors) = ParsedFile::parse_for_package(source, None);
     assert!(errors.is_empty(), "{errors:?}");
-    let parsed = Arc::new(ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let parsed = Arc::new(snapshot);
     let indexes = TestIndexes::single(path, &parsed, with_types);
     let config = FalconConfig::default();
     let context = indexes.context(path, &config, &parsed);
@@ -116,11 +113,8 @@ pub fn diagnostics(
 }
 
 pub fn count(name: &'static str, rule: &dyn Rule, source: &str, with_types: bool) -> usize {
-    let falcon_dart_parser::ParseResult { tree, .. } = parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let snapshot = ParsedFile::parse(source);
+    let parsed = Arc::new(snapshot);
     let config = FalconConfig::default();
     let path = Path::new("t.dart");
     let indexes = TestIndexes::single(path, &parsed, with_types);
@@ -145,11 +139,8 @@ pub fn analyze_flutter_rule(
     write_flutter_fixture(root, &app);
     let path = app.join("lib/main.dart");
     std::fs::write(&path, source).unwrap();
-    let falcon_dart_parser::ParseResult { errors, tree } = parse(source);
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let (snapshot, errors) = ParsedFile::parse_for_package(source, None);
+    let parsed = std::sync::Arc::new(snapshot);
     let program = parsed.program();
     assert!(errors.is_empty(), "parse errors: {errors:?}");
     let environment = AnalysisEnvironment::discover([path.as_path()]);

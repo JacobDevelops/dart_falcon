@@ -480,11 +480,7 @@ fn typed_options_follow_matching_overrides_and_preserve_level_only_changes() {
     let loaded = load_config(&path).unwrap();
     assert_eq!(loaded.warnings, [] as [std::string::String; 0]);
     let source = "void f(int a, int b, int c) {}";
-    let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parser::parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let parsed = Arc::new(ParsedFile::parse(source));
     let rule = MaxParametersForFunction;
     for (file, maximum, reports) in [
         ("lib/a.dart", 1, 1),

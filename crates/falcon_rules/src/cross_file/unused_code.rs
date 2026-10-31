@@ -49,7 +49,7 @@ impl CrossFileRule for UnusedCode {
     ) -> Vec<Diagnostic> {
         let file_packages: Vec<_> = files
             .iter()
-            .map(|file| environment.file_package(&file.path))
+            .map(|file| environment.file_package(file.path()))
             .collect();
         let packages = project_packages(&file_packages);
 
@@ -71,7 +71,7 @@ impl CrossFileRule for UnusedCode {
 
         let mut diags = Vec::new();
         for (idx, f) in files.iter().enumerate() {
-            let canon = canonical_package_path(&f.path);
+            let canon = canonical_package_path(f.path());
             let package = file_packages[idx].identity();
             if !is_under_lib(&canon, package)
                 || (!packages.is_empty() && package.is_none() && !has_lib_component(&canon))
@@ -83,7 +83,7 @@ impl CrossFileRule for UnusedCode {
             }
             // Error-recovery can leak method-body locals to the top level; don't
             // trust a file's own declaration list when it failed to parse.
-            if f.has_parse_errors {
+            if f.has_parse_errors() {
                 continue;
             }
             let cands = candidates(f.program());
@@ -117,7 +117,7 @@ impl CrossFileRule for UnusedCode {
                          remove it.",
                         cand.kind, cand.name
                     ),
-                    f.path.to_string_lossy().into_owned(),
+                    f.path().to_string_lossy().into_owned(),
                     cand.span,
                 ));
             }
@@ -185,7 +185,7 @@ fn collect_exported_files(
 ) -> super::ReferenceSet {
     let mut refs = super::ReferenceSet::default();
     for (index, f) in files.iter().enumerate() {
-        let from = canonical_package_path(&f.path);
+        let from = canonical_package_path(f.path());
         for exp in f.program().exports() {
             if let Some(r) = resolve_directive_uri(
                 &from,
@@ -244,16 +244,10 @@ mod tests {
         std::os::unix::fs::symlink(&package, &workspace).unwrap();
         std::os::unix::fs::symlink(&sources, package.join("lib")).unwrap();
         let file = |path: PathBuf, source: &str| {
-            let parsed = falcon_dart_parser::parse(source);
-            assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-            ProjectFile {
-                path,
-                parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-                    source: source.into(),
-                    tree: parsed.tree,
-                }),
-                has_parse_errors: false,
-            }
+            let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+            assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+            ProjectFile::new(path, std::sync::Arc::new(parsed))
+                .expect("parsed fixture must be accepted by the project")
         };
         let dead = workspace.join("lib/src/dead.dart");
         let files = [
@@ -264,7 +258,7 @@ mod tests {
             file(workspace.join("lib/src/api.dart"), "class Exported {}\n"),
             file(dead.clone(), "class Unused {}\n"),
         ];
-        assert!(files.iter().all(|file| !file.path.exists()));
+        assert!(files.iter().all(|file| !file.path().exists()));
 
         let diagnostics = super::UnusedCode.analyze_project(
             "unused-code",
@@ -285,15 +279,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("standalone.dart");
         let source = "class UnusedStandalone {}";
-        let parsed = falcon_dart_parser::parse(source);
-        let files = [ProjectFile {
-            path: path.clone(),
-            parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-                source: source.into(),
-                tree: parsed.tree,
-            }),
-            has_parse_errors: false,
-        }];
+        let parsed = falcon_analyze::ParsedFile::parse(source);
+        let files = [ProjectFile::new(path.clone(), std::sync::Arc::new(parsed))
+            .expect("parsed fixture must be accepted by the project")];
         let diagnostics = super::UnusedCode.analyze_project(
             "unused-code",
             &falcon_analyze::AnalysisEnvironment::default(),
@@ -334,15 +322,9 @@ mod tests {
         let files: Vec<_> = sources
             .into_iter()
             .map(|(path, source)| {
-                let parsed = falcon_dart_parser::parse(source);
-                ProjectFile {
-                    path,
-                    parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-                        source: source.into(),
-                        tree: parsed.tree,
-                    }),
-                    has_parse_errors: false,
-                }
+                let parsed = falcon_analyze::ParsedFile::parse(source);
+                ProjectFile::new(path, std::sync::Arc::new(parsed))
+                    .expect("parsed fixture must be accepted by the project")
             })
             .collect();
         let diagnostics = super::UnusedCode.analyze_project(

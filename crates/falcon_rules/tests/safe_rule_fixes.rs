@@ -10,12 +10,9 @@ use falcon_rules::lint::style::prefer_single_quotes::PreferSingleQuotes;
 use falcon_rules::lint::style::unnecessary_new::UnnecessaryNew;
 
 fn diagnostics(name: &'static str, rule: &dyn Rule, source: &str) -> Vec<Diagnostic> {
-    let result = parse(source);
-    assert!(result.errors.is_empty(), "{:?}", result.errors);
-    let parsed = Arc::new(ParsedFile {
-        source: source.into(),
-        tree: result.tree,
-    });
+    let (parsed, errors) = ParsedFile::parse_for_package(source, None);
+    assert!(errors.is_empty(), "{errors:?}");
+    let parsed = Arc::new(parsed);
     let config = FalconConfig::default();
     let context = AnalyzeContext::new(Path::new("fix.dart"), &config, &parsed);
     rule.analyze(name, parsed.program(), &context)

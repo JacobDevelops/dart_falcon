@@ -268,12 +268,9 @@ mod tests {
         let source = "class Target {}\n\
                       extension NullableValues on Target? { int get value => 1; }\n\
                       void read(Target? target) { target?.value; }\n";
-        let parsed = falcon_dart_parser::parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = std::sync::Arc::new(parsed);
         let path = std::path::Path::new("/project/lib/main.dart");
         let indexes = crate::lint::test_support::TestIndexes::new(&[(path, &parsed)]);
         let config = falcon_config::FalconConfig::default();

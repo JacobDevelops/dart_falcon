@@ -702,7 +702,6 @@ impl SignatureIndex {
 mod tests {
     use super::*;
     use crate::resolve::IdentitySource;
-    use falcon_dart_parser::parse;
     use std::path::PathBuf;
 
     #[test]
@@ -717,12 +716,7 @@ mod tests {
                       class Plain implements I {}
                       class Base extends I {}
                       class Explicit extends Base with M implements I {}";
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(crate::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = crate::resolve::parsed_fixture(source);
         let identities = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path: &path,

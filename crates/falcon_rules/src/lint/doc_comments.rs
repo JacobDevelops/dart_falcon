@@ -1254,17 +1254,13 @@ fn member_element<'s>(
 mod tests {
     use super::*;
 
-    use falcon_dart_parser::parse;
     use std::path::Path;
 
     fn with_resolver(source: &str, check: impl FnOnce(&DocResolver<'_, '_>, &DocScopes)) {
         let path = Path::new("/project/lib/test.dart");
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
+        let (snapshot, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = std::sync::Arc::new(snapshot);
         let program = parsed.program();
         let identities = crate::lint::test_support::identities(&[(path, &parsed)]);
         let model = SemanticModel::new(path, &parsed, &identities, None);

@@ -32,7 +32,7 @@ impl CrossFileRule for MissingAssets {
             for file in package
                 .files
                 .iter()
-                .filter(|file| is_library_file(&file.path, &package.pubspec))
+                .filter(|file| is_library_file(file.path(), &package.pubspec))
             {
                 for literal in asset_strings(file).filter(|literal| !has_package_argument(*literal))
                 {
@@ -53,10 +53,10 @@ impl CrossFileRule for MissingAssets {
                         format!(
                             "Asset `{value}` is not declared under `flutter: assets:` in `pubspec.yaml`."
                         ),
-                        file.path.to_string_lossy().into_owned(),
+                        file.path().to_string_lossy().into_owned(),
                         literal.span(),
                     );
-                    diagnostic.resolve_position(&file.parsed.source);
+                    diagnostic.resolve_position(file.source());
                     diagnostics.push(diagnostic);
                 }
             }

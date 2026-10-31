@@ -97,25 +97,18 @@ mod tests {
     use falcon_analyze::RuleAnalysis;
 
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::PathBuf;
 
     /// Mixed-in types resolve through declaration identities across files.
     fn reports(source: &str, imported: &str) -> Vec<String> {
         let path = PathBuf::from("/project/lib/main.dart");
         let imported_path = PathBuf::from("/project/lib/imported.dart");
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let (snapshot, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        let parsed = std::sync::Arc::new(snapshot);
         let program = parsed.program();
         assert!(errors.is_empty(), "{errors:?}");
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(imported);
-        let dependency = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: imported.into(),
-            tree,
-        });
+        let (snapshot, errors) = falcon_analyze::ParsedFile::parse_for_package(imported, None);
+        let dependency = std::sync::Arc::new(snapshot);
         assert!(errors.is_empty(), "{errors:?}");
         let indexes = crate::lint::test_support::TestIndexes::new(&[(&path, &parsed), (&imported_path, &dependency)]);
         let config = FalconConfig::default();

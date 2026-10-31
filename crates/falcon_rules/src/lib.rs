@@ -460,7 +460,7 @@ pub fn run_cross_file(
     let mut diagnostics = registry.run_all(environment, files, config, indexes)?;
     let files_by_path: HashMap<_, _> = files
         .iter()
-        .map(|file| (file.path.to_string_lossy(), file))
+        .map(|file| (file.path().to_string_lossy(), file))
         .collect();
     let mut suppressions = HashMap::new();
     diagnostics.retain(|diagnostic| {

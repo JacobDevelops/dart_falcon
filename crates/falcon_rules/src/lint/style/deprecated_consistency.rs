@@ -180,12 +180,9 @@ mod tests {
             class C(this.value) { @deprecated int value; }\n\
             @deprecated class D() { @deprecated this {} }\n\
             class F(@deprecated this.value) { int value; }";
-        let parsed = falcon_dart_parser::parse(source);
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
+        let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+        assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
+        let parsed = std::sync::Arc::new(parsed);
         let program = parsed.program();
         let path = Path::new("/project/lib/api.dart");
         let sources = [IdentitySource {

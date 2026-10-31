@@ -42,17 +42,17 @@ impl CrossFileRule for NoDeepPackageImports {
     ) -> Vec<Diagnostic> {
         let file_packages: Vec<_> = files
             .iter()
-            .map(|file| environment.file_package(&file.path))
+            .map(|file| environment.file_package(file.path()))
             .collect();
         let packages = project_packages(&file_packages);
         let sources: HashMap<_, _> = files
             .iter()
-            .map(|file| (canonical_package_path(&file.path), file))
+            .map(|file| (canonical_package_path(file.path()), file))
             .collect();
         let mut dependencies: HashMap<_, HashMap<String, Option<PackageBarrel>>> = HashMap::new();
         let mut diagnostics = Vec::new();
         for (file, own_package) in files.iter().zip(&file_packages) {
-            let configured = environment.package_config(&file.path);
+            let configured = environment.package_config(file.path());
             let dependencies = dependencies
                 .entry(configured.map(|config| config.path.as_path()))
                 .or_default();
@@ -127,7 +127,7 @@ impl CrossFileRule for NoDeepPackageImports {
                             "",
                             Severity::Warning,
                             format!("Import `package:{name}/{name}.dart` instead of reaching into `{value}`."),
-                            file.path.to_string_lossy().as_ref(),
+                            file.path().to_string_lossy().as_ref(),
                             uri.span(),
                         ));
                     }
@@ -160,7 +160,7 @@ fn export_closure(
             continue;
         }
         if let Some(file) = sources.get(&path) {
-            if file.has_parse_errors || file.source().len() > remaining_bytes {
+            if file.has_parse_errors() || file.source().len() > remaining_bytes {
                 continue;
             }
             remaining_bytes -= file.source().len();
@@ -231,20 +231,16 @@ mod tests {
     fn dependency_disk_loading_respects_analyzed_snapshots() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/corpus/no-deep-package-imports/cross-file/bad");
-        let project_file = |path, source: &str| ProjectFile {
-            path,
-            parsed: Arc::new(falcon_analyze::ParsedFile {
-                source: source.into(),
-                tree: falcon_dart_parser::parse(source).tree,
-            }),
-            has_parse_errors: false,
+        let project_file = |path, source: &str| {
+            ProjectFile::new(path, Arc::new(falcon_analyze::ParsedFile::parse(source)))
+                .expect("parsed fixture must be accepted by the project")
         };
         let mut files = vec![project_file(
             root.join("main.dart"),
             &std::fs::read_to_string(root.join("main.dart")).unwrap(),
         )];
         let environment = AnalysisEnvironment::discover_with_sdk_locator(
-            files.iter().map(|file| file.path.as_path()),
+            files.iter().map(falcon_analyze::ProjectFile::path),
             |_| None,
         );
         let analyze = |files: &[ProjectFile]| {

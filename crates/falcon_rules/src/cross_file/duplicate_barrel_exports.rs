@@ -86,7 +86,7 @@ impl CrossFileRule for DuplicateBarrelExports {
                 let other = project.paths[earlier]
                     .strip_prefix(
                         environment
-                            .file_package(&files[earlier].path)
+                            .file_package(files[earlier].path())
                             .identity()
                             .and_then(|package| package.lib_root.parent())
                             .unwrap_or_else(|| std::path::Path::new("")),
@@ -98,7 +98,7 @@ impl CrossFileRule for DuplicateBarrelExports {
                     "",
                     Severity::Warning,
                     format!("Another `{name}` is exported by `{other}`; importing both barrels is ambiguous."),
-                    files[later].path.to_string_lossy().as_ref(),
+                    files[later].path().to_string_lossy().as_ref(),
                     export.directive.uri().span(),
                 ));
             }

@@ -80,11 +80,8 @@ impl Rule for CountFunctionDeclsRule {
 #[test]
 fn test_mock_rule_analyze_empty() {
     let rule = NoOpRule;
-    let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parse("void main() {}");
-    let parsed = Arc::new(ParsedFile {
-        source: "void main() {}".into(),
-        tree,
-    });
+    let (tree, _) = ParsedFile::parse_for_package("void main() {}", None);
+    let parsed = Arc::new(tree);
     let config = FalconConfig::default();
     let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
 
@@ -97,11 +94,8 @@ fn test_registry_register_and_run_all_empty() {
     let mut registry = RuleRegistry::new();
     registry.register("no_op", Box::new(NoOpRule));
 
-    let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parse("void main() {}");
-    let parsed = Arc::new(ParsedFile {
-        source: "void main() {}".into(),
-        tree,
-    });
+    let (tree, _) = ParsedFile::parse_for_package("void main() {}", None);
+    let parsed = Arc::new(tree);
     let config = FalconConfig::default();
     let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
 
@@ -114,11 +108,8 @@ fn test_registry_run_all_emits_diagnostic() {
     let mut registry = RuleRegistry::new();
     registry.register("always_error", Box::new(AlwaysErrorRule));
 
-    let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parse("void main() {}");
-    let parsed = Arc::new(ParsedFile {
-        source: "void main() {}".into(),
-        tree,
-    });
+    let (tree, _) = ParsedFile::parse_for_package("void main() {}", None);
+    let parsed = Arc::new(tree);
     let config = FalconConfig::default();
     let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
 
@@ -131,10 +122,7 @@ fn test_registry_run_all_emits_diagnostic() {
 #[test]
 fn direct_analysis_uses_provided_registered_name() {
     let source = "void main() {}";
-    let parsed = Arc::new(ParsedFile {
-        source: source.into(),
-        tree: falcon_dart_parser::parse(source).tree,
-    });
+    let parsed = Arc::new(ParsedFile::parse(source));
     let config = FalconConfig::default();
     let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
 
@@ -202,11 +190,8 @@ fn test_registry_multiple_rules() {
     registry.register("always_error", Box::new(AlwaysErrorRule));
     registry.register("count_functions", Box::new(CountFunctionDeclsRule(2)));
 
-    let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parse("void main() {}");
-    let parsed = Arc::new(ParsedFile {
-        source: "void main() {}".into(),
-        tree,
-    });
+    let (tree, _) = ParsedFile::parse_for_package("void main() {}", None);
+    let parsed = Arc::new(tree);
     let config = FalconConfig::default();
     let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
 
@@ -220,10 +205,7 @@ fn test_analyze_context_fields() {
     let config = FalconConfig::default();
     let source = "void main() {}";
     let path = Path::new("test.dart");
-    let parsed = Arc::new(ParsedFile {
-        source: source.into(),
-        tree: falcon_dart_parser::parse(source).tree,
-    });
+    let parsed = Arc::new(ParsedFile::parse(source));
 
     let ctx = AnalyzeContext::new(path, &config, &parsed);
 
@@ -334,10 +316,7 @@ fn test_end_to_end_parse_analyze_serialize() {
         }
     ";
 
-    let falcon_dart_parser::ParseResult {
-        tree,
-        errors: parse_errors,
-    } = falcon_dart_parser::parse(source);
+    let (tree, parse_errors) = ParsedFile::parse_for_package(source, None);
     assert!(
         parse_errors.is_empty(),
         "unexpected parse errors: {parse_errors:?}"
@@ -346,10 +325,7 @@ fn test_end_to_end_parse_analyze_serialize() {
     let mut registry = RuleRegistry::new();
     registry.register("always_error", Box::new(AlwaysErrorRule));
 
-    let parsed = Arc::new(ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let parsed = Arc::new(tree);
     let config = FalconConfig::default();
     let ctx = AnalyzeContext::new(Path::new("foo.dart"), &config, &parsed);
 
@@ -369,10 +345,7 @@ fn test_end_to_end_parse_analyze_serialize() {
 #[test]
 fn test_context_diagnostic_uses_file_and_warning_default() {
     let config = FalconConfig::default();
-    let parsed = Arc::new(ParsedFile {
-        source: "abc".into(),
-        tree: falcon_dart_parser::parse("abc").tree,
-    });
+    let parsed = Arc::new(ParsedFile::parse("abc"));
     let ctx = AnalyzeContext::new(Path::new("foo.dart"), &config, &parsed);
     let span = falcon_syntax::cst::Span { start: 1, end: 3 };
     let diagnostic = ctx.diagnostic("message", span);
@@ -386,12 +359,9 @@ fn test_context_diagnostic_uses_file_and_warning_default() {
 #[test]
 fn context_reuses_per_file_analysis_facts() {
     let source = "int value = 0; void main() { while (value < 2) { value++; } }";
-    let falcon_dart_parser::ParseResult { tree, errors } = falcon_dart_parser::parse(source);
+    let (tree, errors) = ParsedFile::parse_for_package(source, None);
     assert!(errors.is_empty(), "{errors:?}");
-    let parsed = Arc::new(ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let parsed = Arc::new(tree);
     let program = parsed.program();
     let config = FalconConfig::default();
     let path = Path::new("test.dart");
@@ -432,11 +402,8 @@ fn context_fix_uses_lossless_cst_byte_spans() {
     use falcon_diagnostics::{FixKind, TextEdit};
 
     let source = "// café\r\nvoid main() { var value = 1; /* kept */ }\r\n";
-    let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let (tree, _) = ParsedFile::parse_for_package(source, None);
+    let parsed = Arc::new(tree);
     let config = FalconConfig::default();
     let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
     let span = ctx
@@ -462,11 +429,8 @@ fn context_rejects_invalid_rule_fixes() {
     use falcon_diagnostics::{FixKind, TextEdit};
 
     let source = "// é\nvoid main() {}";
-    let falcon_dart_parser::ParseResult { tree, .. } = falcon_dart_parser::parse(source);
-    let parsed = Arc::new(ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let (tree, _) = ParsedFile::parse_for_package(source, None);
+    let parsed = Arc::new(tree);
     let config = FalconConfig::default();
     let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
     for spans in [

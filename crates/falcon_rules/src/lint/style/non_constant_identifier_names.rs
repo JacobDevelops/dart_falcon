@@ -203,15 +203,11 @@ mod tests {
     use super::*;
     use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::PathBuf;
 
     fn run(source: &str) -> usize {
-        let falcon_dart_parser::ParseResult { tree, .. } = parse(source);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let snapshot = falcon_analyze::ParsedFile::parse(source);
+        let parsed = std::sync::Arc::new(snapshot);
         let program = parsed.program();
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");

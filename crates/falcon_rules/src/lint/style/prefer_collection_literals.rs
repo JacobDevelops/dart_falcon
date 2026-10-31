@@ -277,14 +277,10 @@ mod tests {
     use falcon_analyze::RuleAnalysis;
     use falcon_analyze::TypeIndex;
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
     use std::path::PathBuf;
 
     fn count_no_types(source: &str) -> usize {
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            tree: parse(source).tree,
-            source: source.into(),
-        });
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile::parse(source));
         let program = parsed.program();
         let config = FalconConfig::default();
         let path = PathBuf::from("t.dart");
@@ -293,10 +289,7 @@ mod tests {
     }
 
     fn count_with_types(source: &str) -> usize {
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            tree: parse(source).tree,
-            source: source.into(),
-        });
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile::parse(source));
         let program = parsed.program();
         let identities = crate::lint::test_support::identities(&[(std::path::Path::new("t.dart"), &parsed)]);
         let types = TypeIndex::from_resolved_files(
@@ -429,12 +422,9 @@ mod tests {
             "part 'missing.dart'; class Map {} void f() { var value = Map(); }",
             "part 'missing.dart'; class Duration {} void f() { var value = Map(); }",
         ] {
-            let parsed = parse(source);
-            assert!(parsed.errors.is_empty());
-            let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-                tree: parsed.tree,
-                source: source.into(),
-            });
+            let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+            assert!(parsed_errors.is_empty());
+            let parsed = std::sync::Arc::new(parsed);
             let program = parsed.program();
             let path = PathBuf::from("/project/t.dart");
             let identities = crate::lint::test_support::identities(&[(&path, &parsed)]);

@@ -4,7 +4,6 @@
 
 use falcon_analyze::{AnalyzeContext, RuleRegistry};
 use falcon_config::FalconConfig;
-use falcon_dart_parser::parse;
 use falcon_rules::lint::suspicious::avoid_dynamic::AvoidDynamic;
 use falcon_rules::meta::suppression_lookup;
 use std::path::Path;
@@ -12,11 +11,7 @@ use std::path::Path;
 fn run(source: &str) -> Vec<String> {
     let mut registry = RuleRegistry::with_lookup(suppression_lookup);
     registry.register("avoid-dynamic", Box::new(AvoidDynamic));
-    let falcon_dart_parser::ParseResult { tree, .. } = parse(source);
-    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-        source: source.into(),
-        tree,
-    });
+    let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile::parse(source));
     let program = parsed.program();
     let config = FalconConfig::default();
     let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);

@@ -48,12 +48,12 @@ impl<'a> ProjectExports<'a> {
     ) -> Self {
         let file_packages: Vec<_> = files
             .iter()
-            .map(|file| environment.file_package(&file.path))
+            .map(|file| environment.file_package(file.path()))
             .collect();
         let identities = project_packages(&file_packages);
         let paths: Vec<_> = files
             .iter()
-            .map(|file| canonical_package_path(&file.path))
+            .map(|file| canonical_package_path(file.path()))
             .collect();
         let packages: Vec<_> = file_packages
             .iter()
@@ -73,7 +73,7 @@ impl<'a> ProjectExports<'a> {
             let Some(package) = packages[index] else {
                 continue;
             };
-            if file.has_parse_errors {
+            if file.has_parse_errors() {
                 continue;
             }
             if let Ok(relative) = paths[index].strip_prefix(&identities[package].lib_root) {
@@ -168,7 +168,7 @@ fn collect_exports<'a>(
         let Some(package) = packages[index] else {
             continue;
         };
-        if file.has_parse_errors || file.program().part_of_directive().is_some() {
+        if file.has_parse_errors() || file.program().part_of_directive().is_some() {
             continue;
         }
         for directive in file.program().exports() {
@@ -194,7 +194,7 @@ fn collect_exports<'a>(
                     continue;
                 };
                 if packages[target] == Some(package)
-                    && !files[target].has_parse_errors
+                    && !files[target].has_parse_errors()
                     && files[target].program().part_of_directive().is_none()
                 {
                     exports[index].push(Export { target, directive });

@@ -1115,8 +1115,10 @@ impl IdentityIndex {
     /// The caller must first establish an unchanged declaration signature.
     ///
     /// # Panics
-    /// Panics if `file` identifies an external declaration or an unindexed project file.
+    /// Panics if the snapshot is rejected, or `file` identifies an external
+    /// declaration or an unindexed project file.
     pub fn refresh_file_body(&mut self, file: FileId, parsed: &Arc<ParsedFile>) {
+        assert!(!parsed.is_rejected(), "cannot index a rejected snapshot");
         assert_eq!(file.0 & EXTERNAL_ID, 0, "cannot edit external declarations");
         self.type_occurrences[file.0].edited =
             Some((Arc::clone(parsed), parsed.type_occurrences()));
@@ -1143,7 +1145,9 @@ impl IdentityIndex {
             occurrences
                 .edited
                 .as_ref()
-                .filter(|(edited, _)| Arc::ptr_eq(edited, parsed) || edited.source == parsed.source)
+                .filter(|(edited, _)| {
+                    Arc::ptr_eq(edited, parsed) || edited.source() == parsed.source()
+                })
                 .map_or(&occurrences.original, |(_, offsets)| offsets)
         };
         offsets
@@ -1304,7 +1308,7 @@ impl IdentityIndex {
                 .imports()
                 .map(|import| import.uri().value())
                 .chain(program.exports().map(|export| export.uri().value()))
-                .chain(doc_imports(program, &source.parsed.source).map(Cow::Borrowed));
+                .chain(doc_imports(program, source.parsed.source()).map(Cow::Borrowed));
             for uri in uris {
                 if let ImportTarget::Library(target) = resolver.resolve(source.path, None, &uri) {
                     reverse.entry(target).or_default().push(new);
@@ -1319,10 +1323,7 @@ impl IdentityIndex {
                 }
             }
         }
-        let sources: Vec<_> = files
-            .iter()
-            .map(|file| file.parsed.source.as_ref())
-            .collect();
+        let sources: Vec<_> = files.iter().map(|file| file.parsed.source()).collect();
         self.project_snapshots = snapshots;
         let mut next = Self::build_selected(
             files,
@@ -3285,11 +3286,7 @@ pub fn library_doc_imports<'s>(
             import_source.clear();
             import_source.push_str("import ");
             import_source.push_str(rest);
-            let parsed = falcon_dart_parser::parse(&import_source);
-            let parsed = Arc::new(ParsedFile {
-                source: import_source.clone().into_boxed_str(),
-                tree: parsed.tree,
-            });
+            let parsed = Arc::new(ParsedFile::parse(import_source.as_str()));
             let import = parsed.program().imports().next()?;
             let (first, first_span) = import.uri().segments().next()?;
             let content_start =
@@ -3793,7 +3790,27 @@ fn package_member(package: &str, name: &str) -> Option<DeclarationIdentity> {
 mod tests {
     use super::*;
     use crate::ParsedFile;
-    use falcon_dart_parser::parse;
+
+    #[test]
+    fn rejected_body_refresh_preserves_previous_facts() {
+        let original = crate::resolve::parsed_fixture("class C { int value() => 1; }");
+        let sources = [IdentitySource {
+            path: Path::new("/project/main.dart"),
+            parsed: &original,
+            has_parse_errors: false,
+        }];
+        let mut index = IdentityIndex::from_project_files(&sources, &[]);
+        let edited = crate::resolve::parsed_fixture("class C { int value() => 2; }");
+        index.refresh_file_body(FileId(0), &edited);
+        let rejected = Arc::new(ParsedFile::rejected(edited.source()));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            index.refresh_file_body(FileId(0), &rejected);
+        }));
+        assert!(result.is_err());
+        let (retained, _) = index.type_occurrences[0].edited.as_ref().unwrap();
+        assert!(Arc::ptr_eq(retained, &edited));
+        assert!(Arc::ptr_eq(index.parsed_file(FileId(0)), &original));
+    }
 
     #[test]
     fn unique_candidates_preserve_ambiguity_and_non_sdk_precedence() {
@@ -3854,12 +3871,7 @@ mod tests {
             paths.iter().map(PathBuf::as_path),
             |_| None,
         );
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = crate::resolve::parsed_fixture(source);
         let project = paths
             .each_ref()
             .map(|path| (path.as_path(), parsed.program(), source));
@@ -3940,14 +3952,9 @@ mod tests {
             paths.iter().map(PathBuf::as_path),
             |_| None,
         );
-        let parsed = sources.each_ref().map(|source| {
-            let parsed = parse(source);
-            assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
-            Arc::new(ParsedFile {
-                source: source.as_str().into(),
-                tree: parsed.tree,
-            })
-        });
+        let parsed = sources
+            .each_ref()
+            .map(|source| crate::resolve::parsed_fixture(source.as_str()));
         let project = std::array::from_fn::<_, 3, _>(|index| {
             (
                 paths[index].as_path(),
@@ -4022,12 +4029,7 @@ mod tests {
             paths.iter().map(PathBuf::as_path),
             |_| None,
         );
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = crate::resolve::parsed_fixture(source);
         let project: Vec<_> = paths
             .iter()
             .map(|path| (path.as_path(), parsed.program(), source))
@@ -4377,14 +4379,7 @@ mod tests {
     fn index(inputs: &[(&str, &str)], packages: &[PackageIdentity]) -> IdentityIndex {
         let parsed: Vec<_> = inputs
             .iter()
-            .map(|(_, source)| {
-                let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-                assert!(errors.is_empty(), "{errors:?}");
-                Arc::new(ParsedFile {
-                    source: (*source).into(),
-                    tree,
-                })
-            })
+            .map(|(_, source)| crate::resolve::parsed_fixture(source))
             .collect();
         let sources: Vec<_> = inputs
             .iter()
@@ -4852,12 +4847,9 @@ mod tests {
         );
 
         let source = "import 'package:meta/meta.dart'; part 'main.g.dart'; class";
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-        assert!(!errors.is_empty());
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let (parsed, errors) = ParsedFile::parse_for_package(source, None);
+        assert!(!errors.is_empty(), "{errors:?}");
+        let parsed = Arc::new(parsed);
         let index = IdentityIndex::from_project_files(
             &[IdentitySource {
                 path: Path::new("/app/lib/main.dart"),
@@ -4894,11 +4886,7 @@ mod tests {
         ] {
             for directive in ["import", "export"] {
                 let source = format!("{directive} 'a.dart' {suffix};");
-                let parsed = parse(&source);
-                let parsed = ParsedFile {
-                    source: source.clone().into_boxed_str(),
-                    tree: parsed.tree,
-                };
+                let parsed = ParsedFile::parse(source.as_str());
                 let program = parsed.program();
                 let combinators: Vec<_> = if directive == "import" {
                     program.imports().next().unwrap().combinators().collect()
@@ -5434,12 +5422,7 @@ mod tests {
         let path = app.join("lib/main.dart");
         let source = "import 'package:dep/api.dart' as p; const _limit = 9;";
         std::fs::write(&path, source).unwrap();
-        let falcon_dart_parser::ParseResult { tree, errors } = parse(source);
-        assert!(errors.is_empty(), "{errors:?}");
-        let parsed = Arc::new(ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = crate::resolve::parsed_fixture(source);
         let environment =
             AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);
         let external = ExternalLibraries::load(
@@ -5863,7 +5846,7 @@ mod tests {
         let owner = declaration(&index, file, "C").unwrap();
         let (path, parsed, node) = index.source_declaration(&owner).unwrap();
         assert_eq!(path, Path::new(file));
-        assert!(!parsed.source.is_empty());
+        assert_ne!(parsed.source(), "");
         let TopLevelDecl::Class(class) = node else {
             panic!("expected class")
         };

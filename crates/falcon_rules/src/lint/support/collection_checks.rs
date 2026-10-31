@@ -162,7 +162,7 @@ mod tests {
     use falcon_analyze::Rule;
     use falcon_analyze::RuleAnalysis;
     use falcon_config::FalconConfig;
-    use falcon_dart_parser::parse;
+
     use std::path::Path;
 
     #[test]
@@ -171,12 +171,9 @@ mod tests {
             print(s.length == 0); print(s.length != 0);
             xs.where((e) => e is String);
         }";
-        let parsed = parse(source);
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        });
-        let program = parsed.tree.program(source);
+        let parsed = falcon_analyze::ParsedFile::parse(source);
+        let parsed = std::sync::Arc::new(parsed);
+        let program = parsed.program();
         let config = FalconConfig::default();
         let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
         for (name, rule) in [

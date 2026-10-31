@@ -388,8 +388,8 @@ impl<'a> Tables<'a> {
             for declaration in source.program.declarations() {
                 tables.add_top_level(
                     unit,
-                    &source.parsed.source,
-                    &source.parsed.tree,
+                    source.parsed.source(),
+                    source.parsed.tree(),
                     declaration,
                 );
             }
@@ -428,8 +428,8 @@ impl<'a> Tables<'a> {
         for container in 0..tables.containers.len() {
             tables.add_members(
                 container,
-                &units[tables.containers[container].unit].parsed.source,
-                &units[tables.containers[container].unit].parsed.tree,
+                units[tables.containers[container].unit].parsed.source(),
+                units[tables.containers[container].unit].parsed.tree(),
                 semantic,
             );
         }
@@ -964,7 +964,7 @@ impl<'a> Tables<'a> {
         // Deliberately include names in comments and strings: this conservative
         // escape check must not conclude that a container is never named elsewhere.
         for (unit, source) in units.iter().enumerate() {
-            let bytes = source.parsed.source.as_bytes();
+            let bytes = source.parsed.source().as_bytes();
             let mut index = 0;
             while index < bytes.len() {
                 if !is_ident_body(bytes[index]) {
@@ -977,7 +977,7 @@ impl<'a> Tables<'a> {
                 }
                 let Some(containers) = source
                     .parsed
-                    .source
+                    .source()
                     .get(start..index)
                     .and_then(|w| by_name.get(w))
                 else {
@@ -1261,8 +1261,8 @@ impl<'t, 'a> RefWalker<'t, 'a> {
         Self {
             tables,
             unit,
-            source: &parsed.source,
-            tree: &parsed.tree,
+            source: parsed.source(),
+            tree: parsed.tree(),
             bound,
             deps,
             stack: Vec::new(),
@@ -2100,10 +2100,7 @@ mod tests {
     use crate::lint::doc_comments::references;
 
     fn parse(source: &str) -> std::sync::Arc<falcon_analyze::ParsedFile> {
-        std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: falcon_dart_parser::parse(source).tree,
-        })
+        std::sync::Arc::new(falcon_analyze::ParsedFile::parse(source))
     }
 
     fn lint(source: &str) -> Vec<String> {
@@ -2125,16 +2122,15 @@ mod tests {
         let markdown_link = "/// [text](url)\n";
         let markdown_parsed = parse(markdown_link);
         assert!(
-            markdown_parsed
-                .tree
-                .doc_blocks(markdown_link)
-                .flat_map(|block| references(&block).0)
-                .next()
-                .is_none()
-        );
+                    markdown_parsed
+                        .tree()
+                        .doc_blocks(markdown_link)
+                        .flat_map(|block| references(&block).0)
+                        .next()
+                        .is_none()
+                );
         let parsed = parse(source);
-        let references: Vec<(bool, Vec<&str>)> = parsed
-            .tree
+        let references: Vec<(bool, Vec<&str>)> = parsed.tree()
             .doc_blocks(source)
             .flat_map(|block| references(&block).0)
             .filter_map(|reference| reference.parse())
@@ -2162,17 +2158,17 @@ mod tests {
         let source = "int a = 0;\n/// One.\n/// Two.\nvoid f() {}\n/** Block. */\nvoid g() {}\n";
         let parsed = parse(source);
         assert_eq!(
-            doc_start(source, &parsed.tree, source.find("void f").unwrap()),
-            source.find("/// One").unwrap()
-        );
+                    doc_start(source, parsed.tree(), source.find("void f").unwrap()),
+                    source.find("/// One").unwrap()
+                );
         assert_eq!(
-            doc_start(source, &parsed.tree, source.find("void g").unwrap()),
-            source.find("/**").unwrap()
-        );
+                    doc_start(source, parsed.tree(), source.find("void g").unwrap()),
+                    source.find("/**").unwrap()
+                );
         assert_eq!(
-            doc_start(source, &parsed.tree, source.find("int a").unwrap()),
-            0
-        );
+                    doc_start(source, parsed.tree(), source.find("int a").unwrap()),
+                    0
+                );
     }
 
     #[test]
@@ -2180,9 +2176,9 @@ mod tests {
         let source = "/**/\nvoid main() {}\n";
         let parsed = parse(source);
         assert_eq!(
-            doc_start(source, &parsed.tree, source.find("void").unwrap()),
-            5
-        );
+                    doc_start(source, parsed.tree(), source.find("void").unwrap()),
+                    5
+                );
         assert_eq!(lint(source), [] as [std::string::String; 0]);
         assert_eq!(lint("/**/\nvoid main() {}\nclass C {}\n"), ["C"]);
     }
@@ -2193,13 +2189,13 @@ mod tests {
                       /// Detached.\n// Boundary.\n  /// Attached.\nvoid g() {}\n";
         let parsed = parse(source);
         assert_eq!(
-            doc_start(source, &parsed.tree, source.find("void f").unwrap()),
-            0
-        );
+                    doc_start(source, parsed.tree(), source.find("void f").unwrap()),
+                    0
+                );
         assert_eq!(
-            doc_start(source, &parsed.tree, source.find("void g").unwrap()),
-            source.find("  /// Attached").unwrap()
-        );
+                    doc_start(source, parsed.tree(), source.find("void g").unwrap()),
+                    source.find("  /// Attached").unwrap()
+                );
     }
 
     #[test]
@@ -2208,8 +2204,7 @@ mod tests {
                       // [PlainOnly]\n/**/\n\
                       /// [Attached]\nvoid f() {}\n";
         let parsed = parse(source);
-        let references: Vec<_> = parsed
-            .tree
+        let references: Vec<_> = parsed.tree()
             .doc_blocks(source)
             .flat_map(|block| references(&block).0)
             .collect();
@@ -2244,12 +2239,12 @@ mod tests {
         let source = "void first() {} /// [Helper]\nvoid main() {}\nclass Helper {}\n";
         let parsed = parse(source);
         let start = source.find("void main").unwrap();
-        assert_eq!(doc_start(source, &parsed.tree, start), start);
+        assert_eq!(doc_start(source, parsed.tree(), start), start);
         assert!(
-            attached_doc_references(source, &parsed.tree)
-                .next()
-                .is_none()
-        );
+                    attached_doc_references(source, parsed.tree())
+                        .next()
+                        .is_none()
+                );
     }
 
     #[test]
@@ -2257,8 +2252,7 @@ mod tests {
         let source = "void main() { print('''${() {\n\
                       /// [Helper]\nreturn 0;\n}()}'''); }\nclass Helper {}\n";
         let parsed = parse(source);
-        let references: Vec<_> = parsed
-            .tree
+        let references: Vec<_> = parsed.tree()
             .doc_blocks(source)
             .flat_map(|block| references(&block).0)
             .collect();

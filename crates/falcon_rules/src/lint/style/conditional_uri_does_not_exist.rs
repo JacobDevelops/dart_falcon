@@ -303,13 +303,9 @@ mod tests {
             if (dart.library.io) 'package:configured_app/src/present.dart?query'\n\
             if (dart.library.html) '?query'\n\
             if (dart.library.js_interop) 'package:configured_app/src/present.dart#fragment';";
-        let falcon_dart_parser::ParseResult { tree, errors } =
-            falcon_dart_parser::parser::parse(source);
+        let (snapshot, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
         assert!(errors.is_empty(), "{errors:?}");
-        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree,
-        });
+        let parsed = std::sync::Arc::new(snapshot);
         let environment =
             AnalysisEnvironment::discover_with_sdk_locator([file.as_path()], |_| None);
         let config = falcon_config::FalconConfig::default();

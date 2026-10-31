@@ -205,20 +205,22 @@ fn shared_fix_externals_retain_unopened_selected_part_companions() {
     fs::write(&owner, "part 'part.dart'; class Base {}\n").unwrap();
     let source = "part of 'owner.dart'; class Child extends Base {}\n";
     fs::write(&part, source).unwrap();
-    let parsed = falcon_dart_parser::try_parse_for_package(source, None).unwrap();
-    let mut files = vec![falcon_analyze::ProjectFile {
-        path: part.clone(),
-        has_parse_errors: !parsed.errors.is_empty(),
-        parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: source.into(),
-            tree: parsed.tree,
-        }),
-    }];
+    let mut files = vec![
+        falcon_analyze::ProjectFile::new(
+            part.clone(),
+            std::sync::Arc::new(
+                falcon_analyze::ParsedFile::try_parse_for_package(source, None)
+                    .unwrap()
+                    .0,
+            ),
+        )
+        .expect("selected part fixture parses successfully"),
+    ];
     let environment =
         falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator([part.as_path()], |_| None);
     let external = super::FixExternals::load(&environment, &mut files);
-    assert!(files.iter().any(|file| file.path == owner));
-    assert!(files.iter().any(|file| file.path == part));
+    assert!(files.iter().any(|file| file.path() == owner));
+    assert!(files.iter().any(|file| file.path() == part));
     assert!(external.libraries.project_companions().next().is_some());
 }
 
@@ -230,16 +232,16 @@ fn saved_writes_refresh_project_snapshots_but_rejected_writes_do_not() {
         let before = "class Example {} void main() { new Example(); }\n";
         let after = "class Example {} void main() { Example(); }\n";
         fs::write(&path, before).unwrap();
-        let parsed = falcon_dart_parser::try_parse_for_package(before, None).unwrap();
-        let mut file = falcon_analyze::ProjectFile {
-            path: path.clone(),
-            has_parse_errors: false,
-            parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-                source: before.into(),
-                tree: parsed.tree,
-            }),
-        };
-        let original = std::sync::Arc::clone(&file.parsed);
+        let mut file = falcon_analyze::ProjectFile::new(
+            path.clone(),
+            std::sync::Arc::new(
+                falcon_analyze::ParsedFile::try_parse_for_package(before, None)
+                    .unwrap()
+                    .0,
+            ),
+        )
+        .expect("saved write fixture parses successfully");
+        let original = std::sync::Arc::clone(file.parsed());
         let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
             [path.as_path()],
             |_| None,
@@ -257,12 +259,12 @@ fn saved_writes_refresh_project_snapshots_but_rejected_writes_do_not() {
         );
         if concurrent_save {
             assert!(result.is_err());
-            assert!(std::sync::Arc::ptr_eq(&file.parsed, &original));
+            assert!(std::sync::Arc::ptr_eq(file.parsed(), &original));
             assert_eq!(file.source(), before);
             assert_eq!(fs::read_to_string(&path).unwrap(), "// concurrent save\n");
         } else {
             result.unwrap();
-            assert!(!std::sync::Arc::ptr_eq(&file.parsed, &original));
+            assert!(!std::sync::Arc::ptr_eq(file.parsed(), &original));
             assert_eq!(file.source(), after);
             assert_eq!(fs::read_to_string(&path).unwrap(), after);
         }
@@ -276,15 +278,15 @@ fn preview_refreshes_project_snapshot_without_writing() {
     let before = "class Example {} void main() { new Example(); }\n";
     let after = "class Example {} void main() { Example(); }\n";
     fs::write(&path, before).unwrap();
-    let parsed = falcon_dart_parser::try_parse_for_package(before, None).unwrap();
-    let mut file = falcon_analyze::ProjectFile {
-        path: path.clone(),
-        has_parse_errors: false,
-        parsed: std::sync::Arc::new(falcon_analyze::ParsedFile {
-            source: before.into(),
-            tree: parsed.tree,
-        }),
-    };
+    let mut file = falcon_analyze::ProjectFile::new(
+        path.clone(),
+        std::sync::Arc::new(
+            falcon_analyze::ParsedFile::try_parse_for_package(before, None)
+                .unwrap()
+                .0,
+        ),
+    )
+    .expect("preview fixture parses successfully");
     let environment =
         falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);
     WriteSnapshot::apply_with_project_snapshot(None, &path, after, Some(&mut file), &environment)

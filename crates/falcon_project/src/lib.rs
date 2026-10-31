@@ -295,17 +295,14 @@ pub fn analyze_document<'a>(
 }
 
 /// Retain a manifest using the same parsed-file representation as Dart sources.
+///
+/// # Panics
+///
+/// Panics if the lexical snapshot is unexpectedly rejected.
 #[must_use]
 pub fn manifest_file(path: PathBuf, source: String) -> ProjectFile {
-    let tree = falcon_dart_parser::lex_tree(&source);
-    ProjectFile {
-        path,
-        parsed: Arc::new(ParsedFile {
-            source: source.into_boxed_str(),
-            tree,
-        }),
-        has_parse_errors: false,
-    }
+    ProjectFile::new(path, Arc::new(ParsedFile::lexical(source)))
+        .expect("a lexical manifest snapshot is not rejected")
 }
 
 /// Apply file-rule severities and append cross-file findings using existing indexes.
@@ -330,7 +327,7 @@ pub fn complete_analysis(
                 diagnostics.extend(
                     files
                         .first()
-                        .map(|file| falcon_analyze::rules_thread_diagnostic(&file.path, &error)),
+                        .map(|file| falcon_analyze::rules_thread_diagnostic(file.path(), &error)),
                 );
             }
         }

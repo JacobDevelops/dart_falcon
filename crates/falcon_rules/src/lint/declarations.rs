@@ -447,12 +447,10 @@ mod tests {
                 let source = format!(
                     "import 'package:flutter/widgets.dart';\n{header} {{ {variants} {member_source} }}"
                 );
-                let falcon_dart_parser::ParseResult { errors, tree } = parse(&source);
+                let (snapshot, errors) =
+                    falcon_analyze::ParsedFile::parse_for_package(source, None);
                 assert!(errors.is_empty(), "{name}/{kind}: {errors:?}");
-                let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile {
-                    source: source.into_boxed_str(),
-                    tree,
-                });
+                let parsed = std::sync::Arc::new(snapshot);
                 let path = Path::new("containers.dart");
                 let indexes = TestIndexes::single(path, &parsed, false);
                 let ctx = indexes.context(path, &config, &parsed);
