@@ -40,16 +40,23 @@ def plan(tier, scope, root=ROOT):
                 if task == "clippy_workspace" else ["makers", task] for task in tasks]
     if tier == "package" or tier.startswith("iterate-"):
         manifests = [root / "Cargo.toml", root / "xtask/Cargo.toml", *sorted((root / "crates").glob("*/Cargo.toml"))]
-        packages = {tomllib.loads(p.read_text()).get("package", {}).get("name") for p in manifests}
+        packages = {}
+        for path in manifests:
+            manifest = tomllib.loads(path.read_text())
+            packages[manifest.get("package", {}).get("name")] = (path, manifest)
         if scope not in packages or not scope:
             raise ValueError("package requires an existing workspace package name")
         if tier.startswith("iterate-"):
             return [["blaze", tier.removeprefix("iterate-"), "--locked", "-p", scope]]
-        return [
+        path, manifest = packages[scope]
+        commands = [
             ["@cargo", "clippy", "--locked", "-p", scope, "--all-targets", "--", "-D", "warnings"],
             ["@cargo", "nextest", "run", "--locked", "-p", scope, "--all-targets"],
-            ["@cargo", "test", "--locked", "-p", scope, "--doc"],
         ]
+        if "lib" in manifest or (manifest["package"].get("autolib", True)
+                                 and (path.parent / "src/lib.rs").is_file()):
+            commands.append(["@cargo", "test", "--locked", "-p", scope, "--doc"])
+        return commands
     if not scope or not re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*", scope):
         raise ValueError("rule requires a canonical rule id")
     if not (root / "crates/falcon_rules/tests/corpus" / scope).is_dir():

@@ -38,6 +38,38 @@ class VerificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 verify.plan(tier, scope)
 
+    def test_package_doctests_require_a_library_target(self):
+        for package, has_lib in [("dart_falcon", False), ("xtask", False), ("falcon_config", True)]:
+            with self.subTest(package=package):
+                commands = verify.plan("package", package)
+                self.assertEqual(commands[:2], [
+                    ["@cargo", "clippy", "--locked", "-p", package, "--all-targets", "--", "-D", "warnings"],
+                    ["@cargo", "nextest", "run", "--locked", "-p", package, "--all-targets"],
+                ])
+                self.assertEqual(commands[2:], [
+                    ["@cargo", "test", "--locked", "-p", package, "--doc"],
+                ] if has_lib else [])
+
+    def test_package_library_discovery_honors_manifest_and_layout(self):
+        (self.root / "xtask").mkdir()
+        (self.root / "xtask/Cargo.toml").write_text('[package]\nname = "xtask"\n')
+        (self.root / "src").mkdir()
+        for manifest, default_lib, has_lib in [
+            ('[package]\nname = "example"\n', False, False),
+            ('[package]\nname = "example"\n', True, True),
+            ('[package]\nname = "example"\n[lib]\npath = "library.rs"\n', False, True),
+            ('[package]\nname = "example"\nautolib = false\n', True, False),
+        ]:
+            with self.subTest(manifest=manifest, default_lib=default_lib):
+                (self.root / "Cargo.toml").write_text(manifest)
+                lib = self.root / "src/lib.rs"
+                if default_lib:
+                    lib.touch()
+                else:
+                    lib.unlink(missing_ok=True)
+                commands = verify.plan("package", "example", self.root)
+                self.assertEqual(any("--doc" in cmd for cmd in commands), has_lib)
+
     def test_iteration_is_explicit_pinned_and_isolates_compiler_outputs(self):
         self.assertEqual(verify.plan("iterate-test", "falcon_syntax"),
                          [["blaze", "test", "--locked", "-p", "falcon_syntax"]])

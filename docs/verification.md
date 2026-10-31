@@ -2,9 +2,10 @@
 
 Use `makers verify-rule <id>` or `makers verify-package <package>` for iteration.
 A rule check exercises only the selected CLI corpus. Package checks exercise
-Clippy, all package test targets and doctests; they do not establish dependent
-package behavior. `makers verify-fast` checks formatting/TOML, workspace Clippy
-and workspace tests, without release builds or CLI corpus/doc generation.
+Clippy, all package test targets and, for packages with a library target,
+doctests; they do not establish dependent package behavior. `makers verify-fast`
+checks formatting/TOML, workspace Clippy and workspace tests, without release
+builds or CLI corpus/doc generation.
 
 The final coordinator runs `makers verify-full` (`makers A`) on settled source.
 It runs lint, check, tests, the shared CLI/benchmark validation build (including
