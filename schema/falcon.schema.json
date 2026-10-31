@@ -63,6 +63,7 @@
                 "recommended",
                 "none"
               ],
+              "default": "recommended",
               "description": "Activation level for the `flutter` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them."
             },
             "test": {
@@ -71,6 +72,7 @@
                 "recommended",
                 "none"
               ],
+              "default": "recommended",
               "description": "Activation level for the `test` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them."
             },
             "bloc": {
@@ -79,6 +81,7 @@
                 "recommended",
                 "none"
               ],
+              "default": "recommended",
               "description": "Activation level for the `bloc` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them."
             },
             "riverpod": {
@@ -87,6 +90,7 @@
                 "recommended",
                 "none"
               ],
+              "default": "recommended",
               "description": "Activation level for the `riverpod` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them."
             },
             "provider": {
@@ -95,6 +99,7 @@
                 "recommended",
                 "none"
               ],
+              "default": "recommended",
               "description": "Activation level for the `provider` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them."
             },
             "flutter_hooks": {
@@ -103,6 +108,7 @@
                 "recommended",
                 "none"
               ],
+              "default": "recommended",
               "description": "Activation level for the `flutter_hooks` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them."
             },
             "equatable": {
@@ -111,6 +117,7 @@
                 "recommended",
                 "none"
               ],
+              "default": "recommended",
               "description": "Activation level for the `equatable` domain's rules: `all` enables every rule in the domain, `recommended` only its recommended rules, `none` disables them."
             }
           }

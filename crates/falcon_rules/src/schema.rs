@@ -117,6 +117,7 @@ pub fn config_schema() -> Value {
             domain.to_string(),
             json!({
                 "enum": ["all", "recommended", "none"],
+                "default": "recommended",
                 "description": format!(
                     "Activation level for the `{domain}` domain's rules: `all` enables \
                      every rule in the domain, `recommended` only its recommended rules, \
@@ -342,6 +343,13 @@ mod tests {
         assert_eq!(properties["baseline"]["type"], json!(["string", "null"]));
         assert_eq!(properties["error-on-warnings"]["type"], "boolean");
         assert_eq!(properties["error-on-warnings"]["default"], false);
+        for domain in Domain::ALL {
+            assert_eq!(
+                properties["linter"]["properties"]["domains"]["properties"][domain.as_str()]
+                    ["default"],
+                "recommended"
+            );
+        }
         assert!(properties.get("error_on_warnings").is_none());
         let overrides = &properties["overrides"]["items"]["properties"];
         assert!(overrides.get("baseline").is_none());
