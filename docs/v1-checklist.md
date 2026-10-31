@@ -54,9 +54,26 @@ These entries describe implemented foundation, not acceptance of the open items.
   Remaining callers include `falcon_analyze/src/parallel.rs` companion reads,
   LSP semantic companion reads, `falcon_project/src/autofix_analysis.rs:275` and
   `falcon_cli/src/analyze_pipeline.rs:649` (`FixExternals::load`).
-  Discovery still warns/skips `WalkDir` traversal errors and explicit-input
-  metadata errors other than `NotFound`/`NotADirectory`; these can hide required
-  sources before acquisition and remain part of V1-1.
+  Discovery now retains typed `DiscoveryFailure::Metadata` and `Traversal`
+  outcomes with paths and underlying errors, including walked Dart symlink target
+  failures. CLI aborts on required paths; LSP caches partial paths separately from
+  completeness, suppresses cross-file results and logs each failure once per
+  unresolved episode. Failed paths are revalidated in both watcher modes without
+  rewalking or rebuilding while the same error persists, including external targets.
+  Explicit missing inputs remain unmatched paths; midwalk disappearance is absent.
+  Excluded directories still prune traversal. Unreadable directories that cannot
+  contain positively included files warn and skip, including under package configs.
+  Declared workspace member globs preserve potentially required sources even before
+  inaccessible member configurations can be loaded; loaded member filters still win.
+  Deterministic public-API symlink-loop tests cover metadata failures, CLI exit,
+  exclusions, dangling targets and readable recovery. LSP tests assert stable walk
+  and semantic-build counts across requests/polls, then removal/recreation recovery,
+  canonicalized watch events and dynamic-watch recovery without an external event.
+  Permission-guarded tests cover traversal failures, include scope, exclusion and
+  CLI/LSP stale-result clearing followed by independently expected recovery results.
+  They print a skip when permissions are bypassed. WalkDir I/O failures still need
+  permission guards: no existing public injectable traversal-error seam was found.
+  Optional member-manifest and dependency-watch discovery failures retain warnings.
   Optional/external metadata, unsupported/failed analysis and an explicit
   editor-facing incompleteness signal still need the broader contract (this slice
   retains the existing log-only signal). This slice does not certify the overall

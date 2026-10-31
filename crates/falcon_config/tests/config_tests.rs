@@ -1037,3 +1037,127 @@ fn compiled_path_filter_skips_invalid_globs_and_extends_exclusions() {
     assert!(filter.admits("lib/main.dart"));
     assert!(falcon_config::PathFilter::from_includes(&["[".to_string()]).admits("main.dart"));
 }
+
+#[test]
+fn included_descendants_use_glob_prefixes_not_file_matches() {
+    let root = tempfile::tempdir().unwrap();
+    for (patterns, directory, expected) in [
+        (vec![], "other", true),
+        (vec!["**"], "other", true),
+        (vec!["lib/**"], "", true),
+        (vec!["lib/**"], "lib", true),
+        (vec!["lib/**"], "lib/deep", true),
+        (vec!["lib/**"], "other", false),
+        (vec!["lib/*.dart"], "lib", true),
+        (vec!["lib/*.dart"], "lib/deep", false),
+        (vec!["lib/*.dart"], "lib/directory.dart", false),
+        (vec!["lib/*/main.dart"], "lib/deep", true),
+        (vec!["lib/*/main.dart"], "lib/deep/nested", false),
+        (vec!["lib/**/main.dart"], "lib/deep/nested", true),
+        (vec!["lib/[ab]?/main.dart"], "lib/a1", true),
+        (vec!["lib/[ab]?/main.dart"], "lib/c1", false),
+        (vec!["lib/**", "!lib/hidden"], "lib/hidden", false),
+    ] {
+        let patterns: Vec<_> = patterns.into_iter().map(str::to_string).collect();
+        let mut filter = falcon_config::PathFilter::from_includes(&patterns);
+        filter.set_base_dir(root.path());
+        assert_eq!(
+            filter.may_include_descendants(&root.path().join(directory)),
+            expected,
+            "{patterns:?}: {directory}"
+        );
+    }
+}
+
+#[test]
+fn included_descendants_accept_native_path_separators() {
+    let pattern = std::path::Path::new("lib")
+        .join("*.dart")
+        .to_string_lossy()
+        .into_owned();
+    let filter = falcon_config::PathFilter::from_includes(&[pattern]);
+    assert!(filter.may_include_descendants(std::path::Path::new("lib")));
+    assert!(!filter.may_include_descendants(std::path::Path::new("other")));
+    assert!(!filter.may_include_descendants(&std::path::Path::new("lib").join("deep")));
+
+    let root = tempfile::tempdir().unwrap();
+    let mut filter = filter;
+    filter.set_base_dir(root.path());
+    assert!(filter.may_include_descendants(root.path()));
+    assert!(filter.may_include_descendants(&root.path().join("lib")));
+    assert!(!filter.may_include_descendants(&root.path().join("other")));
+}
+
+#[test]
+fn descendant_matching_honors_replacement_package_filters() {
+    let root = tempfile::tempdir().unwrap();
+    let mut parent = from_json(serde_json::json!({"files": {"includes": ["lib/**"]}}));
+    parent.resolve_paths(root.path());
+    let package = root.path().join("packages/child");
+    let mut child = from_json(serde_json::json!({"files": {"includes": ["src/**"]}}));
+    child.resolve_paths(&package);
+    parent.set_package_configs(vec![child]);
+    let filter = &parent.files.includes;
+    assert!(filter.may_include_descendants(&root.path().join("packages")));
+    assert!(filter.may_include_descendants(&package.join("src")));
+    assert!(!filter.may_include_descendants(&package.join("lib")));
+    assert!(!filter.may_include_descendants(&root.path().join("other")));
+}
+
+#[test]
+fn undiscovered_member_declarations_preserve_possible_sources() {
+    let root = tempfile::tempdir().unwrap();
+    for member in ["packages/child", "packages/*"] {
+        let mut parent = from_json(serde_json::json!({"files": {"includes": ["lib/**"]}}));
+        parent.resolve_paths(root.path());
+        let pattern = root
+            .path()
+            .join(member)
+            .join("**")
+            .to_string_lossy()
+            .into_owned();
+        parent
+            .files
+            .includes
+            .set_declared_member_patterns(std::slice::from_ref(&pattern));
+        let package = root.path().join("packages/child");
+        assert!(
+            parent
+                .files
+                .includes
+                .may_include_descendants(&root.path().join("packages"))
+        );
+        assert!(parent.files.includes.may_include_descendants(&package));
+        assert!(
+            parent
+                .files
+                .includes
+                .may_include_descendants(&package.join("src"))
+        );
+        assert!(
+            !parent
+                .files
+                .includes
+                .may_include_descendants(&root.path().join("other"))
+        );
+        let mut child = from_json(serde_json::json!({"files": {"includes": ["src/**"]}}));
+        child.resolve_paths(&package);
+        parent.set_package_configs(vec![child]);
+        parent
+            .files
+            .includes
+            .set_declared_member_patterns(&[pattern]);
+        assert!(
+            parent
+                .files
+                .includes
+                .may_include_descendants(&package.join("src"))
+        );
+        assert!(
+            !parent
+                .files
+                .includes
+                .may_include_descendants(&package.join("lib"))
+        );
+    }
+}

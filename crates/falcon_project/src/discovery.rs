@@ -76,7 +76,7 @@ impl DiscoveryWatch {
 }
 
 /// Paths discovered without opening source or manifest contents.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ProjectDiscovery {
     pub files: Vec<PathBuf>,
     pub manifests: Vec<PathBuf>,
@@ -84,6 +84,8 @@ pub struct ProjectDiscovery {
     /// Empty unless discovery explicitly requests watches.
     pub watches: Vec<DiscoveryWatch>,
     pub missing_paths: Vec<PathBuf>,
+    /// Failures that make the discovered source set incomplete.
+    pub failures: Vec<DiscoveryFailure>,
     pub filtered_paths: Vec<PathBuf>,
 }
 
@@ -94,6 +96,49 @@ pub struct WalkOutput {
     pub missing_paths: Vec<PathBuf>,
     /// Explicit supported files rejected by the configured path filter.
     pub filtered_paths: Vec<PathBuf>,
+}
+
+/// A required input could not be inspected or traversed.
+#[derive(Debug)]
+pub enum DiscoveryFailure {
+    Metadata {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    Traversal {
+        path: PathBuf,
+        source: walkdir::Error,
+    },
+}
+
+impl std::fmt::Display for DiscoveryFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Metadata { path, source } => {
+                write!(
+                    formatter,
+                    "failed to access input {}: {source}; exclude unwanted paths with a ! pattern in files.includes",
+                    path.display()
+                )
+            }
+            Self::Traversal { path, source } => {
+                write!(
+                    formatter,
+                    "failed to walk directory {}: {source}; exclude unwanted paths with a ! pattern in files.includes",
+                    path.display()
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for DiscoveryFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Metadata { source, .. } => Some(source),
+            Self::Traversal { source, .. } => Some(source),
+        }
+    }
 }
 
 /// Acquisition of a required project source, retaining the underlying I/O reason.
@@ -121,17 +166,21 @@ pub fn acquire_source(path: &Path) -> SourceAcquisition {
 /// Includes select Dart files only. Exclusions prune directories and apply to
 /// manifests, including manifests discovered in input paths' ancestors.
 /// Required source read failures abort collection; ordinary optional manifest reads warn and skip.
-/// Discovery traversal/metadata errors still warn and skip: a known gap tracked in V1-1.
+/// Discovery failures abort collection rather than hiding required sources.
 ///
 /// # Errors
 ///
-/// Returns an error if a required source cannot be read or a manifest exceeds the size limit.
+/// Returns an error if discovery fails, a required source cannot be read,
+/// or a manifest exceeds the size limit.
 pub fn walk_project(
     paths: &[PathBuf],
     filter: &PathFilter,
     collect_manifests: bool,
 ) -> Result<WalkOutput, String> {
     let discovery = discover_project(paths, filter, collect_manifests);
+    if let Some(failure) = discovery.failures.first() {
+        return Err(failure.to_string());
+    }
     let mut output = WalkOutput {
         missing_paths: discovery.missing_paths,
         filtered_paths: discovery.filtered_paths,
@@ -180,13 +229,7 @@ fn discover_project_inner(
     collect_manifests: bool,
     track_watches: bool,
 ) -> ProjectDiscovery {
-    let mut output = ProjectDiscovery {
-        files: Vec::new(),
-        manifests: Vec::new(),
-        watches: Vec::new(),
-        missing_paths: Vec::new(),
-        filtered_paths: Vec::new(),
-    };
+    let mut output = ProjectDiscovery::default();
     let mut seen = HashSet::new();
     let mut index_by_path = track_watches.then(HashMap::new);
     let mut watches = Vec::new();
@@ -210,7 +253,11 @@ fn discover_project_inner(
                 continue;
             }
             Err(error) => {
-                tracing::warn!(path = %path.display(), %error, "failed to access input");
+                let failure = DiscoveryFailure::Metadata {
+                    path: path.clone(),
+                    source: error,
+                };
+                record_discovery_failure(failure, filter, collect_manifests, &mut output);
                 continue;
             }
         };
@@ -281,6 +328,28 @@ fn discover_project_inner(
     output
 }
 
+fn record_discovery_failure(
+    failure: DiscoveryFailure,
+    filter: &PathFilter,
+    collect_manifests: bool,
+    output: &mut ProjectDiscovery,
+) {
+    let path = match &failure {
+        DiscoveryFailure::Metadata { path, .. } | DiscoveryFailure::Traversal { path, .. } => path,
+    };
+    if filter.excludes_directory(path) {
+        return;
+    }
+    let required = filter.may_include_descendants(path)
+        || (matches!(&failure, DiscoveryFailure::Metadata { .. })
+            && admitted_file(path, filter, collect_manifests));
+    if required {
+        output.failures.push(failure);
+    } else {
+        tracing::warn!("{failure}; skipped because no included files can be descendants");
+    }
+}
+
 fn discover_directory(
     path: &Path,
     filter: &PathFilter,
@@ -299,7 +368,7 @@ fn discover_directory(
             let kind = entry.file_type();
             if !kind.is_dir() {
                 if track_watches
-                    && (kind.is_file() || (kind.is_symlink() && entry.path().is_file()))
+                    && (kind.is_file() || kind.is_symlink())
                     && admitted_file(entry.path(), filter, collect_manifests)
                 {
                     record_entry(entry, index_by_path.as_ref(), watches);
@@ -326,14 +395,44 @@ fn discover_directory(
         let entry = match item {
             Ok(entry) => entry,
             Err(error) => {
-                tracing::warn!(%error, "failed to walk directory");
+                let failed_path = error.path().unwrap_or(path);
+                if error
+                    .io_error()
+                    .is_none_or(|error| error.kind() != std::io::ErrorKind::NotFound)
+                {
+                    let failure = DiscoveryFailure::Traversal {
+                        path: failed_path.to_path_buf(),
+                        source: error,
+                    };
+                    record_discovery_failure(failure, filter, collect_manifests, output);
+                }
                 continue;
             }
         };
         #[cfg(test)]
         VISITED_ENTRIES.with_borrow_mut(|visited| visited.push(entry.path().to_path_buf()));
-        if entry.file_type().is_file() || (entry.file_type().is_symlink() && entry.path().is_file())
+        let is_file = if entry.file_type().is_symlink()
+            && admitted_file(entry.path(), filter, collect_manifests)
         {
+            match entry.path().metadata() {
+                Ok(metadata) => metadata.is_file(),
+                Err(source) => {
+                    if !matches!(
+                        source.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                    ) {
+                        output.failures.push(DiscoveryFailure::Metadata {
+                            path: entry.path().to_path_buf(),
+                            source,
+                        });
+                    }
+                    false
+                }
+            }
+        } else {
+            entry.file_type().is_file()
+        };
+        if is_file {
             collect_file(entry.path(), filter, collect_manifests, seen, output);
         }
     }
@@ -424,6 +523,151 @@ fn read_manifest(path: &Path) -> Result<Option<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn explicit_metadata_failures_are_not_missing_or_excluded_inputs() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loop");
+        std::os::unix::fs::symlink(&path, &path).unwrap();
+        let mut filter = PathFilter::from_includes(&["**".into()]);
+        filter.set_base_dir(directory.path());
+        let discovery = discover_project(std::slice::from_ref(&path), &filter, false);
+        assert_eq!(discovery.missing_paths, [] as [PathBuf; 0]);
+        assert!(matches!(
+            &discovery.failures[..],
+            [DiscoveryFailure::Metadata { path: failed, source }]
+                if failed == &path && source.raw_os_error() == path.metadata().unwrap_err().raw_os_error()
+        ));
+        let error = walk_project(std::slice::from_ref(&path), &filter, false).unwrap_err();
+        assert!(error.contains(&*path.to_string_lossy()), "{error}");
+        filter = PathFilter::from_includes(&["**".into(), "!loop".into()]);
+        filter.set_base_dir(directory.path());
+        assert!(walk_project(std::slice::from_ref(&path), &filter, false).is_ok());
+        std::fs::remove_file(&path).unwrap();
+        let missing = discover_project(std::slice::from_ref(&path), &filter, false);
+        assert!(missing.failures.is_empty());
+        assert_eq!(missing.missing_paths, [path]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn walked_source_symlink_errors_are_reported_and_recover() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loop.dart");
+        std::os::unix::fs::symlink(&path, &path).unwrap();
+        let mut filter = PathFilter::from_includes(&["**".into()]);
+        filter.set_base_dir(directory.path());
+        for discover in [discover_project, discover_project_with_watches] {
+            let discovery = discover(&[directory.path().to_path_buf()], &filter, false);
+            assert!(matches!(
+                &discovery.failures[..],
+                [DiscoveryFailure::Metadata { path: failed, source }]
+                    if failed == &path && source.raw_os_error() == path.metadata().unwrap_err().raw_os_error()
+            ));
+        }
+        let error = walk_project(&[directory.path().to_path_buf()], &filter, false).unwrap_err();
+        assert!(error.contains(&*path.to_string_lossy()), "{error}");
+        assert!(error.contains("! pattern in files.includes"), "{error}");
+        let mut excluded = PathFilter::from_includes(&["**".into(), "!loop.dart".into()]);
+        excluded.set_base_dir(directory.path());
+        assert!(walk_project(&[directory.path().to_path_buf()], &excluded, false).is_ok());
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(directory.path().join("absent.dart"), &path).unwrap();
+        let absent = discover_project(&[directory.path().to_path_buf()], &filter, false);
+        assert!(absent.failures.is_empty());
+        assert_eq!(absent.files, [] as [PathBuf; 0]);
+        std::fs::remove_file(&path).unwrap();
+        let non_directory = directory.path().join("plain");
+        std::fs::write(&non_directory, "").unwrap();
+        std::os::unix::fs::symlink(non_directory.join("absent.dart"), &path).unwrap();
+        assert_eq!(
+            path.metadata().unwrap_err().kind(),
+            std::io::ErrorKind::NotADirectory
+        );
+        let absent = discover_project(&[directory.path().to_path_buf()], &filter, false);
+        assert!(absent.failures.is_empty());
+        assert_eq!(absent.files, [] as [PathBuf; 0]);
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, "class Recovered {}").unwrap();
+        let recovered = walk_project(&[directory.path().to_path_buf()], &filter, false).unwrap();
+        assert_eq!(recovered.files, [(path, "class Recovered {}".into())]);
+    }
+
+    #[test]
+    fn disappearing_traversal_inputs_are_absent() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("disappeared");
+        let filter = PathFilter::from_includes(&["**".into()]);
+        let mut output = discover_project(&[], &filter, false);
+        discover_directory(
+            &path,
+            &filter,
+            false,
+            &mut HashSet::new(),
+            &mut output,
+            &mut None,
+            &mut Vec::new(),
+        );
+        assert!(output.failures.is_empty());
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("recovered.dart"), "class Recovered {}").unwrap();
+        let recovered = discover_project(std::slice::from_ref(&path), &filter, false);
+        assert!(recovered.failures.is_empty());
+        assert_eq!(recovered.files, [path.join("recovered.dart")]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_directories_fail_unless_excluded() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let hidden = directory.path().join("hidden");
+        std::fs::create_dir(&hidden).unwrap();
+        std::fs::write(hidden.join("required.dart"), "class Required {}").unwrap();
+        std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o0)).unwrap();
+        let unreadable = std::fs::read_dir(&hidden).is_err();
+        let mut filter = PathFilter::from_includes(&["**".into()]);
+        filter.set_base_dir(directory.path());
+        let result = walk_project(&[directory.path().to_path_buf()], &filter, false);
+        let source = hidden.join("required.dart");
+        let metadata_unreadable = source.metadata().is_err();
+        let explicit = discover_project(std::slice::from_ref(&source), &filter, false);
+        let mut excluded = PathFilter::from_includes(&["**".into(), "!hidden".into()]);
+        excluded.set_base_dir(directory.path());
+        let skipped = walk_project(&[directory.path().to_path_buf()], &excluded, false);
+        let explicit_skipped = walk_project(std::slice::from_ref(&hidden), &excluded, false);
+        let excluded_source = walk_project(std::slice::from_ref(&source), &excluded, false);
+        std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(skipped.unwrap().files, [] as [(PathBuf, String); 0]);
+        assert_eq!(
+            explicit_skipped.unwrap().files,
+            [] as [(PathBuf, String); 0]
+        );
+        assert_eq!(excluded_source.unwrap().files, [] as [(PathBuf, String); 0]);
+        if metadata_unreadable {
+            assert!(matches!(
+                &explicit.failures[..],
+                [DiscoveryFailure::Metadata { path, source: error }]
+                    if path == &source && error.kind() == std::io::ErrorKind::PermissionDenied
+            ));
+        } else {
+            eprintln!(
+                "skipped metadata permission assertion: this user bypasses directory permissions"
+            );
+        }
+        if unreadable {
+            let error = result.unwrap_err();
+            assert!(error.contains(&*hidden.to_string_lossy()), "{error}");
+        } else {
+            eprintln!(
+                "skipped traversal permission assertion: this user bypasses directory permissions"
+            );
+        }
+        let recovered = walk_project(&[directory.path().to_path_buf()], &filter, false).unwrap();
+        assert_eq!(recovered.files.len(), 1);
+        assert_eq!(recovered.files[0].0, hidden.join("required.dart"));
+    }
     #[test]
     fn required_source_acquisition_retains_read_outcomes() {
         let directory = tempfile::tempdir().unwrap();

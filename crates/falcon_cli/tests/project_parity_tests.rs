@@ -8,6 +8,228 @@ use falcon_diagnostics::Severity;
 use falcon_lsp::LspState;
 use tempfile::tempdir;
 
+#[cfg(unix)]
+#[test]
+fn explicit_metadata_failure_exits_nonzero_and_names_the_input() {
+    let temp = tempdir().unwrap();
+    let config = temp.path().join("falcon.json");
+    fs::write(&config, "{}").unwrap();
+    let path = temp.path().join("loop.dart");
+    std::os::unix::fs::symlink(&path, &path).unwrap();
+    for input in [path.clone(), temp.path().to_path_buf()] {
+        let options = CheckOptions {
+            paths: vec![input],
+            config_path: Some(config.clone()),
+            quiet: true,
+            ..Default::default()
+        };
+        let error = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap_err();
+        assert!(error.contains("failed to access input"), "{error}");
+        assert!(error.contains(&*path.to_string_lossy()), "{error}");
+        assert!(
+            error.contains(&path.metadata().unwrap_err().to_string()),
+            "{error}"
+        );
+        assert_ne!(
+            falcon_cli::run_check_with_sdk_locator(&options, |_| None),
+            0
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_directory_blocks_cli_and_editor_results_and_recovers() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempdir().unwrap();
+    let root = fs::canonicalize(temp.path()).unwrap();
+    let lib = root.join("lib");
+    let hidden = lib.join("hidden");
+    fs::create_dir_all(&hidden).unwrap();
+    fs::create_dir(lib.join("src")).unwrap();
+    fs::write(root.join("pubspec.yaml"), "name: traversal_fixture\n").unwrap();
+    let config = root.join("falcon.json");
+    fs::write(
+        &config,
+        r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#,
+    ).unwrap();
+    fs::write(
+        lib.join("main.dart"),
+        "import 'hidden/bridge.dart';\nvoid main() {}\n",
+    )
+    .unwrap();
+    let bridge = hidden.join("bridge.dart");
+    fs::write(&bridge, "// no export\n").unwrap();
+    let orphan = lib.join("src/orphan.dart");
+    fs::write(&orphan, "class Orphan {}\n").unwrap();
+    let options = CheckOptions {
+        paths: vec![root],
+        config_path: Some(config.clone()),
+        quiet: true,
+        ..Default::default()
+    };
+    let uri = format!("file://{}", orphan.display());
+    let mut lsp = LspState::new_with_sdk_locator(Some(config), |_| None);
+    lsp.open(&uri, "class Orphan {}\n".into(), Some(1));
+    let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+    assert_eq!(cli.diagnostics.len(), 1);
+    assert_eq!(cli.diagnostics[0].rule, "unused-files");
+    assert_eq!(cli.diagnostics[0].file_path, orphan.to_string_lossy());
+    let published = lsp.cross_file_pass();
+    assert_eq!(
+        serde_json::to_value(&published.iter().find(|(key, _)| key == &uri).unwrap().1).unwrap(),
+        serde_json::to_value(&cli.diagnostics).unwrap()
+    );
+    fs::set_permissions(&hidden, fs::Permissions::from_mode(0o0)).unwrap();
+    if fs::read_dir(&hidden).is_ok() {
+        fs::set_permissions(&hidden, fs::Permissions::from_mode(0o700)).unwrap();
+        eprintln!(
+            "skipped traversal parity permission assertion: this user bypasses directory permissions"
+        );
+        return;
+    }
+    let error = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap_err();
+    assert!(error.contains(&*hidden.to_string_lossy()), "{error}");
+    assert_ne!(
+        falcon_cli::run_check_with_sdk_locator(&options, |_| None),
+        0
+    );
+    lsp.watched_files_changed(std::slice::from_ref(&hidden));
+    let published = lsp.cross_file_pass();
+    assert!(
+        published
+            .iter()
+            .find(|(key, _)| key == &uri)
+            .unwrap()
+            .1
+            .is_empty()
+    );
+    fs::set_permissions(&hidden, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::write(&bridge, "export '../src/orphan.dart';\n").unwrap();
+    lsp.watched_files_changed(std::slice::from_ref(&bridge));
+    let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+    assert!(cli.diagnostics.is_empty());
+    assert_eq!(cli.exit_code, 0);
+    assert!(
+        lsp.cross_file_pass()
+            .iter()
+            .all(|(_, diagnostics)| diagnostics.is_empty())
+    );
+    fs::write(&bridge, "// export removed again\n").unwrap();
+    lsp.watched_files_changed(std::slice::from_ref(&bridge));
+    let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+    let published = lsp.cross_file_pass();
+    let editor = &published.iter().find(|(key, _)| key == &uri).unwrap().1;
+    assert_eq!(
+        serde_json::to_value(editor).unwrap(),
+        serde_json::to_value(&cli.diagnostics).unwrap()
+    );
+    assert_eq!(editor.len(), 1);
+    assert_eq!(editor[0].rule, "unused-files");
+    assert_eq!(editor[0].file_path, orphan.to_string_lossy());
+    assert_eq!(editor[0].severity, Severity::Warning);
+    assert!(editor[0].message.contains("not reachable"));
+    assert_eq!((editor[0].line, editor[0].col), (1, 1));
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_directories_fail_only_when_included_descendants_are_possible() {
+    use std::os::unix::fs::PermissionsExt;
+    for (includes, hidden_relative, member, complete) in [
+        (vec!["lib/**"], "outside", None, true),
+        (vec!["lib/**"], "lib/hidden", None, false),
+        (vec![], "outside", None, false),
+        (
+            vec!["lib/**"],
+            "packages/child",
+            Some("packages/child"),
+            false,
+        ),
+        (vec!["lib/**"], "packages/child", Some("packages/*"), false),
+        (vec!["lib/**"], "packages", Some("packages/child"), false),
+    ] {
+        let temp = tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        let lib = root.join("lib");
+        let hidden = root.join(hidden_relative);
+        fs::create_dir_all(lib.join("src")).unwrap();
+        fs::create_dir_all(&hidden).unwrap();
+        fs::write(hidden.join("source.dart"), "class Hidden {}").unwrap();
+        fs::write(root.join("pubspec.yaml"), "name: scope_fixture\n").unwrap();
+        if let Some(member) = member {
+            fs::write(
+                root.join("pubspec.yaml"),
+                format!("name: scope_fixture\nworkspace:\n  - '{member}'\n"),
+            )
+            .unwrap();
+            let child = root.join("packages/child");
+            fs::create_dir_all(&child).unwrap();
+            fs::write(
+                child.join("pubspec.yaml"),
+                "name: child\nresolution: workspace\n",
+            )
+            .unwrap();
+        }
+        fs::write(lib.join("main.dart"), "void main() {}\n").unwrap();
+        let orphan = lib.join("src/orphan.dart");
+        fs::write(&orphan, "class Orphan {}\n").unwrap();
+        let config = root.join("falcon.json");
+        fs::write(
+            &config,
+            serde_json::json!({
+                "files": {"includes": includes},
+                "linter": {"rules": {"recommended": false}},
+                "cross-file": {"rules": {
+                    "recommended": false, "correctness": {"unused-files": "warn"}
+                }}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let mut lsp = LspState::new_with_sdk_locator(Some(config.clone()), |_| None);
+        let uri = format!("file://{}", orphan.display());
+        lsp.open(&uri, "class Orphan {}\n".into(), Some(1));
+        let baseline = lsp.cross_file_pass();
+        assert_eq!(
+            baseline
+                .iter()
+                .find(|(key, _)| key == &uri)
+                .unwrap()
+                .1
+                .len(),
+            1
+        );
+        fs::set_permissions(&hidden, fs::Permissions::from_mode(0o0)).unwrap();
+        if fs::read_dir(&hidden).is_ok() {
+            fs::set_permissions(&hidden, fs::Permissions::from_mode(0o700)).unwrap();
+            eprintln!(
+                "skipped include-scope permission assertion: this user bypasses directory permissions"
+            );
+            continue;
+        }
+        let options = CheckOptions {
+            paths: vec![root],
+            config_path: Some(config.clone()),
+            quiet: true,
+            ..Default::default()
+        };
+        let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None);
+        lsp.watched_files_changed(std::slice::from_ref(&hidden));
+        let published = lsp.cross_file_pass();
+        fs::set_permissions(&hidden, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(cli.is_ok(), complete, "{includes:?}: {hidden_relative}");
+        let diagnostics = &published.iter().find(|(key, _)| key == &uri).unwrap().1;
+        assert_eq!(diagnostics.len(), usize::from(complete));
+        if let Ok(cli) = cli {
+            assert_eq!(cli.diagnostics.len(), 1);
+            assert_eq!(diagnostics[0].rule, "unused-files");
+        } else {
+            assert!(cli.unwrap_err().contains(&*hidden.to_string_lossy()));
+        }
+    }
+}
+
 #[test]
 fn required_source_failure_blocks_partial_projects_and_recovers() {
     let temp = tempdir().unwrap();

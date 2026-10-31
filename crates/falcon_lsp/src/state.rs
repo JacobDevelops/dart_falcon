@@ -446,6 +446,8 @@ pub struct LspState {
     project_paths: Option<Vec<(PathBuf, bool)>>,
     project_path_patterns: Vec<String>,
     project_discovery_watches: Vec<DiscoveryWatch>,
+    project_discovery_failures: Vec<falcon_project::DiscoveryFailure>,
+    reported_discovery_failures: HashSet<String>,
     #[cfg(test)]
     fallback_scan_count: u64,
 }
@@ -567,6 +569,8 @@ impl LspState {
             project_paths: None,
             project_path_patterns: Vec::new(),
             project_discovery_watches: Vec::new(),
+            project_discovery_failures: Vec::new(),
+            reported_discovery_failures: HashSet::new(),
             #[cfg(test)]
             fallback_scan_count: 0,
         }
@@ -763,8 +767,47 @@ impl LspState {
             self.fallback_dependency_watches
                 .entry(root.to_path_buf())
                 .or_insert_with(|| {
-                    discover_project_with_watches(&[root.to_path_buf()], &filter, false).watches
+                    let discovery =
+                        discover_project_with_watches(&[root.to_path_buf()], &filter, false);
+                    // Dependency watches do not determine the required project source set.
+                    for failure in &discovery.failures {
+                        match failure {
+                            falcon_project::DiscoveryFailure::Metadata { path, source } => {
+                                warn!(path = %path.display(), %source, "failed to access dependency watch input");
+                            }
+                            falcon_project::DiscoveryFailure::Traversal { path, source } => {
+                                warn!(path = %path.display(), %source, "failed to traverse dependency watch path");
+                            }
+                        }
+                    }
+                    discovery.watches
                 });
+        }
+    }
+
+    fn discovery_failure_changed(failure: &falcon_project::DiscoveryFailure) -> bool {
+        let (current, previous) = match failure {
+            falcon_project::DiscoveryFailure::Metadata { path, source } => {
+                (path.metadata().err(), Some(source))
+            }
+            falcon_project::DiscoveryFailure::Traversal { path, source } => {
+                (std::fs::read_dir(path).err(), source.io_error())
+            }
+        };
+        !current.zip(previous).is_some_and(|(current, previous)| {
+            current.kind() == previous.kind() && current.raw_os_error() == previous.raw_os_error()
+        })
+    }
+
+    fn collect_changed_discovery_failures(&self, changed: &mut Vec<PathBuf>) {
+        for failure in &self.project_discovery_failures {
+            if Self::discovery_failure_changed(failure) {
+                let path = match failure {
+                    falcon_project::DiscoveryFailure::Metadata { path, .. }
+                    | falcon_project::DiscoveryFailure::Traversal { path, .. } => path,
+                };
+                changed.push(path.clone());
+            }
         }
     }
 
@@ -818,6 +861,7 @@ impl LspState {
             }
         });
         self.project_discovery_watches = watches;
+        self.collect_changed_discovery_failures(&mut changed);
         let unresolved_changed = self.refresh_unresolved_paths();
         if environment_changed {
             self.disk_files
@@ -875,15 +919,17 @@ impl LspState {
             return Vec::new();
         }
         if paths.iter().any(|path| {
-            self.workspace_roots
-                .iter()
-                .any(|root| path.starts_with(root))
-                && !(path.is_file()
-                    && self.project_paths.as_ref().is_some_and(|files| {
-                        files
-                            .binary_search_by(|(candidate, _)| candidate.cmp(path))
-                            .is_ok()
-                    }))
+            self.is_failed_discovery_path(path)
+                || self
+                    .workspace_roots
+                    .iter()
+                    .any(|root| path.starts_with(root))
+                    && !(path.is_file()
+                        && self.project_paths.as_ref().is_some_and(|files| {
+                            files
+                                .binary_search_by(|(candidate, _)| candidate.cmp(path))
+                                .is_ok()
+                        }))
         }) {
             self.project_paths = None;
         }
@@ -947,9 +993,20 @@ impl LspState {
             .collect()
     }
 
+    fn is_failed_discovery_path(&self, path: &Path) -> bool {
+        self.project_discovery_failures.iter().any(|failure| {
+            let failed = match failure {
+                falcon_project::DiscoveryFailure::Metadata { path, .. }
+                | falcon_project::DiscoveryFailure::Traversal { path, .. } => path,
+            };
+            watched_path(failed) == path
+        })
+    }
+
     fn relevant_watched_path(&self, path: &Path, inputs_changed: bool) -> bool {
         inputs_changed
             || is_dart_file(path)
+            || self.is_failed_discovery_path(path)
             || path.is_dir()
             || matches!(
                 path.file_name().and_then(|name| name.to_str()),
@@ -2566,9 +2623,9 @@ impl LspState {
     /// The boolean is false when required source ingestion left the workspace incomplete;
     /// cross-file rules must not infer absence from that partial set.
     fn collect_project_files(&mut self, view: ProjectView) -> (Vec<ProjectFile>, bool) {
-        let paths = self.discover_project_paths();
+        let (paths, discovery_complete) = self.discover_project_paths();
         let capacity = self.prepare_project_files(&paths, view);
-        let mut complete = true;
+        let mut complete = discovery_complete;
         let open_by_path: HashMap<&Path, &DocumentState> = self
             .documents
             .values()
@@ -2735,15 +2792,28 @@ impl LspState {
         (language_version, stamp)
     }
 
-    fn discover_project_paths(&mut self) -> Vec<(PathBuf, bool)> {
+    fn discover_project_paths(&mut self) -> (Vec<(PathBuf, bool)>, bool) {
         if self.project_path_patterns != self.config.files.includes.patterns() {
             self.project_paths = None;
         }
-        self.project_paths.take().unwrap_or_else(|| {
+        if let Some(paths) = self.project_paths.take() {
+            if !self
+                .project_discovery_failures
+                .iter()
+                .any(Self::discovery_failure_changed)
+            {
+                return (paths, self.project_discovery_failures.is_empty());
+            }
+            self.invalidate_semantic_snapshot();
+        }
+        let mut complete = true;
+        let previous_failures = std::mem::take(&mut self.reported_discovery_failures);
+        let paths = {
             self.workspace_walk_count += 1;
             self.project_path_patterns = self.config.files.includes.patterns().to_vec();
             let mut paths = Vec::new();
             self.project_discovery_watches.clear();
+            self.project_discovery_failures.clear();
             for (index, root) in self.workspace_roots.iter().enumerate() {
                 let discover = if self.dynamic_file_watching {
                     falcon_project::discover_project
@@ -2755,7 +2825,18 @@ impl LspState {
                     &self.config_for_root(index).files.includes,
                     true,
                 );
+                for failure in &discovery.failures {
+                    let message = failure.to_string();
+                    if !previous_failures.contains(&message)
+                        && !self.reported_discovery_failures.contains(&message)
+                    {
+                        warn!("{failure}");
+                    }
+                    self.reported_discovery_failures.insert(message);
+                    complete = false;
+                }
                 self.project_discovery_watches.extend(discovery.watches);
+                self.project_discovery_failures.extend(discovery.failures);
                 paths.extend(
                     discovery
                         .files
@@ -2787,7 +2868,8 @@ impl LspState {
                     || companions.contains(path.as_path())
             });
             paths
-        })
+        };
+        (paths, complete)
     }
 
     fn parse_project_source(

@@ -179,6 +179,7 @@ pub struct PathFilter {
     root: Option<Arc<PathRoot>>,
     warnings: Vec<String>,
     package_filters: Vec<PathFilter>,
+    declared_member_patterns: Vec<Pattern>,
 }
 
 #[derive(Debug)]
@@ -280,6 +281,26 @@ impl PathFilter {
     #[must_use]
     pub fn from_includes(patterns: &[String]) -> Self {
         patterns.to_vec().into()
+    }
+
+    /// Preserve potential member sources before inaccessible member configs can be loaded.
+    pub fn set_declared_member_patterns(&mut self, patterns: &[String]) {
+        let directory = self
+            .root
+            .as_ref()
+            .map(|root| format!("{}/", root.lexical.display()));
+        self.declared_member_patterns = patterns
+            .iter()
+            .filter_map(|pattern| Pattern::new(pattern).ok())
+            .filter(|pattern| {
+                directory
+                    .as_ref()
+                    .is_none_or(|directory| !matches_path(pattern, directory))
+            })
+            .collect();
+        for filter in &mut self.package_filters {
+            filter.set_declared_member_patterns(patterns);
+        }
     }
 
     pub fn extend_excludes(&mut self, patterns: &[String]) {
@@ -523,6 +544,40 @@ impl PathFilter {
             .any(|pattern| matches_path(pattern, &path))
     }
 
+    /// Whether any included file could be a descendant of this directory.
+    #[must_use]
+    pub fn may_include_descendants(&self, path: &Path) -> bool {
+        let text = path.to_string_lossy();
+        let resolved = self.matching_path(&text);
+        if self.package_filters.iter().any(|filter| {
+            filter.root.as_ref().is_some_and(|root| {
+                root.lexical != path && root.lexical.starts_with(resolved.as_ref())
+            })
+        }) {
+            return true;
+        }
+        if let Some(filter) = self.package_filter(&text) {
+            return filter.may_include_descendants(path);
+        }
+        if self.excludes_directory(path) {
+            return false;
+        }
+        if self.include.is_empty() {
+            return true;
+        }
+        let directory = format!("{}/", resolved.trim_end_matches(std::path::is_separator));
+        if self
+            .declared_member_patterns
+            .iter()
+            .any(|pattern| pattern_may_include_descendants(pattern, &directory))
+        {
+            return true;
+        }
+        self.include
+            .iter()
+            .any(|pattern| pattern_may_include_descendants(pattern, &directory))
+    }
+
     #[must_use]
     pub fn patterns(&self) -> &[String] {
         &self.patterns
@@ -541,6 +596,18 @@ impl PathFilter {
                     .iter()
                     .any(|pattern| matches_path(pattern, &path)))
     }
+}
+
+fn pattern_may_include_descendants(pattern: &Pattern, directory: &str) -> bool {
+    (!pattern.as_str().ends_with(std::path::is_separator) && matches_path(pattern, directory))
+        || pattern
+            .as_str()
+            .match_indices(std::path::is_separator)
+            .any(|(end, _)| {
+                end + 1 < pattern.as_str().len()
+                    && Pattern::new(&pattern.as_str()[..=end])
+                        .is_ok_and(|prefix| matches_path(&prefix, directory))
+            })
 }
 
 fn matches_path(pattern: &Pattern, path: &str) -> bool {

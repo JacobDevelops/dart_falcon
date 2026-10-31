@@ -1910,8 +1910,128 @@ mod source_size_tests {
         assert_eq!(files[0].path(), canonical_or_lexical(&valid));
     }
 
+    #[cfg(unix)]
     #[test]
-    fn ordinary_walk_errors_keep_project_collection_complete() {
+    fn failed_discovery_is_incomplete_until_roots_recover_or_disappear() {
+        for (walked, dynamic) in [(false, false), (true, false), (false, true), (true, true)] {
+            let directory = tempfile::tempdir().unwrap();
+            let valid = directory.path().join("valid");
+            std::fs::create_dir(&valid).unwrap();
+            let failed = if walked {
+                valid.join("loop.dart")
+            } else {
+                directory.path().join("loop")
+            };
+            std::os::unix::fs::symlink(&failed, &failed).unwrap();
+            let source = valid.join("valid.dart");
+            std::fs::write(&source, "class Valid {}").unwrap();
+            let mut state = LspState::new(None);
+            let roots = if walked {
+                vec![valid]
+            } else {
+                vec![valid, failed.clone()]
+            };
+            state.initialize_workspace_roots(roots);
+            state.set_dynamic_file_watching(dynamic);
+            state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+            state.resolve_semantics = true;
+            let uri = format!("file://{}", source.display());
+            state.open(&uri, "class Valid {}".into(), Some(1));
+            let walks = state.workspace_walk_count;
+            let builds = state.semantic_snapshot_build_count;
+            assert!(walks > 0);
+            assert!(builds > 0);
+            for _ in 0..2 {
+                let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+                assert!(!complete);
+                assert_eq!(files.len(), 1);
+                assert_eq!(files[0].path(), source);
+                assert!(state.project_paths.is_some());
+                state.analyze(&uri);
+                state.cross_file_pass();
+                assert!(state.revalidate_disk().is_empty());
+                assert_eq!(state.workspace_walk_count, walks);
+                assert_eq!(state.semantic_snapshot_build_count, builds);
+                assert_eq!(state.reported_discovery_failures.len(), 1);
+            }
+            std::fs::remove_file(&failed).unwrap();
+            state.revalidate_disk();
+            let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+            assert!(complete);
+            assert_eq!(files.len(), 1);
+            assert_eq!(state.workspace_walk_count, walks + 1);
+            assert!(state.reported_discovery_failures.is_empty());
+            std::fs::create_dir(&failed).unwrap();
+            let recovered = failed.join("recovered.dart");
+            std::fs::write(&recovered, "class Recovered {}").unwrap();
+            state.watched_files_changed(std::slice::from_ref(&recovered));
+            let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+            assert!(complete);
+            assert_eq!(files.len(), 2);
+            assert!(files.iter().any(|file| file.path() == recovered));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dynamic_discovery_recovers_external_link_without_a_watcher_event() {
+        let directory = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        let target = external.path().join("target.dart");
+        std::os::unix::fs::symlink(&target, &target).unwrap();
+        let link = directory.path().join("source.dart");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let mut state = LspState::new(None);
+        state.initialize_workspace_roots(vec![directory.path().to_path_buf()]);
+        state.set_dynamic_file_watching(true);
+        state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+        for _ in 0..2 {
+            let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+            assert!(!complete);
+            assert!(files.is_empty());
+            assert_eq!(state.workspace_walk_count, 1);
+        }
+        std::fs::remove_file(&target).unwrap();
+        std::fs::write(&target, "class Recovered {}").unwrap();
+        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+        assert!(complete);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path(), target);
+        assert_eq!(state.workspace_walk_count, 2);
+        assert!(state.reported_discovery_failures.is_empty());
+        std::fs::remove_file(&target).unwrap();
+        std::os::unix::fs::symlink(&target, &target).unwrap();
+        state.watched_files_changed(std::slice::from_ref(&link));
+        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+        assert!(!complete);
+        assert!(files.is_empty());
+        assert_eq!(state.reported_discovery_failures.len(), 1);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn repaired_failure_watch_matches_the_canonical_non_dart_target() {
+        let directory = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        let target = external.path().join("input");
+        std::os::unix::fs::symlink(&target, &target).unwrap();
+        let link = directory.path().join("input");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let mut state = LspState::new(None);
+        state.initialize_workspace_roots(vec![link.clone()]);
+        let (_, complete) = state.collect_project_files(ProjectView::CrossFile);
+        assert!(!complete);
+        std::fs::remove_file(&target).unwrap();
+        std::fs::write(&target, "unsupported input").unwrap();
+        assert!(state.relevant_watched_path(&watched_path(&link), false));
+        state.watched_files_changed(std::slice::from_ref(&link));
+        assert!(state.project_paths.is_none());
+        let (_, complete) = state.collect_project_files(ProjectView::CrossFile);
+        assert!(complete);
+        assert_eq!(state.workspace_walk_count, 2);
+    }
+
+    #[test]
+    fn missing_roots_keep_project_collection_complete() {
         let directory = tempfile::tempdir().unwrap();
         let mut state = LspState::new(None);
         state.initialize_workspace_roots(vec![directory.path().join("missing")]);

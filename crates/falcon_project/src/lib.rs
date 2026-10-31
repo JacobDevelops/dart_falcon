@@ -12,8 +12,8 @@ pub use autofix::{
 pub use workspace::{Workspace, WorkspacePackage, discover_workspace};
 
 pub use discovery::{
-    DiscoveryWatch, ProjectDiscovery, SourceAcquisition, WalkOutput, acquire_source,
-    discover_project, discover_project_with_watches, walk_project,
+    DiscoveryFailure, DiscoveryWatch, ProjectDiscovery, SourceAcquisition, WalkOutput,
+    acquire_source, discover_project, discover_project_with_watches, walk_project,
 };
 pub use falcon_rules::run_cross_file as cross_file_diagnostics;
 
@@ -191,6 +191,11 @@ fn load_project_config_impl(
             configs.push(package.config);
         }
         loaded.config.set_package_configs(configs);
+        loaded
+            .config
+            .files
+            .includes
+            .set_declared_member_patterns(&workspace.declared_member_patterns);
     }
     Ok(loaded)
 }

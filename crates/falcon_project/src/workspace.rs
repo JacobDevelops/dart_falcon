@@ -17,6 +17,8 @@ pub struct Workspace {
     pub root: PathBuf,
     /// Named root and members ordered by canonical directory, using pubspec names.
     pub packages: Vec<WorkspacePackage>,
+    /// Rooted descendant globs, retained even when a declared member is inaccessible.
+    pub declared_member_patterns: Vec<String>,
 }
 
 /// A package admitted by a workspace's member declarations.
@@ -61,6 +63,7 @@ pub fn discover_workspace(start_dir: &Path) -> Option<Workspace> {
             continue;
         }
         let mut packages = BTreeMap::new();
+        let mut declared_member_patterns = Vec::new();
         let include_root = !is_pub
             && legacy_melos.as_ref().is_some_and(|value| {
                 value.get("useRootAsPackage").and_then(Value::as_bool) == Some(true)
@@ -69,6 +72,7 @@ pub fn discover_workspace(start_dir: &Path) -> Option<Workspace> {
             insert_package(root, &root.join("pubspec.yaml"), &mut packages);
         }
         if let Some(melos) = legacy_melos.as_ref() {
+            collect_member_patterns(root, melos.get("packages"), &mut declared_member_patterns);
             for manifest in member_manifests(root, melos.get("packages")) {
                 if read_yaml(&manifest).is_some() {
                     insert_package(root, &manifest, &mut packages);
@@ -83,7 +87,14 @@ pub fn discover_workspace(start_dir: &Path) -> Option<Workspace> {
         if is_pub {
             insert_package(root, &root.join("pubspec.yaml"), &mut packages);
             let mut visited = HashSet::new();
-            collect_pub_members(root, root, pub_members, &mut visited, &mut packages);
+            collect_pub_members(
+                root,
+                root,
+                pub_members,
+                &mut visited,
+                &mut packages,
+                &mut declared_member_patterns,
+            );
         }
         return Some(Workspace {
             root: root.to_path_buf(),
@@ -91,6 +102,7 @@ pub fn discover_workspace(start_dir: &Path) -> Option<Workspace> {
                 .into_iter()
                 .map(|(root, name)| WorkspacePackage { name, root })
                 .collect(),
+            declared_member_patterns,
         });
     }
     None
@@ -102,7 +114,9 @@ fn collect_pub_members(
     members: Option<&Value>,
     visited: &mut HashSet<PathBuf>,
     packages: &mut BTreeMap<PathBuf, String>,
+    declared_member_patterns: &mut Vec<String>,
 ) {
+    collect_member_patterns(declaring_root, members, declared_member_patterns);
     for manifest in member_manifests(declaring_root, members) {
         let Some(metadata) = read_yaml(&manifest) else {
             continue;
@@ -123,8 +137,20 @@ fn collect_pub_members(
             metadata.get("workspace"),
             visited,
             packages,
+            declared_member_patterns,
         );
     }
+}
+
+fn collect_member_patterns(root: &Path, members: Option<&Value>, output: &mut Vec<String>) {
+    let root = Pattern::escape(&root.to_string_lossy());
+    output.extend(patterns(members).iter().map(|pattern| {
+        Path::new(&root)
+            .join(pattern.as_str())
+            .join("**")
+            .to_string_lossy()
+            .into_owned()
+    }));
 }
 
 fn insert_package(root: &Path, manifest: &Path, packages: &mut BTreeMap<PathBuf, String>) {
@@ -210,6 +236,10 @@ fn member_manifests(root: &Path, members: Option<&Value>) -> Vec<PathBuf> {
         ]);
         filter.set_base_dir(root);
         let discovery = discover_project(&[start], &filter, true);
+        // Member manifests enrich package metadata; required sources are discovered separately.
+        for failure in &discovery.failures {
+            tracing::warn!(?failure, "failed to discover optional workspace membership");
+        }
         manifests.extend(discovery.manifests.into_iter().filter(|manifest| {
             manifest
                 .parent()
