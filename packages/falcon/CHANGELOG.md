@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.4.7 (2026-10-31)
+
+### Features
+
+- Implement `architecture-layer-boundaries` to flag forbidden dependencies between clean-architecture layers and feature internals within a package.
+- Implement `avoid-cubits` to recommend event-driven Bloc classes instead of direct or indirect Cubit subclasses, including local inheritance when the package is unresolved.
+- Implement `avoid-empty-build-when` to require an explicit `buildWhen` argument on Bloc builders and consumers.
+- Implement `avoid-excessive-expressions` with documented diagnostics and regression fixtures.
+- Implement `avoid-importing-entrypoint-exports` to detect own-package barrel imports even outside the analyzed file set, with configurable source-directory restriction.
+- Implement `avoid-local-functions` with documented diagnostics and regression fixtures.
+- Implement `avoid-missing-test-files` to require mirrored tests for source paths selected by configurable regular expressions and name the expected test path.
+- Add `avoid-misused-test-matchers` to detect matchers incompatible with known actual types, distinguish sets from lists, and check `isIn` against collection element types.
+- Implement `avoid-non-ascii-symbols` to flag non-ASCII characters written literally in strings while accepting escapes and excluding interpolation expressions.
+- Add `avoid-not-encodable-in-to-json` to detect non-encodable return values in serialization methods, including classes from fully loaded dependency packages while leaving incomplete hierarchies alone, with configurable additional method names.
+- Implement `avoid-notifier-constructors` using resolved Riverpod identities to report constructor initialization logic across notifier, async, stream, auto-dispose, family, buildless, `AnyNotifier`, and generated variants while allowing empty constructors, legacy `StateNotifier` constructors, and unrelated same-name types.
+- Add `avoid-returning-value-from-cubit-methods` to keep public Cubit commands focused on observable state, including indirect subclasses when the package is unresolved.
+- Add `avoid-similar-names` to detect confusing declaration names within overlapping local scopes or the same member/top-level declaration level, with bounded edit-distance comparisons, configurable similarity thresholds, score display, and ignored names.
+- Implement `duplicate-barrel-exports` to flag different declarations with the same name exported by independent public barrels in the same package.
+- Implement `format-test-name` with independently configurable regular expressions for `test` and `testWidgets` descriptions, resolved framework identities, constant-string evaluation, and diagnostics naming the failed pattern.
+- Implement `handle-throwing-invocations` to require matching catch clauses or covering `@Throws` metadata from `dart_code_metrics_annotations`, including constant and generic thrown-type sets.
+- Implement `match-class-name-pattern` with package-relative path patterns and configurable class-name regular expressions.
+- Add `missing-assets` to flag literal asset paths missing from Flutter asset declarations.
+- Add `no-deep-package-imports` to flag imports of dependency libraries already exported unrestricted by their public barrel.
+- Add `pass-correct-accepted-type` to check invocation arguments against package-identified `@AcceptedTypes` metadata, including inherited fields and super formals, imported declarations, contextual shorthand construction, and constant generic type sets.
+- Implement `prefer-async-value-when` to flag manual state-dispatch chains on resolved Riverpod async values.
+- Implement `prefer-bytes-builder` to recommend efficient byte composition instead of integer-list concatenation, bulk additions, and spreads, reporting each concatenation chain once and avoiding duplicate concatenation reports inside byte spreads.
+- Add `prefer-prefixed-global-constants` to enforce `allowed-prefixes` (default `k`) on top-level constants only, listing accepted prefixes in diagnostics, with `ignore-private` (default false) to exempt private constants.
+- Add `prefer-single-declaration-per-file` to keep public top-level types, including class aliases, in separate files, with private, enum and resolved `package:meta` testing exclusions.
+- Add `prefer-single-notifier-per-file` to keep resolved Riverpod notifier subclasses in separate files, including family, buildless, `AnyNotifier`, and legacy `StateNotifier` variants.
+- Add `prefer-single-widget-per-file` to keep Flutter widget subclasses in separate files, with private and testing exclusions.
+- Implement `prefer-test-structure` for framework test callbacks, enforcing ordered arrange/act/assert comments with configurable given/when/then alternatives and section-specific diagnostics.
+- Add `prefer-text-rich` to recommend Flutter's `Text.rich` instead of `RichText`, resolving constructors by package identity without flagging unrelated or shadowed names.
+- Implement `proper-super-calls` to enforce first or last direct-statement ordering for existing Flutter `State` lifecycle superclass calls, including State-constrained mixins, without checking `didChangeDependencies` or reporting missing calls.
+- Implement `require-atomic-async-updates` to detect assignments that reuse a value read before an asynchronous suspension, excluding uncaptured local variables and parameters.
+- Implement `unexported-public-api` to flag implementation declarations used across a package but missing from its public export namespace.
+- Add `unused-assets` to flag Flutter asset declarations without references in analyzed Dart sources.
+- Implement `unused-dev-dependencies` to flag resolved pubspec dev dependencies unused by analyzed Dart sources, excluding SDK dependencies, analysis-options includes and plugins, configured tools, resolved builders, executables, and `bin/*.dart` tools.
+- Implement `unused-l10n` to flag template ARB message keys with no identifier references outside generated localization files in analyzed Dart sources.
+
+### Fixes
+
+- Reject configuration and package/workspace metadata larger than 16 MiB before parsing or retaining fingerprints, preventing oversized manifests from exhausting memory during CLI and editor analysis.
+- `deprecated-member-use-from-same-package` now reports deprecated static members accessed through an import prefix.
+- Recognize Riverpod family and buildless stream notifier bases consistently in `prefer-correct-notifier-file-name` while preserving `AnyNotifier` and legacy `StateNotifier` support.
+- Recognize Riverpod family and buildless stream notifier bases consistently in `prefer-riverpod-notifier-suffix` while preserving `AnyNotifier` and legacy `StateNotifier` support.
+- The `falcon.json` JSON schema now reports `recommended` as the default for each `linter.domains` entry, matching falcon's behavior.
+
 ## 0.4.6 (2026-10-28)
 
 ### Features
