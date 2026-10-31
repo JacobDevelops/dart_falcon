@@ -21,6 +21,7 @@ fn analyze_parallel(
         false,
         falcon_analyze::Workspace::default(),
     )
+    .unwrap()
     .0
 }
 
@@ -503,7 +504,8 @@ fn panicking_rules_report_worker_errors_and_leave_the_pool_usable() {
                 true,
                 resolve,
                 falcon_analyze::Workspace::default(),
-            );
+            )
+            .unwrap();
             assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
             let failure = diagnostics
                 .iter()
@@ -560,7 +562,8 @@ fn parallel_rules_run_on_shared_stack_workers_with_and_without_resolution() {
             true,
             resolve,
             falcon_analyze::Workspace::default(),
-        );
+        )
+        .unwrap();
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(retained.len(), files.len());
     }

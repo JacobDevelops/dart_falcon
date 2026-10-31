@@ -329,6 +329,7 @@ impl LspState {
         if self.resolve_semantics && self.semantic_snapshot.is_none() {
             self.ensure_semantic_snapshot();
         }
+        self.refresh_required_source_roots(&[]);
         let document = self.documents.get(uri.as_str()).expect("open document");
         if document.version != version || document.diagnostics_parse_count != document.parse_count {
             return Err("Document changed since Falcon offered the action".to_owned());
@@ -337,6 +338,9 @@ impl LspState {
             return Err(format!(
                 "Falcon cannot fix without a valid semantic snapshot: {error}"
             ));
+        }
+        if self.semantic_source_incomplete {
+            return Err("Falcon cannot fix while semantic sources are incomplete".to_owned());
         }
         let root_index = self.root_index(&document.path);
         let config = if root_index == 0 {

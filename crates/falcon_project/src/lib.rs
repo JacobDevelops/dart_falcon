@@ -9,11 +9,11 @@ pub use autofix::{
     FixContext, FixOutcome, FixStop, apply_fix_policies, effective_fix_kind, fix_file,
     fix_file_with_context,
 };
-pub use workspace::{Workspace, WorkspacePackage, discover_workspace};
+pub use workspace::{Workspace, WorkspacePackage, discover_workspace, required_source_roots};
 
 pub use discovery::{
-    DiscoveryFailure, DiscoveryWatch, ProjectDiscovery, SourceAcquisition, WalkOutput,
-    acquire_source, discover_project, discover_project_with_watches, walk_project,
+    DiscoveryFailure, DiscoveryWatch, ProjectDiscovery, WalkOutput, discover_project,
+    discover_project_with_watches, walk_project,
 };
 pub use falcon_rules::run_cross_file as cross_file_diagnostics;
 
@@ -324,15 +324,21 @@ impl ProjectAnalysis {
     }
 }
 
+/// Diagnostics and retained project facts produced by source analysis.
+pub type SourceAnalysis = (Vec<Diagnostic>, Vec<ProjectFile>, Option<SemanticIndexes>);
+
 /// Analyze source strings, retaining parsed files and semantic indexes when required.
 /// Callers own the environment so they can retain it and deliver its warnings.
+///
+/// # Errors
+/// Returns a path-bearing error when a required project companion cannot be read.
 pub fn analyze_sources(
     analysis: &ProjectAnalysis,
     files: &[(PathBuf, String)],
     manifests: &[(PathBuf, String)],
     config: &FalconConfig,
     environment: &mut AnalysisEnvironment,
-) -> (Vec<Diagnostic>, Vec<ProjectFile>, Option<SemanticIndexes>) {
+) -> Result<SourceAnalysis, falcon_analyze::SourceFailure> {
     let packages = if analysis.resolve {
         package_identities(
             files

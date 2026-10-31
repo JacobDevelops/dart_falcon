@@ -7,9 +7,8 @@ use falcon_analyze::{
     AnalysisEnvironment, AnalyzeContext, ExternalIndexParts, ExternalLibraries, ExternalSources,
     ExternalTarget, IdentityIndex, IdentitySource, LibraryGrouping, PackageIdentity, ParsedFile,
     ProjectFile, SemanticIndexes, SignatureIndex, TypeIndex, build_semantic_indexes,
-    canonical_or_lexical, library_unit_by, package_identities, read_source,
-    rules_thread_diagnostic, source_size_diagnostic, syntax_error_diagnostics,
-    update_semantic_indexes,
+    canonical_or_lexical, library_unit_by, package_identities, rules_thread_diagnostic,
+    source_size_diagnostic, syntax_error_diagnostics, update_semantic_indexes,
 };
 use falcon_config::FalconConfig;
 use falcon_diagnostics::Diagnostic;
@@ -72,6 +71,7 @@ pub(crate) struct AutofixAnalyzer<'a> {
     companions: Vec<ProjectFile>,
     packages: Vec<PackageIdentity>,
     overlay: Option<ProjectOverlay>,
+    pub(crate) source_failure: Option<falcon_analyze::SourceFailure>,
     #[cfg(test)]
     overlay_builds: usize,
     #[cfg(test)]
@@ -117,6 +117,7 @@ impl<'a> AutofixAnalyzer<'a> {
             companions,
             packages: Vec::new(),
             overlay: None,
+            source_failure: None,
             #[cfg(test)]
             overlay_builds: 0,
             #[cfg(test)]
@@ -144,8 +145,11 @@ impl<'a> AutofixAnalyzer<'a> {
                 .with_environment(Some(self.environment));
             return analyze_document(self.analysis.registry(), self.config, &ctx, diagnostics);
         }
-        if !self.initialized {
-            self.load_external(&file);
+        if !self.initialized
+            && let Err(error) = self.load_external(&file)
+        {
+            self.source_failure = Some(error);
+            return Vec::new();
         }
         let declaration_signature = file.parsed().declaration_signature();
         if let Some(overlay) = self.overlay.as_mut().filter(|overlay| {
@@ -249,7 +253,7 @@ impl<'a> AutofixAnalyzer<'a> {
         ))
     }
 
-    fn load_external(&mut self, file: &ProjectFile) {
+    fn load_external(&mut self, file: &ProjectFile) -> Result<(), falcon_analyze::SourceFailure> {
         let path = canonical_or_lexical(self.path);
         let project_paths: std::collections::HashSet<_> = std::iter::once(path.clone())
             .chain(
@@ -268,13 +272,26 @@ impl<'a> AutofixAnalyzer<'a> {
             })
         });
         let libraries = self.external_libraries.or(owned.as_ref()).unwrap();
+        let roots =
+            crate::required_source_roots(project_paths.iter().map(std::path::PathBuf::as_path));
+        let required = |path: &Path| self.environment.project_source_required(path, &roots);
+        if let Some(error) = libraries.source_failure(required) {
+            return Err(error);
+        }
         for companion in libraries
             .project_companions()
             .filter(|candidate| owned.is_some() && !project_paths.contains(*candidate))
         {
-            if let Ok(source) = read_source(companion)
-                && let Ok((file, _)) = self.parse(companion, &source)
-            {
+            let source = match falcon_analyze::acquire_source(companion).companion(companion) {
+                Ok(Some(source)) => source,
+                Ok(None) => continue,
+                Err(error) if required(companion) => return Err(error),
+                Err(error) => {
+                    tracing::warn!("{error}");
+                    continue;
+                }
+            };
+            if let Ok((file, _)) = self.parse(companion, &source) {
                 self.companions.push(file);
             }
         }
@@ -304,6 +321,7 @@ impl<'a> AutofixAnalyzer<'a> {
         }
         self.libraries = owned;
         self.initialized = true;
+        Ok(())
     }
 }
 

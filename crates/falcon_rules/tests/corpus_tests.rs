@@ -831,7 +831,8 @@ fn cross_file_corpus_matches_expectations() {
                     packages: &packages,
                     environment: Some(&environment),
                 },
-            );
+            )
+            .unwrap();
             append_pubspec_files(&fixture_sources, &mut files);
 
             let diagnostics = registry

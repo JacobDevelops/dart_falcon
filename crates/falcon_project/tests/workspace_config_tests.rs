@@ -95,7 +95,8 @@ fn member_configuration_replaces_disabled_parent_and_controls_shared_analysis() 
         &output.manifests,
         &config,
         &mut environment,
-    );
+    )
+    .unwrap();
     let diagnostics: Vec<_> = diagnostics
         .into_iter()
         .filter(|diagnostic| diagnostic.rule == "max-lines-for-file")

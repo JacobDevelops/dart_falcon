@@ -934,7 +934,7 @@ fn empty_uri_self_imports_resolve_project_and_external_declarations_without_warn
 }
 
 #[test]
-fn directory_and_not_directory_external_imports_and_companions_are_silent() {
+fn directory_and_not_directory_imports_and_companions_are_silent() {
     let (root, app) = workspace();
     let directives = "import 'directory'; import 'file/child.dart'; \
                       part 'directory'; part 'file/child.dart';";

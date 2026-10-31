@@ -692,7 +692,7 @@ mod tests {
             true,
             true,
             falcon_analyze::Workspace::default(),
-        );
+        ).unwrap();
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         UnnecessaryNullable
             .analyze_project(
@@ -966,7 +966,7 @@ mod tests {
                         packages: &packages,
                         environment: None,
                     },
-                );
+                ).unwrap();
             assert!(diagnostics.is_empty(), "{diagnostics:?}");
             let snapshot = falcon_analyze::ParsedFile::lexical("name: app\n");
             files.push(

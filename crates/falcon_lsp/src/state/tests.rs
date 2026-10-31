@@ -1909,6 +1909,233 @@ mod source_size_tests {
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path(), canonical_or_lexical(&valid));
     }
+    #[test]
+    fn path_dependency_companions_follow_declared_workspaces() {
+        for inside in [true, false] {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path().join("workspace");
+            let app = root.join("app");
+            std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
+            std::fs::create_dir_all(app.join("lib/src")).unwrap();
+            let shared = if inside {
+                root.join("shared")
+            } else {
+                directory.path().join("shared")
+            };
+            std::fs::create_dir_all(shared.join("lib")).unwrap();
+            std::fs::write(shared.join("lib/shared.dart"), [0xff]).unwrap();
+            let relative = if inside {
+                "../../shared/"
+            } else {
+                "../../../shared/"
+            };
+            std::fs::write(app.join(".dart_tool/package_config.json"), format!(r#"{{"configVersion":2,"packages":[{{"name":"shared","rootUri":"{relative}","packageUri":"lib/"}}]}}"#)).unwrap();
+            std::fs::write(app.join("pubspec.yaml"), "name: app\n").unwrap();
+            if inside {
+                std::fs::write(
+                    root.join("pubspec.yaml"),
+                    "name: workspace_root\nworkspace: [app]\n",
+                )
+                .unwrap();
+                std::fs::write(
+                    app.join("pubspec.yaml"),
+                    "name: app\nresolution: workspace\n",
+                )
+                .unwrap();
+            }
+            let config = root.join("falcon.json");
+            std::fs::write(&config, r#"{"linter":{"rules":{"recommended":false,"correctness":{"use-key-in-widget-constructors":"warn"}}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#).unwrap();
+            let main = app.join("lib/src/main.dart");
+            let source = "import 'package:shared/shared.dart'; void main() {}";
+            std::fs::write(&main, source).unwrap();
+            std::fs::write(app.join("lib/src/orphan.dart"), "class Orphan {}").unwrap();
+            let mut state = LspState::new_from(Some(config), |_| None, root);
+            state.open(
+                &format!("file://{}", main.display()),
+                source.into(),
+                Some(1),
+            );
+            let diagnostics = state.cross_file_diagnostics();
+            if inside {
+                assert!(diagnostics.is_empty());
+            } else {
+                assert!(!state.semantic_source_incomplete);
+                assert!(state.semantic_snapshot.is_some());
+                assert!(
+                    diagnostics
+                        .values()
+                        .flatten()
+                        .any(|diagnostic| diagnostic.rule == "unused-files")
+                );
+            }
+        }
+    }
+
+    fn assert_unused_file(state: &mut LspState, name: &str) {
+        let diagnostics = state.cross_file_diagnostics();
+        assert!(
+            diagnostics
+                .values()
+                .flatten()
+                .any(|diagnostic| diagnostic.rule == "unused-files"
+                    && diagnostic.file_path.ends_with(name)),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn unopened_package_and_loose_companions_make_semantic_sources_incomplete() {
+        for packaged in [true, false] {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path();
+            let lib = root.join("affected/lib/src");
+            let observer = root.join("observer/lib");
+            std::fs::create_dir_all(&lib).unwrap();
+            std::fs::create_dir_all(&observer).unwrap();
+            if packaged {
+                std::fs::write(root.join("affected/pubspec.yaml"), "name: affected\n").unwrap();
+                std::fs::write(root.join("observer/pubspec.yaml"), "name: observer\n").unwrap();
+            }
+            let main = lib.join("main.dart");
+            let companion = lib.join("companion.dart");
+            std::fs::write(&main, "import 'companion.dart'; void main() {}").unwrap();
+            std::fs::write(&companion, "class Companion {}").unwrap();
+            std::fs::write(lib.join("orphan.dart"), "class Orphan {}").unwrap();
+            let config = root.join("falcon.json");
+            std::fs::write(&config, r#"{"linter":{"rules":{"recommended":false,"correctness":{"use-key-in-widget-constructors":"warn"}}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#).unwrap();
+            let mut state = LspState::new_from(Some(config), |_| None, root.to_path_buf());
+            state
+                .config
+                .files
+                .includes
+                .extend_excludes(&[companion.to_string_lossy().into_owned()]);
+            let observer_main = observer.join("main.dart");
+            std::fs::write(&observer_main, "void main() {}").unwrap();
+            state.open(
+                &format!("file://{}", observer_main.display()),
+                "void main() {}".into(),
+                Some(1),
+            );
+            assert_eq!(state.documents.len(), 1);
+            assert!(
+                state.project_paths.as_ref().is_some_and(|paths| paths
+                    .iter()
+                    .any(|(path, _)| path == &canonical_or_lexical(&main))),
+                "{:?}",
+                state.project_paths
+            );
+            assert_unused_file(&mut state, "orphan.dart");
+            std::fs::write(&companion, [0xff]).unwrap();
+            state.watched_files_changed(std::slice::from_ref(&companion));
+            state.ensure_semantic_snapshot();
+            assert!(state.semantic_source_incomplete, "packaged={packaged}");
+            assert!(state.cross_file_diagnostics().is_empty());
+            let fresh = lib.join("fresh.dart");
+            std::fs::write(&fresh, "class Fresh {}").unwrap();
+            std::fs::write(&companion, "class Companion {}").unwrap();
+            state.watched_files_changed(&[companion, fresh]);
+            assert_unused_file(&mut state, "fresh.dart");
+            assert!(!state.semantic_source_incomplete);
+        }
+    }
+
+    #[test]
+    fn required_companion_reads_preserve_per_file_semantics_and_recover_cross_file_results() {
+        for failure in ["invalid", "oversized"] {
+            let directory = tempfile::tempdir().unwrap();
+            let config = directory.path().join("falcon.json");
+            std::fs::write(&config, r#"{"linter":{"rules":{"recommended":false,"correctness":{"use-key-in-widget-constructors":"warn"},"suspicious":{"avoid-ignoring-return-values":"warn"}}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#).unwrap();
+            let lib = directory.path().join("lib/src");
+            std::fs::create_dir_all(&lib).unwrap();
+            std::fs::write(directory.path().join("pubspec.yaml"), "name: companions\n").unwrap();
+            let main = lib.join("main.dart");
+            let source = "import 'api.dart'; import 'companion.dart'; void main() { api(); }";
+            std::fs::write(&main, source).unwrap();
+            std::fs::write(lib.join("api.dart"), "int api() => 1;").unwrap();
+            let companion = lib.join("companion.dart");
+            std::fs::write(&companion, "class Companion {}").unwrap();
+            let orphan = lib.join("orphan.dart");
+            std::fs::write(&orphan, "class Orphan {}").unwrap();
+            let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
+            state
+                .config
+                .files
+                .includes
+                .extend_excludes(&[companion.to_string_lossy().into_owned()]);
+            state.open(
+                &format!("file://{}", main.display()),
+                source.into(),
+                Some(1),
+            );
+            assert!(state.semantic_snapshot.is_some());
+            let observer = lib.join("observer.dart");
+            let observer_uri = format!("file://{}", observer.display());
+            let observer_source = "import 'api.dart'; void observe() { api(); }";
+            std::fs::write(&observer, observer_source).unwrap();
+            state.open(&observer_uri, observer_source.into(), Some(1));
+            assert!(
+                state
+                    .analyze(&observer_uri)
+                    .iter()
+                    .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values"),
+                "readable baseline"
+            );
+            assert_unused_file(&mut state, "orphan.dart");
+            match failure {
+                "oversized" => std::fs::File::create(&companion)
+                    .unwrap()
+                    .set_len(u64::from(u32::MAX) + 1)
+                    .unwrap(),
+                _ => std::fs::write(&companion, [0xff]).unwrap(),
+            }
+            state.watched_files_changed(std::slice::from_ref(&companion));
+            state.ensure_semantic_snapshot();
+            assert!(state.semantic_snapshot.is_some(), "{failure}");
+            assert!(state.semantic_source_incomplete, "{failure}");
+            assert!(state.cross_file_diagnostics().is_empty(), "{failure}");
+            let diagnostics = state.analyze(&observer_uri);
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values"),
+                "{diagnostics:?}"
+            );
+            let resets = state.external_reset_count;
+            for version in 2..5 {
+                state.change(
+                    &format!("file://{}", main.display()),
+                    format!("{source}\n// edit {version}"),
+                    Some(version),
+                );
+                state.ensure_semantic_snapshot();
+                assert!(state.semantic_source_incomplete);
+                assert_eq!(state.external_reset_count, resets);
+            }
+            let fresh = lib.join("fresh.dart");
+            std::fs::write(&fresh, "class Fresh {}").unwrap();
+            std::fs::write(&companion, "class Companion {}").unwrap();
+            state.watched_files_changed(&[companion.clone(), fresh.clone()]);
+            assert_unused_file(&mut state, "fresh.dart");
+            assert!(state.semantic_snapshot.is_some(), "{failure}");
+            assert!(!state.semantic_source_incomplete, "{failure}");
+            std::fs::write(&companion, [0xff]).unwrap();
+            state.watched_files_changed(std::slice::from_ref(&companion));
+            assert!(state.cross_file_diagnostics().is_empty());
+            assert!(state.semantic_source_incomplete);
+            state.close(&format!("file://{}", main.display()));
+            std::fs::write(&main, "void main() {}").unwrap();
+            state.watched_files_changed(std::slice::from_ref(&main));
+            assert_unused_file(&mut state, "fresh.dart");
+            assert!(state.semantic_snapshot.is_some());
+            state.open(
+                &format!("file://{}", main.display()),
+                source.into(),
+                Some(6),
+            );
+            assert!(state.cross_file_diagnostics().is_empty());
+            assert!(state.semantic_source_incomplete);
+        }
+    }
 
     #[cfg(unix)]
     #[test]
@@ -2190,13 +2417,13 @@ mod source_size_tests {
             state.invalidate_semantic_snapshot();
             state.ensure_semantic_snapshot();
             let snapshot = state.semantic_snapshot.as_ref().unwrap();
+            assert!(snapshot.files.iter().all(|file| file.path() != rejected));
             assert!(
                 snapshot
                     .files
                     .iter()
                     .any(|file| file.path() == canonical_or_lexical(&orphan))
             );
-            assert!(snapshot.files.iter().all(|file| file.path() != rejected));
             assert!(state.semantic_snapshot_error.is_none());
 
             std::fs::remove_file(&rejected).unwrap();

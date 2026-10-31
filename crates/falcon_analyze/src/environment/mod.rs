@@ -243,6 +243,7 @@ pub struct AnalysisEnvironment {
     #[cfg(test)]
     observation_time: Option<std::time::SystemTime>,
     warnings: Arc<Mutex<EnvironmentWarnings>>,
+    project_roots: Vec<PathBuf>,
 }
 
 impl Default for AnalysisEnvironment {
@@ -252,6 +253,28 @@ impl Default for AnalysisEnvironment {
 }
 
 impl AnalysisEnvironment {
+    /// Set the frontend's analyzed project/workspace boundaries.
+    pub fn set_project_roots(&mut self, roots: impl IntoIterator<Item = PathBuf>) {
+        self.project_roots = roots
+            .into_iter()
+            .map(|root| crate::canonical_or_lexical(&std::path::absolute(&root).unwrap_or(root)))
+            .collect();
+    }
+
+    /// Classify a source against explicit frontend roots or standalone API roots.
+    #[must_use]
+    pub fn project_source_required(&self, path: &Path, fallback: &[PathBuf]) -> bool {
+        let roots = if self.project_roots.is_empty() {
+            fallback
+        } else {
+            &self.project_roots
+        };
+        let path = crate::canonical_or_lexical(
+            &std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()),
+        );
+        roots.iter().any(|root| path.starts_with(root))
+    }
+
     /// Use an explicit SDK discovery policy, including SDK-free test fixtures.
     pub fn with_sdk_locator(locator: SdkLocator) -> Self {
         Self::new(Some(locator))
@@ -274,6 +297,7 @@ impl AnalysisEnvironment {
             #[cfg(test)]
             observation_time: None,
             warnings: Arc::default(),
+            project_roots: Vec::new(),
         }
     }
 

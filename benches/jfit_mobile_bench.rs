@@ -92,6 +92,7 @@ fn bench_parse_analyze(c: &mut Criterion) {
                 false,
                 Workspace::default(),
             )
+            .unwrap()
         });
     });
     group.bench_function("parse_analyze/parallel", |b| {
@@ -104,6 +105,7 @@ fn bench_parse_analyze(c: &mut Criterion) {
                 false,
                 Workspace::default(),
             )
+            .unwrap()
         });
     });
     group.finish();
@@ -128,7 +130,8 @@ fn bench_full_pipeline(c: &mut Criterion) {
                 false,
                 false,
                 Workspace::default(),
-            );
+            )
+            .unwrap();
             sort_diagnostics(&mut diagnostics);
             format_text(&diagnostics)
         });
@@ -142,7 +145,8 @@ fn bench_full_pipeline(c: &mut Criterion) {
                 false,
                 false,
                 Workspace::default(),
-            );
+            )
+            .unwrap();
             sort_diagnostics(&mut diagnostics);
             format_text(&diagnostics)
         });

@@ -108,6 +108,28 @@ pub fn discover_workspace(start_dir: &Path) -> Option<Workspace> {
     None
 }
 
+/// Required companion scope follows analyzed packages and their declared workspaces.
+#[must_use]
+pub fn required_source_roots<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Vec<PathBuf> {
+    let paths: Vec<_> = paths.into_iter().collect();
+    let mut roots = falcon_analyze::project_source_roots(paths.iter().copied());
+    let mut directories: Vec<_> = paths
+        .into_iter()
+        .filter_map(Path::parent)
+        .map(falcon_analyze::canonical_or_lexical)
+        .collect();
+    directories.sort_unstable();
+    directories.dedup();
+    roots.extend(
+        directories
+            .iter()
+            .filter_map(|directory| discover_workspace(directory).map(|workspace| workspace.root)),
+    );
+    roots.sort_unstable();
+    roots.dedup();
+    roots
+}
+
 fn collect_pub_members(
     workspace_root: &Path,
     declaring_root: &Path,
@@ -278,6 +300,42 @@ mod tests {
         let path = root.join(path);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, source).unwrap();
+    }
+
+    #[test]
+    fn required_companion_roots_ignore_vcs_and_config_boundaries() {
+        for workspace in ["none", "pub", "melos"] {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path();
+            write(root, "falcon.json", "{}");
+            std::fs::create_dir(root.join(".jj")).unwrap();
+            write(
+                root,
+                "app/pubspec.yaml",
+                if workspace == "pub" {
+                    "name: app\nresolution: workspace\n"
+                } else {
+                    "name: app\n"
+                },
+            );
+            write(root, "app/lib/src/main.dart", "void main() {}");
+            match workspace {
+                "pub" => write(root, "pubspec.yaml", "name: repository\nworkspace: [app]\n"),
+                "melos" => write(root, "melos.yaml", "packages: [app]\n"),
+                _ => {}
+            }
+            let main = root.join("app/lib/src/main.dart");
+            let mut expected = vec![root.join("app").canonicalize().unwrap()];
+            if workspace != "none" {
+                expected.push(root.canonicalize().unwrap());
+            }
+            expected.sort_unstable();
+            assert_eq!(
+                required_source_roots([main.as_path(), main.as_path()]),
+                expected,
+                "{workspace}"
+            );
+        }
     }
 
     fn names(workspace: &Workspace) -> Vec<&str> {

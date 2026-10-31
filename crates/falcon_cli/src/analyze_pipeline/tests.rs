@@ -218,7 +218,7 @@ fn shared_fix_externals_retain_unopened_selected_part_companions() {
     ];
     let environment =
         falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator([part.as_path()], |_| None);
-    let external = super::FixExternals::load(&environment, &mut files);
+    let external = super::FixExternals::load(&environment, &mut files).unwrap();
     assert!(files.iter().any(|file| file.path() == owner));
     assert!(files.iter().any(|file| file.path() == part));
     assert!(external.libraries.project_companions().next().is_some());

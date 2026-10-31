@@ -35,11 +35,11 @@ These entries describe implemented foundation, not acceptance of the open items.
 ### V1-1 — Make analysis completeness explicit
 
 - [ ] Agree and implement a shared completeness contract. The required-project-source
-  first slice uses `falcon_project::SourceAcquisition` to distinguish acquired text,
+  first slice uses `falcon_analyze::SourceAcquisition` to distinguish acquired text,
   oversized sources and failed reads retaining their I/O error kind.
   CLI collection aborts on any required source read failure, naming the path and
   reason; LSP deliberately stays live but marks collection incomplete and suppresses
-  all cross-file results. Oversize behavior and open-buffer handling are unchanged.
+  all cross-file results. Companion failures retain partial semantic snapshots for per-file rules.
   Optional metadata remains separate: ordinary manifest failures still warn/skip,
   and oversized manifests retain their existing rejection behavior.
   `required_source_acquisition_retains_read_outcomes` covers acquired text,
@@ -51,9 +51,27 @@ These entries describe implemented foundation, not acceptance of the open items.
   publication while incomplete, and recovery to an exported orphan with no warning
   (distinct from the pre-failure unreachable-orphan warning), then requires a new
   absence warning from both frontends to prove recovery restored complete analysis.
-  Remaining callers include `falcon_analyze/src/parallel.rs` companion reads,
-  LSP semantic companion reads, `falcon_project/src/autofix_analysis.rs:275` and
-  `falcon_cli/src/analyze_pipeline.rs:649` (`FixExternals::load`).
+  Companion acquisition now shares the same lowest-owner outcome in
+  `falcon_analyze::source` (avoiding a reverse dependency on `falcon_project`).
+  Resolving analysis, LSP semantic companions, project autofix and CLI
+  `FixExternals::load` reject unreadable project companions before using partial facts.
+  Required companions are existing sources inside an analyzed package's pubspec
+  directory or its discovered pub/Melos workspace; loose sources without a pubspec
+  use their canonical containing directory. CLI current directory, VCS/config
+  roots and LSP workspace folders never independently expand this boundary.
+  LSP scope includes every discovered project source as well as open documents,
+  so packages without open buffers count. Local imports and parts within that
+  scope are required; outside path dependencies, SDK and pub-cache sources remain
+  optional and warn. Project autofix also discovers enclosing pub/Melos workspaces.
+  Missing, directory and not-a-directory directive targets remain silently absent;
+  disappearance after required-source discovery retains the earlier V1-1a contract.
+  External-source completeness remains open. Deterministic companion tests cover
+  invalid UTF-8 and sparse oversized files, CLI current-directory/path-spelling
+  invariance, errors/nonzero exits and actual `unnecessary-new` write controls,
+  direct autofix and LSP fix-all refusal, and LSP per-file semantic retention/cross-file
+  suppression. Recovery requires fresh
+  `unused-files` diagnostics, including removal of a closed owner's directive on disk;
+  repeated edits while unreadable do not reload the external layer.
   Discovery now retains typed `DiscoveryFailure::Metadata` and `Traversal`
   outcomes with paths and underlying errors, including walked Dart symlink target
   failures. CLI aborts on required paths; LSP caches partial paths separately from

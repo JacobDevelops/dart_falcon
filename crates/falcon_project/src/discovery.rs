@@ -1,5 +1,6 @@
 //! Discover Dart sources and package manifests in one pruning directory walk.
 
+use falcon_analyze::{SourceAcquisition, acquire_source};
 use falcon_config::PathFilter;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
@@ -138,26 +139,6 @@ impl std::error::Error for DiscoveryFailure {
             Self::Metadata { source, .. } => Some(source),
             Self::Traversal { source, .. } => Some(source),
         }
-    }
-}
-
-/// Acquisition of a required project source, retaining the underlying I/O reason.
-#[derive(Debug)]
-pub enum SourceAcquisition {
-    Acquired(String),
-    Oversized(std::io::Error),
-    Failed(std::io::Error),
-}
-
-/// Read a required source without treating a failed read as legitimate absence.
-#[must_use]
-pub fn acquire_source(path: &Path) -> SourceAcquisition {
-    match falcon_analyze::read_source(path) {
-        Ok(source) => SourceAcquisition::Acquired(source),
-        Err(error) if falcon_analyze::is_source_too_large(&error) => {
-            SourceAcquisition::Oversized(error)
-        }
-        Err(error) => SourceAcquisition::Failed(error),
     }
 }
 

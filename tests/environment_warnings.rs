@@ -1,4 +1,6 @@
+use std::fs;
 use std::process::Command;
+use tempfile::tempdir;
 
 #[test]
 fn malformed_package_config_is_reported_on_stderr() {
@@ -114,4 +116,150 @@ fn member_run_wide_settings_warn_once_on_stderr_only_when_present() {
         let stdout = String::from_utf8(output.stdout).unwrap();
         assert!(!stdout.contains("ignores run-wide setting"), "{stdout}");
     }
+}
+#[test]
+fn companion_scope_is_independent_of_cli_current_directory_and_spelling() {
+    let directory = tempdir().unwrap();
+    let project = directory.path().join("app");
+    let src = project.join("lib/src");
+    fs::create_dir_all(&src).unwrap();
+    fs::create_dir_all(project.join("lib/models")).unwrap();
+    fs::create_dir_all(project.join(".dart_tool")).unwrap();
+    fs::write(project.join("pubspec.yaml"), "name: app\n").unwrap();
+    let config = directory.path().join("falcon.json");
+    fs::write(&config, r#"{"linter":{"rules":{"recommended":false,"correctness":{"use-key-in-widget-constructors":"warn"}}}}"#).unwrap();
+    let cache = directory.path().join("pub-cache");
+    fs::create_dir_all(cache.join("lib")).unwrap();
+    fs::write(cache.join("pubspec.yaml"), "name: cached\n").unwrap();
+    fs::write(cache.join("lib/outside.dart"), [0xff]).unwrap();
+    fs::write(project.join(".dart_tool/package_config.json"), r#"{"configVersion":2,"packages":[{"name":"cached","rootUri":"../../pub-cache/","packageUri":"lib/"}]}"#).unwrap();
+    fs::write(project.join("lib/models/companion.dart"), [0xff]).unwrap();
+    let main = src.join("main.dart");
+    for required in [true, false] {
+        fs::write(
+            &main,
+            if required {
+                "import '../models/companion.dart'; void main() {}"
+            } else {
+                "import 'package:cached/outside.dart'; void main() {}"
+            },
+        )
+        .unwrap();
+        for (cwd, relative) in [
+            (project.as_path(), "lib/src/main.dart"),
+            (directory.path(), "app/lib/src/main.dart"),
+            (src.as_path(), "main.dart"),
+        ] {
+            for spelling in [
+                relative.to_owned(),
+                format!("./{relative}"),
+                main.display().to_string(),
+            ] {
+                let output = Command::new(env!("CARGO_BIN_EXE_falcon"))
+                    .current_dir(cwd)
+                    .args(["check", &spelling, "--config"])
+                    .arg(&config)
+                    .env_remove("DART_SDK")
+                    .env_remove("FLUTTER_ROOT")
+                    .env("PATH", "")
+                    .output()
+                    .unwrap();
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                assert_eq!(
+                    output.status.success(),
+                    !required,
+                    "{cwd:?} {spelling}: {stderr}"
+                );
+                assert!(
+                    stderr.contains(if required {
+                        "companion.dart"
+                    } else {
+                        "outside.dart"
+                    }),
+                    "{stderr}"
+                );
+                assert!(stderr.contains("UTF-8"), "{stderr}");
+                if !required {
+                    assert!(stderr.contains("warning:"), "{stderr}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn loose_file_write_rejects_unreadable_parts_without_changing_source() {
+    let directory = tempdir().unwrap();
+    let main = directory.path().join("main.dart");
+    let source = "part 'broken.dart'; class Example {} void main() { new Example(); }";
+    fs::write(&main, source).unwrap();
+    fs::write(directory.path().join("broken.dart"), [0xff]).unwrap();
+    fs::write(
+        directory.path().join("falcon.json"),
+        r#"{"linter":{"rules":{"recommended":false,"style":{"unnecessary-new":"warn"}}}}"#,
+    )
+    .unwrap();
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_falcon"))
+            .current_dir(directory.path())
+            .args(["check", "--write", "./main.dart"])
+            .env_remove("DART_SDK")
+            .env_remove("FLUTTER_ROOT")
+            .env("PATH", "")
+            .output()
+            .unwrap()
+    };
+    let failed = run();
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(!failed.status.success(), "{stderr}");
+    assert!(stderr.contains("broken.dart"), "{stderr}");
+    assert!(stderr.contains("UTF-8"), "{stderr}");
+    assert_eq!(fs::read_to_string(&main).unwrap(), source);
+    fs::write(directory.path().join("broken.dart"), "part of 'main.dart';").unwrap();
+    let recovered = run();
+    assert!(recovered.status.success(), "{recovered:?}");
+    assert!(!fs::read_to_string(&main).unwrap().contains("new Example"));
+}
+
+#[test]
+fn collected_package_companions_abort_cli_analysis() {
+    let directory = tempdir().unwrap();
+    for package in ["affected", "observer"] {
+        fs::create_dir_all(directory.path().join(package).join("lib")).unwrap();
+        fs::write(
+            directory.path().join(package).join("pubspec.yaml"),
+            format!("name: {package}\n"),
+        )
+        .unwrap();
+    }
+    fs::write(
+        directory.path().join("affected/lib/main.dart"),
+        "import 'companion.dart'; void main() {}",
+    )
+    .unwrap();
+    fs::write(
+        directory.path().join("observer/lib/main.dart"),
+        "void main() {}",
+    )
+    .unwrap();
+    fs::write(
+        directory.path().join("affected/lib/orphan.dart"),
+        "class Orphan {}",
+    )
+    .unwrap();
+    let companion = directory.path().join("affected/lib/companion.dart");
+    fs::write(&companion, [0xff]).unwrap();
+    fs::write(directory.path().join("falcon.json"), r#"{"files":{"includes":["**","!affected/lib/companion.dart"]},"linter":{"rules":{"recommended":false,"correctness":{"use-key-in-widget-constructors":"warn"}}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_falcon"))
+        .current_dir(directory.path())
+        .args(["check", "."])
+        .env_remove("DART_SDK")
+        .env_remove("FLUTTER_ROOT")
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(stderr.contains("companion.dart"), "{stderr}");
+    assert!(stderr.contains("UTF-8"), "{stderr}");
 }

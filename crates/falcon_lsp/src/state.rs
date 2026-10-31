@@ -406,6 +406,7 @@ pub struct LspState {
     previous_semantic_snapshot: Option<SemanticSnapshot>,
     /// A failed project parse or semantic build invalidates the complete view until its inputs change.
     semantic_snapshot_error: Option<std::io::Error>,
+    semantic_source_incomplete: bool,
     #[cfg(test)]
     parser_failure_path: Option<PathBuf>,
     #[cfg(test)]
@@ -537,6 +538,7 @@ impl LspState {
             semantic_snapshot: None,
             previous_semantic_snapshot: None,
             semantic_snapshot_error: None,
+            semantic_source_incomplete: false,
             #[cfg(test)]
             parser_failure_path: None,
             #[cfg(test)]
@@ -1722,6 +1724,32 @@ impl LspState {
         published
     }
 
+    fn prepare_cross_file_indexes(&mut self, files: &[ProjectFile], reuse_snapshot: bool) -> bool {
+        if !reuse_snapshot && self.cross_file_resolve_semantics {
+            // Dependency waves would otherwise parse on Rayon's global small-stack workers.
+            if let Err(error) =
+                falcon_dart_parser::with_stack(|| self.ensure_cross_file_indexes(files))
+            {
+                warn!("cross-file index worker failed: {error}");
+                // Per-file publication carries the failure until inputs change, without reloading.
+                self.semantic_snapshot = None;
+                self.previous_semantic_snapshot = None;
+                self.semantic_snapshot_error = Some(error);
+                return false;
+            }
+        }
+        if let Some(error) = self
+            .external_libraries
+            .source_failure(|path| self.environment.project_source_required(path, &[]))
+        {
+            warn!("{error}");
+            self.semantic_source_incomplete = true;
+            self.cross_file_index_cache = None;
+            return false;
+        }
+        !self.semantic_source_incomplete
+    }
+
     /// Build the cross-file diagnostics for the whole workspace, grouped by file
     /// path. Open buffers contribute their in-memory text and cached CST; every
     /// other `.dart` file under the workspace root is read and parsed from disk.
@@ -1761,18 +1789,8 @@ impl LspState {
             same_packages(&packages, &snapshot.packages).then_some(&snapshot.indexes)
         });
         let reuse_snapshot = indexes.is_some();
-        if !reuse_snapshot && self.cross_file_resolve_semantics {
-            // Dependency waves would otherwise parse on Rayon's global small-stack workers.
-            if let Err(error) =
-                falcon_dart_parser::with_stack(|| self.ensure_cross_file_indexes(&files))
-            {
-                warn!("cross-file index worker failed: {error}");
-                // Per-file publication carries the failure until inputs change, without reloading.
-                self.semantic_snapshot = None;
-                self.previous_semantic_snapshot = None;
-                self.semantic_snapshot_error = Some(error);
-                return HashMap::new();
-            }
+        if !self.prepare_cross_file_indexes(&files, reuse_snapshot) {
+            return HashMap::new();
         }
         let indexes = if reuse_snapshot {
             self.semantic_snapshot
@@ -2148,6 +2166,7 @@ impl LspState {
         self.semantic_snapshot = None;
         self.previous_semantic_snapshot = None;
         self.semantic_snapshot_error = None;
+        self.semantic_source_incomplete = false;
         self.body_only_changes.clear();
     }
 
@@ -2196,6 +2215,7 @@ impl LspState {
             self.semantic_snapshot = None;
         }
         self.semantic_snapshot_error = None;
+        self.semantic_source_incomplete = false;
         self.body_only_changes.clear();
     }
 
@@ -2419,6 +2439,12 @@ impl LspState {
         &mut self,
         files: &mut Vec<ProjectFile>,
     ) -> Option<(PathBuf, std::io::Error)> {
+        self.semantic_source_incomplete = false;
+        let required = |path: &Path| self.environment.project_source_required(path, &[]);
+        if let Some(error) = self.external_libraries.source_failure(required) {
+            warn!("{error}");
+            self.semantic_source_incomplete = true;
+        }
         // An open dependency part promotes its whole library to the project
         // view. Keep the buffered member and read only its unopened companions.
         let mut seen: HashSet<PathBuf> =
@@ -2450,8 +2476,9 @@ impl LspState {
                     .entry(path.to_path_buf())
                     .or_insert(fallback_stamp);
             }
-            match falcon_analyze::read_source(path) {
-                Ok(source) => {
+            match falcon_analyze::acquire_source(path).companion(path) {
+                Ok(None) => {}
+                Ok(Some(source)) => {
                     if let Some(cached) = self.disk_files.get_mut(path)
                         && cached.language_version == language_version
                         && cached.parsed.source() == source
@@ -2495,7 +2522,12 @@ impl LspState {
                             .expect("successful companion parses are not rejected"),
                     );
                 }
-                Err(error) => warn!("failed to read {}: {}", path.display(), error),
+                Err(error) => {
+                    warn!("failed to read {}: {}", path.display(), error);
+                    if required(path) {
+                        self.semantic_source_incomplete = true;
+                    }
+                }
             }
         }
         companion_failure
@@ -2615,6 +2647,22 @@ impl LspState {
             })
     }
 
+    fn refresh_required_source_roots(&mut self, collected: &[(PathBuf, bool)]) {
+        self.environment
+            .set_project_roots(falcon_project::required_source_roots(
+                self.documents
+                    .values()
+                    .map(|document| document.path.as_path())
+                    .chain(
+                        self.project_paths
+                            .iter()
+                            .flatten()
+                            .map(|(path, _)| path.as_path()),
+                    )
+                    .chain(collected.iter().map(|(path, _)| path.as_path())),
+            ));
+    }
+
     /// Assemble the [`ProjectFile`] set: every non-excluded `.dart` file under
     /// the workspace root, preferring an open buffer's text + cached CST over the
     /// on-disk copy. Semantic analysis also includes explicitly open buffers,
@@ -2624,6 +2672,7 @@ impl LspState {
     /// cross-file rules must not infer absence from that partial set.
     fn collect_project_files(&mut self, view: ProjectView) -> (Vec<ProjectFile>, bool) {
         let (paths, discovery_complete) = self.discover_project_paths();
+        self.refresh_required_source_roots(&paths);
         let capacity = self.prepare_project_files(&paths, view);
         let mut complete = discovery_complete;
         let open_by_path: HashMap<&Path, &DocumentState> = self
@@ -2753,10 +2802,10 @@ impl LspState {
         complete: &mut bool,
     ) -> std::io::Result<String> {
         let result = if required {
-            match falcon_project::acquire_source(path) {
-                falcon_project::SourceAcquisition::Acquired(source) => Ok(source),
-                falcon_project::SourceAcquisition::Oversized(error)
-                | falcon_project::SourceAcquisition::Failed(error) => {
+            match falcon_analyze::acquire_source(path) {
+                falcon_analyze::SourceAcquisition::Acquired(source) => Ok(source),
+                falcon_analyze::SourceAcquisition::Oversized(error)
+                | falcon_analyze::SourceAcquisition::Failed(error) => {
                     *complete = false;
                     Err(error)
                 }

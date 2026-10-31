@@ -150,6 +150,16 @@ fn closing_deleted_file_does_not_keep_buffer_in_snapshot() {
     assert!(state.semantic_snapshot.is_none());
     state.analyze(&caller_uri);
     let snapshot = state.semantic_snapshot.as_ref().unwrap();
-    assert!(!snapshot.by_path.contains_key(&path));
+    assert!(snapshot.files.iter().all(|file| file.path() != path));
+    assert!(!state.semantic_source_incomplete);
     assert!(!state.disk_files.contains_key(&path));
+    std::fs::write(&path, "int api() => 1;\n").unwrap();
+    state.watched_files_changed(std::slice::from_ref(&path));
+    assert!(state.semantic_snapshot.is_some());
+    assert!(
+        state
+            .analyze(&caller_uri)
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "avoid-ignoring-return-values")
+    );
 }

@@ -80,6 +80,7 @@ pub struct ExternalLibraries {
     eviction_roots: FxHashMap<PathBuf, usize>,
     project_companions: std::collections::BTreeMap<PathBuf, Vec<PathBuf>>,
     companion_dependencies: FxHashMap<PathBuf, CompanionDependencies>,
+    source_failures: std::sync::Mutex<Vec<crate::SourceFailure>>,
 }
 
 /// Source-validated directives: unchanged snapshots need not reparse unopened parts.
@@ -122,6 +123,105 @@ pub enum ExternalTarget {
 }
 
 impl ExternalLibraries {
+    /// Return the first unreadable source owned by this analysis scope.
+    pub fn source_failure(&self, required: impl Fn(&Path) -> bool) -> Option<crate::SourceFailure> {
+        self.source_failures
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|failure| required(&failure.path))
+            .min_by(|left, right| left.path.cmp(&right.path))
+            .cloned()
+    }
+
+    fn retain_reachable_failures(
+        &mut self,
+        environment: &AnalysisEnvironment,
+        project: &[(&Path, Program<'_>, &str)],
+    ) {
+        if self
+            .source_failures
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty()
+        {
+            return;
+        }
+        let mut sources: FxHashMap<_, Vec<_>> = FxHashMap::default();
+        for library in &self.libraries {
+            for file in library.files.iter() {
+                sources.entry(file.path.clone()).or_default().push((
+                    library.context,
+                    file.program(),
+                    file.parsed.source(),
+                ));
+            }
+        }
+        for &(path, program, source) in project {
+            let path = canonical_or_lexical(path);
+            let context = environment.context_index(&path);
+            sources.insert(path, vec![(context, program, source)]);
+        }
+        let mut reachable = FxHashSet::default();
+        let mut pending: Vec<_> = project
+            .iter()
+            .map(|(path, _, _)| canonical_or_lexical(path))
+            .collect();
+        pending.extend(self.project_companions().map(Path::to_path_buf));
+        while let Some(path) = pending.pop() {
+            if !reachable.insert(path.clone()) {
+                continue;
+            }
+            for &(context, program, source) in sources.get(&path).into_iter().flatten() {
+                pending.extend(dependencies(
+                    environment,
+                    &self.canonical_paths,
+                    context,
+                    &path,
+                    program,
+                ));
+                pending.extend(program.part_directives().filter_map(|part| {
+                    resolve(
+                        environment,
+                        &self.canonical_paths,
+                        context,
+                        &path,
+                        &part.uri().value(),
+                    )
+                }));
+                pending.extend(
+                    program
+                        .part_of_directive()
+                        .and_then(falcon_syntax::cst::PartOfDirective::uri)
+                        .and_then(|uri| {
+                            resolve(
+                                environment,
+                                &self.canonical_paths,
+                                context,
+                                &path,
+                                &uri.value(),
+                            )
+                        }),
+                );
+                pending.extend(
+                    crate::resolve::doc_imports(program, source).filter_map(|uri| {
+                        resolve(environment, &self.canonical_paths, context, &path, uri)
+                    }),
+                );
+            }
+        }
+        self.source_failures
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|failure| {
+                let keep = reachable.contains(&failure.path);
+                if !keep && let Some(id) = self.paths.get(&failure.path) {
+                    self.states[*id as usize].attempted = false;
+                }
+                keep
+            });
+    }
+
     /// Load every library reachable from `project` (path, program, source)
     /// through imports, exports and documentation imports, plus implicit
     /// `dart:core`. Conditional directives use their default URI.
@@ -169,6 +269,19 @@ impl ExternalLibraries {
         is_project: impl Fn(&Path) -> bool,
         observe_source: impl Fn(&Path, &ExternalOrigin) + Sync,
     ) {
+        let recovered = self
+            .source_failures
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .any(|failure| {
+                crate::acquire_source(&failure.path)
+                    .companion(&failure.path)
+                    .is_ok()
+            });
+        if recovered {
+            *self = Self::default();
+        }
         self.canonical_paths
             .get_mut()
             .unwrap_or_else(PoisonError::into_inner)
@@ -250,6 +363,7 @@ impl ExternalLibraries {
             self.companion_dependencies
                 .retain(|path, _| referenced.contains(path));
         }
+        self.retain_reachable_failures(environment, project);
     }
 
     fn refresh_project_evictions(&mut self, is_project: &impl Fn(&Path) -> bool) {
@@ -299,17 +413,22 @@ impl ExternalLibraries {
     ) -> Option<&CompanionDependencies> {
         let origin = environment.origin(context, path, &mut StringInterner::default());
         observe_source(path, &origin);
-        let source = match crate::source::read_source(path) {
-            Ok(source) => source,
+        self.source_failures
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|failure| failure.path != path);
+        let source = match crate::acquire_source(path).companion(path) {
+            Ok(Some(source)) => source,
+            Ok(None) => {
+                self.companion_dependencies.remove(path);
+                return None;
+            }
             Err(error) => {
-                if !matches!(
-                    error.kind(),
-                    std::io::ErrorKind::NotFound
-                        | std::io::ErrorKind::IsADirectory
-                        | std::io::ErrorKind::NotADirectory
-                ) {
-                    environment.warn(path, error);
-                }
+                warn_source_failure(environment, &error);
+                self.source_failures
+                    .get_mut()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(error);
                 self.companion_dependencies.remove(path);
                 return None;
             }
@@ -404,7 +523,9 @@ impl ExternalLibraries {
         } else {
             context
         };
-        let fresh = if state.sdk.is_none() {
+        let fresh = if !state.attempted {
+            self.pending_contexts.insert((id, context))
+        } else if state.sdk.is_none() {
             id == next || (context != state.context && self.pending_contexts.insert((id, context)))
         } else {
             self.register_context(id, context) || id == next
@@ -519,11 +640,11 @@ impl ExternalLibraries {
                     let loaded = load_library(
                         environment,
                         &self.canonical_paths,
-                        id,
-                        &path,
+                        (id, &path),
                         context,
                         origin,
                         observe_source,
+                        &self.source_failures,
                     );
                     (id, path, context, local, sdk, loaded)
                 })
@@ -1228,11 +1349,11 @@ fn dependencies(
 fn load_library(
     environment: &AnalysisEnvironment,
     canonical_paths: &CanonicalPaths,
-    path_id: u32,
-    path: &Path,
+    (path_id, path): (u32, &Path),
     context: Option<usize>,
     origin: ExternalOrigin,
     observe_source: &(impl Fn(&Path, &ExternalOrigin) + Sync),
+    failures: &std::sync::Mutex<Vec<crate::SourceFailure>>,
 ) -> std::io::Result<Option<(ExternalLibrary, Vec<PathBuf>)>> {
     // Each file parses at its package's language version (SDK: current).
     let read = |path: &Path| {
@@ -1242,7 +1363,7 @@ fn load_library(
                 .language_version_canonical(path)
         });
         observe_source(path, &origin);
-        read(environment, path, package_version)
+        read(environment, path, package_version, failures)
     };
     let Some(defining) = read(path)? else {
         return Ok(None);
@@ -1306,23 +1427,34 @@ fn load_library(
     )))
 }
 
+fn warn_source_failure(environment: &AnalysisEnvironment, error: &crate::SourceFailure) {
+    tracing::warn!("{error}");
+    if !matches!(
+        error.source.kind(),
+        std::io::ErrorKind::NotFound
+            | std::io::ErrorKind::NotADirectory
+            | std::io::ErrorKind::IsADirectory
+    ) {
+        environment.warn(&error.path, &error.source);
+    }
+}
+
 /// `None` when the source is unreadable; `Err` when the parser worker fails.
 fn read(
     environment: &AnalysisEnvironment,
     path: &Path,
     package_version: Option<LanguageVersion>,
+    failures: &std::sync::Mutex<Vec<crate::SourceFailure>>,
 ) -> std::io::Result<Option<ExternalFile>> {
-    let source = match crate::source::read_source(path) {
-        Ok(source) => source,
+    let source = match crate::acquire_source(path).companion(path) {
+        Ok(Some(source)) => source,
+        Ok(None) => return Ok(None),
         Err(error) => {
-            if !matches!(
-                error.kind(),
-                std::io::ErrorKind::NotFound
-                    | std::io::ErrorKind::IsADirectory
-                    | std::io::ErrorKind::NotADirectory
-            ) {
-                environment.warn(path, error);
-            }
+            warn_source_failure(environment, &error);
+            failures
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(error);
             return Ok(None);
         }
     };
@@ -1677,7 +1809,11 @@ mod tests {
             .set_len(u64::from(u32::MAX) + 1)
             .unwrap();
         let environment = AnalysisEnvironment::with_sdk_locator(|_| None);
-        assert!(read(&environment, &imported, None).unwrap().is_none());
+        assert!(
+            read(&environment, &imported, None, &std::sync::Mutex::default())
+                .unwrap()
+                .is_none()
+        );
         let error = crate::source::read_source(&imported).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         assert!(error.to_string().contains("maximum supported source size"));

@@ -3,6 +3,115 @@
 use std::io::{self, Read};
 use std::path::Path;
 
+/// Acquisition of a required source, distinct from legitimate absence.
+#[derive(Debug)]
+pub enum SourceAcquisition {
+    Acquired(String),
+    Oversized(io::Error),
+    Failed(io::Error),
+}
+
+/// A required source could not be read.
+#[derive(Debug, Clone)]
+pub struct SourceFailure {
+    pub path: std::path::PathBuf,
+    pub source: std::sync::Arc<io::Error>,
+}
+
+impl std::fmt::Display for SourceFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "failed to read file {}: {}",
+            self.path.display(),
+            self.source
+        )
+    }
+}
+
+impl std::error::Error for SourceFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
+impl SourceAcquisition {
+    /// Return acquired text or retain the failing source path and underlying I/O error.
+    ///
+    /// # Errors
+    /// Returns an error for unreadable or oversized sources.
+    pub fn required(self, path: &Path) -> Result<String, SourceFailure> {
+        match self {
+            Self::Acquired(source) => Ok(source),
+            Self::Oversized(source) | Self::Failed(source) => Err(SourceFailure {
+                path: path.to_path_buf(),
+                source: std::sync::Arc::new(source),
+            }),
+        }
+    }
+
+    /// Read a directive target, preserving genuine failures rather than legitimate absence.
+    ///
+    /// # Errors
+    /// Returns genuine read failures, but not missing or non-file targets.
+    pub fn companion(self, path: &Path) -> Result<Option<String>, SourceFailure> {
+        match self {
+            Self::Failed(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound
+                        | io::ErrorKind::IsADirectory
+                        | io::ErrorKind::NotADirectory
+                ) =>
+            {
+                Ok(None)
+            }
+            acquisition => acquisition.required(path).map(Some),
+        }
+    }
+}
+
+/// Acquire bounded source text while preserving oversized and ordinary read failures.
+#[must_use]
+pub fn acquire_source(path: &Path) -> SourceAcquisition {
+    match read_source(path) {
+        Ok(source) => SourceAcquisition::Acquired(source),
+        Err(error) if is_source_too_large(&error) => SourceAcquisition::Oversized(error),
+        Err(error) => SourceAcquisition::Failed(error),
+    }
+}
+
+/// Package roots, or containing directories for loose requested sources.
+#[must_use]
+pub fn project_source_roots<'a>(
+    paths: impl IntoIterator<Item = &'a Path>,
+) -> Vec<std::path::PathBuf> {
+    let paths: Vec<_> = paths
+        .into_iter()
+        .map(|path| {
+            crate::canonical_or_lexical(
+                &std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()),
+            )
+        })
+        .collect();
+    let mut directories: Vec<_> = paths.iter().filter_map(|path| path.parent()).collect();
+    directories.sort_unstable();
+    directories.dedup();
+    let mut roots: Vec<_> = directories
+        .into_iter()
+        .map(|directory| {
+            directory
+                .ancestors()
+                .find(|root| root.join("pubspec.yaml").is_file())
+                .unwrap_or(directory)
+                .to_path_buf()
+        })
+        .collect();
+    roots.sort_unstable();
+    roots.dedup();
+    roots
+}
+
 #[derive(Debug)]
 struct SourceTooLarge(u64);
 

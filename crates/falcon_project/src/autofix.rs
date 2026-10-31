@@ -171,13 +171,24 @@ pub fn fix_file_with_context(
     context: FixContext<'_>,
 ) -> FixOutcome {
     let mut analyzer = AutofixAnalyzer::new(analysis, config, environment, path, context);
-    fix_with_cancellation(
+    let outcome = fix_with_cancellation(
         source,
         unsafe_fixes,
         MAX_NONCONVERGING_ITERATIONS,
         context.cancelled,
         |source| analyzer.analyze(source),
-    )
+    );
+    if let Some(error) = analyzer.source_failure {
+        return FixOutcome {
+            source: source.to_owned(),
+            diagnostics: Vec::new(),
+            stop: Some(FixStop::AnalysisFailure {
+                message: error.to_string(),
+                rules: Vec::new(),
+            }),
+        };
+    }
+    outcome
 }
 
 #[cfg(test)]
@@ -414,6 +425,40 @@ fn unique_rules(rules: Vec<&'static str>) -> Vec<&'static str> {
 mod tests {
     use super::*;
     use falcon_diagnostics::{Fix, Severity, Span, TextEdit};
+
+    #[test]
+    fn unreadable_companions_prevent_autofix_from_using_partial_facts() {
+        for failure in ["invalid", "oversized"] {
+            let directory = tempfile::tempdir().unwrap();
+            let config_path = directory.path().join("falcon.json");
+            std::fs::write(directory.path().join("pubspec.yaml"), "name: app\n").unwrap();
+            std::fs::write(&config_path, r#"{"linter":{"rules":{"recommended":false,"correctness":{"use-key-in-widget-constructors":"warn"},"style":{"unnecessary-new":"warn"}}}}"#).unwrap();
+            let config = falcon_rules::load_config(&config_path).unwrap().config;
+            let analysis = ProjectAnalysis::new(&config);
+            assert!(analysis.resolve());
+            let main = directory.path().join("main.dart");
+            let original = "part 'companion.dart'; class C {} C f() => new C();\n";
+            let companion = directory.path().join("companion.dart");
+            std::fs::write(&companion, [0xff]).unwrap();
+            if failure == "oversized" {
+                std::fs::File::create(&companion)
+                    .unwrap()
+                    .set_len(u64::from(u32::MAX) + 1)
+                    .unwrap();
+            }
+            let mut environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+            let outcome = fix_file(&analysis, &config, &mut environment, &main, original, false);
+            assert_eq!(outcome.source, original);
+            let Some(FixStop::AnalysisFailure { message, .. }) = outcome.stop else {
+                panic!("expected a source failure");
+            };
+            assert!(message.contains("companion.dart"), "{message}");
+            assert!(message.contains("failed to read file"), "{message}");
+            std::fs::write(&companion, "part of 'main.dart';").unwrap();
+            let readable = fix_file(&analysis, &config, &mut environment, &main, original, false);
+            assert_eq!(readable.source, original.replace("new ", ""));
+        }
+    }
 
     #[test]
     fn many_shrinking_fixes_converge_beyond_the_iteration_limit() {

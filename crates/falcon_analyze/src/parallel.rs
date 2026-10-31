@@ -20,6 +20,8 @@ use crate::{
     AnalyzeContext, ParsedFile, ProjectFile, RuleRegistry, SemanticIndexes, build_semantic_indexes,
 };
 
+type AnalysisOutput = (Vec<Diagnostic>, Vec<ProjectFile>, Option<SemanticIndexes>);
+
 /// Parse `source`, run every per-file rule (with no project index), and
 /// optionally keep the parsed program for the cross-file pass. This is the fast
 /// path: resolver-dependent rules are not enabled, so no cross-file index is
@@ -140,26 +142,11 @@ fn analyze_indexed(
     config: &FalconConfig,
     parallel: bool,
     workspace: Workspace<'_>,
-) -> (Vec<Diagnostic>, SemanticIndexes) {
+) -> Result<(Vec<Diagnostic>, SemanticIndexes), crate::SourceFailure> {
     // Partition files into libraries, then build the type index (each type
     // inheriting its library's unresolved-part flag) and per-file library units.
     let externals = load_indexed_externals(parsed, workspace);
-    // Opening a dependency part promotes the defining library into the project
-    // view. Index its unopened companions without linting them as requested files.
-    let mut companion_sources: Vec<(PathBuf, Box<str>)> = externals
-        .as_ref()
-        .into_iter()
-        .flat_map(|(libraries, _, project_paths)| {
-            libraries
-                .project_companions()
-                .filter(|path| !project_paths.contains(*path))
-        })
-        .filter_map(|path| {
-            crate::source::read_source(path)
-                .ok()
-                .map(|source| (path.to_path_buf(), source.into_boxed_str()))
-        })
-        .collect();
+    let mut companion_sources = read_companion_sources(parsed, workspace, externals.as_ref())?;
     let mut companion_diagnostics = Vec::new();
     let companions: Vec<SourceParse<'_>> = companion_sources
         .iter_mut()
@@ -231,20 +218,70 @@ fn analyze_indexed(
         parsed.iter().enumerate().flat_map(run_one).collect()
     };
     diagnostics.extend(companion_diagnostics);
-    (
+    Ok((
         diagnostics,
         SemanticIndexes {
             types: type_index,
             identities,
             signatures,
         },
-    )
+    ))
+}
+
+type IndexedExternals<'a> = (ExternalLibraries, &'a AnalysisEnvironment, HashSet<PathBuf>);
+
+fn read_companion_sources(
+    parsed: &[SourceParse<'_>],
+    workspace: Workspace<'_>,
+    externals: Option<&IndexedExternals<'_>>,
+) -> Result<Vec<(PathBuf, Box<str>)>, crate::SourceFailure> {
+    let roots = crate::project_source_roots(
+        parsed.iter().map(|file| file.path).chain(
+            workspace
+                .packages
+                .iter()
+                .map(|package| package.lib_root.as_path()),
+        ),
+    );
+    let required = |path: &Path| {
+        workspace.environment.map_or_else(
+            || {
+                roots
+                    .iter()
+                    .any(|root| crate::canonical_or_lexical(path).starts_with(root))
+            },
+            |environment| environment.project_source_required(path, &roots),
+        )
+    };
+    if let Some((libraries, _, _)) = externals
+        && let Some(error) = libraries.source_failure(required)
+    {
+        return Err(error);
+    }
+    // Opening a dependency part promotes its unopened companions without linting them.
+    externals
+        .into_iter()
+        .flat_map(|(libraries, _, project_paths)| {
+            libraries
+                .project_companions()
+                .filter(|path| !project_paths.contains(*path))
+        })
+        .filter_map(|path| match crate::acquire_source(path).companion(path) {
+            Ok(Some(source)) => Some(Ok((path.to_path_buf(), source.into_boxed_str()))),
+            Ok(None) => None,
+            Err(error) if required(path) => Some(Err(error)),
+            Err(error) => {
+                tracing::warn!("{error}");
+                None
+            }
+        })
+        .collect()
 }
 
 fn load_indexed_externals<'a>(
     parsed: &[SourceParse<'_>],
     workspace: Workspace<'a>,
-) -> Option<(ExternalLibraries, &'a AnalysisEnvironment, HashSet<PathBuf>)> {
+) -> Option<IndexedExternals<'a>> {
     workspace
         .environment
         .map(|environment| {
@@ -291,7 +328,9 @@ impl Workspace<'_> {
 /// Analyze files in parallel, optionally retaining parsed programs for cross-file
 /// analysis and building shared semantic indexes before per-file rules run.
 /// Without resolution, each file is parsed and analyzed in one step.
-#[must_use]
+///
+/// # Errors
+/// Returns the path and I/O failure of any unreadable required project companion.
 pub fn analyze_parallel_collecting_resolving(
     registry: &RuleRegistry,
     files: &[(PathBuf, String)],
@@ -299,7 +338,7 @@ pub fn analyze_parallel_collecting_resolving(
     collect_programs: bool,
     resolve: bool,
     workspace: Workspace<'_>,
-) -> (Vec<Diagnostic>, Vec<ProjectFile>, Option<SemanticIndexes>) {
+) -> Result<AnalysisOutput, crate::SourceFailure> {
     crate::with_rules_stack(|| {
         analyze_parallel_inner(
             registry,
@@ -311,14 +350,14 @@ pub fn analyze_parallel_collecting_resolving(
         )
     })
     .unwrap_or_else(|error| {
-        (
+        Ok((
             files
                 .iter()
                 .map(|(path, _)| crate::rules_thread_diagnostic(path, &error))
                 .collect(),
             Vec::new(),
             None,
-        )
+        ))
     })
 }
 
@@ -329,7 +368,7 @@ fn analyze_parallel_inner(
     collect_programs: bool,
     resolve: bool,
     workspace: Workspace<'_>,
-) -> (Vec<Diagnostic>, Vec<ProjectFile>, Option<SemanticIndexes>) {
+) -> Result<AnalysisOutput, crate::SourceFailure> {
     if !resolve {
         let (diagnostics, retained): (Vec<Vec<Diagnostic>>, Vec<Option<ProjectFile>>) = files
             .par_iter()
@@ -337,11 +376,11 @@ fn analyze_parallel_inner(
                 analyze_file(registry, path, source, config, collect_programs, workspace)
             })
             .unzip();
-        return (
+        return Ok((
             diagnostics.into_iter().flatten().collect(),
             retained.into_iter().flatten().collect(),
             None,
-        );
+        ));
     }
     let mut diagnostics = Vec::new();
     let parsed: Vec<Result<SourceParse<'_>, Box<Diagnostic>>> = files
@@ -371,17 +410,19 @@ fn analyze_parallel_inner(
         })
         .collect();
     diagnostics.extend(parse_diagnostics);
-    let (file_diagnostics, indexes) = analyze_indexed(registry, &parsed, config, true, workspace);
+    let (file_diagnostics, indexes) = analyze_indexed(registry, &parsed, config, true, workspace)?;
     if diagnostics.is_empty() {
         diagnostics = file_diagnostics;
     } else {
         diagnostics.extend(file_diagnostics);
     }
-    (diagnostics, retain(parsed, collect_programs), Some(indexes))
+    Ok((diagnostics, retain(parsed, collect_programs), Some(indexes)))
 }
 
 /// Sequential counterpart of [`analyze_parallel_collecting_resolving`].
-#[must_use]
+///
+/// # Errors
+/// Returns the path and I/O failure of any unreadable required project companion.
 pub fn analyze_sequential_collecting_resolving(
     registry: &RuleRegistry,
     files: &[(PathBuf, String)],
@@ -389,7 +430,7 @@ pub fn analyze_sequential_collecting_resolving(
     collect_programs: bool,
     resolve: bool,
     workspace: Workspace<'_>,
-) -> (Vec<Diagnostic>, Vec<ProjectFile>, Option<SemanticIndexes>) {
+) -> Result<AnalysisOutput, crate::SourceFailure> {
     crate::with_rules_stack(|| {
         analyze_sequential_inner(
             registry,
@@ -401,14 +442,14 @@ pub fn analyze_sequential_collecting_resolving(
         )
     })
     .unwrap_or_else(|error| {
-        (
+        Ok((
             files
                 .iter()
                 .map(|(path, _)| crate::rules_thread_diagnostic(path, &error))
                 .collect(),
             Vec::new(),
             None,
-        )
+        ))
     })
 }
 
@@ -419,7 +460,7 @@ fn analyze_sequential_inner(
     collect_programs: bool,
     resolve: bool,
     workspace: Workspace<'_>,
-) -> (Vec<Diagnostic>, Vec<ProjectFile>, Option<SemanticIndexes>) {
+) -> Result<AnalysisOutput, crate::SourceFailure> {
     if !resolve {
         let mut diagnostics = Vec::new();
         let mut retained = Vec::new();
@@ -429,7 +470,7 @@ fn analyze_sequential_inner(
             diagnostics.extend(diags);
             retained.extend(file);
         }
-        return (diagnostics, retained, None);
+        return Ok((diagnostics, retained, None));
     }
     let mut diagnostics = Vec::new();
     let parsed: Vec<SourceParse<'_>> = files
@@ -448,11 +489,11 @@ fn analyze_sequential_inner(
             }
         })
         .collect();
-    let (file_diagnostics, indexes) = analyze_indexed(registry, &parsed, config, false, workspace);
+    let (file_diagnostics, indexes) = analyze_indexed(registry, &parsed, config, false, workspace)?;
     if diagnostics.is_empty() {
         diagnostics = file_diagnostics;
     } else {
         diagnostics.extend(file_diagnostics);
     }
-    (diagnostics, retain(parsed, collect_programs), Some(indexes))
+    Ok((diagnostics, retain(parsed, collect_programs), Some(indexes)))
 }

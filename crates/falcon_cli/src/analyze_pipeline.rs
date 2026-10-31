@@ -296,6 +296,9 @@ fn collect_selected_check(
         Some(locator) => AnalysisEnvironment::with_sdk_locator(locator),
         None => AnalysisEnvironment::default(),
     };
+    environment.set_project_roots(falcon_project::required_source_roots(
+        files.iter().map(|(path, _)| path.as_path()),
+    ));
     let mut diff = String::new();
     let mut fix_reports = Vec::new();
     if options.write {
@@ -309,7 +312,7 @@ fn collect_selected_check(
             (&mut files, &manifests),
             &root,
             (&mut diff, &mut fix_reports),
-        );
+        )?;
         analysis.set_autofix_snapshots(false);
     }
     let total_files = files.len();
@@ -321,7 +324,7 @@ fn collect_selected_check(
         &mut files,
         &mut manifests,
         &mut unmatched,
-    );
+    )?;
 
     let fix_failed = !fix_reports.is_empty();
     diagnostics.append(&mut fix_reports);
@@ -470,11 +473,12 @@ fn apply_selected_fixes(
     sources: (&mut [SourceText], &[SourceText]),
     root: &Path,
     reports: (&mut String, &mut Vec<Diagnostic>),
-) {
+) -> Result<(), String> {
     let (diff, fix_reports) = reports;
     let (files, manifests) = sources;
     let (mut initial, mut fix_files, _) =
-        analyze_sources(analysis, files, manifests, config, environment);
+        analyze_sources(analysis, files, manifests, config, environment)
+            .map_err(|error| error.to_string())?;
     falcon_rules::apply_severities(&mut initial, config);
     falcon_project::apply_fix_policies(config, &mut initial);
     let fixable: HashSet<_> = initial
@@ -487,8 +491,13 @@ fn apply_selected_fixes(
         })
         .map(|diagnostic| diagnostic.file_path)
         .collect();
+    if !analysis.resolve() && !fixable.is_empty() {
+        load_fix_companions(environment, &mut fix_files).map_err(|error| error.to_string())?;
+    }
     let external = (analysis.resolve() && !fixable.is_empty())
-        .then(|| FixExternals::load(environment, &mut fix_files));
+        .then(|| FixExternals::load(environment, &mut fix_files))
+        .transpose()
+        .map_err(|error| error.to_string())?;
     for (path, source) in files {
         if !fixable.contains(path.to_string_lossy().as_ref()) {
             continue;
@@ -544,6 +553,7 @@ fn apply_selected_fixes(
             *source = outcome.source;
         }
     }
+    Ok(())
 }
 
 fn finish_project_analysis(
@@ -554,10 +564,11 @@ fn finish_project_analysis(
     files: &mut Vec<(PathBuf, String)>,
     manifests: &mut Vec<(PathBuf, String)>,
     unmatched: &mut Vec<Diagnostic>,
-) -> (Vec<Diagnostic>, Vec<ProjectFile>, bool, bool) {
+) -> Result<(Vec<Diagnostic>, Vec<ProjectFile>, bool, bool), String> {
     let collect_programs = analysis.collect_programs();
     let (mut diagnostics, mut project_files, indexes) =
-        analyze_sources(analysis, files, manifests, config, environment);
+        analyze_sources(analysis, files, manifests, config, environment)
+            .map_err(|error| error.to_string())?;
     if collect_programs {
         project_files.extend(
             manifests
@@ -600,7 +611,7 @@ fn finish_project_analysis(
                 .map(|(path, source)| (path.as_path(), source.as_str())),
         );
     }
-    (diagnostics, project_files, pipeline_failed, has_unmatched)
+    Ok((diagnostics, project_files, pipeline_failed, has_unmatched))
 }
 
 fn fix_report(path: &Path, message: &str) -> Diagnostic {
@@ -627,39 +638,60 @@ thread_local! {
     static FIX_EXTERNAL_LOADS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+fn load_fix_companions(
+    environment: &AnalysisEnvironment,
+    files: &mut Vec<ProjectFile>,
+) -> Result<ExternalLibraries, falcon_analyze::SourceFailure> {
+    let paths: HashSet<_> = files
+        .iter()
+        .map(|file| falcon_analyze::canonical_or_lexical(file.path()))
+        .collect();
+    let roots: Vec<_> = files
+        .iter()
+        .map(|file| (file.path(), file.program(), file.source()))
+        .collect();
+    let libraries = ExternalLibraries::load(environment, &roots, |path| paths.contains(path));
+    // A selected part can promote its unopened library companions out of
+    // the external graph. Keep those in the shared project snapshot.
+    let roots = falcon_project::required_source_roots(paths.iter().map(PathBuf::as_path));
+    let required = |path: &Path| environment.project_source_required(path, &roots);
+    if let Some(error) = libraries.source_failure(required) {
+        return Err(error);
+    }
+    for path in libraries
+        .project_companions()
+        .filter(|path| !paths.contains(*path))
+    {
+        let source = match falcon_analyze::acquire_source(path).companion(path) {
+            Ok(Some(source)) => source,
+            Ok(None) => continue,
+            Err(error) if required(path) => return Err(error),
+            Err(error) => {
+                tracing::warn!("{error}");
+                continue;
+            }
+        };
+        let Ok((parsed, _)) =
+            ParsedFile::try_parse_for_package(source, environment.package_language_version(path))
+        else {
+            continue;
+        };
+        files.push(
+            ProjectFile::new(path.to_path_buf(), Arc::new(parsed))
+                .expect("a successful parse produces a project snapshot"),
+        );
+    }
+    Ok(libraries)
+}
+
 impl FixExternals {
-    fn load(environment: &AnalysisEnvironment, files: &mut Vec<ProjectFile>) -> Self {
+    fn load(
+        environment: &AnalysisEnvironment,
+        files: &mut Vec<ProjectFile>,
+    ) -> Result<Self, falcon_analyze::SourceFailure> {
         #[cfg(test)]
         FIX_EXTERNAL_LOADS.with(|loads| loads.set(loads.get() + 1));
-        let paths: HashSet<_> = files
-            .iter()
-            .map(|file| falcon_analyze::canonical_or_lexical(file.path()))
-            .collect();
-        let roots: Vec<_> = files
-            .iter()
-            .map(|file| (file.path(), file.program(), file.source()))
-            .collect();
-        let libraries = ExternalLibraries::load(environment, &roots, |path| paths.contains(path));
-        // A selected part can promote its unopened library companions out of
-        // the external graph. Keep those in the shared project snapshot.
-        for path in libraries
-            .project_companions()
-            .filter(|path| !paths.contains(*path))
-        {
-            let Ok(source) = falcon_analyze::read_source(path) else {
-                continue;
-            };
-            let Ok((parsed, _)) = ParsedFile::try_parse_for_package(
-                source,
-                environment.package_language_version(path),
-            ) else {
-                continue;
-            };
-            files.push(
-                ProjectFile::new(path.to_path_buf(), Arc::new(parsed))
-                    .expect("a successful parse produces a project snapshot"),
-            );
-        }
+        let libraries = load_fix_companions(environment, files)?;
         let external = ExternalSources {
             libraries: &libraries,
             environment,
@@ -674,12 +706,12 @@ impl FixExternals {
             &identities,
             &types,
         ));
-        Self {
+        Ok(Self {
             libraries,
             identities,
             types,
             signatures,
-        }
+        })
     }
 
     fn indexes(&self) -> ExternalIndexParts<'_> {

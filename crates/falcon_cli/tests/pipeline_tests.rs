@@ -69,6 +69,100 @@ fn oversized_sources_abort_before_partial_workspace_analysis() {
 }
 
 #[test]
+fn unreadable_project_companions_abort_checks_and_writes() {
+    for failure in ["invalid", "oversized"] {
+        let temp = tempdir().unwrap();
+        fs::write(temp.path().join("pubspec.yaml"), "name: app\n").unwrap();
+        let config = temp.path().join("falcon.json");
+        fs::write(&config, r#"{"linter":{"rules":{"recommended":false,"correctness":{"use-key-in-widget-constructors":"warn"},"style":{"unnecessary-new":"warn"}}}}"#).unwrap();
+        let main = temp.path().join("main.dart");
+        let original = "part 'companion.dart'; class C {} C f() => new C();\n";
+        fs::write(&main, original).unwrap();
+        let companion = temp.path().join("companion.dart");
+        fs::write(&companion, [0xff]).unwrap();
+        if failure == "oversized" {
+            fs::File::create(&companion)
+                .unwrap()
+                .set_len(u64::from(u32::MAX) + 1)
+                .unwrap();
+        }
+        for write in [false, true] {
+            let options = CheckOptions {
+                paths: vec![main.clone()],
+                config_path: Some(config.clone()),
+                write,
+                quiet: true,
+                ..Default::default()
+            };
+            let error = collect_check(&options).unwrap_err();
+            assert!(error.contains("failed to read file"), "{error}");
+            assert!(error.contains("companion.dart"), "{error}");
+            let reason = match failure {
+                "oversized" => "maximum supported source size",
+                _ => "UTF-8",
+            };
+            assert!(error.contains(reason), "{error}");
+            assert_ne!(run_check(&options), 0);
+            assert_eq!(fs::read_to_string(&main).unwrap(), original);
+        }
+        fs::write(&companion, "part of 'main.dart';").unwrap();
+        collect_check(&CheckOptions {
+            paths: vec![main.clone()],
+            config_path: Some(config),
+            write: true,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(&main).unwrap(),
+            original.replace("new ", "")
+        );
+    }
+}
+
+#[test]
+fn path_dependency_companions_follow_declared_workspaces() {
+    let directory = tempdir().unwrap();
+    let root = directory.path().join("workspace");
+    fs::create_dir_all(root.join("app/lib")).unwrap();
+    fs::create_dir_all(root.join("app/.dart_tool")).unwrap();
+    fs::write(root.join("falcon.json"), r#"{"linter":{"rules":{"recommended":false,"correctness":{"use-key-in-widget-constructors":"warn"}}}}"#).unwrap();
+    fs::write(
+        root.join("pubspec.yaml"),
+        "name: workspace_root\nworkspace: [app]\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("app/pubspec.yaml"),
+        "name: app\nresolution: workspace\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("app/lib/main.dart"),
+        "import 'package:shared/shared.dart'; void main() {}",
+    )
+    .unwrap();
+    for (relative, required) in [("../../shared/", true), ("../../../shared/", false)] {
+        let shared = root.join("app/.dart_tool").join(relative);
+        fs::create_dir_all(shared.join("lib")).unwrap();
+        fs::write(shared.join("lib/shared.dart"), [0xff]).unwrap();
+        fs::write(root.join("app/.dart_tool/package_config.json"), format!(r#"{{"configVersion":2,"packages":[{{"name":"shared","rootUri":"{relative}","packageUri":"lib/"}}]}}"#)).unwrap();
+        let result = collect_check(&CheckOptions {
+            paths: vec![root.join("app/lib/main.dart")],
+            config_path: Some(root.join("falcon.json")),
+            ..Default::default()
+        });
+        assert_eq!(result.is_err(), required, "{relative}: {result:?}");
+        if let Err(error) = result {
+            assert!(
+                error.contains("shared.dart") && error.contains("UTF-8"),
+                "{error}"
+            );
+        }
+    }
+}
+
+#[test]
 fn secure_pubspec_urls_uses_security_configuration_and_rejects_old_group() {
     let temp = tempdir().unwrap();
     fs::write(
@@ -971,7 +1065,8 @@ fn test_default_output_matches_ordered_sequential_diagnostics() {
                 packages: &packages,
                 environment: Some(&environment),
             },
-        );
+        )
+        .unwrap();
     falcon_rules::apply_severities(&mut sequential, &config);
     sequential.extend(
         falcon_rules::run_cross_file(

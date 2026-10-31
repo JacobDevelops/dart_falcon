@@ -311,6 +311,71 @@ fn resolving_rejects_failed_semantic_snapshot() {
 }
 
 #[test]
+fn fix_all_rejects_incomplete_package_companions_independently_of_workspace_folder() {
+    for folder in ["", "app", "app/lib/src"] {
+        for required in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path();
+            let app = root.join("app");
+            std::fs::create_dir_all(app.join("lib/src")).unwrap();
+            std::fs::create_dir_all(app.join("lib/models")).unwrap();
+            std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
+            std::fs::create_dir_all(root.join("shared/lib")).unwrap();
+            std::fs::write(app.join("pubspec.yaml"), "name: app\n").unwrap();
+            std::fs::write(root.join("shared/pubspec.yaml"), "name: shared\n").unwrap();
+            std::fs::write(root.join("shared/lib/shared.dart"), [0xff]).unwrap();
+            std::fs::write(app.join("lib/models/model.dart"), [0xff]).unwrap();
+            std::fs::write(app.join(".dart_tool/package_config.json"), r#"{"configVersion":2,"packages":[{"name":"shared","rootUri":"../../shared/","packageUri":"lib/"}]}"#).unwrap();
+            let config = root.join("falcon.json");
+            std::fs::write(&config, r#"{"linter":{"rules":{"recommended":false,"correctness":{"use-key-in-widget-constructors":"warn"},"style":{"unnecessary-new":"warn"}}},"cross-file":{"enabled":false}}"#).unwrap();
+            let mut state = LspState::new_from(Some(config), |_| None, root.join(folder));
+            state.config.files.includes.extend_excludes(&[
+                root.join("shared").to_string_lossy().into_owned(),
+                app.join("lib/models").to_string_lossy().into_owned(),
+            ]);
+            let uri = format!("file://{}", app.join("lib/src/main.dart").display());
+            let source = format!(
+                "import 'package:shared/shared.dart'; {} class C {{}} C f() => new C();",
+                if required {
+                    "import '../models/model.dart';"
+                } else {
+                    ""
+                }
+            );
+            state.open(&uri, source, Some(1));
+            assert_eq!(state.semantic_source_incomplete, required, "{folder}");
+            let action = || CodeAction {
+                data: Some(serde_json::json!({"uri": uri, "version": 1, "includeUnsafe": false})),
+                ..Default::default()
+            };
+            if required {
+                assert!(
+                    state
+                        .resolve_code_action(action(), &|| false)
+                        .unwrap_err()
+                        .contains("incomplete")
+                );
+            } else {
+                assert!(
+                    state
+                        .resolve_code_action(action(), &|| false)
+                        .unwrap()
+                        .edit
+                        .is_some()
+                );
+                state.semantic_source_incomplete = true;
+                assert!(
+                    state
+                        .resolve_code_action(action(), &|| false)
+                        .unwrap_err()
+                        .contains("incomplete")
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn fix_all_reuses_published_external_graph_and_indexes() {
     let directory = tempfile::tempdir().unwrap();
     let app = directory.path().join("app");

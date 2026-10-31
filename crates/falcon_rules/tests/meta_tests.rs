@@ -448,7 +448,8 @@ fn every_options_type_is_declared_and_loaded_options_execute() {
         true,
         true,
         Workspace::default(),
-    );
+    )
+    .unwrap();
     assert!(
         diagnostics
             .iter()
@@ -1483,7 +1484,8 @@ fn library_dependent_rules_analyze_parts_when_enabled_alone() {
             false,
             falcon_rules::requires_resolution(&registry),
             Workspace::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(
             diagnostics
                 .iter()

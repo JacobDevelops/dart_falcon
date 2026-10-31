@@ -57,7 +57,8 @@ fn assert_subset_visibility(include_library: bool, configured: bool) {
             packages: &[],
             environment: Some(&environment),
         },
-    );
+    )
+    .unwrap();
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(
         retained.len(),
@@ -140,7 +141,8 @@ fn unopened_local_declarations_retain_deprecation_annotations() {
             packages: &[],
             environment: Some(&environment),
         },
-    );
+    )
+    .unwrap();
     let indexes = indexes.unwrap();
     let model = SemanticModel::new(
         &a,
@@ -207,7 +209,8 @@ fn part_only_indexes_uri_owner_siblings_and_imports() {
             packages: &[],
             environment: Some(&environment),
         },
-    );
+    )
+    .unwrap();
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(retained.len(), 1);
     assert_eq!(retained[0].path(), part);
@@ -344,4 +347,117 @@ fn failed_local_import_targets_remain_available_for_file_watches() {
             path.display(),
         );
     }
+}
+
+#[test]
+fn unreadable_project_companions_abort_both_resolving_engines() {
+    for directive in ["part", "import"] {
+        for failure in ["invalid", "oversized"] {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path();
+            fs::write(root.join("pubspec.yaml"), "name: app\n").unwrap();
+            let companion = root.join("companion.dart");
+            fs::write(&companion, [0xff]).unwrap();
+            if failure == "oversized" {
+                fs::File::create(&companion)
+                    .unwrap()
+                    .set_len(u64::from(u32::MAX) + 1)
+                    .unwrap();
+            }
+            let files = vec![(
+                root.join("main.dart"),
+                format!("{directive} 'companion.dart';"),
+            )];
+            let environment = AnalysisEnvironment::discover_with_sdk_locator([root], |_| None);
+            for analyze in [
+                falcon_analyze::analyze_sequential_collecting_resolving,
+                falcon_analyze::analyze_parallel_collecting_resolving,
+            ] {
+                let error = analyze(
+                    &RuleRegistry::new(),
+                    &files,
+                    &FalconConfig::default(),
+                    true,
+                    true,
+                    Workspace {
+                        packages: &[],
+                        environment: Some(&environment),
+                    },
+                )
+                .err()
+                .unwrap();
+                assert_eq!(error.path, companion);
+                assert_eq!(error.source.kind(), std::io::ErrorKind::InvalidData);
+                assert!(error.to_string().contains("failed to read file"));
+                if failure == "oversized" {
+                    assert!(error.to_string().contains("maximum supported source size"));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn absent_project_directive_targets_do_not_abort_resolving_engines() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    fs::write(root.join("pubspec.yaml"), "name: app\n").unwrap();
+    fs::create_dir(root.join("directory.dart")).unwrap();
+    fs::write(root.join("file.dart"), "").unwrap();
+    let environment = AnalysisEnvironment::discover_with_sdk_locator([root], |_| None);
+    for target in ["missing.dart", "directory.dart", "file.dart/child.dart"] {
+        for directive in ["import", "part"] {
+            let files = vec![(root.join("main.dart"), format!("{directive} '{target}';"))];
+            for analyze in [
+                falcon_analyze::analyze_sequential_collecting_resolving,
+                falcon_analyze::analyze_parallel_collecting_resolving,
+            ] {
+                assert!(
+                    analyze(
+                        &RuleRegistry::new(),
+                        &files,
+                        &FalconConfig::default(),
+                        true,
+                        true,
+                        Workspace {
+                            packages: &[],
+                            environment: Some(&environment)
+                        },
+                    )
+                    .is_ok(),
+                    "{directive} {target}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn unreadable_sources_outside_project_warn_without_aborting() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("app");
+    fs::create_dir(&root).unwrap();
+    fs::write(root.join("pubspec.yaml"), "name: app\n").unwrap();
+    let external = directory.path().join("external.dart");
+    fs::write(&external, [0xff]).unwrap();
+    let environment = AnalysisEnvironment::discover_with_sdk_locator([root.as_path()], |_| None);
+    let files = vec![(root.join("main.dart"), "import '../external.dart';".into())];
+    let result = analyze_sequential_collecting_resolving(
+        &RuleRegistry::new(),
+        &files,
+        &FalconConfig::default(),
+        true,
+        true,
+        Workspace {
+            packages: &[],
+            environment: Some(&environment),
+        },
+    );
+    assert!(result.is_ok());
+    assert!(
+        environment
+            .take_warnings()
+            .iter()
+            .any(|warning| warning.contains("external.dart") && warning.contains("UTF-8"))
+    );
 }
