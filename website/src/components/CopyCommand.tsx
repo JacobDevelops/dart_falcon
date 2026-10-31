@@ -1,19 +1,27 @@
 import { useState } from 'react'
 import { Icon } from './Icon'
 
-/** A one-line shell command with a copy button; the command stays selectable without JS. */
-export function CopyCommand({ command }: { command: string }) {
+/** A selectable snippet with a copy button. */
+export function CopyCommand({
+  command,
+  prompt = true,
+  label = 'Copy command',
+}: {
+  command: string
+  prompt?: boolean
+  label?: string
+}) {
   const [copied, setCopied] = useState(false)
   return (
     <div className="cmd">
       <code>
-        <span className="cmd-prompt" aria-hidden="true">$ </span>
+        {prompt ? <span className="cmd-prompt" aria-hidden="true">$ </span> : null}
         {command}
       </code>
       <button
         type="button"
         className="cmd-copy"
-        aria-label={copied ? 'Copied' : 'Copy command'}
+        aria-label={copied ? 'Copied' : label}
         onClick={() =>
           navigator.clipboard.writeText(command).then(() => {
             setCopied(true)

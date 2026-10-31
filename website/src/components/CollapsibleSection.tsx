@@ -14,13 +14,15 @@ export function CollapsibleSection({
   title,
   children,
   className = '',
+  defaultExpanded = true,
 }: {
   id: string
   title: ReactNode
   children: ReactNode
   className?: string
+  defaultExpanded?: boolean
 }) {
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(defaultExpanded)
   const registerSection = useCallback((section: HTMLElement | null) => {
     if (!section) return
     sectionExpanders.set(section, () => setExpanded(true))

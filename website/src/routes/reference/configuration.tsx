@@ -6,6 +6,9 @@ import { CollapsibleSection } from '../../components/CollapsibleSection'
 import { breadcrumbs, seo } from '../../lib/seo'
 import { configKeyId } from '../../lib/headings'
 import configJson from '../../data/config-reference.json'
+import cli from '../../data/cli.json'
+import { CodeBlock } from '../../components/CodeBlock'
+import { CopyCommand } from '../../components/CopyCommand'
 
 export const Route = createFileRoute('/reference/configuration')({
   head: () =>
@@ -35,28 +38,90 @@ function topLevel(path: string): string {
 
 const sections = [...new Set(config.map((key) => topLevel(key.path)))]
 
+const schemaUrl = `https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v${cli.version}/schema/falcon.schema.json`
+
+function keyExample(entry: ConfigKey): string | undefined {
+  const crossFile = entry.path.includes('cross-file')
+  const path = entry.path
+    .replace('<group>', crossFile ? 'correctness' : 'suspicious')
+    .replace('<rule>', crossFile ? 'unused-files' : 'avoid-dynamic')
+    .split('.')
+  const values: Record<string, unknown> = {
+    baseline: 'falcon-baseline.json',
+    'max-errors': 100,
+    'error-on-warnings': true,
+    includes: ['test/**', '!test/fixtures/**'],
+    enabled: false,
+    recommended: false,
+  }
+  const last = path[path.length - 1]
+  let example: unknown = entry.allowedValues?.includes('warn')
+    ? 'warn'
+    : entry.allowedValues?.includes('recommended')
+      ? 'all'
+      : values[last]
+  if (entry.path === 'files.includes') example = ['**', '!build/**', '!**/*.g.dart']
+  if (example === undefined) return undefined
+  for (const key of path.reverse()) {
+    if (key === 'overrides[]') {
+      const override: Record<string, unknown> = {
+        includes: values.includes,
+        ...(example as Record<string, unknown>),
+      }
+      if (entry.path === 'overrides[].includes') {
+        override.linter = { enabled: false }
+      }
+      example = { overrides: [override] }
+    } else {
+      example = { [key]: example }
+    }
+  }
+  return JSON.stringify(example, null, 2)
+}
+
 function KeyEntry({ entry }: { entry: ConfigKey }) {
   const isRulePath = entry.path.includes('<rule>')
+  const example = entry.path === '$schema' ? undefined : keyExample(entry)
   return (
     <div className="config-key" id={configKeyId(entry.path)}>
-      <div className="config-key-head">
-        <code className="config-path">{entry.path}</code>
-        <code className="config-type">{entry.type}</code>
-      </div>
-      <p className="config-desc">{entry.description}</p>
-      <div className="config-meta">
+      {entry.path !== topLevel(entry.path) ? (
+        <h3 className="config-key-head">
+          <code className="config-path">{entry.path}</code>
+        </h3>
+      ) : null}
+      <p className="config-signature">
+        Type: <code>{entry.type}</code>
         {'default' in entry ? (
-          <span className="flag-tag">
-            default: <code>{JSON.stringify(entry.default)}</code>
-          </span>
+          <> · Default: <code>{JSON.stringify(entry.default)}</code></>
         ) : null}
-        <ValueList values={entry.allowedValues} />
-        {isRulePath ? (
-          <span className="flag-tag">
-            <Link to="/linter/rules">browse rule ids →</Link>
-          </span>
-        ) : null}
-      </div>
+      </p>
+      <p className="config-desc">
+        {entry.path === '$schema'
+          ? `Use this exact URL for falcon ${cli.version}. It enables rule-name autocomplete and configuration validation in your editor.`
+          : entry.description}
+      </p>
+      {entry.allowedValues?.length || isRulePath ? (
+        <div className="config-meta">
+          <ValueList values={entry.allowedValues} />
+          {isRulePath ? (
+            <span className="flag-tag">
+              <Link to="/linter/rules">browse rule ids →</Link>
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {entry.path === '$schema' ? (
+        <CopyCommand
+          command={`"$schema": "${schemaUrl}"`}
+          prompt={false}
+          label="Copy schema setting"
+        />
+      ) : example ? (
+        <details className="config-example">
+          <summary>Example<span className="visually-hidden"> for {entry.path}</span></summary>
+          <CodeBlock code={example} filename="falcon.json" lang="json" />
+        </details>
+      ) : null}
     </div>
   )
 }

@@ -14,5 +14,5 @@ export const Route = createFileRoute('/docs/configuration')({
       type: 'article',
       jsonLd: [breadcrumbs([['Docs', '/docs/getting-started'], ['Configuration', '/docs/configuration']])],
     }),
-  component: () => <DocsPage source={source} />,
+  component: () => <DocsPage source={source} tocDepth={2} className="config-guide" />,
 })

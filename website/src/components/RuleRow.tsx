@@ -26,7 +26,6 @@ export function RuleRow({ rule, omitDomain }: { rule: RuleSummary; omitDomain?: 
       <Link to="/linter/rules/$rule" params={{ rule: rule.name }} className="rule-name">
         {rule.name}
       </Link>
-      {rule.upstreamId ? <code className="rule-sci">{rule.upstreamId}</code> : null}
       <span className="rule-badges">
         <RuleBadges rule={rule} omitDomain={omitDomain} />
       </span>

@@ -17,12 +17,11 @@ export const Route = createFileRoute('/linter/rules/$rule')({
   head: ({ loaderData, params }) => {
     if (!loaderData) return {}
     const { rule } = loaderData
-    const alias = rule.source.upstreamId ? ` (${rule.source.upstreamId})` : ''
     const path = `/linter/rules/${params.rule}`
     const group = groupLabel(rule.group)
     const description = `${rule.name}: ${rule.description.replace(/`/g, '').replace(/\.?$/, '.')} ${group} lint rule for Dart${rule.domains.includes('flutter') ? ' and Flutter' : ''} in falcon.`
     return seo({
-      title: `${rule.name}${alias} | Dart Falcon`,
+      title: `${rule.name} | Dart Falcon`,
       description,
       path,
       markdownPath: `${path}.md`,

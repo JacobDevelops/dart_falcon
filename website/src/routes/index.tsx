@@ -1,11 +1,10 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { Fragment, type CSSProperties } from 'react'
-import { BenchSummaryChart } from '../components/BenchChart'
 import { CodeBlock } from '../components/CodeBlock'
 import { CopyCommand } from '../components/CopyCommand'
 import { Icon } from '../components/Icon'
 import { Tabs } from '../components/Tabs'
-import { scenarioSummaries, summaryText } from '../lib/benchmarks'
+import { cacheLabel, formatRange, scenarioSummaries, speedup } from '../lib/benchmarks'
 import { highlightDart } from '../lib/highlight'
 import { REPO_URL } from '../lib/rules'
 import { getHomeData } from '../lib/server'
@@ -69,7 +68,9 @@ const INSTALL_MISE = `[tools]
 
 function Home() {
   const { coverage, hero, bench } = Route.useLoaderData()
-  const [lead, ...rest] = scenarioSummaries(bench)
+  const summaries = scenarioSummaries(bench)
+  const lead = summaries.find((s) => cacheLabel(s.scenario) === 'Cold' && (s.scenario.comparator ?? 'dart-analyze') === 'dart-analyze')
+  const warm = summaries.find((s) => cacheLabel(s.scenario) === 'Warm' && (s.scenario.comparator ?? 'dart-analyze') === 'dart-analyze')
   const maxGroup = Math.max(...coverage.groups.map((g) => g.count))
   return (
     <>
@@ -80,9 +81,8 @@ function Home() {
               The fast Dart linter <span className="nowrap">&amp; Flutter linter</span>
             </h1>
             <p className="lede">
-              falcon runs {coverage.total} Dart lint rules for Dart and Flutter
-              projects from a single Rust binary. It parses Dart itself, so it never
-              boots the Dart analyzer, and it speaks LSP for your editor.
+              {coverage.total} Dart lint rules. One Rust binary.
+              Built-in editor support, without starting the Dart analyzer.
             </p>
             <CopyCommand command="dart pub global activate falcon" />
             <div className="hero-cta">
@@ -94,27 +94,19 @@ function Home() {
               </Link>
             </div>
           </div>
-          <div className="hero-figure">
-            {lead ? (
-              <>
-                <BenchSummaryChart summary={lead} />
-                <ul className="bench-notes">
-                  {rest.map((s) => (
-                    <li key={s.scenario.id}>{summaryText(s)}</li>
-                  ))}
-                  <li>
-                    Each scenario enables matching rule names within its rule family.
-                    Matching names do not imply identical work or diagnostic output.
-                    {' '}When measured, <code>dart analyze</code> also type-checks;
-                    falcon does not.
-                  </li>
-                </ul>
-                <Link to="/benchmarks" className="more-link">
-                  All {bench.runs.length} runs and methodology <Icon name="arrow" />
-                </Link>
-              </>
-            ) : null}
-          </div>
+          {lead ? (
+            <div className="hero-figure">
+              <p className="hero-speed">
+                <strong>{lead.slower.length === 0 ? formatRange(lead.min, lead.max) : 'Mixed results'}</strong>
+                <span>{lead.slower.length === 0 ? 'faster than' : 'versus'} {speedup(lead.comparableRuns[0]).versus.name}</span>
+                <span className="bench-desc">{lead.scenario.title} · {lead.comparableRuns.length} {lead.comparableRuns.length === 1 ? 'corpus' : 'corpora'}</span>
+              </p>
+              <p className="note">dart analyze also type-checks; falcon doesn't.</p>
+              <Link to="/benchmarks" className="more-link">
+                Results and methodology <Icon name="arrow" />
+              </Link>
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -203,9 +195,14 @@ function Home() {
             <p>
               falcon runs beside the analyzer, not inside it, so it adds no
               plugin to your analysis server.
-              {lead ? ` ${summaryText(lead)}` : ''}{' '}
               Every rule is free and MIT licensed.
             </p>
+            {warm ? (
+              <p className="note">
+                {warm.slower.length === 0 ? 'falcon was faster on every matched warm-cache corpus.' : `${speedup(warm.comparableRuns[0]).versus.name} was faster on ${warm.slower.length} of ${warm.comparableRuns.length} warm-cache corpora.`}{' '}
+                <Link to="/benchmarks">Cold and warm benchmarks</Link>.
+              </p>
+            ) : null}
             <Link to="/compare" className="more-link">
               Compare falcon with other Dart linters <Icon name="arrow" />
             </Link>

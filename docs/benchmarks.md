@@ -2,7 +2,7 @@
 
 These are local, whole-command measurements of release falcon, `dart analyze`, DCM, and DCL, not a claim that the tools perform identical work. The same-rules family compares falcon with `dart analyze`; the DCM/DCL family uses its own shared ruleset. `dart analyze` additionally performs full Dart type analysis and reports compiler errors, warnings, and non-lint diagnostics. Falcon is not a replacement for that type checker.
 
-The machine-readable results, individual wall-clock samples, exact commands, diagnostic distributions, source revisions, and dependency-resolution failures are published in [benchmarks.json](https://github.com/JacobDevelops/dart_falcon/blob/main/website/src/data/benchmarks.json). The [interactive benchmark page](https://dart-falcon.jacobdevelops.com/benchmarks) reads the same data.
+The machine-readable results, individual wall-clock samples, exact commands, diagnostic distributions, source revisions, and dependency-resolution failures are published in [benchmarks.json](https://github.com/JacobDevelops/dart_falcon/blob/main/website/src/data/benchmarks.json). The [interactive benchmark page](https://dart-falcon.jacobdevelops.com/benchmarks) reads the same data: cold and warm charts share a time scale within each corpus and rule family. Expand its measurement tables and methodology for the full detail.
 
 ## Corpora
 

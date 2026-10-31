@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { DocsLayout } from '../components/DocsLayout'
 import { CollapsibleSection } from '../components/CollapsibleSection'
 import { Toc } from '../components/Toc'
-import { corpusLabel, formatSpeedup, headlineSummary, scenarioSummaries, unmeasuredTools, type ScenarioSummary } from '../lib/benchmarks'
+import { corpusLabel, formatSpeedup, scenarioSummaries, summaryText, unmeasuredTools, type ScenarioSummary } from '../lib/benchmarks'
 import { getCompareData } from '../lib/server'
 import { breadcrumbs, seo } from '../lib/seo'
 
@@ -74,13 +74,13 @@ function Cite({ href, n }: { href: string; n: number }) {
 }
 
 const toc = [
-  { id: 'performance-h', title: 'Measured performance' },
   { id: 'comparison-h', title: 'At a glance' },
+  { id: 'performance-h', title: 'Measured performance' },
   { id: 'alt-h', title: 'When to pick which' },
   { id: 'faq-h', title: 'Questions' },
   { id: 'src-h', title: 'Sources' },
 ]
-const tocWithoutPerformance = toc.slice(1)
+const tocWithoutPerformance = toc.filter((item) => item.id !== 'performance-h')
 
 function Compare() {
   const { coverage, bench } = Route.useLoaderData()
@@ -134,16 +134,16 @@ function Compare() {
     [
       'Configuration',
       <><code>falcon.json</code> with a JSON Schema</>,
-      <><code>analysis_options.yaml</code><Cite href={SOURCES.dartAnalysis} n={7} /></>,
-      <>A <code>dcm</code> entry in <code>analysis_options.yaml</code><Cite href={SOURCES.dcmConfig} n={4} /></>,
-      <><code>analysis_options.yaml</code> analyzer plugin<Cite href={SOURCES.customLint} n={6} /></>,
+      <><code>analysis_<wbr />options.<wbr />yaml</code><Cite href={SOURCES.dartAnalysis} n={7} /></>,
+      <>A <code>dcm</code> entry in <code>analysis_<wbr />options.<wbr />yaml</code><Cite href={SOURCES.dcmConfig} n={4} /></>,
+      <><code>analysis_<wbr />options.<wbr />yaml</code> analyzer plugin<Cite href={SOURCES.customLint} n={6} /></>,
     ],
     [
       'Status',
       'Actively developed, pre-1.0',
       'Maintained by the Dart team',
       <>Actively released<Cite href={SOURCES.dcmPricing} n={3} /></>,
-      <>Repository archived; the README recommends <a href={SOURCES.serverPlugin}>analysis_server_plugin</a> instead<Cite href={SOURCES.customLint} n={6} /></>,
+      <>Repository archived; the README recommends <a href={SOURCES.serverPlugin}>analysis_<wbr />server_<wbr />plugin</a> instead<Cite href={SOURCES.customLint} n={6} /></>,
     ],
   ]
 
@@ -152,20 +152,49 @@ function Compare() {
       <header className="page-head">
         <h1>Dart linter comparison: falcon, dart analyze, DCM and custom_lint</h1>
         <p className="lede">
-          Looking for a DCM alternative or a custom_lint alternative? Compare
-          falcon as a Dart linter and Flutter linter, including where a{' '}
-          <code>dart analyze</code> alternative for linting still needs the
-          analyzer for type checking. falcon's numbers come from its rule catalog
-          and <Link to="/benchmarks">benchmarks</Link>; other claims link to public sources.
-          {` ${headlineSummary(bench)}`}
+          Compare Dart and Flutter linters by rules, price and workflow.
+          Keep <code>dart analyze</code> for type checking; add falcon for linting.
         </p>
+        <p className="note">falcon's numbers come from its <Link to="/linter/rules">rule catalog</Link> and <Link to="/benchmarks">benchmarks</Link>; other claims link to public sources.</p>
       </header>
 
+      <CollapsibleSection id="comparison-h" title="At a glance" className="rule-section">
+        <p className="note">On narrow screens, scroll sideways to compare all four tools.</p>
+        <div className="table-scroll compare-scroll" role="region" aria-label="Linter feature comparison, scroll horizontally" tabIndex={0}>
+          <table className="compare">
+            <caption>Dart and Flutter linters at a glance</caption>
+            <thead>
+              <tr>
+                <th scope="col">
+                  <span className="visually-hidden">Aspect</span>
+                </th>
+                <th scope="col" className="is-falcon">falcon</th>
+                <th scope="col">dart analyze</th>
+                <th scope="col">DCM</th>
+                <th scope="col">custom_lint</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(([label, ...cells]) => (
+                <tr key={label}>
+                  <th scope="row">{label}</th>
+                  {cells.map((c, i) => (
+                    <td key={i} className={i === 0 ? 'is-falcon' : undefined}>
+                      {c}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CollapsibleSection>
       {summaries.length > 0 ? (
         <CollapsibleSection id="performance-h" title="Measured performance" className="rule-section">
-          <div className="table-scroll">
+          <p className="note">On narrow screens, scroll sideways to compare all four tools.</p>
+          <div className="table-scroll compare-scroll" role="region" aria-label="Linter performance comparison, scroll horizontally" tabIndex={0}>
             <table className="compare">
-              <caption>Measured performance; geometric-mean time ratios relative to falcon</caption>
+              <caption>Geometric-mean time ratios vs falcon</caption>
               <thead>
                 <tr>
                   <th scope="col">Measurement</th>
@@ -199,39 +228,11 @@ function Compare() {
               </tbody>
             </table>
           </div>
-        </CollapsibleSection>
-      ) : null}
-
-      <CollapsibleSection id="comparison-h" title="At a glance" className="rule-section">
-        <div className="table-scroll">
-          <table className="compare">
-            <caption>Dart and Flutter linters at a glance</caption>
-            <thead>
-              <tr>
-                <th scope="col">
-                  <span className="visually-hidden">Aspect</span>
-                </th>
-                <th scope="col" className="is-falcon">falcon</th>
-                <th scope="col">dart analyze</th>
-                <th scope="col">DCM</th>
-                <th scope="col">custom_lint</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(([label, ...cells]) => (
-                <tr key={label}>
-                  <th scope="row">{label}</th>
-                  {cells.map((c, i) => (
-                    <td key={i} className={i === 0 ? 'is-falcon' : undefined}>
-                      {c}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {summaries.length > 0 ? (
+          <ul className="note">
+            {summaries.filter((s) => s.slower.length > 0).map((s) => (
+              <li key={s.scenario.id}>{summaryText(s)}</li>
+            ))}
+          </ul>
           <p className="note">
             Each timing is a mean of repeated runs. Speed cells use the geometric
             mean of per-corpus time ratios against falcon on the matched corpora
@@ -240,8 +241,8 @@ function Compare() {
             <Link to="/benchmarks">per-corpus charts and methodology</Link>, which
             also list the machine, versions, and commands.
           </p>
-        ) : null}
-      </CollapsibleSection>
+        </CollapsibleSection>
+      ) : null}
 
       <CollapsibleSection id="alt-h" title="When to pick which" className="rule-section">
         <h3>A dart analyze alternative for lint rules</h3>

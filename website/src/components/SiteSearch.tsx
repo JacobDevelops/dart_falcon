@@ -164,7 +164,7 @@ export default function SiteSearch({ open, onClose }: { open: boolean, onClose: 
             </Link>
           ))}
         </div>
-        <p className="site-search-help"><span>↑ ↓ to choose · Enter to open · Esc to close</span><span>Rule ids also accept underscores</span></p>
+        <p className="site-search-help">↑ ↓ to choose · Enter to open · Esc to close</p>
       </div>
     </dialog>
   )

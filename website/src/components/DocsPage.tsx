@@ -58,11 +58,15 @@ export function MarkdownContent({ source }: { source: string }) {
   )
 }
 
-export function DocsPage({ source }: { source: string }) {
-  const headings = useMemo(() => extractHeadings(source), [source])
+export function DocsPage({ source, tocDepth = 3, className = '' }: {
+  source: string
+  tocDepth?: 2 | 3
+  className?: string
+}) {
+  const headings = useMemo(() => extractHeadings(source).filter(({ level }) => level <= tocDepth), [source, tocDepth])
   return (
     <DocsLayout aside={headings.length ? <Toc items={headings} /> : undefined}>
-      <article className="prose">
+      <article className={`prose ${className}`.trim()}>
         <MarkdownContent source={source} />
       </article>
     </DocsLayout>

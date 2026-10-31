@@ -12,7 +12,7 @@ export const Route = createFileRoute('/linter/rules/')({
   loader: () => getRulesIndex(),
   head: ({ loaderData }) => seo({
     title: 'Dart lint rules | Dart Falcon',
-    description: `Explore ${loaderData?.coverage.total ?? ''} falcon lint rules for Dart and Flutter by group, framework, Dart alias, and recommended defaults, with diagnostics and examples.`,
+    description: `Explore ${loaderData?.coverage.total ?? ''} falcon lint rules for Dart and Flutter by group, framework, and recommended defaults, with diagnostics and examples.`,
     path: '/linter/rules',
     jsonLd: [breadcrumbs([['Rules', '/linter/rules']])],
   }),

@@ -1,106 +1,37 @@
 # Configuring falcon (`falcon.json`)
 
+Use `falcon.json` to choose rules, tune their severity, and apply settings by path. For top-level and section keys, use the [configuration reference](https://dart-falcon.jacobdevelops.com/reference/configuration). For rule-specific settings, see [rule options](#rule-options) and [autofix policy](#autofix-policy).
+
+## Find your configuration
+
 falcon reads `falcon.json`. Discovery order (first match wins):
 
 1. `falcon.json` in the current directory
 2. `falcon.json` at the nearest enclosing Git or Jujutsu repository root (`.git` or `.jj`)
 3. `~/.falcon.json`
 
-If no config is found, falcon enables its own recommended set: 215 recommended
-rules out of 538 shipped rules, at their default severity (warning), chosen independently of upstream presets.
+If no config is found, falcon enables its own recommended set: 215 recommended rules out of 538 shipped rules, at their default severity (warning), chosen independently of upstream presets.
 
-A config that **is** found but fails to load is a hard **error**: falcon prints
-a message and exits non-zero rather than silently falling back to defaults. This
-covers invalid JSON, wrong-typed values, `max-errors: 0` (see
-[`max-errors`](#max-errors)), and the [legacy flat
-schema](#migrating-from-the-legacy-flat-schema). Discovery and explicit
-`--config` behave identically here, so a typo can never quietly re-enable every
-rule.
+A config that **is** found but fails to load is a hard **error**: falcon prints a message and exits non-zero rather than silently falling back to defaults. This covers invalid JSON, wrong-typed values, `max-errors: 0` (see [`max-errors`](#max-errors)), and the [legacy flat schema](#migrating-from-the-legacy-flat-schema).
 
-## Unknown and legacy keys
+Discovery and explicit `--config` behave identically here, so a typo can never quietly re-enable every rule.
 
-Unknown keys at any configuration depth and unknown domain names are **errors**:
-the message names the full key path, and the configuration does not load. Rule
-`options` retain their rule-specific validation. An override may omit `includes`
-to apply everywhere, but a misspelled `includes` is rejected.
+### Start with a minimal example
 
-The deprecated spellings `project` and `cross_file` (for `cross-file`) and
-`max_errors` (for `max-errors`) still load with deprecation warnings pointing at
-`falcon migrate`, including inside overrides. Registered legacy rule ids also
-load with warnings. The CLI prints configuration warnings; the language server
-sends them to the editor. The published JSON schema accepts canonical keys only.
-
-The CLI and language server use the same project discovery, analysis and
-diagnostic ordering stages. Both prune excluded directories, include package
-manifests for cross-file rules and apply per-file overrides before publishing
-findings. The CLI analyzes its selected input paths; the language server analyzes
-the workspace and prefers open buffers over disk contents. Unsaved buffers also
-participate in editor semantic analysis. An incomplete editor project does not
-produce cross-file findings that assume a missing file or declaration. Editors
-supporting relative file-watch patterns also watch package manifests above the
-workspace root.
-
-## Monorepos
-
-Run `falcon check` from a workspace root to analyze its packages together. falcon
-detects pub workspaces from the root `pubspec.yaml` `workspace` list and member
-`resolution: workspace` declarations. It also detects `melos.yaml` `packages`
-globs and Melos 7's `melos` section in the root `pubspec.yaml`.
-
-Each member uses its nearest `falcon.json`. A member configuration replaces,
-rather than merges with, the workspace configuration; there is no `extends`
-setting. Members without their own configuration use the workspace configuration.
-An explicit `--config` selects the base configuration, but member configurations
-still apply. File filters and overrides in a member configuration resolve from
-that configuration's directory. Explicit input paths select workspace members,
-not a different default configuration: discovery still follows the current
-directory's configuration precedence, falling back to the input workspace when
-no configuration is discovered there. A local configuration in a nonmember
-directory (for example, `tools/`) remains scoped to that directory.
-The CLI loads only selected members' configurations, so an invalid configuration
-in an unselected sibling does not block the run. Selecting that sibling is still
-a configuration error. The language server uses the same package configuration
-selection, reports individual invalid member configurations, and retains the
-base and other valid member configurations.
-Run-wide settings (`baseline`, `max-errors`, and `error-on-warnings`) come from
-the base configuration or their CLI overrides. When a member configuration
-explicitly sets one of these keys (including the legacy `max_errors` spelling),
-the CLI warns on stderr once per key and configuration file that the setting is
-ignored, even when its value is `null` or `false`. Omitting these keys does not warn.
-A member file selected as the explicit `--config` base supplies these run-wide
-settings and does not warn that they are ignored.
-
-For example, a pub workspace can contain:
-
-```text
-pubspec.yaml                  # workspace: [packages/app, packages/core]
-falcon.json                   # fallback configuration
-packages/app/pubspec.yaml     # name: app; resolution: workspace
-packages/app/falcon.json      # app-specific configuration
-packages/core/pubspec.yaml    # name: core; resolution: workspace
-```
-
-Package identity comes from each member's own `pubspec.yaml`, including for
-`package:` imports used by cross-file rules. Text reports include a per-package
-summary, including clean packages, with file and severity counts. Summaries count
-all remaining findings after baseline filtering, even when `--max-errors` limits
-printed diagnostics.
-JSON reports always use a diagnostic array. Workspace findings additionally carry
-a `package` field containing the member name, or `null` for findings outside the
-workspace packages. SARIF reports retain package identities and per-package summaries.
-
-## Editor autocomplete (`$schema`)
-
-Point the top-level `$schema` at the published JSON schema to get rule-name
-autocomplete and validation in editors:
+Create `falcon.json` in your project root. This keeps recommended rules enabled and excludes build output:
 
 ```json
-"$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v0.4.6/schema/falcon.schema.json"
+{
+  "$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v0.4.6/schema/falcon.schema.json",
+  "files": { "includes": ["**", "!build/**"] },
+  "linter": { "rules": { "recommended": true } }
+}
 ```
 
-The VS Code extension enables the [published schema](../schema/falcon.schema.json) automatically for files named `falcon.json`.
+<details>
+<summary>Complete configuration example</summary>
 
-## Full example
+### Full example
 
 ```json
 {
@@ -137,58 +68,53 @@ The VS Code extension enables the [published schema](../schema/falcon.schema.jso
 }
 ```
 
-## `files.includes`
+</details>
 
-A single mixed list of globs:
+<details>
+<summary>Validation, compatibility, and CLI/editor behavior</summary>
 
-- Plain entries are **positive includes**: only files matching at least one are
-  linted. A list containing a bare catch-all (`**` or `**/*`), or an empty list,
-  means "no positive filtering": every file is a candidate, even outside the
-  configuration directory. Exclusions still resolve relative to that directory.
-- Entries prefixed with `!` are **exclusions**, applied on top of the includes.
+### Unknown and legacy keys
 
-Exclusions and any CLI `--exclude` patterns are unioned.
+Unknown keys at any configuration depth and unknown domain names are **errors**: the message names the full key path, and the configuration does not load. Rule `options` retain their rule-specific validation. An override may omit `includes` to apply everywhere, but a misspelled `includes` is rejected.
 
-Invalid glob patterns produce a warning and are skipped consistently in CLI
-file selection, LSP selection, and overrides. If no valid positive patterns
-remain, positive filtering is unrestricted; valid exclusions still win.
+The deprecated spellings `project` and `cross_file` (for `cross-file`) and `max_errors` (for `max-errors`) still load with deprecation warnings pointing at `falcon migrate`, including inside overrides. Registered legacy rule ids also load with warnings.
 
-All globs resolve relative to the directory containing `falcon.json`, including
-CLI `--exclude` patterns and override filters. User-level `~/.falcon.json` is
-settings rather than a workspace: its globs resolve from the CLI current working
-directory or the LSP workspace root, not the home directory. This also applies
-when the home directory is reached through a symlink or another directory alias;
-a config symlink in another directory still uses that directory as its root.
-With no config, the current directory is the base. CLI relative paths, absolute paths, and LSP
-document paths therefore select the same files, including symlinked configuration
-or document roots and not-yet-created document paths beneath those roots. A link
-to a subdirectory also preserves its root-relative path: a document reached
-through `lib-link -> <root>/lib` matches `lib/**` in file filters and overrides.
-`*` never crosses `/`; `**` crosses directories.
-For example, `lib/*.dart` matches direct children, while `lib/**/*.dart` also
-matches nested files. An exclusion matching a directory excludes its whole
-subtree, and that directory is pruned before traversal. For example, `!build`
-excludes the build directory and its contents, while `!lib/*.dart` excludes only
-direct Dart children (unless a matching child is itself a directory).
+The CLI prints configuration warnings; the language server sends them to the editor. The published JSON schema accepts canonical keys only.
 
-## `linter`
+The CLI and language server use the same project discovery, analysis and diagnostic ordering stages. Both prune excluded directories, include package manifests for cross-file rules and apply per-file overrides before publishing findings.
+
+The CLI analyzes its selected input paths; the language server analyzes the workspace and prefers open buffers over disk contents. Unsaved buffers also participate in editor semantic analysis. An incomplete editor project does not produce cross-file findings that assume a missing file or declaration.
+
+Editors supporting relative file-watch patterns also watch package manifests above the workspace root.
+
+### Metadata input size
+
+Falcon rejects configuration and package/workspace metadata files larger than 16 MiB before parsing or retaining change-detection bytes. This includes `falcon.json`, package configuration, pubspec, Melos and SDK metadata. Reads are also bounded when a file grows after it is opened. Configuration errors are reported; optional discovery metadata retains its existing warning/skip policy. This metadata limit is separate from the Dart source-coordinate size limit.
+
+</details>
+
+## Rules and severities
+
+Set rules under their group in `linter.rules`. Use a level string for severity only, or an object to add options and a fix policy.
+
+```json
+{
+  "linter": {
+    "rules": {
+      "complexity": {
+        "max-lines-for-file": { "level": "warn", "options": { "max-lines": 400 } }
+      },
+      "suspicious": { "avoid-dynamic": "error" }
+    }
+  }
+}
+```
+
+### `linter`
 
 - `enabled` (default `true`): when `false`, no file rule runs. Cross-file checks are configured separately.
-- `domains`: per-domain gating. Keys are domain names (`flutter`, `test`,
-  `bloc`, `riverpod`, `provider`, `flutter_hooks`, `equatable`); values are
-  `all`, `recommended`, or `none`.
+- `domains`: [domain-specific rule selection](#domains).
 - `rules`: falcon's recommended set plus per-group rule levels.
-
-### Language server reloads
-
-The language server reloads configuration and mutable dependencies when the editor sends watched-file notifications. This includes path and git dependencies, Flutter SDK packages, and newly generated Dart files.
-
-Configuration warnings and errors appear in the editor and identify the source
-file. Invalid reloads keep the last successfully loaded settings until the file
-is fixed. Repeated notifications with unchanged warnings do not show duplicate
-messages.
-
-Out-of-workspace dependency watches need editor support for LSP 3.17 relative patterns. Without it, restart the server after changing those dependencies. If watched-file registration is unavailable or fails, saving workspace configuration files still reloads configuration; restart after dependency changes. Restart after manually editing hosted-package or Dart SDK sources too.
 
 ### `linter.rules`
 
@@ -216,10 +142,10 @@ Levels:
 
 ### Autofix policy
 
-Rule objects also accept `"fix": "none" | "safe" | "unsafe"` alongside `level`
-and `options`. Omitting `fix` keeps the rule's declared fix classification.
-`none` hides the fix without hiding its diagnostic; `safe` and `unsafe`
-reclassify an existing fix rather than creating a fix for a rule that has none.
+<details>
+<summary>Options and safe writes</summary>
+
+Rule objects also accept `"fix": "none" | "safe" | "unsafe"` alongside `level` and `options`. Omitting `fix` keeps the rule's declared fix classification. `none` hides the fix without hiding its diagnostic; `safe` and `unsafe` reclassify an existing fix rather than creating a fix for a rule that has none.
 
 ```json
 {
@@ -243,29 +169,21 @@ reclassify an existing fix rather than creating a fix for a rule that has none.
 }
 ```
 
-Matching overrides resolve `fix` independently of severity and options: the last
-explicit `fix` wins, and an override that omits it leaves the earlier policy
-intact. Package configurations select fix policy just like rule severity.
-The same option is accepted for cross-file rules, but automatic fixing currently
-applies only file-rule fixes. Cross-file diagnostics remain visible after fixing.
+Matching overrides resolve `fix` independently of severity and options: the last explicit `fix` wins, and an override that omits it leaves the earlier policy intact. Package configurations select fix policy just like rule severity.
+
+The same option is accepted for cross-file rules, but automatic fixing currently applies only file-rule fixes. Cross-file diagnostics remain visible after fixing.
 
 `falcon check --write` applies safe fixes; add `--unsafe` to include unsafe fixes.
 `--write --dry-run` previews a unified diff without modifying files. Each file
-is reanalyzed after one atomic fix, so overlapping edits are never merged.
-Repeated file text stops fixing and reports the rules in the cycle; a limit of
-100 applied fixes per file also stops non-repeating growth and reports the
-involved rules. Remaining diagnostics are reported against the resulting text.
-Invalid fixes, cycles, and the iteration limit abort before any
-file is written. Dry-run diffs go to stdout for text reports and stderr for
-machine-readable report formats, keeping their stdout parseable.
+is reanalyzed after one atomic fix, so overlapping edits are never merged. Repeated file text stops fixing and reports the rules in the cycle; a limit of 100 applied fixes per file also stops non-repeating growth and reports the involved rules. Remaining diagnostics are reported against the resulting text.
+
+Invalid fixes, cycles, and the iteration limit abort before any file is written. Dry-run diffs go to stdout for text reports and stderr for machine-readable report formats, keeping their stdout parseable.
 `--dry-run` cannot be combined with `--write-baseline`; previewing never writes a
 baseline for source changes that were not saved.
 
-Editors offer individual safe and unsafe quick fixes. Safe fixes are preferred;
-unsafe fixes are labeled. `source.fixAll.falcon` applies safe fixes only and is
-suitable for code actions on save. The separately named unsafe fix-all action
-requires explicit selection.
+Editors offer individual safe and unsafe quick fixes. Safe fixes are preferred; unsafe fixes are labeled. `source.fixAll.falcon` applies safe fixes only and is suitable for code actions on save. The separately named unsafe fix-all action requires explicit selection.
 
+</details>
 
 ### Resolution order
 
@@ -273,70 +191,21 @@ For each rule falcon resolves an effective severity (or "disabled"):
 
 1. If `linter.enabled` is `false` → disabled.
 2. An **explicit** entry under the rule's group wins and bypasses domain gating.
-3. Otherwise, a domain-scoped rule follows its domain setting (`flutter`, `test`, `bloc`, `riverpod`, `provider`, `flutter_hooks`, or `equatable`). `all` enables every rule in that domain; `none` disables them; `recommended` enables only recommended rules when falcon's recommended set is active. A missing domain setting defaults to `recommended`.
+3. Otherwise, a domain-scoped rule follows its [domain setting](#domains).
 4. Otherwise, the rule runs only if it is recommended and falcon's recommended set is active.
 
 With no config file, only falcon's recommended rules run, at warning severity.
 
-## `max-errors`
+<details>
+<summary>Rule options: validation, defaults, and individual recipes</summary>
 
-Optional cap on printed diagnostics (`null` = unlimited). In `falcon.json`, the value must be **at least 1**; `0` is rejected at load. The CLI `--max-errors` flag overrides the config value and accepts `0` to hide every diagnostic. The cap never changes the exit code: diagnostics not printed still participate in the [exit policy](#error-on-warnings). The legacy config key `max_errors` still loads with a deprecation warning.
-Whole-number JSON values such as `1.0` are accepted; fractional and out-of-range
-values are rejected.
+### Rule options
 
-## `baseline`
+Some rules accept an `options` object under the `{ "level": ..., "options": {…} }` form. Missing options use the rule's defaults. Unknown keys and invalid option types reject the configuration at load time with the full configuration path.
 
-Optional path to a diagnostic baseline used by `falcon check`. Omit this key or
-set it to `null` to disable baseline filtering. The value must otherwise be a
-string. Matching baseline diagnostics are suppressed; new diagnostics remain
-visible and participate in the exit policy.
+An individual option field set to `null` is invalid unless that field explicitly accepts null. For compatibility, setting the entire `options` value to `null` is treated like omitting options and uses the rule defaults.
 
-Relative configured paths resolve from the configuration files root: the
-directory containing `falcon.json`, or the current working directory for
-user-level `~/.falcon.json` (including the directory-alias and config-symlink
-behavior described under [`files.includes`](#filesincludes)). Absolute paths are
-used as supplied. `--baseline <path>` overrides the configured baseline, and its
-relative path resolves from the CLI's current working directory, not the config
-directory. The same current-directory base applies to `--write-baseline <path>`.
-Without a path, `--write-baseline` writes to the configured `baseline` path, or
-to `falcon-baseline.json` in the anchored project root when none is configured.
-
-Baseline fingerprints use paths relative to the nearest repository root containing
-`.git` or `.jj`, otherwise the pub/Melos workspace root, otherwise the configuration
-root (or the current directory outside a project). Running from a subdirectory
-therefore preserves baseline matches within the same project, including a pub
-workspace nested below the repository root.
-
-Syntax errors and malformed suppression directives are never baselined. They
-remain reported with their normal exit policy while baseline writing records
-the lint findings; operational failures still prevent overwriting a baseline.
-
-## `error-on-warnings`
-
-Boolean, default `false`; `null` is invalid. By default, `falcon check` succeeds
-when its remaining diagnostics are warnings or information only. Error
-diagnostics cause a nonzero exit. Set `"error-on-warnings": true` to also fail on
-remaining warning diagnostics; information alone still succeeds. The CLI
-`--error-on-warnings` flag enables this policy even when the config value is
-`false`. Baseline-suppressed diagnostics do not count, while diagnostics hidden
-by `max-errors` still count. Configuration and pipeline failures remain errors
-regardless of this setting.
-
-Both `baseline` and `error-on-warnings` are top-level settings, not per-path
-override keys.
-
-## Rule options
-
-Some rules accept an `options` object under the `{ "level": ..., "options": {…} }`
-form. Missing options use the rule's defaults. Unknown keys and invalid option
-types reject the configuration at load time with the full configuration path.
-
-An individual option field set to `null` is invalid unless that field explicitly
-accepts null. For compatibility, setting the entire `options` value to `null`
-is treated like omitting options and uses the rule defaults.
-
-Integer-valued rule options also accept whole-number JSON values such as `1.0`.
-Fractional, negative, and out-of-range values are rejected with the allowed range.
+Integer-valued rule options also accept whole-number JSON values such as `1.0`. Fractional, negative, and out-of-range values are rejected with the allowed range.
 
 ```json
 {
@@ -351,14 +220,9 @@ Fractional, negative, and out-of-range values are rejected with the allowed rang
 }
 ```
 
-Option names use `kebab-case`. Recognized historical `snake_case` option keys
-still load with a deprecation warning, including keys nested in arrays and
-objects. When an alias and canonical key are both present, the canonical key wins
-and a collision warning reports the discarded alias value. Unknown `snake_case`
-keys are left unchanged, not guessed into new names, and remain subject to
-unknown-field validation. `falcon migrate` rewrites recognized keys and reports
-collisions as warnings. The JSON schema provides rule-specific option completion,
-types, descriptions, and defaults.
+Option names use `kebab-case`. Recognized historical `snake_case` option keys still load with a deprecation warning, including keys nested in arrays and objects. When an alias and canonical key are both present, the canonical key wins and a collision warning reports the discarded alias value.
+
+Unknown `snake_case` keys are left unchanged, not guessed into new names, and remain subject to unknown-field validation. `falcon migrate` rewrites recognized keys and reports collisions as warnings. The JSON schema provides rule-specific option completion, types, descriptions, and defaults.
 
 The table below is generated from the typed rule options by `cargo xtask docgen`.
 
@@ -474,9 +338,7 @@ The table below is generated from the typed rule options by `cargo xtask docgen`
 
 `avoid-banned-names`, `avoid-banned-types`, `avoid-banned-annotations`,
 `avoid-banned-exports` and `banned-usage` do nothing until configured.
-Like `banned-imports`, each entry in `options.rules` contains a `deny` match
-list and a nonblank `message`. Matches are case-sensitive globs; malformed
-entries reject the configuration with the full option path.
+Like `banned-imports`, each entry in `options.rules` contains a `deny` match list and a nonblank `message`. Matches are case-sensitive globs; malformed entries reject the configuration with the full option path.
 
 ```json
 {
@@ -505,16 +367,12 @@ entries reject the configuration with the full option path.
 | `avoid-banned-exports` | Export URI strings, including conditional alternatives. |
 | `banned-usage` | Resolved top-level names or `Type.member` selectors; unnamed constructors use `Type.new`. |
 
-For `banned-usage`, a bare class name matches references to the type itself,
-not construction. Ban `Client.new` or `Client.named` to target its constructors.
+For `banned-usage`, a bare class name matches references to the type itself, not construction. Ban `Client.new` or `Client.named` to target its constructors.
 
 ### Equatable selection
 
 `extend-equatable` (`style`, `equatable` domain) does nothing until configured.
-Set `class-name-pattern` and/or `file-name-pattern` to regular expressions selecting
-value classes that should extend Equatable. Either matching pattern selects a
-class; file patterns match the file basename, not its full path. Missing patterns
-select nothing; invalid regular expressions reject the configuration. For example:
+Set `class-name-pattern` and/or `file-name-pattern` to regular expressions selecting value classes that should extend Equatable. Either matching pattern selects a class; file patterns match the file basename, not its full path. Missing patterns select nothing; invalid regular expressions reject the configuration. For example:
 
 ```json
 "extend-equatable": {
@@ -531,9 +389,7 @@ select nothing; invalid regular expressions reject the configuration. For exampl
 
 `missing-test-assertion` (`correctness`, `test` domain) accepts
 `include-assertions` (array of strings, default `[]`). These names extend the
-built-in framework expectations and mock verification calls with trusted project
-assertion helpers, including local functions. Names match their exact call-site
-spelling; include the prefix for prefixed calls.
+built-in framework expectations and mock verification calls with trusted project assertion helpers, including local functions. Names match their exact call-site spelling; include the prefix for prefixed calls.
 
 ```json
 "missing-test-assertion": {
@@ -542,9 +398,7 @@ spelling; include the prefix for prefixed calls.
 }
 ```
 
-Only `_test.dart` files importing `test` or `flutter_test` are checked, and the
-test registration must resolve to a framework package. Assertions in nested
-tests or unused local closures and functions do not satisfy the enclosing test.
+Only `_test.dart` files importing `test` or `flutter_test` are checked, and the test registration must resolve to a framework package. Assertions in nested tests or unused local closures and functions do not satisfy the enclosing test.
 
 ### `boolean-prefixes` (`style`)
 
@@ -552,29 +406,21 @@ The `prefer-boolean-prefixes` rule id is an alias for `boolean-prefixes` and use
 
 ### `format-comment` (`style`)
 
-Checks that comments read like sentences (start upper-case, end with `.`/`!`/`?`/`:`).
-Consecutive comment lines are treated as one block: a multi-line block is joined
-and split into sentences, so a sentence that wraps across lines is judged as a
-whole and continuation lines are never flagged on their own. Both `//` line
-comments and `///` doc comments are checked unless `only-doc-comments` is set.
+Checks that comments read like sentences (start upper-case, end with `.`/`!`/`?`/`:`). Consecutive comment lines are treated as one block: a multi-line block is joined and split into sentences, so a sentence that wraps across lines is judged as a whole and continuation lines are never flagged on their own.
+
+Both `//` line comments and `///` doc comments are checked unless `only-doc-comments` is set.
 
 ### `no-magic-number` (`style`)
 
-Flags numeric literals that are not extracted to a named constant. Literals are
-exempt when they are in the allow-list, inside a variable/field initializer, a
-collection literal, a const map or const constructor, a `DateTime` constructor,
-or used directly as an index.
+Flags numeric literals that are not extracted to a named constant. Literals are exempt when they are in the allow-list, inside a variable/field initializer, a collection literal, a const map or const constructor, a `DateTime` constructor, or used directly as an index.
 
 ### `prefer-extracting-callbacks` (`complexity`, `flutter`)
 
-Flags block-body function-expression callbacks passed as arguments to widget
-constructors inside a `Widget`/`State` subclass. Arrow (`=>`) callbacks, empty
-blocks and Flutter builders (first parameter `BuildContext`) are never flagged.
+Flags block-body function-expression callbacks passed as arguments to widget constructors inside a `Widget`/`State` subclass. Arrow (`=>`) callbacks, empty blocks and Flutter builders (first parameter `BuildContext`) are never flagged.
 
 ### `member-ordering` (`style`)
 
-Without options, the built-in order applies (static const → static fields →
-instance fields → constructors → static methods → instance methods).
+Without options, the built-in order applies (static const → static fields → instance fields → constructors → static methods → instance methods).
 
 > `widgets-order` detects `State` from the written `extends State`/`State<T>` clause. Only recognized lifecycle members are ordered; `overridden-methods` matches any other `@override` method.
 
@@ -585,150 +431,32 @@ category tokens; it differs from `member-ordering` only in its default sequence.
 
 `enum-constants-ordering`, `map-keys-ordering`, `parameters-ordering`,
 `pattern-fields-ordering`, and `record-fields-ordering` share the following option.
-Unlike DCM's alphabetical defaults, these config-driven falcon rules do nothing
-unless `order` is configured.
+Unlike DCM's alphabetical defaults, these config-driven falcon rules do nothing unless `order` is configured.
 
-`arguments-ordering` defaults to the callee's declared parameter order and skips
-calls whose signature is unknown. `initializers-ordering` defaults to the class's
-field declaration order. Both also accept `order` to select alphabetical ordering.
-For arguments, `alphabetize: true` also selects ascending order; an explicit
-`order` takes precedence, and `alphabetize` defaults to `false`.
-Non-field initializers, including `super`, `this`, and assertions, retain their
-positions.
-For initializer ordering, only literal values and direct constructor-parameter
-reads participate; other expressions break ordering runs to preserve evaluation
-order when applying the recommendation.
+`arguments-ordering` defaults to the callee's declared parameter order and skips calls whose signature is unknown. `initializers-ordering` defaults to the class's field declaration order. Both also accept `order` to select alphabetical ordering.
 
-Parameter and argument ordering applies only to named entries, not positional
-entries whose order changes the API. Map ordering compares simple literal string
-keys, with unknown keys, spreads, and collection control flow breaking the run.
-Record ordering applies to named record-type fields, not record literals.
-Pattern ordering applies to named object and record fields. Unknown names are
-not assigned an alphabetical position.
+For arguments, `alphabetize: true` also selects ascending order; an explicit `order` takes precedence, and `alphabetize` defaults to `false`. Non-field initializers, including `super`, `this`, and assertions, retain their positions.
 
-For example, `"arguments-ordering": { "level": "warn", "options": {
-"order": "ascending" } }` requires named call arguments in ascending order.
+For initializer ordering, only literal values and direct constructor-parameter reads participate; other expressions break ordering runs to preserve evaluation order when applying the recommendation.
+
+Parameter and argument ordering applies only to named entries, not positional entries whose order changes the API. Map ordering compares simple literal string keys, with unknown keys, spreads, and collection control flow breaking the run. Record ordering applies to named record-type fields, not record literals.
+
+Pattern ordering applies to named object and record fields. Unknown names are not assigned an alphabetical position.
+
+For example, `"arguments-ordering": { "level": "warn", "options": { "order": "ascending" } }` requires named call arguments in ascending order.
 
 The `newline-before-method`, `newline-before-constructor`, `newline-before-case`,
 `newline-before-throw`, `newline-before-continue`, and `newline-before-break`
-rules have no options. Like `newline-before-return`, they require a blank line
-only when the declaration, clause, or statement follows another entry in its
-containing list. Statement rules apply to blocks, not unbraced switch-case bodies.
+rules have no options. Like `newline-before-return`, they require a blank line only when the declaration, clause, or statement follows another entry in its containing list. Statement rules apply to blocks, not unbraced switch-case bodies.
 
-## Overrides
+</details>
 
-`overrides` re-configures rules per path, mirroring biome's `overrides`. The
-base `linter` block applies everywhere; each override then re-patches the
-resolution for the files its `includes` match.
+### `cross-file`: cross-file rules
 
-```json
-{
-  "linter": {
-    "rules": { "recommended": true }
-  },
-  "overrides": [
-    {
-      "includes": ["test/**", "!test/fixtures/**"],
-      "linter": {
-        "rules": {
-          "complexity": { "max-lines-for-function": "off" }
-        }
-      }
-    },
-    {
-      "includes": ["**/theme.dart"],
-      "linter": {
-        "rules": { "style": { "prefer-correct-identifier-length": "off" } }
-      }
-    }
-  ]
-}
-```
+<details>
+<summary>Setup, scope, and import boundaries</summary>
 
-### `overrides[].includes`
-
-Same glob syntax as `files.includes`: plain entries are positive includes,
-`!`-prefixed entries are exclusions. A file matches an override when it is not
-excluded by any `!`-pattern and either matches a positive pattern or none are
-given.
-
-### `overrides[].linter` and `overrides[].cross-file`
-
-Each block accepts an optional `enabled` switch and a `rules` object with grouped
-rule levels, options, and fix policies. Unlike base rule blocks, override rule blocks
-do not accept `recommended`; set explicit rule levels or use `enabled` instead. Neither
-block accepts `domains`, nested `overrides`, or `files`. An override may carry
-either or both blocks. The legacy cross-file keys `project` and `cross_file`
-still load with deprecation warnings.
-Setting either override block to `null` is equivalent to omitting it. Optional
-sections such as base `linter.domains` likewise treat `null` as absent.
-
-- Each explicit rule entry (under its group) **replaces** the base resolution
-  for that rule on matching files: `off` disables it; `on`/`info`/`warn`/`error`
-  enables it at that severity, even turning on a rule the base config disabled.
-- A rule entry's `options` block **replaces** the base rule's options on matching
-  files (options are not deep-merged). An override that sets only a level leaves
-  the base options intact.
-- A rule entry's `fix` replaces the earlier fix policy independently. Omitting it
-  preserves the earlier policy, including when severity or options change.
-- `"enabled": false` disables every rule in that section for matching files (a
-  later override may re-enable a specific one).
-
-### Ordering
-
-For a given file, every override whose `includes` match applies **in order**:
-later overrides win over earlier ones, and all win over the base config. A rule
-is registered (and run) if it is enabled for *any* path (base or override), so
-an override can re-enable a rule the base config turned off.
-
-### Path matching
-
-Overrides use the same config-directory-relative matching as `files.includes`.
-For a config in the project root, `test/**` selects test files in both the CLI
-and the editor, regardless of how the CLI paths were supplied.
-
-### Per-path options
-
-An override may carry rule `options`, letting a rule run with different options on
-different paths, for example a stricter `max-lines-for-file` under `test/`:
-
-```jsonc
-"overrides": [
-  {
-    "includes": ["test/**"],
-    "linter": {
-      "rules": {
-        "complexity": {
-          "max-lines-for-file": { "level": "warn", "options": { "max-lines": 1000 } }
-        }
-      }
-    }
-  }
-]
-```
-
-A matching override's `options` **replace** the base rule's options wholesale
-(they are not deep-merged); the last matching override wins. An override that
-sets only a level leaves the base options intact.
-
-## Suppressing diagnostics
-
-`falcon.json` turns whole rules on or off. To silence a single occurrence
-instead, annotate the code with an inline `// falcon-ignore <section>/<group>/<rule>:
-<reason>` comment (the reason is mandatory), or `// falcon-ignore-all` for a
-whole file. The full grammar, placement rules, stacking, and error cases are
-documented in **[suppressions.md](./suppressions.md)**.
-
-```dart
-dynamic payload = decode(bytes); // falcon-ignore lint/suspicious/avoid-dynamic: interop boundary
-```
-
-## `cross-file`: cross-file rules
-
-Most rules analyze one file at a time. **Cross-file rules** instead reason across
-the analyzed file set or package manifests, checking references and package
-metadata. They are a **separate feature** from the linter and live under their
-own top-level `cross-file` block, *not* under
+Most rules analyze one file at a time. **Cross-file rules** instead reason across the analyzed file set or package manifests, checking references and package metadata. They are a **separate feature** from the linter and live under their own top-level `cross-file` block, *not* under
 `linter`. The pre-1.0 spellings `project` and `cross_file` (underscore) are still
 accepted as deprecated aliases (each warns on load; run `falcon migrate`):
 
@@ -750,13 +478,9 @@ accepted as deprecated aliases (each warns on load; run `falcon migrate`):
   as `linter.rules` (level strings or `{ "level", "options" }` objects), but with
   **no `domains`** gating, since cross-file rules are not domain-scoped.
 
-Cross-file rules are grouped under their category (`correctness`, `style`, `security`, or `suspicious`),
-share the same metadata table as file rules, and are suppressible with
-`// falcon-ignore cross-file/<group>/<rule>: <reason>` comments (or the
-`// falcon-ignore-all` variant). Configuring a cross-file rule under
-`linter.rules` (or a file rule under `cross-file.rules`) is an error. The message
-identifies the full key path and the correct section and group, and the
-configuration does not load.
+Cross-file rules are grouped under their category (`correctness`, `style`, `security`, or `suspicious`), share the same metadata table as file rules, and are suppressible with `// falcon-ignore cross-file/<group>/<rule>: <reason>` comments (or the `// falcon-ignore-all` variant).
+
+Configuring a cross-file rule under `linter.rules` (or a file rule under `cross-file.rules`) is an error. The message identifies the full key path and the correct section and group, and the configuration does not load.
 
 | Rule                     | Group        | Recommended | Replaces (dart_code_linter)   |
 |--------------------------|--------------|-------------|-------------------------------|
@@ -807,12 +531,290 @@ Notes:
   }
   ```
 
-  Patterns are case-sensitive whole-string globs: `*` stays within one directory, `**` crosses directories. `files` matches paths relative to the nearest `pubspec.yaml` (including `lib/`). `deny` matches the import URI as written and, for relative or same-package imports, the normalized package-relative target. Conditional import alternatives are checked too; exports and parts are not. Both lists must be non-empty and `message` non-blank; invalid entries reject the configuration with the full option path. Each matching entry reports once per import URI, so a matching conditional alternative gets its own report. Per-path overrides replace the base options.
+  Patterns are case-sensitive whole-string globs: `*` stays within one directory, `**` crosses directories. `files` matches paths relative to the nearest `pubspec.yaml` (including `lib/`).
 
-## Migrating from dart_code_linter / pyramid_lint
+  `deny` matches the import URI as written and, for relative or same-package imports, the normalized package-relative target. Conditional import alternatives are checked too; exports and parts are not.
 
-falcon replaces the `dart_code_linter` and `pyramid_lint` linters, and can
-generate a `falcon.json` from an existing `analysis_options.yaml`:
+  Both lists must be non-empty and `message` non-blank; invalid entries reject the configuration with the full option path.
+
+  Each matching entry reports once per import URI, so a matching conditional alternative gets its own report. Per-path overrides replace the base options.
+
+</details>
+
+### Suppressing diagnostics
+
+`falcon.json` turns whole rules on or off. To silence a single occurrence
+instead, annotate the code with an inline `// falcon-ignore <section>/<group>/<rule>:
+<reason>` comment (the reason is mandatory), or `// falcon-ignore-all` for a
+whole file. The full grammar, placement rules, stacking, and error cases are documented in **[suppressions.md](./suppressions.md)**.
+
+```dart
+dynamic payload = decode(bytes); // falcon-ignore lint/suspicious/avoid-dynamic: interop boundary
+```
+
+## Domains
+
+Choose which domain-specific rules run under `linter.domains`:
+
+| Value | What runs |
+| --- | --- |
+| `recommended` | Recommended rules in the domain, when the recommended set is active. This is the default. |
+| `all` | Every rule in the domain. |
+| `none` | No domain rules, unless explicitly enabled under their group. |
+
+```json
+{
+  "linter": {
+    "domains": { "flutter": "all", "test": "recommended" }
+  }
+}
+```
+
+Available domains: `flutter`, `test`, `bloc`, `riverpod`, `provider`, `flutter_hooks`, and `equatable`. An explicit rule entry bypasses domain gating. Cross-file rules do not use domains.
+
+## Overrides
+
+`overrides` re-configures rules per path, mirroring biome's `overrides`. The
+base `linter` block applies everywhere; each override then re-patches the resolution for the files its `includes` match.
+
+```json
+{
+  "linter": {
+    "rules": { "recommended": true }
+  },
+  "overrides": [
+    {
+      "includes": ["test/**", "!test/fixtures/**"],
+      "linter": {
+        "rules": {
+          "complexity": { "max-lines-for-function": "off" }
+        }
+      }
+    },
+    {
+      "includes": ["**/theme.dart"],
+      "linter": {
+        "rules": { "style": { "prefer-correct-identifier-length": "off" } }
+      }
+    }
+  ]
+}
+```
+
+### `overrides[].includes`
+
+Same glob syntax as `files.includes`: plain entries are positive includes,
+`!`-prefixed entries are exclusions. A file matches an override when it is not
+excluded by any `!`-pattern and either matches a positive pattern or none are given.
+
+### `overrides[].linter` and `overrides[].cross-file`
+
+Each block accepts an optional `enabled` switch and a `rules` object with grouped rule levels, options, and fix policies. Unlike base rule blocks, override rule blocks do not accept `recommended`; set explicit rule levels or use `enabled` instead. Neither block accepts `domains`, nested `overrides`, or `files`.
+
+An override may carry either or both blocks. The legacy cross-file keys `project` and `cross_file` still load with deprecation warnings. Setting either override block to `null` is equivalent to omitting it. Optional sections such as base `linter.domains` likewise treat `null` as absent.
+
+- Each explicit rule entry (under its group) **replaces** the base resolution
+  for that rule on matching files: `off` disables it; `on`/`info`/`warn`/`error`
+  enables it at that severity, even turning on a rule the base config disabled.
+- A rule entry's `options` block **replaces** the base rule's options on matching
+  files (options are not deep-merged). An override that sets only a level leaves
+  the base options intact.
+- A rule entry's `fix` replaces the earlier fix policy independently. Omitting it
+  preserves the earlier policy, including when severity or options change.
+- `"enabled": false` disables every rule in that section for matching files (a
+  later override may re-enable a specific one).
+
+### Ordering
+
+For a given file, every override whose `includes` match applies **in order**: later overrides win over earlier ones, and all win over the base config. A rule is registered (and run) if it is enabled for *any* path (base or override), so an override can re-enable a rule the base config turned off.
+
+### Path matching
+
+Overrides use the same config-directory-relative matching as `files.includes`. For a config in the project root, `test/**` selects test files in both the CLI and the editor, regardless of how the CLI paths were supplied.
+
+### Per-path options
+
+An override may carry rule `options`, letting a rule run with different options on different paths, for example a stricter `max-lines-for-file` under `test/`:
+
+```jsonc
+"overrides": [
+  {
+    "includes": ["test/**"],
+    "linter": {
+      "rules": {
+        "complexity": {
+          "max-lines-for-file": { "level": "warn", "options": { "max-lines": 1000 } }
+        }
+      }
+    }
+  }
+]
+```
+
+A matching override's `options` **replace** the base rule's options wholesale (they are not deep-merged); the last matching override wins. An override that sets only a level leaves the base options intact.
+
+## Files to include or exclude
+
+```json
+{
+  "files": {
+    "includes": ["lib/**", "test/**", "!**/*.g.dart", "!build/**"]
+  }
+}
+```
+
+| Pattern | Effect |
+| --- | --- |
+| `lib/**` | Include files below `lib/`. |
+| `!**/*.g.dart` | Exclude generated Dart files. |
+| `!build` | Exclude the directory and prune its whole subtree. |
+| `lib/*.dart` | Match direct children only; use `lib/**/*.dart` for nested files. |
+
+### `files.includes`
+
+A single mixed list of globs:
+
+- Plain entries are **positive includes**: only files matching at least one are
+  linted. A list containing a bare catch-all (`**` or `**/*`), or an empty list,
+  means "no positive filtering": every file is a candidate, even outside the
+  configuration directory. Exclusions still resolve relative to that directory.
+- Entries prefixed with `!` are **exclusions**, applied on top of the includes.
+
+Exclusions and any CLI `--exclude` patterns are unioned.
+
+Invalid glob patterns produce a warning and are skipped consistently in CLI file selection, LSP selection, and overrides. If no valid positive patterns remain, positive filtering is unrestricted; valid exclusions still win.
+
+<details>
+<summary>Path roots, symlinks, and directory traversal</summary>
+
+All globs resolve relative to the directory containing `falcon.json`, including CLI `--exclude` patterns and override filters. User-level `~/.falcon.json` is settings rather than a workspace: its globs resolve from the CLI current working directory or the LSP workspace root, not the home directory.
+
+This also applies when the home directory is reached through a symlink or another directory alias; a config symlink in another directory still uses that directory as its root. With no config, the current directory is the base.
+
+CLI relative paths, absolute paths, and LSP document paths therefore select the same files, including symlinked configuration or document roots and not-yet-created document paths beneath those roots.
+
+A link to a subdirectory also preserves its root-relative path: a document reached through `lib-link -> <root>/lib` matches `lib/**` in file filters and overrides.
+`*` never crosses `/`; `**` crosses directories.
+For example, `lib/*.dart` matches direct children, while `lib/**/*.dart` also matches nested files. An exclusion matching a directory excludes its whole subtree, and that directory is pruned before traversal.
+
+For example, `!build` excludes the build directory and its contents, while `!lib/*.dart` excludes only direct Dart children (unless a matching child is itself a directory).
+
+</details>
+
+## Monorepos
+
+Run `falcon check` from a workspace root to analyze its packages together. falcon detects pub workspaces from the root `pubspec.yaml` `workspace` list and member
+`resolution: workspace` declarations. It also detects `melos.yaml` `packages`
+globs and Melos 7's `melos` section in the root `pubspec.yaml`.
+
+| Configuration scope | Configuration used |
+| --- | --- |
+| Member with `falcon.json` | Its own configuration, replacing the workspace configuration. |
+| Member without `falcon.json` | The workspace configuration. |
+| Run-wide settings | The base configuration or CLI overrides. |
+
+<details>
+<summary>Package selection, run-wide settings, and reports</summary>
+
+Each member uses its nearest `falcon.json`. A member configuration replaces, rather than merges with, the workspace configuration; there is no `extends` setting. Members without their own configuration use the workspace configuration. An explicit `--config` selects the base configuration, but member configurations still apply.
+
+File filters and overrides in a member configuration resolve from that configuration's directory.
+
+Explicit input paths select workspace members, not a different default configuration: discovery still follows the current directory's configuration precedence, falling back to the input workspace when no configuration is discovered there.
+
+A local configuration in a nonmember directory (for example, `tools/`) remains scoped to that directory. The CLI loads only selected members' configurations, so an invalid configuration in an unselected sibling does not block the run. Selecting that sibling is still a configuration error.
+
+The language server uses the same package configuration selection, reports individual invalid member configurations, and retains the base and other valid member configurations. Run-wide settings (`baseline`, `max-errors`, and `error-on-warnings`) come from the base configuration or their CLI overrides.
+
+When a member configuration explicitly sets one of these keys (including the legacy `max_errors` spelling), the CLI warns on stderr once per key and configuration file that the setting is ignored, even when its value is `null` or `false`. Omitting these keys does not warn.
+
+A member file selected as the explicit `--config` base supplies these run-wide settings and does not warn that they are ignored.
+
+For example, a pub workspace can contain:
+
+```text
+pubspec.yaml                  # workspace: [packages/app, packages/core]
+falcon.json                   # fallback configuration
+packages/app/pubspec.yaml     # name: app; resolution: workspace
+packages/app/falcon.json      # app-specific configuration
+packages/core/pubspec.yaml    # name: core; resolution: workspace
+```
+
+Package identity comes from each member's own `pubspec.yaml`, including for `package:` imports used by cross-file rules. Text reports include a per-package summary, including clean packages, with file and severity counts.
+
+Summaries count all remaining findings after baseline filtering, even when `--max-errors` limits printed diagnostics. JSON reports always use a diagnostic array. Workspace findings additionally carry a `package` field containing the member name, or `null` for findings outside the workspace packages.
+
+SARIF reports retain package identities and per-package summaries.
+
+</details>
+
+## Editor setup
+
+### Editor autocomplete (`$schema`)
+
+Point the top-level `$schema` at the published JSON schema to get rule-name autocomplete and validation in editors:
+
+```json
+"$schema": "https://raw.githubusercontent.com/JacobDevelops/dart_falcon/v0.4.6/schema/falcon.schema.json"
+```
+
+The VS Code extension enables the [published schema](../schema/falcon.schema.json) automatically for files named `falcon.json`.
+
+### Language server reloads
+
+The language server reloads configuration and mutable dependencies when the editor sends watched-file notifications. This includes path and git dependencies, Flutter SDK packages, and newly generated Dart files.
+
+Configuration warnings and errors appear in the editor and identify the source file. Invalid reloads keep the last successfully loaded settings until the file is fixed. Repeated notifications with unchanged warnings do not show duplicate messages.
+
+Out-of-workspace dependency watches need editor support for LSP 3.17 relative patterns. Without it, restart the server after changing those dependencies. If watched-file registration is unavailable or fails, saving workspace configuration files still reloads configuration; restart after dependency changes.
+
+Restart after manually editing hosted-package or Dart SDK sources too.
+
+## Check output and exit status
+
+| Setting | Use it to |
+| --- | --- |
+| [`max-errors`](#max-errors) | Limit printed diagnostics without changing the exit status. |
+| [`baseline`](#baseline) | Hide known findings while keeping new diagnostics visible. |
+| [`error-on-warnings`](#error-on-warnings) | Fail checks on warnings as well as errors. |
+
+### `max-errors`
+
+Optional cap on printed diagnostics (`null` = unlimited). In `falcon.json`, the value must be **at least 1**; `0` is rejected at load. The CLI `--max-errors` flag overrides the config value and accepts `0` to hide every diagnostic.
+
+The cap never changes the exit code: diagnostics not printed still participate in the [exit policy](#error-on-warnings). The legacy config key `max_errors` still loads with a deprecation warning. Whole-number JSON values such as `1.0` are accepted; fractional and out-of-range values are rejected.
+
+### `baseline`
+
+Optional path to a diagnostic baseline used by `falcon check`. Omit this key or set it to `null` to disable baseline filtering. The value must otherwise be a string. Matching baseline diagnostics are suppressed; new diagnostics remain visible and participate in the exit policy.
+
+Relative configured paths resolve from the configuration files root: the directory containing `falcon.json`, or the current working directory for user-level `~/.falcon.json` (including the directory-alias and config-symlink behavior described under [`files.includes`](#filesincludes)). Absolute paths are used as supplied.
+
+`--baseline <path>` overrides the configured baseline, and its relative path resolves from the CLI's current working directory, not the config directory. The same current-directory base applies to `--write-baseline <path>`.
+
+Without a path, `--write-baseline` writes to the configured `baseline` path, or to `falcon-baseline.json` in the anchored project root when none is configured.
+
+Baseline fingerprints use paths relative to the nearest repository root containing
+`.git` or `.jj`, otherwise the pub/Melos workspace root, otherwise the configuration
+root (or the current directory outside a project). Running from a subdirectory therefore preserves baseline matches within the same project, including a pub workspace nested below the repository root.
+
+Syntax errors and malformed suppression directives are never baselined. They remain reported with their normal exit policy while baseline writing records the lint findings; operational failures still prevent overwriting a baseline.
+
+### `error-on-warnings`
+
+Boolean, default `false`; `null` is invalid. By default, `falcon check` succeeds when its remaining diagnostics are warnings or information only. Error diagnostics cause a nonzero exit.
+
+Set `"error-on-warnings": true` to also fail on remaining warning diagnostics; information alone still succeeds. The CLI `--error-on-warnings` flag enables this policy even when the config value is `false`.
+
+Baseline-suppressed diagnostics do not count, while diagnostics hidden by `max-errors` still count. Configuration and pipeline failures remain errors regardless of this setting.
+
+Both `baseline` and `error-on-warnings` are top-level settings, not per-path override keys.
+
+## Migrate an existing configuration
+
+### Migrating from dart_code_linter / pyramid_lint
+
+falcon replaces the `dart_code_linter` and `pyramid_lint` linters, and can generate a `falcon.json` from an existing `analysis_options.yaml`:
 
 ```sh
 # Print the generated config to stdout
@@ -822,7 +824,12 @@ falcon migrate --input analysis_options.yaml
 falcon migrate --write
 ```
 
-Migration reads explicit rules from `dart_code_linter.rules`, legacy `custom_lint.rules`, and the analyzer's top-level `linter.rules` (list or map form). It doesn't expand `include:` presets or read `plugins:` configuration. Each mapped rule is emitted under its falcon group as `"warn"`; disabled entries become `"off"`, and supported option values are preserved.
+<details>
+<summary>Migration mappings, warnings, and upgrades</summary>
+
+Migration reads explicit rules from `dart_code_linter.rules`, legacy `custom_lint.rules`, and the analyzer's top-level `linter.rules` (list or map form). It doesn't expand `include:` presets or read `plugins:` configuration.
+
+Each mapped rule is emitted under its falcon group as `"warn"`; disabled entries become `"off"`, and supported option values are preserved.
 
 The generated `linter.rules` sets `recommended: false`. If cross-file rules are migrated, their block also sets `recommended: false`; otherwise the block is omitted and falcon's recommended cross-file rules remain active. Add `"cross-file": { "enabled": false }` if you don't want those checks.
 
@@ -844,63 +851,49 @@ Notes:
 ### Upgrading an existing falcon.json
 
 `migrate` also upgrades a `falcon.json` written for an older falcon: pass it as
-the input and any legacy `snake_case` rule ids (and the removed twin ids) are
-rewritten to their canonical kebab-case form, preserving levels and supported option values while normalizing option keys to kebab-case.
-Duplicate twin entries collapse into the surviving rule, keeping the more severe
-level. The input kind is auto-detected.
+the input and any legacy `snake_case` rule ids (and the removed twin ids) are rewritten to their canonical kebab-case form, preserving levels and supported option values while normalizing option keys to kebab-case. Duplicate twin entries collapse into the surviving rule, keeping the more severe level.
 
-Upgrades preserve the order of configuration keys. Duplicate entries use the
-same severity ranking and canonical-name tie breaking as normal config loading.
+The input kind is auto-detected.
 
-Unknown falcon rule ids, unsupported keys, and invalid values are dropped with
-warnings naming their full configuration paths and discarded values. Known rules
-in the wrong group or section are moved to their declared location, preserving
-levels and supported options; collisions use the same severity policy described
-above, and warnings name both paths.
+Upgrades preserve the order of configuration keys. Duplicate entries use the same severity ranking and canonical-name tie breaking as normal config loading.
 
-Migration converts a single string `includes` into a one-element array when it
-is a valid glob. Invalid include entries are dropped only while usable patterns
-remain. If the original list had a positive pattern, at least one valid positive
-pattern must survive; exclusion-only leftovers cannot replace that scope.
-Invalid override scopes, including unsupported scope keys such as `excludes`,
-discard the whole override with a warning naming its original index. Invalid
-top-level `files` scope fails migration without writing. Intentionally empty or
-omitted includes remain unchanged. Migration also refuses repairs that would
-remove the root or a whole configuration section.
+Unknown falcon rule ids, unsupported keys, and invalid values are dropped with warnings naming their full configuration paths and discarded values.
 
-Other supported settings remain unchanged, and the resulting configuration passes
-falcon's loader. Migration applies the loader's structural, rule-name, and options
-checks. Malformed JSON or YAML still fails before writing.
+Known rules in the wrong group or section are moved to their declared location, preserving levels and supported options; collisions use the same severity policy described above, and warnings name both paths.
 
-Glob matching now uses the configuration file's directory in both the CLI and
-the editor, rather than paths as walked. User-level `~/.falcon.json` globs instead
-use the CLI current directory or LSP workspace root. Review filters when upgrading:
-`!build/**` now excludes the project's build directory with `falcon check .`,
-and `*` no longer spans directory separators. Replace `lib/*.dart` with
-`lib/**/*.dart` when nested files should match. Existing `includes` glob text
-is preserved; legacy flat `exclude_patterns` use the conversion described below.
+Migration converts a single string `includes` into a one-element array when it is a valid glob. Invalid include entries are dropped only while usable patterns remain. If the original list had a positive pattern, at least one valid positive pattern must survive; exclusion-only leftovers cannot replace that scope.
+
+Invalid override scopes, including unsupported scope keys such as `excludes`, discard the whole override with a warning naming its original index. Invalid top-level `files` scope fails migration without writing. Intentionally empty or omitted includes remain unchanged.
+
+Migration also refuses repairs that would remove the root or a whole configuration section.
+
+Other supported settings remain unchanged, and the resulting configuration passes falcon's loader. Migration applies the loader's structural, rule-name, and options checks. Malformed JSON or YAML still fails before writing.
+
+Glob matching now uses the configuration file's directory in both the CLI and the editor, rather than paths as walked. User-level `~/.falcon.json` globs instead use the CLI current directory or LSP workspace root.
+
+Review filters when upgrading: `!build/**` now excludes the project's build directory with `falcon check .`, and `*` no longer spans directory separators. Replace `lib/*.dart` with `lib/**/*.dart` when nested files should match.
+
+Existing `includes` glob text is preserved; legacy flat `exclude_patterns` use the conversion described below.
 
 ```sh
 # Rewrite legacy rule ids in place
 falcon migrate --input falcon.json --write
 ```
 
-## Migrating from the legacy flat schema
+</details>
 
-The old flat schema (`rules`, `exclude_patterns`, `severity_override` at the top
-level) is no longer accepted by the loader. `falcon migrate --input falcon.json`
-translates these keys using the mapping below and each rule's declared group and
-section. Unmapped legacy rules or settings fail migration without writing,
-rather than discarding the old configuration.
+### Migrating from the legacy flat schema
 
-Legacy flat configurations enabled every rule unless explicitly disabled. The
-current schema has no all-rules preset, so migration keeps the recommended
-preset and explicitly listed rules, and warns how many unlisted rules no longer
-run. Enable desired rules explicitly under `linter.rules` or `cross-file.rules`.
+<details>
+<summary>Conversion and compatibility</summary>
 
-Severity overrides are case-insensitive; `warning` maps to `warn` and `note`
-maps to `info`. They change the level without replacing rule options. Explicitly
-disabled rules remain disabled, and their supported options are preserved.
+The old flat schema (`rules`, `exclude_patterns`, `severity_override` at the top level) is no longer accepted by the loader. `falcon migrate --input falcon.json` translates these keys using the mapping below and each rule's declared group and section.
+
+Unmapped legacy rules or settings fail migration without writing, rather than discarding the old configuration.
+
+Legacy flat configurations enabled every rule unless explicitly disabled. The current schema has no all-rules preset, so migration keeps the recommended preset and explicitly listed rules, and warns how many unlisted rules no longer run. Enable desired rules explicitly under `linter.rules` or `cross-file.rules`.
+
+Severity overrides are case-insensitive; `warning` maps to `warn` and `note` maps to `info`. They change the level without replacing rule options. Explicitly disabled rules remain disabled, and their supported options are preserved.
 
 | Legacy                                             | New                                                            |
 |----------------------------------------------------|----------------------------------------------------------------|
@@ -910,20 +903,10 @@ disabled rules remain disabled, and their supported options are preserved.
 | `"exclude_patterns": ["**/gen/**"]`                | `"files": { "includes": ["**", "!**/gen/**"] }`                |
 | `"max_errors": 100`                                | `"max-errors": 100`                                            |
 
-Legacy exclusions beginning with a single `*`, such as `*.g.dart`, become
-recursive exclusions such as `!**/*.g.dart`. Patterns whose old matching cannot
-be preserved, including a single `*` inside a path such as `lib/*.dart`, `?`,
-or character classes such as `[ab]`, fail migration without writing.
+Legacy exclusions beginning with a single `*`, such as `*.g.dart`, become recursive exclusions such as `!**/*.g.dart`. Patterns whose old matching cannot be preserved, including a single `*` inside a path such as `lib/*.dart`, `?`, or character classes such as `[ab]`, fail migration without writing.
 
 The group for a rule is its category (`a11y`, `complexity`, `correctness`,
 `performance`, `security`, `style`, `suspicious`); see the declarations in
 `crates/falcon_rules/src/lint/<group>.rs` and `crates/falcon_rules/src/cross_file.rs`.
 
-## Metadata input size
-
-Falcon rejects configuration and package/workspace metadata files larger than
-16 MiB before parsing or retaining change-detection bytes. This includes
-`falcon.json`, package configuration, pubspec, Melos and SDK metadata. Reads are
-also bounded when a file grows after it is opened. Configuration errors are
-reported; optional discovery metadata retains its existing warning/skip policy.
-This metadata limit is separate from the Dart source-coordinate size limit.
+</details>

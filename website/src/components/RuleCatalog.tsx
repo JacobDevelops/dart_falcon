@@ -80,8 +80,8 @@ export function RuleCatalog({ rules, search: searchInput, onChange, group, domai
     <div className="catalog">
       <CollapsibleSection id="find-rules" title="Find a rule">
       <div className="search catalog-search">
-        <label htmlFor={`${id}-query`}>Search IDs, Dart aliases, and descriptions</label>
-        <input id={`${id}-query`} type="search" placeholder="avoid_print, unused-code, setState…" value={draft} onChange={(event) => {
+        <label htmlFor={`${id}-query`}>Search rule IDs and descriptions</label>
+        <input id={`${id}-query`} type="search" placeholder="avoid-print, unused-code…" value={draft} onChange={(event) => {
           setDraft(event.target.value)
           pendingQueries.current.push(event.target.value)
           onChange({ ...search, q: event.target.value || undefined }, true)

@@ -1,11 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { BenchChart, BenchSummaryChart } from '../components/BenchChart'
+import { BenchChart } from '../components/BenchChart'
 import { DocsLayout } from '../components/DocsLayout'
 import { MarkdownContent } from '../components/DocsPage'
 import { CollapsibleSection } from '../components/CollapsibleSection'
-import { Toc } from '../components/Toc'
+import { expandTarget, Toc } from '../components/Toc'
 import { extractHeadings } from '../lib/headings'
-import { corpusLabel, formatMs, scenarioSummaries, summaryText, unmeasuredTools, type BenchView } from '../lib/benchmarks'
+import { cacheLabel, compareText, corpusLabel, formatMs, formatRange, scenarioSummaries, speedup, summaryText, unmeasuredTools, type BenchView } from '../lib/benchmarks'
 import { getBenchmarks } from '../lib/server'
 import { breadcrumbs, seo } from '../lib/seo'
 import methodology from '../content/benchmarks.md?raw'
@@ -59,44 +59,79 @@ function Benchmarks() {
       <header className="page-head">
         <h1>Dart linter benchmarks</h1>
         <p className="lede">
-          {summaries.map(summaryText).join(' ')} Each bar is the mean of
-          repeated fresh-process runs on one machine, measured {measured}.{' '}
-          {hasAnalyzer ? (
-            <>
-              The dart analyze scenarios enable the same official lint names,
-              but <code>dart analyze</code> also type-checks the code and honors
-              Dart's own suppressions.{' '}
-            </>
-          ) : null}
-          {hasDcl ? (
-            <>
-              The Dart Code Linter (DCL) scenarios compare falcon, DCL and DCM with
-              the selected DCL rule names enabled; their speedup baseline is DCL,
-              not dart analyze. DCM is not measured where the source subset exceeds
-              the DCM Free 50k-line limit, and DCL is not measured where a corpus
-              cannot be represented as one DCL root; those omissions are labeled,
-              not timed.{' '}
-            </>
-          ) : null}
-          Matching rule names do not imply identical work or output. The{' '}
-          <a href="#methodology">methodology</a> says exactly what is timed.
+          Repeated fresh-process timings on one machine. Measured {measured}.
         </p>
       </header>
 
       <CollapsibleSection id="summary-h" title="Summary" className="rule-section">
-        <div className="bench-list">
-          {summaries.map((s) => (
-            <BenchSummaryChart key={s.scenario.id} summary={s} />
-          ))}
+        <div className="table-scroll">
+          <table>
+            <caption>falcon relative to each baseline. dart analyze also type-checks; falcon does not.</caption>
+            <thead>
+              <tr>
+                <th scope="col">Baseline</th>
+                <th scope="col">Cache</th>
+                <th scope="col">Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summaries.map((s) => (
+                <tr key={s.scenario.id}>
+                  <th scope="row">vs {speedup(s.comparableRuns[0]).versus.name}</th>
+                  <td>{cacheLabel(s.scenario)}</td>
+                  <td>
+                    {s.slower.length === 0 ? (
+                      <><strong>{formatRange(s.min, s.max)} faster</strong> · {s.comparableRuns.length} of {corpora.length} {corpora.length === 1 ? 'corpus' : 'corpora'}</>
+                    ) : (
+                      <ul className="bench-results">
+                        {s.comparableRuns.map((run) => (
+                          <li key={run.corpus.id}>{corpusLabel(run.corpus)}: <strong>{compareText(run).ratio} {speedup(run).factor >= 1 ? 'faster' : 'slower'}</strong></li>
+                        ))}
+                      </ul>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+        <p className="note">dart analyze honors its own ignore comments; falcon does not read analyzer suppressions.</p>
+        <details className="bench-disclosure">
+          <summary>How to read these results</summary>
+          <ul>
+            <li>Matching rule names do not mean identical work or diagnostic output.</li>
+            <li>Cold and warm describe the analyzer cache, not a reused process. Every timed run starts a fresh process.</li>
+            <li>The OS file cache stays warm in both scenarios.</li>
+            {hasDcl ? <li>DCL-family speedups use Dart Code Linter as the baseline. DCM is omitted above its Free 50k-line limit; DCL is omitted when a corpus cannot fit one DCL root. Each omission is labeled below, never timed.</li> : null}
+            <li>Ranges cover matched corpora only. See <a href="#methodology" onClick={() => expandTarget('methodology')}>methodology</a> for commands, scope and limitations.</li>
+          </ul>
+        </details>
       </CollapsibleSection>
 
       <CollapsibleSection id="runs-h" title="Every run" className="rule-section">
+        <p className="note">Mean wall-clock time. Each cold/warm pair shares one time scale.</p>
         <div className="bench-list">
-          {runs.map((run) => (
-            <BenchChart key={`${run.corpus.id}-${run.scenario.id}`} run={run} detailed />
-          ))}
+          {corpora.flatMap((corpus) => {
+            const corpusRuns = runs.filter((run) => run.corpus.id === corpus.id)
+            const families = [...new Set(corpusRuns.map((run) => run.scenario.comparator ?? 'dart-analyze'))]
+            return families.map((family) => {
+              const paired = corpusRuns.filter((run) => (run.scenario.comparator ?? 'dart-analyze') === family)
+              const maxMs = Math.max(...paired.flatMap((run) => run.rows.map((row) => row.meanMs)))
+              return (
+                <section key={`${corpus.id}-${family}`} className="bench-run-group">
+                  <h3>{corpusLabel(corpus)} <span>· {family === 'dcl' ? 'DCL rules' : 'Official Dart lints'}</span></h3>
+                  <div className="bench-paired">
+                    {paired.map((run) => (
+                      <BenchChart key={run.scenario.id} run={run} maxMs={maxMs} title={`${cacheLabel(run.scenario)} analyzer cache`} />
+                    ))}
+                  </div>
+                </section>
+              )
+            })
+          })}
         </div>
+        <details className="bench-disclosure">
+          <summary>All timings, spread and memory measurements</summary>
         <div className="table-scroll">
           <table>
             <caption>
@@ -142,9 +177,10 @@ function Benchmarks() {
             </tbody>
           </table>
         </div>
+        </details>
       </CollapsibleSection>
 
-      <CollapsibleSection id="output-h" title="What each tool reported" className="rule-section">
+      <CollapsibleSection id="output-h" title="What each tool reported" className="rule-section" defaultExpanded={false}>
         <p>
           Diagnostics are grouped by corpus and rule family; cold and warm runs
           use the same rule configuration.{' '}
@@ -163,7 +199,7 @@ function Benchmarks() {
           ) : null}
           For falcon, “Error severity” counts syntax errors, not lint severity.{' '}
           Matching rule names are not evidence of diagnostic parity; the{' '}
-          <a href="#methodology">methodology</a> explains differences in output.
+          <a href="#methodology" onClick={() => expandTarget('methodology')}>methodology</a> explains differences in output.
         </p>
         <div className="table-scroll">
           <table>
@@ -271,7 +307,7 @@ function Benchmarks() {
         </div>
       </CollapsibleSection>
 
-      <CollapsibleSection id="methodology" title="Methodology" className="rule-section">
+      <CollapsibleSection id="methodology" title="Methodology" className="rule-section" defaultExpanded={false}>
         <div className="prose">
           <MarkdownContent source={methodologySource} />
         </div>

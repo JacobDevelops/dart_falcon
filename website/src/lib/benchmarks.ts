@@ -30,6 +30,10 @@ export interface BenchScenario {
   comparator?: string
 }
 
+export function cacheLabel(scenario: BenchScenario): string {
+  return scenario.id.endsWith('-cold') ? 'Cold' : scenario.id.endsWith('-warm') ? 'Warm' : scenario.title
+}
+
 export interface BenchResult {
   corpus: string
   scenario: string
@@ -173,7 +177,7 @@ export function summaryBody(s: ScenarioSummary): string {
   const faster = s.comparableRuns.filter((r) => !s.slower.includes(r))
   const comparison = s.slower.length === 0
     ? `falcon ${formatRange(s.min, s.max)} faster than ${versus} on ${s.comparableRuns.length === 1 ? corpusLabel(s.comparableRuns[0].corpus) : `${s.comparableRuns.length} corpora`}`
-    : `${versus} was faster on ${list(s.slower.map((r) => corpusLabel(r.corpus)))}${
+    : `${versus} was faster on ${list(s.slower.map((r) => `${corpusLabel(r.corpus)} (${formatSpeedup(1 / speedup(r).factor)})`))}${
       faster.length > 0
         ? `; falcon was faster on ${list(faster.map((r) => `${corpusLabel(r.corpus)} (${formatSpeedup(speedup(r).factor)})`))}`
         : ''
@@ -190,7 +194,3 @@ export function summaryText(s: ScenarioSummary): string {
   return `${s.scenario.title}: ${summaryBody(s)}`
 }
 
-/** Every scenario's summary as one paragraph; the cold scenario leads. */
-export function headlineSummary(view: BenchView): string {
-  return scenarioSummaries(view).map(summaryText).join(' ')
-}
