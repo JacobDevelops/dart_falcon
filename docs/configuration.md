@@ -918,3 +918,12 @@ or character classes such as `[ab]`, fail migration without writing.
 The group for a rule is its category (`a11y`, `complexity`, `correctness`,
 `performance`, `security`, `style`, `suspicious`); see the declarations in
 `crates/falcon_rules/src/lint/<group>.rs` and `crates/falcon_rules/src/cross_file.rs`.
+
+## Metadata input size
+
+Falcon rejects configuration and package/workspace metadata files larger than
+16 MiB before parsing or retaining change-detection bytes. This includes
+`falcon.json`, package configuration, pubspec, Melos and SDK metadata. Reads are
+also bounded when a file grows after it is opened. Configuration errors are
+reported; optional discovery metadata retains its existing warning/skip policy.
+This metadata limit is separate from the Dart source-coordinate size limit.

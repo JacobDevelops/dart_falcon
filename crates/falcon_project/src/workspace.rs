@@ -141,7 +141,7 @@ fn insert_package(root: &Path, manifest: &Path, packages: &mut BTreeMap<PathBuf,
 }
 
 fn read_yaml(path: &Path) -> Option<Value> {
-    let source = match std::fs::read_to_string(path) {
+    let source = match falcon_config::read_metadata_text(path) {
         Ok(source) => source,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
         Err(error) => {
@@ -495,5 +495,17 @@ mod tests {
             workspace.packages[0].root,
             root.join("packages/member").canonicalize().unwrap()
         );
+    }
+    #[test]
+    fn oversized_workspace_metadata_is_skipped_and_recovers() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("pubspec.yaml");
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(falcon_config::MAX_METADATA_BYTES + 1)
+            .unwrap();
+        assert!(read_yaml(&path).is_none());
+        std::fs::write(&path, "name: recovered\nworkspace: []\n").unwrap();
+        assert!(discover_workspace(directory.path()).is_some());
     }
 }

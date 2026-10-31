@@ -260,7 +260,8 @@ fn render_impl(
                 sources
                     .entry(diagnostic.file_path.as_str())
                     .or_insert_with(|| {
-                        std::fs::read_to_string(&diagnostic.file_path).unwrap_or_default()
+                        falcon_analyze::read_source(std::path::Path::new(&diagnostic.file_path))
+                            .unwrap_or_default()
                     })
                     .as_str()
             } else {

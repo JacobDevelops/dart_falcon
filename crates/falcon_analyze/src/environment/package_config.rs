@@ -51,7 +51,7 @@ impl PackageConfig {
     /// compare equal to the canonical paths of loaded files.
     #[must_use]
     pub fn load(path: &Path) -> Option<Self> {
-        let text = std::fs::read_to_string(path).ok()?;
+        let text = falcon_config::read_metadata_text(path).ok()?;
         let mut config = Self::parse(path, &text)?;
         config.canonicalize_roots();
         Some(config)

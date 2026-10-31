@@ -29,7 +29,7 @@ impl CrossFileRule for PackageNames {
 }
 
 fn check_pubspec(path: &Path) -> Option<Diagnostic> {
-    let source = std::fs::read_to_string(path).ok()?;
+    let source = falcon_config::read_metadata_text(path).ok()?;
     let root: Value = serde_yaml::from_str(&source).ok()?;
     let name_value = root.as_mapping()?.get(Value::String("name".to_string()))?;
     let name = name_value.as_str()?;

@@ -10,7 +10,7 @@ pub(crate) struct PackageManifest {
 }
 
 pub(crate) fn read_manifest(path: &Path) -> Option<PackageManifest> {
-    let source = std::fs::read_to_string(path).ok()?;
+    let source = falcon_config::read_metadata_text(path).ok()?;
     parse_manifest(&source)
 }
 
@@ -54,4 +54,24 @@ pub(crate) fn is_library_file(file: &Path, pubspec: &Path) -> bool {
     let file = canonical_package_path(file);
     let root = pubspec.parent().unwrap_or_else(|| Path::new(""));
     file.starts_with(canonical_package_path(&root.join("lib")))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn oversized_manifest_is_rejected_and_recovers() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        file.as_file()
+            .set_len(falcon_config::MAX_METADATA_BYTES + 1)
+            .unwrap();
+        assert!(super::read_manifest(file.path()).is_none());
+        std::fs::write(
+            file.path(),
+            "name: recovered\ndependencies:\n  example: any\n",
+        )
+        .unwrap();
+        let manifest = super::read_manifest(file.path()).unwrap();
+        assert_eq!(manifest.name, "recovered");
+        assert!(manifest.dependencies.contains("example"));
+    }
 }

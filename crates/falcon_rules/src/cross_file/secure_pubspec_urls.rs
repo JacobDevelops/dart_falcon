@@ -28,7 +28,7 @@ impl CrossFileRule for SecurePubspecUrls {
 }
 
 fn check_pubspec(path: &Path) -> Vec<Diagnostic> {
-    let Ok(source) = std::fs::read_to_string(path) else {
+    let Ok(source) = falcon_config::read_metadata_text(path) else {
         return Vec::new();
     };
     let Ok(root) = serde_yaml::from_str::<Value>(&source) else {

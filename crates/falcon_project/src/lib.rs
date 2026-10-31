@@ -196,7 +196,7 @@ fn load_project_config_impl(
 }
 
 fn load_member_config(path: &Path, is_explicit_base: bool) -> Result<LoadedConfig, ConfigError> {
-    let content = std::fs::read_to_string(path)
+    let content = falcon_config::read_metadata_text(path)
         .map_err(|error| ConfigError::new(format!("failed to read config file: {error}")))?;
     let value: serde_json::Value = serde_json::from_str(&content)
         .map_err(|error| ConfigError::new(format!("failed to parse config JSON: {error}")))?;

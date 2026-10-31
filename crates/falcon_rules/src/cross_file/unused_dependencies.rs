@@ -59,7 +59,7 @@ impl CrossFileRule for UnusedDependencies {
             if read_manifest(&pubspec).is_none() {
                 continue;
             }
-            let Ok(source) = std::fs::read_to_string(&pubspec) else {
+            let Ok(source) = falcon_config::read_metadata_text(&pubspec) else {
                 continue;
             };
             let Ok(root) = parse_yaml_with_options(
@@ -120,7 +120,7 @@ impl CrossFileRule for UnusedDependencies {
 }
 
 fn native_plugins(root: &Path) -> HashSet<String> {
-    let Some(plugins) = std::fs::read_to_string(root.join(".flutter-plugins-dependencies"))
+    let Some(plugins) = falcon_config::read_metadata_text(&root.join(".flutter-plugins-dependencies"))
         .ok()
         .and_then(|source| serde_json::from_str::<serde_json::Value>(&source).ok())
     else {
@@ -139,7 +139,7 @@ fn native_plugins(root: &Path) -> HashSet<String> {
 }
 
 fn has_flutter_resources(root: &Path) -> bool {
-    let Some(manifest) = std::fs::read_to_string(root.join("pubspec.yaml"))
+    let Some(manifest) = falcon_config::read_metadata_text(&root.join("pubspec.yaml"))
         .ok()
         .and_then(|source| serde_yaml::from_str::<serde_yaml::Value>(&source).ok())
     else {

@@ -133,7 +133,7 @@ fn canonical_event_path(path: &Path) -> PathBuf {
 
 fn file_fingerprint(path: &Path) -> ResolvedFingerprint {
     // Fingerprints include synthetic probes; real loads report read failures.
-    let contents = std::fs::read(path).ok().map(Arc::from);
+    let contents = falcon_config::read_metadata_bytes(path).ok().map(Arc::from);
     let resolved = packages::canonical_comparison_path(path);
     (resolved, contents)
 }
@@ -304,7 +304,7 @@ impl AnalysisEnvironment {
     }
 
     fn read_optional(&self, path: &Path) -> Option<String> {
-        match std::fs::read_to_string(path) {
+        match falcon_config::read_metadata_text(path) {
             Ok(source) => Some(source),
             Err(error) => {
                 if !matches!(
@@ -523,7 +523,7 @@ impl AnalysisEnvironment {
             {
                 self.config_fingerprints.lock().unwrap().reads += 1;
             }
-            std::fs::read(path).ok().map(Arc::from)
+            falcon_config::read_metadata_bytes(path).ok().map(Arc::from)
         };
         self.config_fingerprints.lock().unwrap().files.insert(
             path.to_path_buf(),
@@ -794,5 +794,41 @@ impl AnalysisEnvironment {
     #[must_use]
     pub fn package_language_version(&self, path: &Path) -> Option<LanguageVersion> {
         self.package_config(path)?.language_version(path)
+    }
+}
+
+#[cfg(test)]
+mod bounded_metadata_tests {
+    use super::*;
+
+    #[test]
+    fn rejected_metadata_is_not_fingerprinted_and_recovers_when_replaced() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("pubspec.yaml");
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(falcon_config::MAX_METADATA_BYTES + 1)
+            .unwrap();
+        let environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+        assert!(file_fingerprint(&path).1.is_none());
+        assert!(environment.config_fingerprint(&path).1.is_none());
+        assert!(environment.read_optional(&path).is_none());
+        assert!(PackageMetadata::load(&path).parsed_name().is_none());
+        assert!(PackageConfig::load(&path).is_none());
+        std::fs::write(&path, "name: recovered\n").unwrap();
+        assert_eq!(
+            PackageMetadata::load(&path).parsed_name(),
+            Some("recovered")
+        );
+        assert_eq!(
+            environment.config_fingerprint(&path).1.as_deref(),
+            Some(&b"name: recovered\n"[..])
+        );
+        std::fs::write(&path, [0xff]).unwrap();
+        assert_eq!(
+            environment.config_fingerprint(&path).1.as_deref(),
+            Some(&[0xff][..])
+        );
+        assert!(environment.read_optional(&path).is_none());
     }
 }

@@ -19,7 +19,7 @@ impl PackageMetadata {
     /// # Panics
     /// Panics if the manifest path has no parent directory.
     pub fn load(manifest: &Path) -> Self {
-        let source = std::fs::read_to_string(manifest).ok();
+        let source = falcon_config::read_metadata_text(manifest).ok();
         let yaml = source
             .as_deref()
             .and_then(|source| serde_yaml::from_str::<serde_yaml::Value>(source).ok());

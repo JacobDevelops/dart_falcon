@@ -7,6 +7,9 @@
 //! separate feature under `cross_file.rules`, resolved the same way minus domains
 //! (see [`CrossFileConfig::resolve_rule`]).
 
+mod metadata;
+pub use metadata::{MAX_METADATA_BYTES, read_metadata_bytes, read_metadata_text};
+
 use glob::Pattern;
 use serde::de::{self, DeserializeOwned, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -1606,7 +1609,7 @@ fn validate_rule_level(
 /// Returns an error for unreadable files, invalid JSON or configuration keys,
 /// the legacy flat schema, and a zero `max-errors` value.
 pub fn deserialize_config(path: &Path) -> Result<LoadedConfig, ConfigError> {
-    let content = std::fs::read_to_string(path)
+    let content = read_metadata_text(path)
         .map_err(|e| ConfigError::new(format!("failed to read config file: {e}")))?;
     let value: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| ConfigError::new(format!("failed to parse config JSON: {e}")))?;
