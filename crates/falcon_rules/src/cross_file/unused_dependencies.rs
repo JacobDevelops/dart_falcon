@@ -27,18 +27,18 @@ pub struct UnusedDependencies;
 impl CrossFileRule for UnusedDependencies {
     fn prepare_project(
         &self,
-        _environment: &falcon_analyze::AnalysisEnvironment,
+        environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         _config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
     ) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-        for (pubspec, mut used) in analyzed_package_usage(files) {
+        for (pubspec, (package, mut used)) in analyzed_package_usage(environment, files) {
             if let Some(package_root) = pubspec.parent() {
                 used.extend(native_plugins(package_root));
             }
             diagnostics.extend(unused_dependency_diagnostics(
-                &pubspec,
+                package,
                 &used,
                 "dependencies",
                 |_, _, resolved| resolved.is_some_and(has_flutter_resources),
@@ -135,7 +135,9 @@ mod tests {
             UnusedDependencies
                 .analyze_project(
                     "unused-dependencies",
-                    &falcon_analyze::AnalysisEnvironment::default(),
+                    &falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+                        files.iter().map(ProjectFile::path), |_| None,
+                    ),
                     &files,
                     &FalconConfig::default(),
                     None,
@@ -152,7 +154,9 @@ mod tests {
             UnusedDependencies
                 .analyze_project(
                     "unused-dependencies",
-                    &falcon_analyze::AnalysisEnvironment::default(),
+                    &falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+                        files.iter().map(ProjectFile::path), |_| None,
+                    ),
                     &files,
                     &FalconConfig::default(),
                     None,

@@ -20,8 +20,7 @@
 //! entries can therefore produce multiple reports. Exports and parts are not
 //! imports and are deliberately outside this rule's boundary policy.
 
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use falcon_analyze::{CrossFileRule, PackageIdentity, ProjectFile};
 use falcon_config::FalconConfig;
@@ -31,7 +30,7 @@ use glob::MatchOptions;
 
 use crate::lint::options::{self, Glob, nonblank_message, nonempty_patterns};
 
-use super::{ResolvedRef, canonical_or_lexical, enclosing_pubspec, resolve_directive_uri};
+use super::{ResolvedRef, canonical_or_lexical, resolve_directive_uri};
 
 #[derive(Default)]
 pub struct BannedImports;
@@ -70,12 +69,11 @@ struct Boundary {
 impl CrossFileRule for BannedImports {
     fn prepare_project(
         &self,
-        _environment: &falcon_analyze::AnalysisEnvironment,
+        environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
     ) -> Vec<Diagnostic> {
-        let mut packages: HashMap<PathBuf, PackageIdentity> = HashMap::new();
         let mut diagnostics = Vec::new();
         for file in files {
             let file_path = file.path().to_string_lossy();
@@ -95,13 +93,11 @@ impl CrossFileRule for BannedImports {
             if boundaries.is_empty() {
                 continue;
             }
-            let Some(manifest) = enclosing_pubspec(file.path()) else {
+            let Some(metadata) = environment.package(file.path()) else {
                 continue;
             };
-            let package = packages
-                .entry(manifest.clone())
-                .or_insert_with(|| super::package_identity(&manifest));
-            let root = manifest.parent().unwrap();
+            let package = &metadata.identity;
+            let root = metadata.manifest.parent().unwrap();
             let Some(relative) = package_relative(file.path(), root, package) else {
                 continue;
             };

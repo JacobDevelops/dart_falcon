@@ -153,22 +153,43 @@ These entries describe implemented foundation, not acceptance of the open items.
   V1-3a migrates `secure_pubspec_urls.rs`, the smallest consumer needing only
   manifest text and YAML, to `falcon_analyze::PackageMetadata::snapshot`.
   Its closed `ManifestSnapshot` captures bounded optional metadata once per
-  environment: Missing is silent and emits nothing; Malformed emits no rule
-  diagnostic and warns with the path; Inaccessible (I/O, invalid UTF-8 or the
-  metadata size limit) warns with path and reason and skips the secure-URL check
-  for that package, not other rules. Shared discovery emits these warnings
+  environment: Missing is silent and emits nothing; Malformed (including YAML
+  beyond serde's recursion limit) emits no YAML-dependent snapshot-consumer diagnostic and warns
+  with the path; Inaccessible (I/O, invalid UTF-8 or the metadata size limit)
+  warns with path and reason and skips YAML-dependent snapshot consumers for that
+  package, not unrelated rules. Shared discovery emits these warnings
   whichever rules are enabled, including discovered manifests without Dart files.
-  Valid snapshots retain the exact source and parsed YAML, preserving diagnostics.
+  Valid snapshots retain the exact source and parsed YAML, preserving diagnostics;
+  classification and fallback-name recovery ignore a leading UTF-8 BOM without
+  changing source offsets. Exact sorting and package-name diagnostics cover BOM
+  manifests, which previously lost parsed facts and package identity.
   Changed metadata is captured per CLI run; the LSP refreshes on disk change
   (save or watcher); unsaved buffers are not facts. Warning deduplication lasts
   until invalidation, so a later failure episode warns again.
   CLI subprocess and CLI/LSP parity recovery tests cover malformed YAML, invalid
   UTF-8 and sparse oversized manifests, exact recovered diagnostic identity,
   range, severity and message, and saved changes clearing stale diagnostics.
-  Remaining rule-side readers: `sort_pub_dependencies.rs`, `flutter_assets.rs`,
-  `lint/support/package_manifests.rs`, `cross_file/package_names.rs`,
-  `unused_dependencies.rs`, `unused_dev_dependencies.rs`, `banned_imports.rs`
-  (via `package_identity`) and `cross_file.rs`; migrate these separately.
+  V1-3b also migrates `sort_pub_dependencies`, `package_names`,
+  `depend_on_referenced_packages`, `undeclared_dependencies`, analyzed-package
+  manifest reads in `unused_dependencies` / `unused_dev_dependencies`, and
+  `banned_imports` identity reads. `lint/support/package_manifests` now extracts
+  facts from snapshots; its filesystem reader and production text parser are
+  removed. `manifest_consumers_use_captured_facts_without_reopening_the_manifest`
+  proves the migration by deleting the manifest after capture and comparing exact
+  diagnostics. Dependency-section CLI/LSP recovery tests cover diagnostics and
+  warning episodes, but already pass before this migration.
+  Identity-only import boundaries still use immutable fallback `metadata.identity`.
+  A malformed manifest with a recoverable `name` preserves own-package path denies;
+  Inaccessible metadata has no name, so only raw-URI and relative-path matching
+  remain available, not own-package path matching. Apart from BOM name recovery,
+  this preserves existing behavior.
+  Remaining exclusions: `flutter_assets` retains a second bounded manifest loader.
+  Its manifest bytes could use this snapshot; asset globbing still needs filesystem
+  facts. This cutover remains for a follow-up slice. Unused-dependency resource/build-tool
+  exemptions still inspect resolved dependency manifests alongside package-config
+  discovery, plugin registration, analysis options, build files and executable
+  directories. Those coupled non-manifest acquisitions need their own project-facts
+  slice; this checkbox remains open.
 - [ ] Expand `crates/falcon_cli/tests/project_parity_tests.rs` around actual risk:
   diagnostics identity/range/severity/message, suppression, config changes,
   incomplete analysis and cross-file invalidation. Shared stages already live in

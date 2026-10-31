@@ -107,6 +107,102 @@ fn optional_manifest_failures_recover_to_fresh_secure_url_diagnostics() {
     }
 }
 
+#[test]
+fn dependency_manifest_consumers_recover_exact_diagnostics_and_warning_episodes() {
+    for broken in [b"dependencies: [".as_slice(), &[0xff], b"oversized"] {
+        let temp = tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        let manifest = root.join("pubspec.yaml");
+        let dart = root.join("main.dart");
+        let source = "import 'package:missing/missing.dart';\nvoid main() {}\n";
+        let valid = "name: BadName\ndependencies:\n  zebra: any\n  apple: any\n";
+        fs::write(&dart, source).unwrap();
+        fs::write(&manifest, valid).unwrap();
+        let config = root.join("falcon.json");
+        fs::write(&config, r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"style":{"package-names":"warn"},"correctness":{"sort-pub-dependencies":"warn","undeclared-dependencies":"warn"}}}}"#).unwrap();
+        let options = CheckOptions {
+            paths: vec![root],
+            config_path: Some(config.clone()),
+            quiet: true,
+            ..Default::default()
+        };
+        let control = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+        assert_eq!(control.diagnostics.len(), 3, "{:?}", control.diagnostics);
+        for rule in [
+            "sort-pub-dependencies",
+            "package-names",
+            "undeclared-dependencies",
+        ] {
+            assert!(
+                control
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.rule == rule)
+            );
+        }
+        let expected = serde_json::to_value(&control.diagnostics).unwrap();
+        let mut lsp = LspState::new_with_sdk_locator(Some(config), |_| None);
+        lsp.open(
+            &format!("file://{}", dart.display()),
+            source.into(),
+            Some(1),
+        );
+        lsp.open(
+            &format!("file://{}", manifest.display()),
+            valid.into(),
+            Some(1),
+        );
+        let collect = |lsp: &mut LspState| {
+            let mut diagnostics = lsp
+                .cross_file_pass()
+                .into_iter()
+                .flat_map(|(_, diagnostics)| diagnostics)
+                .collect::<Vec<_>>();
+            diagnostics.sort_by(|left, right| {
+                left.file_path
+                    .cmp(&right.file_path)
+                    .then(left.span.start.cmp(&right.span.start))
+                    .then(left.rule.cmp(right.rule))
+            });
+            diagnostics
+        };
+        assert_eq!(serde_json::to_value(collect(&mut lsp)).unwrap(), expected);
+        assert_eq!(lsp.take_config_messages(), Vec::new());
+        for _ in 0..2 {
+            fs::write(&manifest, broken).unwrap();
+            if broken == b"oversized" {
+                fs::OpenOptions::new()
+                    .write(true)
+                    .open(&manifest)
+                    .unwrap()
+                    .set_len(falcon_config::MAX_METADATA_BYTES + 1)
+                    .unwrap();
+            }
+            lsp.watched_files_changed(std::slice::from_ref(&manifest));
+            let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+            assert!(cli.diagnostics.is_empty(), "{:?}", cli.diagnostics);
+            assert!(collect(&mut lsp).is_empty());
+            let warnings = lsp.take_config_messages();
+            assert_eq!(
+                warnings
+                    .iter()
+                    .filter(|warning| warning.message.contains(&*manifest.to_string_lossy()))
+                    .count(),
+                1,
+                "{warnings:?}"
+            );
+            assert!(collect(&mut lsp).is_empty());
+            assert_eq!(lsp.take_config_messages(), Vec::new());
+            fs::write(&manifest, valid).unwrap();
+            lsp.watched_files_changed(std::slice::from_ref(&manifest));
+            let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+            assert_eq!(serde_json::to_value(&cli.diagnostics).unwrap(), expected);
+            assert_eq!(serde_json::to_value(collect(&mut lsp)).unwrap(), expected);
+            assert_eq!(lsp.take_config_messages(), Vec::new());
+        }
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn explicit_metadata_failure_exits_nonzero_and_names_the_input() {

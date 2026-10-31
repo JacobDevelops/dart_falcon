@@ -41,9 +41,9 @@ crate::declare_rules! {
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::lint::support::package_manifests::parse_manifest;
+use crate::lint::support::package_manifests::manifest_sections;
 use falcon_analyze::{PackageConfig, PackageIdentity, ProjectFile, canonical_or_lexical};
-use falcon_analyze::{canonical_package_path, enclosing_pubspec, package_identity};
+use falcon_analyze::{canonical_package_path, enclosing_pubspec};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::cst::Program;
 use marked_yaml::{
@@ -69,13 +69,13 @@ fn slashed(path: &Path) -> String {
 pub fn yaml_string_span(source: &str, root: &Value, target: &Value) -> Option<DiagSpan> {
     let mut path = Vec::new();
     yaml_value_path(root, target, &mut path)?;
-    let marked = parse_yaml(0, source).ok()?;
+    let marked = parse_yaml(0, source.strip_prefix('\u{feff}').unwrap_or(source)).ok()?;
     let node = marked_node_at_path(&marked, &path)?;
     if node.as_scalar()?.as_str() != target.as_str()? {
         return None;
     }
     let character = node.span().start()?.character();
-    let start = character_to_byte(source, character)?;
+    let start = yaml_character_to_byte(source, character)?;
     scalar_source_span(source, start)
 }
 
@@ -125,6 +125,13 @@ fn marked_node_at_path<'a>(
         YamlPathSegment::Key(key) => node.as_mapping()?.get_node(key),
         YamlPathSegment::Index(index) => node.as_sequence()?.get(*index),
     })
+}
+
+// Snapshot consumers parse without the BOM; asset consumers still use original-text markers.
+fn yaml_character_to_byte(source: &str, character: usize) -> Option<usize> {
+    let parser_source = source.strip_prefix('\u{feff}').unwrap_or(source);
+    character_to_byte(parser_source, character)
+        .map(|offset| source.len() - parser_source.len() + offset)
 }
 
 fn character_to_byte(source: &str, character: usize) -> Option<usize> {
@@ -254,15 +261,6 @@ pub fn project_packages(file_packages: &[falcon_analyze::FilePackage]) -> Vec<Pa
         .collect()
 }
 
-fn project_pubspecs(files: &[ProjectFile]) -> Vec<PathBuf> {
-    let mut seen = HashSet::new();
-    files
-        .iter()
-        .filter_map(|file| enclosing_pubspec(file.path()))
-        .filter(|path| seen.insert(path.clone()))
-        .collect()
-}
-
 /// Resolve an `import`/`export`/`part` URI (already the string value, without
 /// quotes) relative to `from_file`. `dart:` URIs resolve to `None` (external).
 pub fn resolve_directive_uri(
@@ -320,13 +318,18 @@ fn program_reference_uris(
     imports.chain(exports).chain(parts)
 }
 
-fn analyzed_package_usage(files: &[ProjectFile]) -> BTreeMap<PathBuf, HashSet<String>> {
-    let mut usage: BTreeMap<PathBuf, HashSet<String>> = BTreeMap::new();
+fn analyzed_package_usage<'a>(
+    environment: &'a falcon_analyze::AnalysisEnvironment,
+    files: &[ProjectFile],
+) -> BTreeMap<PathBuf, (&'a falcon_analyze::PackageMetadata, HashSet<String>)> {
+    let mut usage = BTreeMap::new();
     for file in files {
-        let Some(pubspec) = enclosing_pubspec(file.path()) else {
+        let Some(package) = environment.package(file.path()) else {
             continue;
         };
-        let used = usage.entry(pubspec).or_default();
+        let (_, used) = usage
+            .entry(package.manifest.clone())
+            .or_insert_with(|| (package, HashSet::new()));
         if file
             .path()
             .extension()
@@ -347,22 +350,23 @@ fn analyzed_package_usage(files: &[ProjectFile]) -> BTreeMap<PathBuf, HashSet<St
 }
 
 fn unused_dependency_diagnostics(
-    pubspec: &Path,
+    package: &falcon_analyze::PackageMetadata,
     used: &HashSet<String>,
     section: &str,
     exempt: impl Fn(&str, &MarkedMappingNode, Option<&Path>) -> bool,
     message: impl Fn(&str) -> String,
 ) -> Vec<Diagnostic> {
-    let Ok(source) = falcon_config::read_metadata_text(pubspec) else {
+    let falcon_analyze::ManifestSnapshot::Valid { source, yaml } = package.snapshot() else {
         return Vec::new();
     };
-    if parse_manifest(&source).is_none() {
+    if manifest_sections(yaml).is_none() {
         return Vec::new();
     }
+    let pubspec = &package.manifest;
     let Ok(root) = parse_yaml_with_options(
         0,
-        &source,
-        LoaderOptions::default().error_on_duplicate_keys(true),
+        source.strip_prefix('\u{feff}').unwrap_or(source),
+        LoaderOptions::default(),
     ) else {
         return Vec::new();
     };
@@ -394,11 +398,11 @@ fn unused_dependency_diagnostics(
         let Some(start) = name
             .span()
             .start()
-            .and_then(|marker| character_to_byte(&source, marker.character()))
+            .and_then(|marker| yaml_character_to_byte(source, marker.character()))
         else {
             continue;
         };
-        let Some(span) = scalar_source_span(&source, start) else {
+        let Some(span) = scalar_source_span(source, start) else {
             continue;
         };
         let mut diagnostic = Diagnostic::new(
@@ -408,7 +412,7 @@ fn unused_dependency_diagnostics(
             pubspec.to_string_lossy().into_owned(),
             span,
         );
-        diagnostic.resolve_position(&source);
+        diagnostic.resolve_position(source);
         diagnostics.push(diagnostic);
     }
     diagnostics

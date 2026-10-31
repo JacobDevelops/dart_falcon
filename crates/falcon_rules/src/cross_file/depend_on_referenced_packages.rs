@@ -15,19 +15,19 @@ use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 
-use super::{canonical_or_lexical, enclosing_pubspec};
+use super::canonical_or_lexical;
 
 #[derive(Default)]
 pub struct DependOnReferencedPackages;
 
 use crate::lint::support::package_manifests::{
-    PackageManifest, imported_package, is_library_file, read_manifest,
+    PackageManifest, imported_package, is_library_file, manifest_facts,
 };
 
 impl CrossFileRule for DependOnReferencedPackages {
     fn prepare_project(
         &self,
-        _environment: &falcon_analyze::AnalysisEnvironment,
+        environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
@@ -37,16 +37,17 @@ impl CrossFileRule for DependOnReferencedPackages {
         let replacement = crate::meta::meta_for("undeclared-dependencies");
 
         for file in files {
-            let Some(pubspec) = enclosing_pubspec(file.path()) else {
+            let Some(package) = environment.package(file.path()) else {
                 continue;
             };
+            let pubspec = &package.manifest;
             let manifest = manifests
                 .entry(pubspec.clone())
-                .or_insert_with(|| read_manifest(&pubspec));
+                .or_insert_with(|| manifest_facts(package));
             let Some(manifest) = manifest else {
                 continue;
             };
-            let regular_dependency_required = is_public_or_executable(file.path(), &pubspec);
+            let regular_dependency_required = is_public_or_executable(file.path(), pubspec);
             let replacement_enabled = replacement.is_some_and(|meta| {
                 config
                     .resolve_cross_file_rule_for(
@@ -80,7 +81,7 @@ impl CrossFileRule for DependOnReferencedPackages {
                 }
                 if replacement_enabled
                     && (!manifest.dev_dependencies.contains(package)
-                        || is_library_file(file.path(), &pubspec))
+                        || is_library_file(file.path(), pubspec))
                 {
                     continue;
                 }
@@ -120,7 +121,6 @@ fn is_public_or_executable(file: &Path, pubspec: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lint::support::package_manifests::parse_manifest;
     use falcon_analyze::CrossFileRuleAnalysis;
 
     #[cfg(unix)]
@@ -165,11 +165,19 @@ mod tests {
 
     #[test]
     fn malformed_package_identity_skips_manifest() {
-        assert!(parse_manifest("dependencies: {http: ^1.0.0}\n").is_none());
-        assert!(parse_manifest("name: [not, a, string]\n").is_none());
-        assert!(parse_manifest("name: pkg\ndependencies: [http]\n").is_none());
-        assert!(parse_manifest("name: pkg\ndev_dependencies: oops\n").is_none());
-        assert!(parse_manifest("name: pkg\ndependencies:\n").is_some());
+        let root = tempfile::tempdir().unwrap();
+        let manifest = root.path().join("pubspec.yaml");
+        for (source, valid) in [
+            ("dependencies: {http: ^1.0.0}\n", false),
+            ("name: [not, a, string]\n", false),
+            ("name: pkg\ndependencies: [http]\n", false),
+            ("name: pkg\ndev_dependencies: oops\n", false),
+            ("name: pkg\ndependencies:\n", true),
+        ] {
+            std::fs::write(&manifest, source).unwrap();
+            let package = falcon_analyze::PackageMetadata::load(&manifest);
+            assert_eq!(manifest_facts(&package).is_some(), valid, "{source}");
+        }
     }
 
     #[test]
@@ -191,7 +199,9 @@ mod tests {
             DependOnReferencedPackages
                 .analyze_project(
                     "depend-on-referenced-packages",
-                    &falcon_analyze::AnalysisEnvironment::default(),
+                    &falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+                        files.iter().map(ProjectFile::path), |_| None,
+                    ),
                     &files,
                     &FalconConfig::default(),
                     None,

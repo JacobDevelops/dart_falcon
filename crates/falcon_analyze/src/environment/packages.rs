@@ -36,7 +36,10 @@ impl PackageMetadata {
     }
 
     pub(super) fn from_acquired(manifest: &Path, acquired: std::io::Result<String>) -> Self {
-        let source = acquired.as_deref().ok();
+        let source = acquired
+            .as_deref()
+            .ok()
+            .map(|source| source.strip_prefix('\u{feff}').unwrap_or(source));
         let parsed = source.map(serde_yaml::from_str::<serde_yaml::Value>);
         let yaml = parsed.as_ref().and_then(|result| result.as_ref().ok());
         let name = yaml

@@ -19,7 +19,7 @@ use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use marked_yaml::{LoaderOptions, parse_yaml_with_options};
 
-use super::{character_to_byte, project_pubspecs, scalar_source_span};
+use super::{scalar_source_span, yaml_character_to_byte};
 
 #[derive(Default)]
 pub struct SortPubDependencies;
@@ -29,25 +29,35 @@ const SECTIONS: [&str; 3] = ["dependencies", "dev_dependencies", "dependency_ove
 impl CrossFileRule for SortPubDependencies {
     fn prepare_project(
         &self,
-        _environment: &falcon_analyze::AnalysisEnvironment,
+        environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         _config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
     ) -> Vec<Diagnostic> {
-        project_pubspecs(files)
-            .into_iter()
-            .flat_map(|path| check_pubspec(&path))
+        let mut seen = std::collections::HashSet::new();
+        files
+            .iter()
+            .filter_map(|file| environment.package(file.path()))
+            .filter(|package| seen.insert(&package.manifest))
+            .flat_map(|package| match package.snapshot() {
+                falcon_analyze::ManifestSnapshot::Valid { source, .. } => {
+                    check_pubspec(&package.manifest, source)
+                }
+                falcon_analyze::ManifestSnapshot::Missing
+                | falcon_analyze::ManifestSnapshot::Malformed(_)
+                | falcon_analyze::ManifestSnapshot::Inaccessible(_) => Vec::new(),
+            })
             .collect()
     }
 }
 
-fn check_pubspec(path: &Path) -> Vec<Diagnostic> {
-    let Ok(source) = falcon_config::read_metadata_text(path) else {
-        return Vec::new();
-    };
-    // Reject invalid mappings during the same location-preserving parse.
-    let options = LoaderOptions::default().error_on_duplicate_keys(true);
-    let Ok(root) = parse_yaml_with_options(0, &source, options) else {
+fn check_pubspec(path: &Path, source: &str) -> Vec<Diagnostic> {
+    let options = LoaderOptions::default();
+    let Ok(root) = parse_yaml_with_options(
+        0,
+        source.strip_prefix('\u{feff}').unwrap_or(source),
+        options,
+    ) else {
         return Vec::new();
     };
     let Some(root) = root.as_mapping() else {
@@ -63,8 +73,8 @@ fn check_pubspec(path: &Path) -> Vec<Diagnostic> {
                 .collect();
             names.sort_unstable_by_key(|(character, _)| *character);
             let (character, name) = first_unsorted(&names)?;
-            let start = character_to_byte(&source, character)?;
-            let span = scalar_source_span(&source, start)?;
+            let start = yaml_character_to_byte(source, character)?;
+            let span = scalar_source_span(source, start)?;
             let mut diagnostic = Diagnostic::new(
                 "",
                 Severity::Warning,
@@ -72,7 +82,7 @@ fn check_pubspec(path: &Path) -> Vec<Diagnostic> {
                 path.to_string_lossy().into_owned(),
                 span,
             );
-            diagnostic.resolve_position(&source);
+            diagnostic.resolve_position(source);
             Some(diagnostic)
         })
         .collect()
@@ -110,14 +120,80 @@ mod tests {
     }
 
     #[test]
-    fn skips_duplicate_keys_even_outside_dependency_sections() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("pubspec.yaml");
-        std::fs::write(
-            &path,
-            "name: example\nmetadata:\n  key: first\n  key: second\ndependencies:\n  zebra: any\n  apple: any\n",
+    fn duplicate_keys_make_the_snapshot_malformed_and_skip_sorting() {
+        let root = tempfile::tempdir().unwrap();
+        let manifest = root.path().join("pubspec.yaml");
+        let source = "name: example\nmetadata:\n  key: first\n  key: second\ndependencies:\n  zebra: any\n  apple: any\n";
+        std::fs::write(&manifest, source).unwrap();
+        let files = [ProjectFile::new(
+            root.path().join("lib/main.dart"),
+            std::sync::Arc::new(falcon_analyze::ParsedFile::parse("void main() {}")),
         )
-        .unwrap();
-        assert!(check_pubspec(&path).is_empty());
+        .unwrap()];
+        let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+            files.iter().map(ProjectFile::path),
+            |_| None,
+        );
+        assert!(matches!(
+            environment.package(files[0].path()).unwrap().snapshot(),
+            falcon_analyze::ManifestSnapshot::Malformed(_)
+        ));
+        assert!(
+            SortPubDependencies
+                .prepare_project(&environment, &files, &FalconConfig::default(), None)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn bom_manifest_preserves_exact_sorting_diagnostic() {
+        let root = tempfile::tempdir().unwrap();
+        let manifest = root.path().join("pubspec.yaml");
+        let files = [ProjectFile::new(
+            root.path().join("lib/main.dart"),
+            std::sync::Arc::new(falcon_analyze::ParsedFile::parse("void main() {}")),
+        )
+        .unwrap()];
+        for (source, start) in [
+            (
+                "\u{feff}name: app\ndependencies:\n  zebra: any\n  apple: any\n",
+                42,
+            ),
+            (
+                "\u{feff}dependencies:\n  zebra: any\n  apple: any\nname: app\n",
+                32,
+            ),
+        ] {
+            std::fs::write(&manifest, source).unwrap();
+            let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+                files.iter().map(ProjectFile::path),
+                |_| None,
+            );
+            let falcon_analyze::ManifestSnapshot::Valid { source: captured, .. } =
+                environment.package(files[0].path()).unwrap().snapshot()
+            else {
+                panic!("BOM-prefixed YAML must be valid");
+            };
+            assert_eq!(captured, source);
+            assert_eq!(environment.take_warnings(), Vec::<String>::new());
+            let mut expected = Diagnostic::new(
+                "",
+                Severity::Warning,
+                "Dependencies not sorted alphabetically: `apple` is out of order.",
+                manifest.to_string_lossy(),
+                falcon_syntax::cst::Span::new(start, start + 5),
+            );
+            expected.resolve_position(source);
+            assert_eq!(
+                serde_json::to_value(SortPubDependencies.prepare_project(
+                    &environment,
+                    &files,
+                    &FalconConfig::default(),
+                    None,
+                ))
+                .unwrap(),
+                serde_json::to_value([expected]).unwrap(),
+            );
+        }
     }
 }

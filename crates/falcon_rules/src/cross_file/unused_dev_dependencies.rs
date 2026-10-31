@@ -25,7 +25,7 @@ use falcon_config::FalconConfig;
 use falcon_diagnostics::Diagnostic;
 use serde_yaml::Value;
 
-use super::{analyzed_package_usage, enclosing_pubspec, unused_dependency_diagnostics};
+use super::{analyzed_package_usage, unused_dependency_diagnostics};
 use crate::lint::support::package_manifests::{imported_package, is_library_file};
 
 #[derive(Default)]
@@ -34,7 +34,7 @@ pub struct UnusedDevDependencies;
 impl CrossFileRule for UnusedDevDependencies {
     fn prepare_project(
         &self,
-        _environment: &falcon_analyze::AnalysisEnvironment,
+        environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         _config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
@@ -47,12 +47,12 @@ impl CrossFileRule for UnusedDevDependencies {
                     .is_some_and(|extension| extension == "dart")
             })
             .filter_map(|file| {
-                let pubspec = enclosing_pubspec(file.path())?;
-                (!is_library_file(file.path(), &pubspec)).then_some(pubspec)
+                let pubspec = &environment.package(file.path())?.manifest;
+                (!is_library_file(file.path(), pubspec)).then_some(pubspec.clone())
             })
             .collect();
         let mut diagnostics = Vec::new();
-        for (pubspec, mut used) in analyzed_package_usage(files) {
+        for (pubspec, (package, mut used)) in analyzed_package_usage(environment, files) {
             if !non_library_packages.contains(&pubspec) {
                 continue;
             }
@@ -63,7 +63,7 @@ impl CrossFileRule for UnusedDevDependencies {
             let custom_lint = options.contains("custom_lint");
             used.extend(options);
             diagnostics.extend(unused_dependency_diagnostics(
-                &pubspec,
+                package,
                 &used,
                 "dev_dependencies",
                 |name, root, resolved| {

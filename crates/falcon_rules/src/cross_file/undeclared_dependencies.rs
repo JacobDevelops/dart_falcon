@@ -12,8 +12,7 @@ use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 
-use super::enclosing_pubspec;
-use crate::lint::support::package_manifests::{imported_package, is_library_file, read_manifest};
+use crate::lint::support::package_manifests::{imported_package, is_library_file, manifest_facts};
 
 #[derive(Default)]
 pub struct UndeclaredDependencies;
@@ -21,7 +20,7 @@ pub struct UndeclaredDependencies;
 impl CrossFileRule for UndeclaredDependencies {
     fn prepare_project(
         &self,
-        _environment: &falcon_analyze::AnalysisEnvironment,
+        environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         _config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
@@ -29,16 +28,17 @@ impl CrossFileRule for UndeclaredDependencies {
         let mut manifests = HashMap::new();
         let mut diagnostics = Vec::new();
         for file in files {
-            let Some(pubspec) = enclosing_pubspec(file.path()) else {
+            let Some(package) = environment.package(file.path()) else {
                 continue;
             };
+            let pubspec = &package.manifest;
             let Some(manifest) = manifests
                 .entry(pubspec.clone())
-                .or_insert_with(|| read_manifest(&pubspec))
+                .or_insert_with(|| manifest_facts(package))
             else {
                 continue;
             };
-            let is_library = is_library_file(file.path(), &pubspec);
+            let is_library = is_library_file(file.path(), pubspec);
             let imports = file.program().imports().flat_map(|directive| {
                 std::iter::once(directive.uri()).chain(
                     directive
