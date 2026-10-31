@@ -301,7 +301,7 @@ impl ConfigStamp {
     fn read(path: &Path) -> Option<Self> {
         Some(Self {
             file: FileStamp::read(path)?,
-            contents: std::fs::read(path).ok()?,
+            contents: falcon_config::read_metadata_bytes(path).ok()?,
         })
     }
 }
@@ -3119,4 +3119,26 @@ pub(crate) fn uri_to_path(uri: &str) -> PathBuf {
                 )
             },
         )
+}
+
+#[cfg(test)]
+mod config_stamp_bounds_tests {
+    use super::ConfigStamp;
+
+    #[test]
+    fn oversized_config_stamp_is_rejected_and_recovers() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        file.as_file()
+            .set_len(falcon_config::MAX_METADATA_BYTES + 1)
+            .unwrap();
+        assert!(ConfigStamp::read(file.path()).is_none());
+        std::fs::write(file.path(), b"{}").unwrap();
+        let first = ConfigStamp::read(file.path()).unwrap();
+        assert_eq!(first.contents, b"{}");
+        std::fs::write(file.path(), b"[]").unwrap();
+        assert_ne!(ConfigStamp::read(file.path()).unwrap(), first);
+        // Fingerprinting preserves raw bytes; config parsing reports invalid UTF-8.
+        std::fs::write(file.path(), [0xff]).unwrap();
+        assert_eq!(ConfigStamp::read(file.path()).unwrap().contents, [0xff]);
+    }
 }
