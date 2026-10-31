@@ -1618,9 +1618,14 @@ fn ancestor_manifest_cross_file_findings_refresh_after_disk_change() {
     );
     assert_eq!(diagnostic.line, 2);
     assert!(diagnostic.col > 0);
-    // The real server opens Dart documents only; manifest findings remain in
-    // the project map instead of being published as artificial Dart buffers.
-    assert!(state.cross_file_pass().is_empty());
+    let manifest_uri = format!("file://{}", manifest.display());
+    let published = state.cross_file_pass();
+    assert_eq!(published.len(), 1);
+    assert_eq!(published[0].0, manifest_uri);
+    assert_eq!(
+        serde_json::to_value(&published[0].1).unwrap(),
+        serde_json::to_value(diagnostics).unwrap()
+    );
 
     std::fs::write(
         &manifest,
@@ -1632,6 +1637,10 @@ fn ancestor_manifest_cross_file_findings_refresh_after_disk_change() {
     assert_eq!(refreshed[0].0, uri);
     assert!(refreshed[0].1.is_empty());
     assert!(state.cross_file_diagnostics().is_empty());
+    let cleared = state.cross_file_pass();
+    assert_eq!(cleared.len(), 1);
+    assert_eq!(cleared[0].0, manifest_uri);
+    assert!(cleared[0].1.is_empty());
 }
 
 #[cfg(test)]
@@ -1670,6 +1679,57 @@ mod source_size_tests {
             ]
         );
         assert!(parsed.program().declarations().next().is_none());
+    }
+
+    #[test]
+    fn cross_rule_worker_failure_retains_manifest_publication_until_recovery() {
+        struct Panics;
+        impl falcon_analyze::CrossFileRule for Panics {
+            fn prepare_project(
+                &self,
+                _: &AnalysisEnvironment,
+                _: &[ProjectFile],
+                _: &FalconConfig,
+                _: Option<&SemanticIndexes>,
+            ) -> Vec<Diagnostic> {
+                panic!("cross-file publication regression");
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let root = canonical_or_lexical(directory.path());
+        let manifest = root.join("pubspec.yaml");
+        std::fs::write(&manifest, "name: app\nhomepage: http://example.com\n").unwrap();
+        let config = root.join("falcon.json");
+        std::fs::write(&config, r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"security":{"secure-pubspec-urls":"warn"}}}}"#).unwrap();
+        let mut state = LspState::new_from(Some(config), |_| None, root);
+        let uri = crate::server::file_uri(&manifest).unwrap().to_string();
+        let initial = state.cross_file_pass();
+        assert!(initial.iter().any(|(published, diagnostics)| {
+            published == &uri
+                && diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.rule == "secure-pubspec-urls")
+        }));
+        let retained = state.published_manifests.clone();
+        assert!(state.cross_file_pass().is_empty());
+        state
+            .cross_file_rules
+            .register("secure-pubspec-urls", Box::new(Panics));
+        assert!(state.cross_file_pass().is_empty());
+        assert!(state.cross_file_worker_failed);
+        assert_eq!(
+            serde_json::to_value(&state.published_manifests).unwrap(),
+            serde_json::to_value(retained).unwrap()
+        );
+        state.reload_config();
+        std::fs::write(&manifest, "name: app\nhomepage: https://example.com\n").unwrap();
+        let cleared = state.watched_files_changed(&[manifest]);
+        assert!(
+            cleared
+                .iter()
+                .any(|(published, diagnostics)| published == &uri && diagnostics.is_empty())
+        );
+        assert!(state.published_manifests.is_empty());
     }
 
     #[test]

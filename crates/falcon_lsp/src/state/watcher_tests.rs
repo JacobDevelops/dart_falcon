@@ -239,7 +239,7 @@ fn unrelated_asset_events_leave_project_caches_intact() {
 }
 
 #[test]
-fn known_gap_asset_events_do_not_trigger_reevaluation_but_directory_facts_refresh() {
+fn asset_events_publish_and_clear_manifest_without_rebuilding_semantics() {
     let (directory, mut state, _) = workspace(true);
     std::fs::write(directory.path().join("falcon.json"),
         r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-assets":"warn"},"suspicious":{"missing-assets":"warn"}}}}"#).unwrap();
@@ -258,6 +258,8 @@ fn known_gap_asset_events_do_not_trigger_reevaluation_but_directory_facts_refres
     let uri = format!("file://{}", source.display());
     state.reload_config();
     state.open(&uri, text.into(), Some(1));
+    state.resolve_semantics = true;
+    state.analyze(&uri);
     let manifest_key = manifest.to_string_lossy().into_owned();
     let initial = state.cross_file_diagnostics();
     assert!(!initial.contains_key(&manifest_key));
@@ -265,28 +267,163 @@ fn known_gap_asset_events_do_not_trigger_reevaluation_but_directory_facts_refres
         initial[&source.to_string_lossy().into_owned()][0].rule,
         "missing-assets"
     );
-    // Known watcher gap: replace these assertions when docs/v1-checklist.md V1-3 closes it.
+    let builds = state.semantic_snapshot_build_count;
+    assert!(builds > 0);
+    let walks = state.workspace_walk_count;
+    let manifest_uri = crate::server::file_uri(&manifest).unwrap().to_string();
     let asset = assets.join("new.png");
     std::fs::write(&asset, "asset").unwrap();
+    let created = state.watched_files_changed(std::slice::from_ref(&asset));
+    let diagnostics = &created
+        .iter()
+        .find(|(uri, _)| uri == &manifest_uri)
+        .unwrap()
+        .1;
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].rule, "unused-assets");
+    assert_eq!(state.semantic_snapshot_build_count, builds);
+    assert_eq!(state.workspace_walk_count, walks);
+    std::fs::write(&asset, "changed").unwrap();
+    assert!(!state.watched_content_change_relevant(&asset));
     assert!(
         state
             .watched_files_changed(std::slice::from_ref(&asset))
-            .is_empty()
+            .iter()
+            .all(|(uri, _)| uri != &manifest_uri)
     );
-    let created = state.cross_file_diagnostics();
-    assert_eq!(created[&manifest_key].len(), 1);
-    assert_eq!(created[&manifest_key][0].rule, "unused-assets");
+    assert_eq!(state.semantic_snapshot_build_count, builds);
+    assert_eq!(state.workspace_walk_count, walks);
     std::fs::remove_file(&asset).unwrap();
+    let cleared = state.watched_files_changed(std::slice::from_ref(&asset));
     assert!(
-        state
-            .watched_files_changed(std::slice::from_ref(&asset))
-            .is_empty()
+        cleared
+            .iter()
+            .any(|(uri, diagnostics)| uri == &manifest_uri && diagnostics.is_empty())
     );
+    assert_eq!(state.semantic_snapshot_build_count, builds);
+    assert_eq!(state.workspace_walk_count, walks);
     let deleted = state.cross_file_diagnostics();
     assert!(!deleted.contains_key(&manifest_key));
     assert_eq!(
         serde_json::to_value(initial).unwrap(),
         serde_json::to_value(deleted).unwrap(),
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn deleted_declared_asset_files_under_symlinked_directories_remain_relevant() {
+    let (directory, mut state, _) = workspace(true);
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-assets":"warn"}}}}"#).unwrap();
+    let actual = directory.path().join("actual");
+    std::fs::create_dir(&actual).unwrap();
+    std::os::unix::fs::symlink(&actual, directory.path().join("assets")).unwrap();
+    let asset = directory.path().join("assets/one.png");
+    std::fs::write(&asset, "asset").unwrap();
+    let manifest = directory.path().join("pubspec.yaml");
+    std::fs::write(
+        &manifest,
+        "name: app\nflutter:\n  assets:\n    - assets/one.png\n",
+    )
+    .unwrap();
+    state.reload_config();
+    let initial = state.cross_file_pass();
+    let uri = crate::server::file_uri(&manifest).unwrap().to_string();
+    assert!(
+        initial
+            .iter()
+            .any(|(published, diagnostics)| published == &uri && diagnostics.len() == 1)
+    );
+    let retained = state.published_manifests.clone();
+    let builds = state.semantic_snapshot_build_count;
+    let walks = state.workspace_walk_count;
+    std::fs::remove_file(&asset).unwrap();
+    assert!(state.asset_event_relevant(&watched_path(&asset)));
+    state.defer_cross_file_pass();
+    assert!(state.watched_files_changed(&[asset]).is_empty());
+    assert!(state.resume_cross_file_pass());
+    assert!(state.cross_file_pass().is_empty());
+    assert_eq!(
+        serde_json::to_value(&state.published_manifests).unwrap(),
+        serde_json::to_value(retained).unwrap()
+    );
+    assert_eq!(state.semantic_snapshot_build_count, builds);
+    assert_eq!(state.workspace_walk_count, walks);
+}
+
+#[test]
+fn asset_event_admission_covers_all_declarations_and_disabled_rules() {
+    let (directory, mut state, _) = workspace(true);
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"suspicious":{"missing-assets":"warn"}}}}"#).unwrap();
+    std::fs::write(directory.path().join("pubspec.yaml"),
+        "name: app\nflutter:\n  assets:\n    - ./assets/icons/\n    - path: assets/one.png\n  shaders:\n    - shaders/test.frag\n  fonts:\n    - family: Test\n      fonts:\n        - asset: fonts/test.ttf\n  deferred-components:\n    - name: later\n      assets:\n        - assets/later.png\n").unwrap();
+    state.reload_config();
+    state.cross_file_pass();
+    for relative in [
+        "assets/icons/new.png",
+        "assets/one.png",
+        "shaders/test.frag",
+        "fonts/test.ttf",
+        "assets/later.png",
+    ] {
+        assert!(
+            state.asset_event_relevant(&directory.path().join(relative)),
+            "{relative}"
+        );
+    }
+    assert!(!state.asset_event_relevant(&directory.path().join("assets/icons/nested/new.png")));
+    let unrelated = directory.path().join("assets/unrelated.png");
+    let walks = state.workspace_walk_count;
+    assert!(state.watched_files_changed(&[unrelated]).is_empty());
+    assert_eq!(state.workspace_walk_count, walks);
+    std::fs::write(
+        &config,
+        r#"{"linter":{"enabled":false},"cross-file":{"enabled":false}}"#,
+    )
+    .unwrap();
+    state.reload_config();
+    assert!(!state.asset_event_relevant(&directory.path().join("assets/one.png")));
+}
+
+#[test]
+fn asset_directory_events_refresh_dart_project_membership() {
+    let (directory, mut state, _) = workspace(true);
+    std::fs::write(directory.path().join("falcon.json"), r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-assets":"warn","unused-files":"warn"}}}}"#).unwrap();
+    std::fs::write(
+        directory.path().join("pubspec.yaml"),
+        "name: app\nflutter:\n  assets:\n    - assets/\n",
+    )
+    .unwrap();
+    let assets = directory.path().join("assets");
+    std::fs::create_dir(&assets).unwrap();
+    let dart = assets.join("example.dart");
+    std::fs::write(&dart, "class Example {}").unwrap();
+    state.reload_config();
+    state.cross_file_pass();
+    let walks = state.workspace_walk_count;
+    std::fs::remove_dir_all(&assets).unwrap();
+    state.watched_files_changed(std::slice::from_ref(&assets));
+    assert!(state.workspace_walk_count > walks);
+    assert!(
+        !state
+            .project_paths
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|(path, _)| path == &dart)
+    );
+    std::fs::create_dir(&assets).unwrap();
+    std::fs::write(&dart, "class Example {}").unwrap();
+    state.watched_files_changed(&[assets]);
+    assert!(
+        state
+            .project_paths
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|(path, _)| path == &dart)
     );
 }
 

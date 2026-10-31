@@ -9,6 +9,8 @@
 mod barrels;
 mod flutter_assets;
 
+pub use flutter_assets::asset_declarations;
+
 #[cfg(test)]
 mod dependency_tests;
 

@@ -12,6 +12,7 @@ pub(crate) mod member_order;
 pub mod meta;
 pub mod schema;
 
+pub use cross_file::asset_declarations;
 pub(crate) use meta::declare_rules;
 
 #[cfg(test)]

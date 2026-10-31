@@ -385,6 +385,14 @@ impl std::ops::DerefMut for LspState {
     }
 }
 
+#[derive(Default)]
+enum CrossFileSchedule {
+    #[default]
+    Immediate,
+    Deferred,
+    Pending,
+}
+
 /// Server-side cache: open documents, active config, enabled rule set.
 pub struct LspState {
     documents: HashMap<String, DocumentState>,
@@ -399,6 +407,11 @@ pub struct LspState {
     /// Cross-file rules; empty unless enabled by config. When empty the
     /// cross-file pass is skipped entirely (the whole-workspace walk is expensive).
     cross_file_rules: CrossFileRuleRegistry,
+    published_manifests: HashMap<String, Vec<Diagnostic>>,
+    cross_file_worker_failed: bool,
+    cross_file_schedule: CrossFileSchedule,
+    asset_paths: Option<(HashSet<PathBuf>, HashSet<PathBuf>)>,
+    client_workspace_roots: Vec<PathBuf>,
     cross_file_index_cache: Option<CrossFileIndexCache>,
     cross_file_index_build_count: u64,
     cross_file_external_cache: Option<CrossFileExternalCache>,
@@ -540,6 +553,11 @@ impl LspState {
             config_start_dir,
             rules,
             cross_file_rules,
+            published_manifests: HashMap::new(),
+            cross_file_worker_failed: false,
+            cross_file_schedule: CrossFileSchedule::default(),
+            asset_paths: None,
+            client_workspace_roots: Vec::new(),
             cross_file_index_cache: None,
             cross_file_index_build_count: 0,
             workspace_roots: vec![workspace_root.clone()],
@@ -591,6 +609,7 @@ impl LspState {
 
     /// Apply initialize roots before opening documents, resolving each folder's config.
     pub(crate) fn initialize_workspace_roots(&mut self, roots: Vec<PathBuf>) {
+        let client_roots = roots.clone();
         let mut roots = roots
             .into_iter()
             .map(|root| canonical_or_lexical(&root))
@@ -604,6 +623,17 @@ impl LspState {
         *self = Self::new_from_environment(self.config_path.clone(), environment, primary.clone());
         self.workspace_root = primary;
         self.workspace_roots = roots;
+        self.client_workspace_roots = self
+            .workspace_roots
+            .iter()
+            .map(|root| {
+                client_roots
+                    .iter()
+                    .find(|client| canonical_or_lexical(client) == *root)
+                    .cloned()
+                    .unwrap_or_else(|| root.clone())
+            })
+            .collect();
         self.workspace_initialized = true;
         let messages = self.reload_additional_root_configs();
         for message in messages {
@@ -940,6 +970,7 @@ impl LspState {
             return Vec::new();
         }
         self.refresh_unresolved_paths();
+        self.refresh_asset_paths();
         // Discovery can capture new disk bytes while retaining a known context.
         // Check original link locations before watcher normalization follows them.
         let inputs_changed = paths.iter().any(|path| {
@@ -955,6 +986,9 @@ impl LspState {
             .collect();
         if paths.is_empty() {
             return Vec::new();
+        }
+        if !inputs_changed && paths.iter().all(|path| self.asset_file_event(path)) {
+            return self.cross_file_pass();
         }
         if paths.iter().any(|path| {
             self.is_failed_discovery_path(path)
@@ -1001,6 +1035,9 @@ impl LspState {
         if !inputs_changed && !dependency_changed && !project_changed && !rules_changed {
             return Vec::new();
         }
+        if !matches!(self.cross_file_schedule, CrossFileSchedule::Immediate) {
+            self.cross_file_schedule = CrossFileSchedule::Pending;
+        }
         if inputs_changed || dependency_changed {
             self.reset_external_environment();
         }
@@ -1009,6 +1046,9 @@ impl LspState {
         self.invalidate_semantic_snapshot();
         if rules_changed {
             let refreshed = self.reload_config();
+            if refreshed.is_empty() && self.documents.is_empty() {
+                return self.cross_file_pass();
+            }
             if !refreshed.is_empty()
                 || !paths.iter().any(|path| {
                     matches!(
@@ -1022,11 +1062,8 @@ impl LspState {
             // A malformed rules config must not suppress manifest-driven
             // analysis: retain the last good rules and refresh open documents.
         }
-        if self.documents.is_empty()
-            && self.incomplete_episode != IncompleteEpisode::Complete
-            && self.cross_file_rules_enabled()
-        {
-            self.cross_file_pass();
+        if self.documents.is_empty() {
+            return self.cross_file_pass();
         }
         self.open_uris()
             .into_iter()
@@ -1035,6 +1072,19 @@ impl LspState {
                 (uri, diagnostics)
             })
             .collect()
+    }
+
+    fn asset_file_event(&self, path: &Path) -> bool {
+        self.asset_event_relevant(path)
+            && !path.is_dir()
+            && !self
+                .disk_files
+                .keys()
+                .any(|cached| cached.starts_with(path))
+            && !self
+                .project_paths
+                .as_ref()
+                .is_some_and(|files| files.iter().any(|(cached, _)| cached.starts_with(path)))
     }
 
     fn is_failed_discovery_path(&self, path: &Path) -> bool {
@@ -1085,6 +1135,69 @@ impl LspState {
                     .environment
                     .watched_dependency_roots()
                     .any(|root| path.starts_with(root)))
+            || self.asset_event_relevant(path)
+    }
+
+    fn asset_event_relevant(&self, path: &Path) -> bool {
+        if is_dart_file(path) {
+            return false;
+        }
+        self.asset_paths
+            .as_ref()
+            .is_some_and(|(files, directories)| {
+                files.contains(path)
+                    || path
+                        .parent()
+                        .is_some_and(|parent| directories.contains(parent))
+            })
+    }
+
+    fn refresh_asset_paths(&mut self) {
+        if self.asset_paths.is_some() || self.project_paths.is_none() {
+            return;
+        }
+        let mut files = HashSet::new();
+        let mut directories = HashSet::new();
+        for (file, _) in self
+            .project_paths
+            .iter()
+            .flatten()
+            .filter(|(_, dart)| !dart)
+        {
+            let index = self.root_index(file);
+            let rules = if index == 0 {
+                &self.cross_file_rules
+            } else {
+                self.additional_root_configs[index - 1]
+                    .analysis
+                    .cross_file_registry()
+            };
+            if !rules
+                .rules()
+                .iter()
+                .any(|(name, _)| matches!(*name, "unused-assets" | "missing-assets"))
+            {
+                continue;
+            }
+            let Some(package) = self.environment.package(file) else {
+                continue;
+            };
+            let falcon_analyze::ManifestSnapshot::Valid { yaml, .. } = package.snapshot() else {
+                continue;
+            };
+            let Some(root) = package.manifest.parent() else {
+                continue;
+            };
+            for asset in falcon_rules::asset_declarations(yaml) {
+                let path = watched_path(&root.join(asset));
+                if asset.ends_with('/') {
+                    directories.insert(path);
+                } else {
+                    files.insert(path);
+                }
+            }
+        }
+        self.asset_paths = Some((files, directories));
     }
 
     fn watched_dependency_changed(&self, paths: &[PathBuf]) -> bool {
@@ -1114,6 +1227,7 @@ impl LspState {
     }
 
     fn reset_external_environment(&mut self) {
+        self.asset_paths = None;
         self.environment.reset();
         self.environment_stamps = None;
         self.reset_external_layer();
@@ -1690,6 +1804,10 @@ impl LspState {
             .additional_root_configs
             .iter()
             .any(|entry| entry.analysis.cross_file_resolve());
+        self.asset_paths = None;
+        if !matches!(self.cross_file_schedule, CrossFileSchedule::Immediate) {
+            self.cross_file_schedule = CrossFileSchedule::Pending;
+        }
         self.cross_file_index_cache = None;
         self.cross_file_external_cache = None;
         self.pending_semantic_affected.clear();
@@ -1698,10 +1816,6 @@ impl LspState {
             self.required_source_failures.clear();
             self.project_discovery_failures.clear();
             self.incomplete_episode = IncompleteEpisode::Complete;
-        } else if self.documents.is_empty()
-            && self.incomplete_episode != IncompleteEpisode::Complete
-        {
-            self.cross_file_pass();
         }
         let current_environment = self.environment.config_stamps();
         if self
@@ -1716,6 +1830,12 @@ impl LspState {
             cross_file_rule_count = self.cross_file_rules.rules().len(),
             "config reloaded"
         );
+        if self.documents.is_empty()
+            && (!self.published_manifests.is_empty()
+                || !matches!(self.incomplete_episode, IncompleteEpisode::Complete))
+        {
+            return self.cross_file_pass();
+        }
         self.open_uris()
             .into_iter()
             .map(|uri| {
@@ -1725,8 +1845,15 @@ impl LspState {
             .collect()
     }
 
-    /// Whether any cross-file rule is enabled. When false the caller skips the
-    /// cross-file pass, avoiding the whole-workspace walk.
+    pub(crate) fn disk_manifest_source(&self, uri: &str) -> Option<&str> {
+        let path = watched_path(&uri_to_path(uri));
+        if path.file_name().is_none_or(|name| name != "pubspec.yaml") {
+            return None;
+        }
+        self.disk_files.get(&path).map(|file| file.parsed.source())
+    }
+
+    /// Whether any workspace root enables cross-file rules.
     pub fn cross_file_rules_enabled(&self) -> bool {
         !self.cross_file_rules.is_empty()
             || self
@@ -1735,23 +1862,64 @@ impl LspState {
                 .any(|entry| !entry.analysis.cross_file_registry().is_empty())
     }
 
+    pub(crate) fn defer_cross_file_pass(&mut self) {
+        self.cross_file_schedule = CrossFileSchedule::Deferred;
+    }
+
+    pub(crate) fn resume_cross_file_pass(&mut self) -> bool {
+        matches!(
+            std::mem::take(&mut self.cross_file_schedule),
+            CrossFileSchedule::Pending
+        )
+    }
+
+    pub(crate) fn watched_content_change_relevant(&mut self, path: &Path) -> bool {
+        self.refresh_asset_paths();
+        !self.asset_file_event(&watched_path(path))
+    }
+
     /// Run the cross-file rules over the whole workspace and republish the
     /// merged (per-file + cross-file) diagnostics for every open document whose
     /// cross-file set changed. Returns the `(uri, merged)` pairs actually
     /// published; pending semantic dependent refreshes remain the caller's job.
     ///
-    /// Only open docs are republished: an editor shows diagnostics for open
-    /// buffers, and republishing unchanged docs would be redundant traffic.
+    /// Manifest results belong to disk facts, including when their buffers are closed.
     pub fn cross_file_pass(&mut self) -> Vec<(String, Vec<Diagnostic>)> {
-        if !self.cross_file_rules_enabled() {
+        if !matches!(self.cross_file_schedule, CrossFileSchedule::Immediate) {
+            self.cross_file_schedule = CrossFileSchedule::Pending;
             return Vec::new();
         }
-        // Compute the cross-file map first so its immutable borrow ends before the
-        // per-document `analyze`/mutation loop below (avoids &self vs &mut self).
+        if !self.cross_file_rules_enabled() {
+            return self
+                .published_manifests
+                .drain()
+                .map(|(uri, _)| (uri, Vec::new()))
+                .collect();
+        }
+        self.cross_file_worker_failed = false;
         let mut cross_file_map = self.cross_file_diagnostics();
+        self.refresh_asset_paths();
         self.add_incomplete_diagnostics(&mut cross_file_map);
+        let mut published = self.document_cross_file_publications(&cross_file_map);
+        if !self.cross_file_worker_failed {
+            published.extend(self.manifest_publications(cross_file_map));
+        }
+        published
+    }
+
+    fn document_cross_file_publications(
+        &mut self,
+        cross_file_map: &HashMap<String, Vec<Diagnostic>>,
+    ) -> Vec<(String, Vec<Diagnostic>)> {
         let mut published = Vec::new();
         for uri in self.open_uris() {
+            if self.documents[&uri]
+                .path
+                .file_name()
+                .is_some_and(|name| name == "pubspec.yaml")
+            {
+                continue;
+            }
             let path = self.documents[&uri].path.to_string_lossy();
             let cross_file_diags = cross_file_map.get(path.as_ref());
             let has_now = cross_file_diags.is_some_and(|d| !d.is_empty());
@@ -1780,6 +1948,75 @@ impl LspState {
             published.push((uri, merged));
         }
         published
+    }
+
+    fn manifest_publications(
+        &mut self,
+        results: HashMap<String, Vec<Diagnostic>>,
+    ) -> Vec<(String, Vec<Diagnostic>)> {
+        fn identity(diagnostic: &Diagnostic) -> impl PartialEq + '_ {
+            let Diagnostic {
+                rule,
+                severity,
+                message,
+                file_path,
+                span,
+                line,
+                col,
+                fix,
+            } = diagnostic;
+            (rule, severity, message, file_path, span, line, col, fix)
+        }
+        let mut manifests = HashMap::new();
+        for (path, diagnostics) in results {
+            if diagnostics.is_empty() {
+                continue;
+            }
+            if Path::new(&path)
+                .file_name()
+                .is_some_and(|name| name == "pubspec.yaml")
+                && let Some(uri) = self.manifest_uri(Path::new(&path))
+            {
+                manifests.insert(uri, diagnostics);
+            }
+        }
+        let mut published = Vec::new();
+        for (uri, diagnostics) in &manifests {
+            if self.published_manifests.get(uri).is_none_or(|previous| {
+                !previous
+                    .iter()
+                    .map(identity)
+                    .eq(diagnostics.iter().map(identity))
+            }) {
+                published.push((uri.clone(), diagnostics.clone()));
+            }
+        }
+        for uri in self
+            .published_manifests
+            .keys()
+            .filter(|uri| !manifests.contains_key(*uri))
+        {
+            published.push((uri.clone(), Vec::new()));
+        }
+        self.published_manifests = manifests;
+        published
+    }
+
+    fn manifest_uri(&self, path: &Path) -> Option<String> {
+        let client_path = self
+            .workspace_roots
+            .iter()
+            .zip(&self.client_workspace_roots)
+            .filter_map(|(root, client)| {
+                path.strip_prefix(root)
+                    .ok()
+                    .map(|relative| (root, client.join(relative)))
+            })
+            .max_by_key(|(root, _)| root.components().count())
+            .map(|(_, path)| path);
+        crate::server::file_uri(client_path.as_deref().unwrap_or(path))
+            .ok()
+            .map(|uri| uri.to_string())
     }
 
     fn add_incomplete_diagnostics(&mut self, output: &mut HashMap<String, Vec<Diagnostic>>) {
@@ -1950,6 +2187,7 @@ impl LspState {
             self.ensure_semantic_snapshot();
         }
         if self.semantic_snapshot_error.is_some() {
+            self.cross_file_worker_failed = true;
             return HashMap::new();
         }
         let (files, complete) = self.collect_project_files(ProjectView::CrossFile);
@@ -1975,6 +2213,7 @@ impl LspState {
         });
         let reuse_snapshot = indexes.is_some();
         if !self.prepare_cross_file_indexes(&files, reuse_snapshot) {
+            self.cross_file_worker_failed = self.semantic_snapshot_error.is_some();
             return HashMap::new();
         }
         let indexes = if reuse_snapshot {
@@ -2013,20 +2252,7 @@ impl LspState {
         });
         let diags = match result {
             Ok(diags) => diags,
-            Err(error) => {
-                // Editors only show open buffers, so every open document carries the failure.
-                warn!("cross-file rules worker failed: {error}");
-                return self
-                    .documents
-                    .values()
-                    .map(|doc| {
-                        (
-                            doc.path.to_string_lossy().into_owned(),
-                            vec![falcon_analyze::rules_thread_diagnostic(&doc.path, &error)],
-                        )
-                    })
-                    .collect();
-            }
+            Err(error) => return self.cross_file_worker_diagnostics(&error),
         };
         let mut grouped: HashMap<String, Vec<Diagnostic>> = HashMap::new();
         for diag in diags {
@@ -2035,7 +2261,30 @@ impl LspState {
                 .or_default()
                 .push(diag);
         }
+        for file in files.iter().filter(|file| !is_dart_file(file.path())) {
+            if let Some(diagnostics) = grouped.get_mut(file.path().to_string_lossy().as_ref()) {
+                resolve_document_positions(diagnostics, file.source());
+                sort_diagnostics(diagnostics);
+            }
+        }
         grouped
+    }
+
+    fn cross_file_worker_diagnostics(
+        &mut self,
+        error: &std::io::Error,
+    ) -> HashMap<String, Vec<Diagnostic>> {
+        self.cross_file_worker_failed = true;
+        warn!("cross-file rules worker failed: {error}");
+        self.documents
+            .values()
+            .map(|doc| {
+                (
+                    doc.path.to_string_lossy().into_owned(),
+                    vec![falcon_analyze::rules_thread_diagnostic(&doc.path, error)],
+                )
+            })
+            .collect()
     }
 
     fn ensure_cross_file_indexes(&mut self, files: &[ProjectFile]) {

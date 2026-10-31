@@ -172,6 +172,16 @@ discovery starts in the first workspace folder. Configuration errors appear as
 editor messages. Diagnostics use UTF-16 positions and combine file and project
 findings in a single publication.
 
+Manifest findings, including dependency ordering, insecure URLs and unused assets,
+appear on `pubspec.yaml` after initialization even when no Dart document is open.
+They use saved disk facts, not unsaved YAML buffers; closing the manifest does not
+clear them. Saving or watching the manifest refreshes its facts. With an asset rule
+enabled, creating or deleting an exact declared asset file or a direct child of a
+declared directory refreshes findings without rebuilding Dart semantics. Nested
+children and content-only asset changes do not trigger this refresh. Results clear
+when fixed, deleted, disabled or suppressed by incomplete analysis; temporary worker
+failures retain prior manifest findings until recovery.
+
 Workspace parses are cached between edits. Clients should send
 `workspace/didChangeWatchedFiles` events for disk changes so newly created,
 changed, or removed files are included without restarting the server.

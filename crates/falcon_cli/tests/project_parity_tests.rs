@@ -58,14 +58,9 @@ fn optional_manifest_failures_recover_to_fresh_secure_url_diagnostics() {
             "{warnings:?}"
         );
         fs::write(&manifest, "name: example\nhomepage: http://example.com\n").unwrap();
-        lsp.watched_files_changed(std::slice::from_ref(&manifest));
+        let mut published = lsp.watched_files_changed(std::slice::from_ref(&manifest));
+        published.extend(lsp.cross_file_pass());
         let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
-        lsp.open(
-            &manifest_uri,
-            fs::read_to_string(&manifest).unwrap(),
-            Some(1),
-        );
-        let published = lsp.cross_file_pass();
         let diagnostics = &published
             .iter()
             .find(|(uri, _)| uri == &manifest_uri)
@@ -86,23 +81,25 @@ fn optional_manifest_failures_recover_to_fresh_secure_url_diagnostics() {
         );
         assert_eq!((diagnostic.line, diagnostic.col), (2, 11));
         assert_eq!((diagnostic.span.start, diagnostic.span.end), (24, 42));
-        assert!(lsp.change(
+        assert!(!lsp.change(
             &manifest_uri,
             "name: example\nhomepage: https://example.com\n".into(),
             Some(2)
         ));
         let unsaved = lsp.cross_file_pass();
-        assert!(unsaved.iter().any(|(_, diagnostics)| {
-            diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.rule == "secure-pubspec-urls")
-        }));
+        assert!(unsaved.iter().all(|(uri, _)| uri != &manifest_uri));
         fs::write(&manifest, "name: example\nhomepage: https://example.com\n").unwrap();
-        lsp.watched_files_changed(std::slice::from_ref(&manifest));
+        let mut cleared = lsp.watched_files_changed(std::slice::from_ref(&manifest));
+        cleared.extend(lsp.cross_file_pass());
+        assert!(
+            cleared
+                .iter()
+                .any(|(uri, diagnostics)| uri == &manifest_uri && diagnostics.is_empty())
+        );
         assert!(
             lsp.cross_file_pass()
                 .iter()
-                .all(|(_, diagnostics)| diagnostics.is_empty())
+                .all(|(uri, _)| uri != &manifest_uri)
         );
     }
 }
@@ -884,4 +881,70 @@ fn write_sdk_parity_fixture(
     )
     .unwrap();
     fs::write(root.join("pubspec.yaml"), "name: sdk_parity_fixture\n").unwrap();
+}
+
+#[test]
+fn closed_manifest_publication_matches_cli_and_clears_on_disable_and_delete() {
+    let temp = tempdir().unwrap();
+    let root = fs::canonicalize(temp.path()).unwrap();
+    let manifest = root.join("pubspec.yaml");
+    let config = root.join("falcon.json");
+    let source =
+        "name: example\nhomepage: http://example.com\ndependencies:\n  zebra: any\n  apple: any\n";
+    let rules = r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"security":{"secure-pubspec-urls":"warn"},"correctness":{"sort-pub-dependencies":"warn"}}}}"#;
+    fs::write(&config, rules).unwrap();
+    fs::write(&manifest, source).unwrap();
+    fs::write(root.join("main.dart"), "void main() {}\n").unwrap();
+    let options = CheckOptions {
+        paths: vec![root],
+        config_path: Some(config.clone()),
+        quiet: true,
+        ..Default::default()
+    };
+    let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+    assert_eq!(cli.diagnostics.len(), 2);
+    assert!(
+        cli.diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "sort-pub-dependencies")
+    );
+    assert!(
+        cli.diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "secure-pubspec-urls")
+    );
+    let mut lsp = LspState::new_with_sdk_locator(Some(config.clone()), |_| None);
+    let manifest_uri = format!("file://{}", manifest.display());
+    let published = lsp.cross_file_pass();
+    let diagnostics = &published
+        .iter()
+        .find(|(uri, _)| uri == &manifest_uri)
+        .unwrap()
+        .1;
+    assert_eq!(
+        serde_json::to_value(diagnostics).unwrap(),
+        serde_json::to_value(&cli.diagnostics).unwrap()
+    );
+    fs::write(
+        &config,
+        r#"{"linter":{"enabled":false},"cross-file":{"enabled":false}}"#,
+    )
+    .unwrap();
+    let cleared = lsp.reload_config();
+    assert_eq!(cleared.len(), 1);
+    assert_eq!(cleared[0].0, manifest_uri);
+    assert!(cleared[0].1.is_empty());
+    assert!(lsp.cross_file_pass().is_empty());
+    fs::write(&config, rules).unwrap();
+    let enabled = lsp.watched_files_changed(std::slice::from_ref(&config));
+    assert!(enabled.iter().any(|(uri, diagnostics)| uri == &manifest_uri
+        && serde_json::to_value(diagnostics).unwrap()
+            == serde_json::to_value(&cli.diagnostics).unwrap()));
+    fs::remove_file(&manifest).unwrap();
+    let cleared = lsp.watched_files_changed(std::slice::from_ref(&manifest));
+    assert!(
+        cleared
+            .iter()
+            .any(|(uri, diagnostics)| uri == &manifest_uri && diagnostics.is_empty())
+    );
 }

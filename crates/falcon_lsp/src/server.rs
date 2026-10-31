@@ -33,7 +33,6 @@ use lsp_types::{
 };
 use tracing::{debug, info, warn};
 
-use falcon_analyze::canonical_or_lexical;
 use falcon_diagnostics::{Diagnostic, lsp_position_to_byte};
 
 use crate::state::LspState;
@@ -64,6 +63,7 @@ type WorkerMessage = (u64, Message, Option<Arc<AtomicBool>>);
 struct Debounce {
     dirty: Arc<HashSet<String>>,
     deadline: Option<Instant>,
+    cross_file: bool,
 }
 
 impl Debounce {
@@ -71,7 +71,7 @@ impl Debounce {
         if self.dirty.contains(uri) {
             Arc::make_mut(&mut self.dirty).remove(uri);
         }
-        if self.dirty.is_empty() {
+        if self.dirty.is_empty() && !self.cross_file {
             self.deadline = None;
         }
     }
@@ -80,6 +80,11 @@ impl Debounce {
         if !self.dirty.contains(&uri) {
             Arc::make_mut(&mut self.dirty).insert(uri);
         }
+        self.deadline = Some(Instant::now() + delay);
+    }
+
+    fn schedule_cross_file(&mut self, delay: Duration) {
+        self.cross_file = true;
         self.deadline = Some(Instant::now() + delay);
     }
 
@@ -106,6 +111,7 @@ struct FileWatching {
     dynamic: bool,
     relative: bool,
     workspace_roots: Vec<PathBuf>,
+    client_workspace_roots: Vec<PathBuf>,
     dependency_roots: Vec<PathBuf>,
     dependency_files: Vec<PathBuf>,
     registration: Option<String>,
@@ -141,16 +147,22 @@ impl FileWatching {
         let mut workspace_roots = Vec::with_capacity(folders.map_or(1, Vec::len));
         for uri in uris.filter_map(|text| Uri::from_str(text).ok()) {
             if uri.scheme().is_some_and(|scheme| scheme.as_str() == "file") {
-                let root = canonical_or_lexical(&crate::state::uri_to_path(uri.as_str()));
+                let root = crate::state::uri_to_path(uri.as_str());
                 if !workspace_roots.contains(&root) {
                     workspace_roots.push(root);
                 }
             }
         }
+        let client_workspace_roots = workspace_roots;
+        let workspace_roots = client_workspace_roots
+            .iter()
+            .map(|root| falcon_analyze::canonical_or_lexical(root))
+            .collect();
         Self {
             dynamic,
             relative,
             workspace_roots,
+            client_workspace_roots,
             dependency_roots: Vec::new(),
             dependency_files: Vec::new(),
             registration: None,
@@ -301,13 +313,23 @@ impl FileWatching {
     }
 }
 
-fn file_uri(path: &Path) -> Result<Uri, ServerError> {
-    let mut uri = String::with_capacity(8 + path.as_os_str().len() * 3);
+pub(crate) fn file_uri(path: &Path) -> Result<Uri, ServerError> {
+    let bytes = path.as_os_str().as_encoded_bytes();
+    #[cfg(windows)]
+    let bytes = bytes.strip_prefix(br"\\?\").unwrap_or(bytes);
+    #[cfg(windows)]
+    let (bytes, authority) = bytes
+        .strip_prefix(br"UNC\")
+        .or_else(|| bytes.strip_prefix(br"\\"))
+        .map_or((bytes, false), |bytes| (bytes, true));
+    #[cfg(not(windows))]
+    let authority = false;
+    let mut uri = String::with_capacity(8 + bytes.len() * 3);
     uri.push_str("file://");
-    if !path.as_os_str().as_encoded_bytes().starts_with(b"/") {
+    if !authority && !bytes.starts_with(b"/") {
         uri.push('/');
     }
-    for &byte in path.as_os_str().as_encoded_bytes() {
+    for &byte in bytes {
         if byte == b'\\' && std::path::MAIN_SEPARATOR == '\\' {
             uri.push('/');
         } else if byte.is_ascii_alphanumeric() || b"/:-._~".contains(&byte) {
@@ -350,20 +372,31 @@ fn watched_files_and_publish(
     state: &mut LspState,
     debounce: &mut Debounce,
     paths: &[PathBuf],
+    delay: Duration,
 ) -> Result<(), ServerError> {
     if paths.is_empty() {
         return Ok(());
     }
+    state.defer_cross_file_pass();
     let affected = state.watched_files_changed(paths);
+    let pending = state.resume_cross_file_pass();
     publish_config_messages(connection, state)?;
-    if affected.is_empty() {
-        return Ok(());
-    }
     for (uri, diagnostics) in affected {
-        debounce.clear(&uri);
-        publish(connection, state, &uri, &diagnostics)?;
+        if state.cross_file_rules_enabled() && (pending || debounce.cross_file) {
+            debounce.schedule(uri, delay);
+        } else {
+            debounce.clear(&uri);
+            publish(connection, state, &uri, &diagnostics)?;
+        }
     }
-    cross_file_pass_and_publish(connection, state, debounce)
+    if pending {
+        if delay.is_zero() {
+            cross_file_pass_and_publish(connection, state, debounce)?;
+        } else {
+            debounce.schedule_cross_file(delay);
+        }
+    }
+    Ok(())
 }
 
 /// Capabilities advertised in the initialize response.
@@ -441,8 +474,8 @@ fn run_with_state(
 ) -> Result<(), ServerError> {
     // Initialize handshake (JSON-RPC request id is echoed by initialize_finish).
     let (initialize_id, initialize_params) = connection.initialize_start()?;
-    let watching = FileWatching::new(&initialize_params);
-    state.initialize_workspace_roots(watching.workspace_roots.clone());
+    let mut watching = FileWatching::new(&initialize_params);
+    state.initialize_workspace_roots(std::mem::take(&mut watching.client_workspace_roots));
     state.configure_code_actions(&initialize_params);
     state.set_dynamic_file_watching(watching.dynamic);
     let initialize_result = InitializeResult {
@@ -662,6 +695,13 @@ fn analysis_worker_with(
     };
     let mut generation = 0;
     let mut debounce = Debounce::default();
+    if state.cross_file_rules_enabled() {
+        if options.debounce.is_zero() {
+            cross_file_pass_and_publish(&connection, &mut state, &mut debounce)?;
+        } else {
+            debounce.schedule_cross_file(options.debounce);
+        }
+    }
     let mut idle_poll_delay = Duration::from_secs(1);
     watching.refresh(&connection, &state)?;
 
@@ -757,14 +797,16 @@ fn revalidate_and_publish(
     idle_poll_delay: Duration,
 ) -> Result<Duration, ServerError> {
     // Revalidate only after a quiet debounce/idle interval.
+    state.defer_cross_file_pass();
     let disk_updates = state.revalidate_disk();
+    let pending = state.resume_cross_file_pass();
     let refreshed = !disk_updates.is_empty();
     let idle_poll_delay = next_idle_poll_delay(idle_poll_delay, refreshed);
     for (uri, diagnostics) in disk_updates {
         publish(connection, state, &uri, &diagnostics)?;
     }
     let uris = debounce.drain();
-    if uris.is_empty() && !refreshed {
+    if uris.is_empty() && !refreshed && !pending && !debounce.cross_file {
         return Ok(idle_poll_delay);
     }
     for (affected_uri, diagnostics) in state.analyze_affected_many(&uris) {
@@ -832,6 +874,7 @@ fn handle_notification(
                         state,
                         debounce,
                         &[crate::state::uri_to_path(params.text_document.uri.as_str())],
+                        delay,
                     )?;
                     watching.refresh(connection, state)?;
                 }
@@ -864,9 +907,14 @@ fn handle_notification(
                         .scheme()
                         .is_some_and(|scheme| scheme.as_str() == "file")
                 })
-                .map(|event| crate::state::uri_to_path(event.uri.as_str()))
+                .filter_map(|event| {
+                    let path = crate::state::uri_to_path(event.uri.as_str());
+                    (event.typ != lsp_types::FileChangeType::CHANGED
+                        || state.watched_content_change_relevant(&path))
+                    .then_some(path)
+                })
                 .collect();
-            watched_files_and_publish(connection, state, debounce, &paths)?;
+            watched_files_and_publish(connection, state, debounce, &paths, delay)?;
         }
         other => debug!(method = other, "ignoring notification"),
     }
@@ -1150,12 +1198,12 @@ fn cross_file_pass_and_publish(
     state: &mut LspState,
     debounce: &mut Debounce,
 ) -> Result<(), ServerError> {
-    if !state.cross_file_rules_enabled() {
-        return Ok(());
-    }
-    let uris = debounce.drain();
-    for (uri, diagnostics) in state.analyze_affected_many(&uris) {
-        publish(connection, state, &uri, &diagnostics)?;
+    debounce.cross_file = false;
+    if state.cross_file_rules_enabled() {
+        let uris = debounce.drain();
+        for (uri, diagnostics) in state.analyze_affected_many(&uris) {
+            publish(connection, state, &uri, &diagnostics)?;
+        }
     }
     for (uri, diagnostics) in state.cross_file_pass() {
         publish(connection, state, &uri, &diagnostics)?;
@@ -1210,19 +1258,30 @@ fn publish(
     uri: &str,
     diagnostics: &[Diagnostic],
 ) -> Result<(), ServerError> {
-    let (lsp_diagnostics, version) = match state.document(uri) {
-        Some(document) => {
-            let lines = falcon_diagnostics::LineIndex::new(document.text());
-            (
-                diagnostics
-                    .iter()
-                    .map(|diagnostic| diagnostic.format_lsp_in(&lines))
-                    .collect(),
-                document.version,
-            )
+    let (lsp_diagnostics, version) = if let Some(source) = state.disk_manifest_source(uri) {
+        let lines = falcon_diagnostics::LineIndex::new(source);
+        (
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.format_lsp_in(&lines))
+                .collect(),
+            None,
+        )
+    } else {
+        match state.document(uri) {
+            Some(document) => {
+                let lines = falcon_diagnostics::LineIndex::new(document.text());
+                (
+                    diagnostics
+                        .iter()
+                        .map(|diagnostic| diagnostic.format_lsp_in(&lines))
+                        .collect(),
+                    document.version,
+                )
+            }
+            // Closed document: publish an empty set to clear editor state.
+            None => (Vec::new(), None),
         }
-        // Closed document: publish an empty set to clear editor state.
-        None => (Vec::new(), None),
     };
     let params = PublishDiagnosticsParams {
         uri: Uri::from_str(uri).map_err(|e| format!("invalid uri {uri}: {e}"))?,

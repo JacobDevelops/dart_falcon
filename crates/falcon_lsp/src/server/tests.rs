@@ -1,4 +1,5 @@
 use super::*;
+use falcon_analyze::canonical_or_lexical;
 
 #[test]
 fn unchanged_idle_scans_back_off_and_changes_reset_the_delay() {
@@ -426,6 +427,18 @@ mod file_watching_tests {
             extra: &Value,
             config: &str,
         ) -> Self {
+            Self::start_prepared(dynamic, relative, extra, config, |workspace, _| {
+                workspace.to_owned()
+            })
+        }
+
+        fn start_prepared(
+            dynamic: bool,
+            relative: bool,
+            extra: &Value,
+            config: &str,
+            prepare: impl FnOnce(&Path, &Path) -> PathBuf,
+        ) -> Self {
             let directory = tempfile::tempdir().unwrap();
             let workspace = directory.path().join("workspace");
             std::fs::create_dir_all(workspace.join(".dart_tool")).unwrap();
@@ -437,6 +450,7 @@ mod file_watching_tests {
                 std::fs::write(library.join("api.dart"), "class C {} C make() => C();").unwrap();
             }
             Self::package_config(&workspace, "../../dep%20%5Bone%5D");
+            let client_workspace = prepare(&workspace, directory.path());
             let (server, connection) = Connection::memory();
             let options = ServerOptions {
                 debounce: Duration::ZERO,
@@ -450,7 +464,7 @@ mod file_watching_tests {
                 connection,
                 worker,
                 directory,
-                workspace,
+                workspace: client_workspace,
             };
             let mut initialize = json!({
                 "capabilities": {"workspace": {"didChangeWatchedFiles": {
@@ -551,6 +565,191 @@ mod file_watching_tests {
             assert_eq!(response.id, 100.into());
             self.notify("exit", Value::Null);
             self.worker.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn initialization_publishes_closed_manifest_without_opening_dart() {
+        for dynamic in [false, true] {
+            let client = Client::start_prepared(
+                dynamic,
+                false,
+                &json!({}),
+                r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"security":{"secure-pubspec-urls":"warn"}}}}"#,
+                |workspace, _| {
+                    std::fs::write(
+                        workspace.join("pubspec.yaml"),
+                        "name: app\nhomepage: http://example.com\n",
+                    )
+                    .unwrap();
+                    workspace.to_owned()
+                },
+            );
+            let uri = file_uri(&client.workspace.join("pubspec.yaml")).unwrap();
+            let messages = client.drain();
+            let publications: Vec<PublishDiagnosticsParams> = messages
+                .iter()
+                .filter_map(|message| match message {
+                    Message::Notification(notification)
+                        if notification.method == PublishDiagnostics::METHOD =>
+                    {
+                        Some(serde_json::from_value(notification.params.clone()).unwrap())
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(publications.len(), 1, "{messages:?}");
+            assert_eq!(publications[0].uri, uri);
+            assert!(has_rule(&publications[0], "secure-pubspec-urls"));
+            assert_eq!(
+                publications[0].diagnostics[0].range,
+                lsp_types::Range::new(
+                    lsp_types::Position::new(1, 10),
+                    lsp_types::Position::new(1, 28)
+                )
+            );
+            client.finish();
+        }
+    }
+
+    #[test]
+    fn enabling_cross_file_rules_publishes_manifest_without_open_documents() {
+        let disabled = r#"{"linter":{"enabled":false},"cross-file":{"enabled":false}}"#;
+        let enabled = r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"security":{"secure-pubspec-urls":"warn"}}}}"#;
+        for dynamic in [false, true] {
+            let client =
+                Client::start_prepared(dynamic, true, &json!({}), disabled, |workspace, _| {
+                    std::fs::write(
+                        workspace.join("pubspec.yaml"),
+                        "name: app\nhomepage: http://example.com\n",
+                    )
+                    .unwrap();
+                    workspace.to_owned()
+                });
+            assert_eq!(publications(&client.drain()), Vec::new());
+            let manifest_uri = file_uri(&client.workspace.join("pubspec.yaml")).unwrap();
+            let config = client.workspace.join("falcon.json");
+            let config_uri = file_uri(&config).unwrap();
+            for (text, active) in [(enabled, true), (disabled, false), (enabled, true)] {
+                std::fs::write(&config, text).unwrap();
+                if dynamic {
+                    client.notify(
+                        "workspace/didChangeWatchedFiles",
+                        json!({"changes":[{"uri":config_uri,"type":2}]}),
+                    );
+                } else {
+                    client.notify(
+                        "textDocument/didSave",
+                        json!({"textDocument":{"uri":config_uri}}),
+                    );
+                }
+                let published = publications(&client.drain());
+                assert_eq!(published.len(), 1, "{published:?}");
+                assert_eq!(published[0].uri, manifest_uri);
+                assert_eq!(has_rule(&published[0], "secure-pubspec-urls"), active);
+                assert_eq!(published[0].diagnostics.is_empty(), !active);
+            }
+            client.finish();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn manifest_publications_use_the_symlinked_client_workspace_uri() {
+        let client = Client::start_prepared(
+            true,
+            true,
+            &json!({}),
+            r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"security":{"secure-pubspec-urls":"warn"}}}}"#,
+            |workspace, directory| {
+                std::fs::write(
+                    workspace.join("pubspec.yaml"),
+                    "name: app\nhomepage: http://example.com\n",
+                )
+                .unwrap();
+                let linked = directory.join("linked workspace #");
+                std::os::unix::fs::symlink(workspace, &linked).unwrap();
+                linked
+            },
+        );
+        let expected = file_uri(&client.workspace.join("pubspec.yaml")).unwrap();
+        let messages = client.drain();
+        let publications: Vec<PublishDiagnosticsParams> = messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::Notification(notification)
+                    if notification.method == PublishDiagnostics::METHOD =>
+                {
+                    Some(serde_json::from_value(notification.params.clone()).unwrap())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(publications.len(), 1, "{messages:?}");
+        assert_eq!(publications[0].uri, expected);
+        assert!(has_rule(&publications[0], "secure-pubspec-urls"));
+        client.finish();
+    }
+
+    #[test]
+    fn manifest_buffers_keep_disk_diagnostics_through_open_change_close_and_save() {
+        let config = r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"security":{"secure-pubspec-urls":"warn"}}}}"#;
+        for dynamic in [false, true] {
+            let client = Client::start_with_configuration(dynamic, true, &json!({}), config);
+            client.drain();
+            let manifest = client.workspace.join("pubspec.yaml");
+            std::fs::write(&manifest, "name: app\nhomepage: http://example.com\n").unwrap();
+            let uri = file_uri(&manifest).unwrap();
+            client.notify(
+                "workspace/didChangeWatchedFiles",
+                json!({"changes":[{"uri":uri,"type":1}]}),
+            );
+            let created = publications(&client.drain());
+            assert!(created.iter().any(|publication| publication.uri == uri
+                && has_rule(publication, "secure-pubspec-urls")));
+            for (method, params) in [
+                (
+                    "textDocument/didOpen",
+                    json!({"textDocument":{"uri":uri,"languageId":"yaml","version":1,"text":"not Dart"}}),
+                ),
+                (
+                    "textDocument/didChange",
+                    json!({"textDocument":{"uri":uri,"version":2},"contentChanges":[{"text":"homepage: https://example.com"}]}),
+                ),
+                ("textDocument/didClose", json!({"textDocument":{"uri":uri}})),
+            ] {
+                client.notify(method, params);
+                assert_eq!(publications(&client.drain()), Vec::new());
+            }
+            let broken = client.workspace.join("broken.dart");
+            let broken_uri = file_uri(&broken).unwrap();
+            std::fs::write(&broken, [0xff]).unwrap();
+            client.notify(
+                "workspace/didChangeWatchedFiles",
+                json!({"changes":[{"uri":broken_uri,"type":1}]}),
+            );
+            let suppressed = publications(&client.drain());
+            assert!(suppressed.iter().any(|publication| publication.uri == uri && publication.diagnostics.is_empty()));
+            std::fs::remove_file(&broken).unwrap();
+            client.notify(
+                "workspace/didChangeWatchedFiles",
+                json!({"changes":[{"uri":broken_uri,"type":3}]}),
+            );
+            let recovered = publications(&client.drain());
+            assert!(recovered.iter().any(|publication| publication.uri == uri
+                && has_rule(publication, "secure-pubspec-urls")));
+            std::fs::write(&manifest, "name: app\nhomepage: https://example.com\n").unwrap();
+            if dynamic {
+                client.notify(
+                    "workspace/didChangeWatchedFiles",
+                    json!({"changes":[{"uri":uri,"type":2}]}),
+                );
+            } else {
+                client.notify("textDocument/didSave", json!({"textDocument":{"uri":uri}}));
+            }
+            let cleared = publications(&client.drain());
+            assert!(cleared.iter().any(|publication| publication.uri == uri && publication.diagnostics.is_empty()));
+            client.finish();
         }
     }
 
@@ -819,6 +1018,11 @@ mod file_watching_tests {
         let config = client.workspace.join("falcon.json");
         let manifest = client.workspace.join("pubspec.yaml");
         std::fs::write(&manifest, "name: app\n").unwrap();
+        client.notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes":[{"uri":file_uri(&manifest).unwrap(),"type":1}]}),
+        );
+        client.drain();
         let uri = file_uri(&client.workspace.join("main.dart")).unwrap();
         client.open();
         let opened = client.drain();
@@ -1486,6 +1690,67 @@ mod file_watching_tests {
     }
 
     #[test]
+    fn watcher_batches_hold_open_diagnostics_until_the_cross_file_pass() {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = directory.path();
+        let config = workspace.join("falcon.json");
+        std::fs::write(&config,
+            r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"no-import-cycles":"warn"}}}}"#
+        ).unwrap();
+        let source = "import 'b.dart';\n";
+        std::fs::write(workspace.join("a.dart"), source).unwrap();
+        std::fs::write(workspace.join("b.dart"), "import 'a.dart';\n").unwrap();
+        let uri = file_uri(&workspace.join("a.dart")).unwrap();
+        let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
+        state.open(uri.as_str(), source.to_owned(), Some(1));
+        let (server, client) = Connection::memory();
+        let mut debounce = Debounce::default();
+        cross_file_pass_and_publish(&server, &mut state, &mut debounce).unwrap();
+        let initial: Vec<_> = client.receiver.try_iter().collect();
+        assert!(
+            publications(&initial)
+                .iter()
+                .any(|publication| publication.uri == uri
+                    && has_rule(publication, "no-import-cycles"))
+        );
+        for batch in 0..3 {
+            let unrelated = workspace.join(format!("unrelated_{batch}.dart"));
+            std::fs::write(&unrelated, "class Unrelated {}\n").unwrap();
+            let previous_deadline = debounce.deadline;
+            watched_files_and_publish(
+                &server,
+                &mut state,
+                &mut debounce,
+                &[unrelated],
+                Duration::from_secs(30),
+            )
+            .unwrap();
+            assert!(debounce.cross_file);
+            assert!(debounce.dirty.contains(uri.as_str()));
+            if let Some(previous_deadline) = previous_deadline {
+                assert!(debounce.deadline.unwrap() > previous_deadline);
+            }
+            let pending: Vec<_> = client.receiver.try_iter().collect();
+            assert!(
+                publications(&pending)
+                    .iter()
+                    .all(|publication| publication.uri != uri
+                        || has_rule(publication, "no-import-cycles"))
+            );
+        }
+        cross_file_pass_and_publish(&server, &mut state, &mut debounce).unwrap();
+        let settled: Vec<_> = client.receiver.try_iter().collect();
+        let published = publications(&settled);
+        let latest = published
+            .iter()
+            .rev()
+            .find(|publication| publication.uri == uri)
+            .unwrap();
+        assert!(has_rule(latest, "no-import-cycles"));
+        assert!(!debounce.dirty.contains(uri.as_str()));
+    }
+
+    #[test]
     fn ignored_watcher_batch_preserves_pending_cross_file_debounce() {
         let directory = tempfile::tempdir().unwrap();
         let workspace = directory.path().join("workspace");
@@ -1509,6 +1774,7 @@ mod file_watching_tests {
             &mut state,
             &mut debounce,
             &[directory.path().join("unrelated.dart")],
+            Duration::ZERO,
         )
         .unwrap();
         assert_eq!(debounce.deadline, deadline);

@@ -88,26 +88,24 @@ pub(super) fn asset_packages<'a>(
             let assets = flutter.and_then(|flutter| flutter.get_sequence("assets"));
             let capacity = assets.map_or(0, |assets| assets.len());
             let mut entries = Vec::with_capacity(if include_spans { capacity } else { 0 });
-            let mut declarations = Vec::with_capacity(if include_spans { 0 } else { capacity });
+            let declarations = if include_spans {
+                Vec::new()
+            } else {
+                asset_declarations(yaml).map(str::to_owned).collect()
+            };
             for scalar in assets
                 .into_iter()
                 .flat_map(|assets| assets.iter())
                 .filter_map(asset_scalar)
+                .filter(|_| include_spans)
             {
                 let path = scalar.as_str().to_owned();
-                if include_spans {
-                    let span = scalar
-                        .span()
-                        .start()
-                        .and_then(|marker| yaml_character_to_byte(source, marker.character()))
-                        .and_then(|start| scalar_source_span(source, start));
-                    entries.push(AssetEntry { path, span });
-                } else {
-                    declarations.push(path);
-                }
-            }
-            if !include_spans && let Some(flutter) = flutter {
-                additional_declarations(flutter, &mut declarations);
+                let span = scalar
+                    .span()
+                    .start()
+                    .and_then(|marker| yaml_character_to_byte(source, marker.character()))
+                    .and_then(|start| scalar_source_span(source, start));
+                entries.push(AssetEntry { path, span });
             }
             Some(AssetPackage {
                 pubspec,
@@ -127,49 +125,33 @@ fn asset_scalar(node: &Node) -> Option<&MarkedScalarNode> {
         .or_else(|| node.as_mapping()?.get_scalar("path"))
 }
 
-fn additional_declarations(
-    flutter: &marked_yaml::types::MarkedMappingNode,
-    declarations: &mut Vec<String>,
-) {
-    for family in flutter
-        .get_sequence("fonts")
-        .into_iter()
-        .flat_map(|fonts| fonts.iter())
-        .filter_map(Node::as_mapping)
-    {
-        declarations.extend(
-            family
-                .get_sequence("fonts")
-                .into_iter()
-                .flat_map(|fonts| fonts.iter())
-                .filter_map(Node::as_mapping)
-                .filter_map(|font| font.get_scalar("asset"))
-                .map(|asset| asset.as_str().to_owned()),
-        );
+/// Asset declarations shared by rule evaluation and filesystem-event admission.
+pub fn asset_declarations(root: &serde_yaml::Value) -> impl Iterator<Item = &str> {
+    fn sequence(value: &serde_yaml::Value) -> &[serde_yaml::Value] {
+        value.as_sequence().map_or(&[], Vec::as_slice)
     }
-    declarations.extend(
-        flutter
-            .get_sequence("shaders")
-            .into_iter()
-            .flat_map(|shaders| shaders.iter())
-            .filter_map(Node::as_scalar)
-            .map(|shader| shader.as_str().to_owned()),
-    );
-    for component in flutter
-        .get_sequence("deferred-components")
-        .into_iter()
-        .flat_map(|components| components.iter())
-        .filter_map(Node::as_mapping)
-    {
-        declarations.extend(
-            component
-                .get_sequence("assets")
-                .into_iter()
-                .flat_map(|assets| assets.iter())
-                .filter_map(asset_scalar)
-                .map(|asset| asset.as_str().to_owned()),
-        );
+    fn asset_path(asset: &serde_yaml::Value) -> Option<&str> {
+        asset.get("path").unwrap_or(asset).as_str()
     }
+    let flutter = &root["flutter"];
+    sequence(&flutter["assets"])
+        .iter()
+        .filter_map(asset_path)
+        .chain(sequence(&flutter["fonts"]).iter().flat_map(|family| {
+            sequence(&family["fonts"])
+                .iter()
+                .filter_map(|font| font["asset"].as_str())
+        }))
+        .chain(
+            sequence(&flutter["shaders"])
+                .iter()
+                .filter_map(serde_yaml::Value::as_str),
+        )
+        .chain(
+            sequence(&flutter["deferred-components"])
+                .iter()
+                .flat_map(|component| sequence(&component["assets"]).iter().filter_map(asset_path)),
+        )
 }
 
 fn fallback_asset_package<'a>(
@@ -179,7 +161,7 @@ fn fallback_asset_package<'a>(
     files: Vec<&'a ProjectFile>,
 ) -> Option<AssetPackage<'a>> {
     use serde_yaml::Value;
-    let flutter = root.get("flutter")?;
+    root.get("flutter")?;
     let name = root.get("name").and_then(Value::as_str).map(str::to_owned);
     let generated = root.get("flutter_gen").is_some()
         || ["dependencies", "dev_dependencies"]
@@ -189,57 +171,7 @@ fn fallback_asset_package<'a>(
                     .and_then(|dependencies| dependencies.get("flutter_gen_runner"))
                     .is_some()
             });
-    let asset_path = |asset: &Value| {
-        let scalar = asset.get("path").unwrap_or(asset);
-        scalar.as_str().map(str::to_owned)
-    };
-    let mut declarations: Vec<_> = flutter
-        .get("assets")
-        .and_then(Value::as_sequence)
-        .into_iter()
-        .flatten()
-        .filter_map(asset_path)
-        .collect();
-    for family in flutter
-        .get("fonts")
-        .and_then(Value::as_sequence)
-        .into_iter()
-        .flatten()
-    {
-        declarations.extend(
-            family
-                .get("fonts")
-                .and_then(Value::as_sequence)
-                .into_iter()
-                .flatten()
-                .filter_map(|font| font.get("asset").and_then(Value::as_str))
-                .map(str::to_owned),
-        );
-    }
-    declarations.extend(
-        flutter
-            .get("shaders")
-            .and_then(Value::as_sequence)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(str::to_owned),
-    );
-    for component in flutter
-        .get("deferred-components")
-        .and_then(Value::as_sequence)
-        .into_iter()
-        .flatten()
-    {
-        declarations.extend(
-            component
-                .get("assets")
-                .and_then(Value::as_sequence)
-                .into_iter()
-                .flatten()
-                .filter_map(asset_path),
-        );
-    }
+    let declarations = asset_declarations(root).map(str::to_owned).collect();
     Some(AssetPackage {
         pubspec,
         source,

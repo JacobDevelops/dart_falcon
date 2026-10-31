@@ -41,13 +41,17 @@ impl TestClient {
     /// Start the server over a memory connection with `falcon.json` written to a
     /// fresh temp workspace; the workspace dir is the cross-file-pass walk root.
     fn start(config_json: &str) -> Self {
+        Self::start_with_debounce(config_json, Duration::ZERO)
+    }
+
+    fn start_with_debounce(config_json: &str, debounce: Duration) -> Self {
         let workspace = TempDir::new().unwrap();
         let config_path = workspace.path().join("falcon.json");
         fs::write(&config_path, config_json).unwrap();
 
         let (server_conn, client_conn) = Connection::memory();
         let options = ServerOptions {
-            debounce: Duration::ZERO,
+            debounce,
             config_path: Some(config_path),
         };
         let server = std::thread::spawn(move || {
@@ -242,6 +246,55 @@ impl TestClient {
             .join()
             .expect("clean server exit");
     }
+}
+
+#[test]
+fn watched_batches_never_publish_open_files_without_their_cross_file_diagnostics() {
+    let mut client = TestClient::start_with_debounce(
+        r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"no-import-cycles":"warn"}}}}"#,
+        Duration::from_millis(200),
+    );
+    let source = "import 'b.dart';\n";
+    let uri = client.write_file("a.dart", source);
+    client.write_file("b.dart", "import 'a.dart';\n");
+    client.open(&uri, source, 1);
+    assert!(
+        client
+            .drain_publishes()
+            .iter()
+            .any(|publication| publication.uri.as_str() == uri
+                && has_rule(publication, "no-import-cycles"))
+    );
+    for batch in 0..5 {
+        let unrelated =
+            client.write_file(&format!("unrelated_{batch}.dart"), "class Unrelated {}\n");
+        client.watch(&unrelated);
+        assert!(
+            client
+                .drain_publishes()
+                .iter()
+                .all(|publication| publication.uri.as_str() != uri
+                    || has_rule(publication, "no-import-cycles"))
+        );
+        std::thread::sleep(Duration::from_millis(60));
+    }
+    loop {
+        let Message::Notification(notification) = client.recv() else {
+            panic!("expected merged diagnostic publication");
+        };
+        assert_eq!(
+            notification.method,
+            lsp_types::notification::PublishDiagnostics::METHOD
+        );
+        let publication: PublishDiagnosticsParams =
+            serde_json::from_value(notification.params).unwrap();
+        if publication.uri.as_str() == uri {
+            assert!(has_rule(&publication, "no-import-cycles"));
+            break;
+        }
+    }
+    client.drain_publishes();
+    client.shutdown();
 }
 
 fn uri_for(path: &Path) -> String {

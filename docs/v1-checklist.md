@@ -176,8 +176,8 @@ These entries describe implemented foundation, not acceptance of the open items.
   changing source offsets. Exact sorting and package-name diagnostics cover BOM
   manifests, which previously lost parsed facts and package identity.
   Changed metadata is captured per CLI run; the LSP refreshes captured disk facts
-  on save or relevant watcher events; unsaved buffers are not facts. Disk-fact
-  refresh does not imply editor publication (see the open parity item below).
+  on save or relevant watcher events; unsaved buffers are not facts. V1-3d adds
+  editor publication and invalidation for these captured facts (see below).
   Warning deduplication lasts until invalidation, so a later failure episode warns again.
   CLI subprocess and CLI/LSP parity recovery tests cover malformed YAML, invalid
   UTF-8 and sparse oversized manifests, exact recovered diagnostic identity,
@@ -223,17 +223,32 @@ These entries describe implemented foundation, not acceptance of the open items.
   `unused_l10n` also retains rule-side enclosing-pubspec discovery and reads of
   `l10n.yaml` and ARB files. These non-snapshot acquisitions need their own
   project-facts slices; this checkbox remains open.
-- [ ] Close LSP manifest-diagnostic publication and declared-asset watcher parity.
-  Although `**/*` registration receives asset events, the relevance filter drops
-  ordinary non-Dart asset create/delete paths, so they do not schedule the next
-  publication. `known_gap_asset_events_do_not_trigger_reevaluation_but_directory_facts_refresh`
-  records this known watcher gap and verifies fresh rule evaluation after create/delete;
-  it does not test server publication. Separately, source inspection shows that the
-  server ignores opening `pubspec.yaml`, while cross-file publication only targets
-  open documents. This affects all manifest-anchored diagnostics:
-  `sort-pub-dependencies`, `secure-pubspec-urls`, `package-names` and `unused-assets`.
-  Their editor publication and asset-triggered reevaluation remain open adapter work,
-  not guarantees supplied by the manifest snapshot.
+- [x] Close LSP manifest-diagnostic publication and declared-asset watcher parity (V1-3d).
+  Initialization schedules the same cross-file pass through the existing debounce
+  and outbox, publishing closed manifest findings before any Dart document opens.
+  Manifest URIs retain the client's workspace namespace, including symlinked roots.
+  Changed results publish once; fixes, deletion, disabling and incomplete analysis
+  clear previous findings. Worker failures retain prior manifest publications until
+  recovery. Ignored YAML buffers cannot replace disk-derived results or clear them
+  on close; saved snapshots supply ranges and watcher/save events refresh facts.
+  Asset create/delete events are relevant only for exact declared files or direct
+  children of declared directories, with an enabled asset rule. Content-only changes,
+  nested children and unrelated events do not schedule asset evaluation. Normalized
+  declarations are cached per environment generation and share extraction with the
+  rule path; deleted symlinked assets use the same path normalization.
+  Asset-only events preserve semantic snapshots and workspace walks; directory
+  events still refresh Dart membership. Watcher batches and configuration reloads
+  coalesce cross-file evaluation through the existing debounce, holding affected
+  open-document publications until merged diagnostics are ready even when later
+  batches postpone the pass.
+  Exact CLI/LSP parity covers sorting and secure URLs; protocol tests cover startup,
+  symlinked URIs, buffer lifecycle, suppression and recovery. Watcher tests pin
+  create/delete publication, unchanged semantic/walk build counts, all declaration
+  forms, disabled rules and directory events. Worker-failure and unchanged-result
+  tests pin retention and deduplication. Both asset CLI corpora match before and
+  after sharing extraction (unused-assets: 8 expectations; missing-assets: 6).
+  The other V1-3 boxes remain open: build-tool/resource probes, `unused_l10n`, and
+  broader parity cases still need their own evidence.
 - [ ] Expand `crates/falcon_cli/tests/project_parity_tests.rs` around actual risk:
   diagnostics identity/range/severity/message, suppression, config changes,
   incomplete analysis and cross-file invalidation. Shared stages already live in
