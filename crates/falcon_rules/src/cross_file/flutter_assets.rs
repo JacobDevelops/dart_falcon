@@ -1,11 +1,11 @@
 use std::{borrow::Cow, collections::BTreeMap, path::PathBuf};
 
-use falcon_analyze::ProjectFile;
+use falcon_analyze::{AnalysisEnvironment, ManifestSnapshot, ProjectFile};
 use falcon_diagnostics::Span;
 use falcon_syntax::cst::{ArgList, Expr, NamedArg, NodeKind, StringLitNode};
 use marked_yaml::{LoaderOptions, Node, parse_yaml_with_options, types::MarkedScalarNode};
 
-use super::{character_to_byte, enclosing_pubspec, scalar_source_span};
+use super::{scalar_source_span, yaml_character_to_byte, yaml_parser_source};
 use crate::lint::string_lit::{LiteralPart, decode_escapes, literal_parts, multiline_lead_len};
 use crate::lint::support::directive_strings::uri_value;
 
@@ -27,7 +27,7 @@ impl AssetEntry {
 
 pub(super) struct AssetPackage<'a> {
     pub pubspec: PathBuf,
-    pub source: String,
+    pub source: &'a str,
     pub name: Option<String>,
     pub entries: Vec<AssetEntry>,
     pub declarations: Vec<String>,
@@ -35,31 +35,43 @@ pub(super) struct AssetPackage<'a> {
     pub generated: bool,
 }
 
-pub(super) fn asset_packages(files: &[ProjectFile], include_spans: bool) -> Vec<AssetPackage<'_>> {
-    let mut packages: BTreeMap<PathBuf, Vec<&ProjectFile>> = BTreeMap::new();
+pub(super) fn asset_packages<'a>(
+    environment: &'a AnalysisEnvironment,
+    files: &'a [ProjectFile],
+    include_spans: bool,
+) -> Vec<AssetPackage<'a>> {
+    let mut packages = BTreeMap::new();
     for file in files {
-        let Some(pubspec) = enclosing_pubspec(file.path()) else {
+        let Some(metadata) = environment.package(file.path()) else {
             continue;
         };
-        let package = packages.entry(pubspec).or_default();
+        let package = packages
+            .entry(&metadata.manifest)
+            .or_insert_with(|| (metadata, Vec::new()));
         if file
             .path()
             .extension()
             .is_some_and(|extension| extension == "dart")
         {
-            package.push(file);
+            package.1.push(file);
         }
     }
     packages
         .into_iter()
-        .filter_map(|(pubspec, files)| {
-            let source = falcon_config::read_metadata_text(&pubspec).ok()?;
+        .filter_map(|(pubspec, (metadata, files))| {
+            let ManifestSnapshot::Valid { source, yaml } = metadata.snapshot() else {
+                return None;
+            };
+            let pubspec = pubspec.clone();
+            let source = source.as_str();
             // marked-yaml 0.8 rejects anchors and has no option to enable them.
-            let Ok(root) = parse_yaml_with_options(0, &source, LoaderOptions::default()) else {
+            let Ok(root) =
+                parse_yaml_with_options(0, yaml_parser_source(source), LoaderOptions::default())
+            else {
                 return if include_spans {
                     None
                 } else {
-                    fallback_asset_package(pubspec, source, files)
+                    fallback_asset_package(pubspec, source, yaml, files)
                 };
             };
             let root = root.as_mapping()?;
@@ -87,8 +99,8 @@ pub(super) fn asset_packages(files: &[ProjectFile], include_spans: bool) -> Vec<
                     let span = scalar
                         .span()
                         .start()
-                        .and_then(|marker| character_to_byte(&source, marker.character()))
-                        .and_then(|start| scalar_source_span(&source, start));
+                        .and_then(|marker| yaml_character_to_byte(source, marker.character()))
+                        .and_then(|start| scalar_source_span(source, start));
                     entries.push(AssetEntry { path, span });
                 } else {
                     declarations.push(path);
@@ -160,14 +172,13 @@ fn additional_declarations(
     }
 }
 
-fn fallback_asset_package(
+fn fallback_asset_package<'a>(
     pubspec: PathBuf,
-    source: String,
-    files: Vec<&ProjectFile>,
-) -> Option<AssetPackage<'_>> {
+    source: &'a str,
+    root: &serde_yaml::Value,
+    files: Vec<&'a ProjectFile>,
+) -> Option<AssetPackage<'a>> {
     use serde_yaml::Value;
-
-    let root: Value = serde_yaml::from_str(&source).ok()?;
     let flutter = root.get("flutter")?;
     let name = root.get("name").and_then(Value::as_str).map(str::to_owned);
     let generated = root.get("flutter_gen").is_some()
@@ -336,4 +347,262 @@ fn package_argument(literal: StringLitNode<'_>) -> Option<NamedArg<'_>> {
     arguments
         .named()
         .find(|argument| argument.name().name() == "package")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_analyze::{AnalysisEnvironment, CrossFileRule, ParsedFile};
+    use falcon_config::FalconConfig;
+    use falcon_diagnostics::{Diagnostic, Severity};
+    use falcon_syntax::cst::Span as CstSpan;
+    use std::sync::Arc;
+
+    fn files(root: &std::path::Path) -> [ProjectFile; 1] {
+        [ProjectFile::new(
+            root.join("lib/main.dart"),
+            Arc::new(ParsedFile::parse("const path = 'assets/missing.png';")),
+        )
+        .unwrap()]
+    }
+
+    fn assert_asset_diagnostics(source: &str, unused_span: CstSpan) {
+        let root = tempfile::tempdir().unwrap();
+        let manifest = root.path().join("pubspec.yaml");
+        std::fs::write(&manifest, source).unwrap();
+        let files = files(root.path());
+        let environment = AnalysisEnvironment::discover_with_sdk_locator(
+            files.iter().map(ProjectFile::path),
+            |_| None,
+        );
+        let mut unused = Diagnostic::new(
+            "",
+            Severity::Warning,
+            "Asset `assets/unused.png` is declared in `pubspec.yaml` but never referenced.",
+            manifest.to_string_lossy(),
+            unused_span,
+        );
+        unused.resolve_position(source);
+        let mut missing = Diagnostic::new(
+            "",
+            Severity::Warning,
+            "Asset `assets/missing.png` is not declared under `flutter: assets:` in `pubspec.yaml`.",
+            files[0].path().to_string_lossy(),
+            CstSpan::new(13, 33),
+        );
+        missing.resolve_position(files[0].source());
+        for (rule, expected) in [
+            (
+                &super::super::unused_assets::UnusedAssets as &dyn CrossFileRule,
+                unused,
+            ),
+            (
+                &super::super::missing_assets::MissingAssets as &dyn CrossFileRule,
+                missing,
+            ),
+        ] {
+            assert_eq!(
+                serde_json::to_value(rule.prepare_project(
+                    &environment,
+                    &files,
+                    &FalconConfig::default(),
+                    None,
+                ))
+                .unwrap(),
+                serde_json::to_value([expected]).unwrap(),
+            );
+        }
+    }
+
+    #[test]
+    fn bom_first_flutter_key_preserves_exact_asset_diagnostics() {
+        assert_asset_diagnostics(
+            "\u{feff}flutter:\n  assets:\n    - assets/unused.png\nname: app\n",
+            CstSpan::new(28, 45),
+        );
+    }
+
+    #[test]
+    fn bom_first_flutter_key_with_crlf_preserves_exact_asset_diagnostics() {
+        assert_asset_diagnostics(
+            "\u{feff}flutter:\r\n  assets:\r\n    - assets/unused.png\r\nname: app\r\n",
+            CstSpan::new(30, 47),
+        );
+    }
+
+    #[test]
+    fn assets_use_manifest_snapshot_after_manifest_deletion() {
+        let root = tempfile::tempdir().unwrap();
+        let manifest = root.path().join("pubspec.yaml");
+        std::fs::write(
+            &manifest,
+            "name: app\nflutter:\n  assets:\n    - assets/unused.png\n",
+        )
+        .unwrap();
+        let files = files(root.path());
+        let environment = AnalysisEnvironment::discover_with_sdk_locator(
+            files.iter().map(ProjectFile::path),
+            |_| None,
+        );
+        let rules: [&dyn CrossFileRule; 2] = [
+            &super::super::unused_assets::UnusedAssets,
+            &super::super::missing_assets::MissingAssets,
+        ];
+        let config = FalconConfig::default();
+        let before: Vec<_> = rules
+            .iter()
+            .map(|rule| rule.prepare_project(&environment, &files, &config, None))
+            .collect();
+        assert_eq!(before.iter().map(Vec::len).collect::<Vec<_>>(), [1, 1]);
+        std::fs::remove_file(&manifest).unwrap();
+        for (rule, expected) in rules.iter().zip(before) {
+            assert_eq!(
+                serde_json::to_value(rule.prepare_project(&environment, &files, &config, None))
+                    .unwrap(),
+                serde_json::to_value(expected).unwrap(),
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_key_manifests_warn_and_skip_both_asset_rules() {
+        let root = tempfile::tempdir().unwrap();
+        let manifest = root.path().join("pubspec.yaml");
+        std::fs::write(
+            &manifest,
+            "name: app\nname: duplicate\nflutter:\n  assets:\n    - assets/unused.png\n",
+        )
+        .unwrap();
+        let files = files(root.path());
+        let environment = AnalysisEnvironment::discover_with_sdk_locator(
+            files.iter().map(ProjectFile::path),
+            |_| None,
+        );
+        assert!(matches!(
+            environment.package(files[0].path()).unwrap().snapshot(),
+            ManifestSnapshot::Malformed(_),
+        ));
+        for rule in [
+            &super::super::unused_assets::UnusedAssets as &dyn CrossFileRule,
+            &super::super::missing_assets::MissingAssets,
+        ] {
+            assert!(
+                rule.prepare_project(&environment, &files, &FalconConfig::default(), None)
+                    .is_empty()
+            );
+        }
+        let warnings = environment.take_warnings();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains(manifest.to_str().unwrap()));
+        assert!(warnings[0].contains("malformed manifest:"));
+        assert_eq!(environment.take_warnings(), Vec::<String>::new());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_asset_symlink_does_not_exempt_other_directory_files() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("pubspec.yaml"),
+            "flutter:\n  assets:\n    - assets/icons/\n",
+        )
+        .unwrap();
+        let directory = root.path().join("assets/icons");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("unused.png"), "asset").unwrap();
+        let files = files(root.path());
+        let environment = AnalysisEnvironment::discover_with_sdk_locator(
+            files.iter().map(ProjectFile::path),
+            |_| None,
+        );
+        let rule = super::super::unused_assets::UnusedAssets;
+        let config = FalconConfig::default();
+        let before = rule.prepare_project(&environment, &files, &config, None);
+        assert_eq!(before.len(), 1);
+        std::os::unix::fs::symlink("absent.png", directory.join("broken.png")).unwrap();
+        assert_eq!(
+            serde_json::to_value(rule.prepare_project(&environment, &files, &config, None))
+                .unwrap(),
+            serde_json::to_value(before).unwrap(),
+        );
+        assert_eq!(environment.take_warnings(), Vec::<String>::new());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn asset_entry_io_failures_warn_and_exempt_the_directory() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("pubspec.yaml"),
+            "flutter:\n  assets:\n    - assets/icons/\n",
+        )
+        .unwrap();
+        let directory = root.path().join("assets/icons");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("unused.png"), "asset").unwrap();
+        let cycle = directory.join("cycle.png");
+        std::os::unix::fs::symlink("cycle.png", &cycle).unwrap();
+        let reason = std::fs::metadata(&cycle).unwrap_err().to_string();
+        let files = files(root.path());
+        let environment = AnalysisEnvironment::discover_with_sdk_locator(
+            files.iter().map(ProjectFile::path),
+            |_| None,
+        );
+        let diagnostics = super::super::unused_assets::UnusedAssets.prepare_project(
+            &environment,
+            &files,
+            &FalconConfig::default(),
+            None,
+        );
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            environment.take_warnings(),
+            [format!("{}: {reason}", cycle.display())],
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_asset_directory_warns_once_per_episode_and_is_exempt() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("pubspec.yaml"),
+            "flutter:\n  assets:\n    - assets/icons/\n",
+        )
+        .unwrap();
+        let directory = root.path().join("assets/icons");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("unused.png"), "asset").unwrap();
+        let files = files(root.path());
+        let mut environment = AnalysisEnvironment::discover_with_sdk_locator(
+            files.iter().map(ProjectFile::path),
+            |_| None,
+        );
+        let permissions = std::fs::metadata(&directory).unwrap().permissions();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o0)).unwrap();
+        if std::fs::read_dir(&directory).is_ok() {
+            std::fs::set_permissions(&directory, permissions).unwrap();
+            eprintln!("skipping unreadable asset directory: permissions are bypassed");
+            return;
+        }
+        let rule = super::super::unused_assets::UnusedAssets;
+        let config = FalconConfig::default();
+        let first = rule.prepare_project(&environment, &files, &config, None);
+        let warnings = environment.take_warnings();
+        let repeated = rule.prepare_project(&environment, &files, &config, None);
+        let repeated_warnings = environment.take_warnings();
+        environment.reset();
+        environment.extend(files.iter().map(ProjectFile::path));
+        let next = rule.prepare_project(&environment, &files, &config, None);
+        let next_warnings = environment.take_warnings();
+        std::fs::set_permissions(&directory, permissions).unwrap();
+        assert!(first.is_empty() && repeated.is_empty() && next.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains(directory.to_str().unwrap()));
+        assert!(warnings[0].contains("Permission denied"));
+        assert_eq!(repeated_warnings, Vec::<String>::new());
+        assert_eq!(warnings, next_warnings);
+    }
 }

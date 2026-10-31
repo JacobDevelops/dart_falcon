@@ -2,6 +2,48 @@ use std::fs;
 use std::process::Command;
 use tempfile::tempdir;
 
+#[cfg(unix)]
+#[test]
+fn asset_directory_failures_warn_once_and_exempt_the_directory() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+    let project = tempdir().unwrap();
+    fs::write(project.path().join("falcon.json"), r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-assets":"warn"}}}}"#).unwrap();
+    fs::write(
+        project.path().join("pubspec.yaml"),
+        "flutter:\n  assets:\n    - assets/icons/\n    - assets/icons/\n",
+    )
+    .unwrap();
+    fs::write(project.path().join("main.dart"), "void main() {}\n").unwrap();
+    let assets = project.path().join("assets/icons");
+    fs::create_dir_all(&assets).unwrap();
+    fs::write(assets.join("unused.png"), "asset").unwrap();
+    let invalid_name = assets.join(OsString::from_vec(b"invalid-\xff.png".to_vec()));
+    fs::write(&invalid_name, "asset").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_falcon"))
+        .args(["check", ".", "--format", "json"])
+        .current_dir(project.path())
+        .env_remove("DART_SDK")
+        .env_remove("FLUTTER_ROOT")
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
+        serde_json::json!([])
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let warnings: Vec<_> = stderr
+        .lines()
+        .filter(|line| {
+            line.starts_with("warning:") && line.contains("asset file name is not valid UTF-8")
+        })
+        .collect();
+    assert_eq!(warnings.len(), 1, "{stderr}");
+    assert!(warnings[0].contains(&*invalid_name.to_string_lossy()));
+}
+
 #[test]
 fn discovered_broken_manifests_warn_without_enclosing_analyzed_sources() {
     for nested_sources in [false, true] {

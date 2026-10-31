@@ -69,7 +69,7 @@ fn slashed(path: &Path) -> String {
 pub fn yaml_string_span(source: &str, root: &Value, target: &Value) -> Option<DiagSpan> {
     let mut path = Vec::new();
     yaml_value_path(root, target, &mut path)?;
-    let marked = parse_yaml(0, source.strip_prefix('\u{feff}').unwrap_or(source)).ok()?;
+    let marked = parse_yaml(0, yaml_parser_source(source)).ok()?;
     let node = marked_node_at_path(&marked, &path)?;
     if node.as_scalar()?.as_str() != target.as_str()? {
         return None;
@@ -127,9 +127,13 @@ fn marked_node_at_path<'a>(
     })
 }
 
-// Snapshot consumers parse without the BOM; asset consumers still use original-text markers.
+fn yaml_parser_source(source: &str) -> &str {
+    source.strip_prefix('\u{feff}').unwrap_or(source)
+}
+
+// Parser markers exclude the BOM; diagnostics address the original bytes.
 fn yaml_character_to_byte(source: &str, character: usize) -> Option<usize> {
-    let parser_source = source.strip_prefix('\u{feff}').unwrap_or(source);
+    let parser_source = yaml_parser_source(source);
     character_to_byte(parser_source, character)
         .map(|offset| source.len() - parser_source.len() + offset)
 }
@@ -363,11 +367,8 @@ fn unused_dependency_diagnostics(
         return Vec::new();
     }
     let pubspec = &package.manifest;
-    let Ok(root) = parse_yaml_with_options(
-        0,
-        source.strip_prefix('\u{feff}').unwrap_or(source),
-        LoaderOptions::default(),
-    ) else {
+    let Ok(root) = parse_yaml_with_options(0, yaml_parser_source(source), LoaderOptions::default())
+    else {
         return Vec::new();
     };
     let Some(root) = root.as_mapping() else {

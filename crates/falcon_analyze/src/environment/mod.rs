@@ -207,7 +207,7 @@ struct PackageDiscovery {
 #[derive(Debug, Default)]
 struct EnvironmentWarnings {
     seen: std::collections::BTreeSet<String>,
-    manifests_seen: std::collections::BTreeSet<String>,
+    optional_metadata_seen: std::collections::BTreeSet<PathBuf>,
     pending: Vec<String>,
 }
 
@@ -308,12 +308,13 @@ impl AnalysisEnvironment {
     /// Panics if the environment warning mutex is poisoned.
     pub fn reset(&mut self) {
         let warnings = Arc::clone(&self.warnings);
-        warnings.lock().unwrap().manifests_seen.clear();
+        warnings.lock().unwrap().optional_metadata_seen.clear();
         *self = Self::new(self.sdk_locator);
         self.warnings = warnings;
     }
 
-    /// Newly encountered failures; manifest warnings deduplicate until discovery resets.
+    /// Newly encountered failures; optional-metadata warnings deduplicate until recovery
+    /// or discovery reset.
     #[must_use]
     ///
     /// # Panics
@@ -332,12 +333,34 @@ impl AnalysisEnvironment {
         }
     }
 
-    fn warn_manifest(&self, path: &Path, error: impl std::fmt::Display) {
-        let message = format!("{}: {error}", path.display());
+    /// Queue a failure at `path` once per `fact` until recovery or discovery reset.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the environment warning mutex is poisoned.
+    pub fn warn_optional_metadata(&self, fact: &Path, path: &Path, error: impl std::fmt::Display) {
         let mut warnings = self.warnings.lock().unwrap();
-        if warnings.manifests_seen.insert(message.clone()) && !warnings.pending.contains(&message) {
+        if warnings.optional_metadata_seen.contains(fact) {
+            return;
+        }
+        warnings.optional_metadata_seen.insert(fact.to_path_buf());
+        let message = format!("{}: {error}", path.display());
+        if !warnings.pending.contains(&message) {
             warnings.pending.push(message);
         }
+    }
+
+    /// End a warning episode after successfully reading the optional metadata fact.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the environment warning mutex is poisoned.
+    pub fn clear_optional_metadata_warning(&self, fact: &Path) {
+        self.warnings
+            .lock()
+            .unwrap()
+            .optional_metadata_seen
+            .remove(fact);
     }
 
     fn read_optional(&self, path: &Path) -> Option<String> {
@@ -760,10 +783,14 @@ impl AnalysisEnvironment {
             });
             match package.snapshot() {
                 packages::ManifestSnapshot::Malformed(reason) => {
-                    self.warn_manifest(&manifest, format!("malformed manifest: {reason}"));
+                    self.warn_optional_metadata(
+                        &manifest,
+                        &manifest,
+                        format!("malformed manifest: {reason}"),
+                    );
                 }
                 packages::ManifestSnapshot::Inaccessible(error) => {
-                    self.warn_manifest(&manifest, error);
+                    self.warn_optional_metadata(&manifest, &manifest, error);
                 }
                 packages::ManifestSnapshot::Missing | packages::ManifestSnapshot::Valid { .. } => {}
             }

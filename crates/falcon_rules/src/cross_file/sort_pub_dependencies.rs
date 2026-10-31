@@ -19,7 +19,7 @@ use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use marked_yaml::{LoaderOptions, parse_yaml_with_options};
 
-use super::{scalar_source_span, yaml_character_to_byte};
+use super::{scalar_source_span, yaml_character_to_byte, yaml_parser_source};
 
 #[derive(Default)]
 pub struct SortPubDependencies;
@@ -55,7 +55,7 @@ fn check_pubspec(path: &Path, source: &str) -> Vec<Diagnostic> {
     let options = LoaderOptions::default();
     let Ok(root) = parse_yaml_with_options(
         0,
-        source.strip_prefix('\u{feff}').unwrap_or(source),
+        yaml_parser_source(source),
         options,
     ) else {
         return Vec::new();

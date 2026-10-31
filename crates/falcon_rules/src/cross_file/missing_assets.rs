@@ -22,13 +22,13 @@ pub struct MissingAssets;
 impl CrossFileRule for MissingAssets {
     fn prepare_project(
         &self,
-        _environment: &falcon_analyze::AnalysisEnvironment,
+        environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         _config: &FalconConfig,
         _indexes: Option<&SemanticIndexes>,
     ) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-        for package in asset_packages(files, false) {
+        for package in asset_packages(environment, files, false) {
             for file in package
                 .files
                 .iter()

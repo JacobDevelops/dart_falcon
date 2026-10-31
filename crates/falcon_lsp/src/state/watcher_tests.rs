@@ -239,6 +239,122 @@ fn unrelated_asset_events_leave_project_caches_intact() {
 }
 
 #[test]
+fn known_gap_asset_events_do_not_trigger_reevaluation_but_directory_facts_refresh() {
+    let (directory, mut state, _) = workspace(true);
+    std::fs::write(directory.path().join("falcon.json"),
+        r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-assets":"warn"},"suspicious":{"missing-assets":"warn"}}}}"#).unwrap();
+    let manifest = directory.path().join("pubspec.yaml");
+    std::fs::write(
+        &manifest,
+        "name: app\nflutter:\n  assets:\n    - assets/icons/\n",
+    )
+    .unwrap();
+    let assets = directory.path().join("assets/icons");
+    std::fs::create_dir_all(&assets).unwrap();
+    let source = directory.path().join("lib/main.dart");
+    std::fs::create_dir(source.parent().unwrap()).unwrap();
+    let text = "const path = 'assets/missing.png';";
+    std::fs::write(&source, text).unwrap();
+    let uri = format!("file://{}", source.display());
+    state.reload_config();
+    state.open(&uri, text.into(), Some(1));
+    let manifest_key = manifest.to_string_lossy().into_owned();
+    let initial = state.cross_file_diagnostics();
+    assert!(!initial.contains_key(&manifest_key));
+    assert_eq!(
+        initial[&source.to_string_lossy().into_owned()][0].rule,
+        "missing-assets"
+    );
+    // Known watcher gap: replace these assertions when docs/v1-checklist.md V1-3 closes it.
+    let asset = assets.join("new.png");
+    std::fs::write(&asset, "asset").unwrap();
+    assert!(
+        state
+            .watched_files_changed(std::slice::from_ref(&asset))
+            .is_empty()
+    );
+    let created = state.cross_file_diagnostics();
+    assert_eq!(created[&manifest_key].len(), 1);
+    assert_eq!(created[&manifest_key][0].rule, "unused-assets");
+    std::fs::remove_file(&asset).unwrap();
+    assert!(
+        state
+            .watched_files_changed(std::slice::from_ref(&asset))
+            .is_empty()
+    );
+    let deleted = state.cross_file_diagnostics();
+    assert!(!deleted.contains_key(&manifest_key));
+    assert_eq!(
+        serde_json::to_value(initial).unwrap(),
+        serde_json::to_value(deleted).unwrap(),
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn asset_directory_failures_reach_config_messages_once_per_episode() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+    let (directory, mut state, uri) = workspace(true);
+    std::fs::write(directory.path().join("falcon.json"),
+        r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-assets":"warn"}}}}"#).unwrap();
+    std::fs::write(
+        directory.path().join("pubspec.yaml"),
+        "flutter:\n  assets:\n    - assets/icons/\n",
+    )
+    .unwrap();
+    let assets = directory.path().join("assets/icons");
+    std::fs::create_dir_all(&assets).unwrap();
+    let invalid_name = assets.join(OsString::from_vec(b"invalid-\xff.png".to_vec()));
+    std::fs::write(&invalid_name, "asset").unwrap();
+    std::fs::write(assets.join("unused.png"), "asset").unwrap();
+    state.reload_config();
+    state.open(&uri, "void main() {}".into(), Some(1));
+    let diagnostics = state.cross_file_diagnostics();
+    assert!(diagnostics.is_empty());
+    let messages = state.take_config_messages();
+    let warnings: Vec<_> = messages
+        .iter()
+        .filter(|message| {
+            message
+                .message
+                .contains("asset file name is not valid UTF-8")
+        })
+        .collect();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].typ, lsp_types::MessageType::WARNING);
+    assert!(
+        warnings[0]
+            .message
+            .contains(&*invalid_name.to_string_lossy())
+    );
+    state.cross_file_diagnostics();
+    assert_eq!(
+        state.take_config_messages(),
+        Vec::<ShowMessageParams>::new()
+    );
+    std::fs::remove_file(&invalid_name).unwrap();
+    let recovered = state.cross_file_diagnostics();
+    let manifest_key = directory.path().join("pubspec.yaml").display().to_string();
+    assert_eq!(recovered[&manifest_key].len(), 1);
+    assert_eq!(recovered[&manifest_key][0].rule, "unused-assets");
+    assert_eq!(
+        state.take_config_messages(),
+        Vec::<ShowMessageParams>::new()
+    );
+    std::fs::write(&invalid_name, "asset").unwrap();
+    assert!(state.cross_file_diagnostics().is_empty());
+    let next = state.take_config_messages();
+    assert_eq!(next.len(), 1);
+    assert_eq!(next[0].message, warnings[0].message);
+    state.cross_file_diagnostics();
+    assert_eq!(
+        state.take_config_messages(),
+        Vec::<ShowMessageParams>::new()
+    );
+}
+
+#[test]
 fn unsaved_document_identity_is_not_probed_during_body_edits() {
     let (directory, mut state, _) = workspace(true);
     let path = directory.path().join("unsaved.dart");

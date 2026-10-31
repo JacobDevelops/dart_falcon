@@ -163,9 +163,10 @@ These entries describe implemented foundation, not acceptance of the open items.
   classification and fallback-name recovery ignore a leading UTF-8 BOM without
   changing source offsets. Exact sorting and package-name diagnostics cover BOM
   manifests, which previously lost parsed facts and package identity.
-  Changed metadata is captured per CLI run; the LSP refreshes on disk change
-  (save or watcher); unsaved buffers are not facts. Warning deduplication lasts
-  until invalidation, so a later failure episode warns again.
+  Changed metadata is captured per CLI run; the LSP refreshes captured disk facts
+  on save or relevant watcher events; unsaved buffers are not facts. Disk-fact
+  refresh does not imply editor publication (see the open parity item below).
+  Warning deduplication lasts until invalidation, so a later failure episode warns again.
   CLI subprocess and CLI/LSP parity recovery tests cover malformed YAML, invalid
   UTF-8 and sparse oversized manifests, exact recovered diagnostic identity,
   range, severity and message, and saved changes clearing stale diagnostics.
@@ -183,13 +184,44 @@ These entries describe implemented foundation, not acceptance of the open items.
   Inaccessible metadata has no name, so only raw-URI and relative-path matching
   remain available, not own-package path matching. Apart from BOM name recovery,
   this preserves existing behavior.
-  Remaining exclusions: `flutter_assets` retains a second bounded manifest loader.
-  Its manifest bytes could use this snapshot; asset globbing still needs filesystem
-  facts. This cutover remains for a follow-up slice. Unused-dependency resource/build-tool
-  exemptions still inspect resolved dependency manifests alongside package-config
-  discovery, plugin registration, analysis options, build files and executable
-  directories. Those coupled non-manifest acquisitions need their own project-facts
-  slice; this checkbox remains open.
+  V1-3c migrates `flutter_assets` (`unused-assets` / `missing-assets`) to the same
+  captured manifest bytes and YAML, including BOM-first `flutter:` keys with exact
+  original-byte diagnostic ranges for LF and CRLF sources. Deleting a manifest after
+  capture leaves both rules' diagnostics unchanged; valid-manifest corpus diagnostics
+  remain identical. Duplicate YAML keys classify the snapshot as Malformed: both
+  asset rules skip it and discovery warns once.
+  Remaining asset IO is specifically `unused-assets`' direct `read_dir` expansion
+  of declared directories and `metadata(...).is_file()` checks on their children,
+  not globbing or existence checks for individual declarations. `missing-assets`
+  checks declarations, not disk existence. These queries stay rule-side and uncached:
+  the CLI evaluates them once per run, and every subsequent LSP evaluation reads
+  current directory contents. Moving them into the manifest snapshot would add a
+  second invalidation lifecycle without making publication coherent.
+  Missing/non-directory paths are silent and exempt; dangling symlinks skip only
+  that entry. Other directory/entry IO errors and non-UTF-8 file names exempt the
+  directory and warn with path and reason through the environment warning channel,
+  deduplicated by declared directory until a successful directory read or discovery
+  reset. A successful directory read re-arms that directory's warning, so a subsequent
+  failure warns again without an environment reset. CLI subprocess tests cover the
+  warning channel; the LSP test covers break → fix (diagnostic returns) → break,
+  including one new warning in the second episode.
+  **Remaining exclusions:** unused-dependency resource/build-tool exemptions still
+  inspect resolved dependency manifests alongside package-config discovery, plugin
+  registration, analysis options, build files and executable directories.
+  `unused_l10n` also retains rule-side enclosing-pubspec discovery and reads of
+  `l10n.yaml` and ARB files. These non-snapshot acquisitions need their own
+  project-facts slices; this checkbox remains open.
+- [ ] Close LSP manifest-diagnostic publication and declared-asset watcher parity.
+  Although `**/*` registration receives asset events, the relevance filter drops
+  ordinary non-Dart asset create/delete paths, so they do not schedule the next
+  publication. `known_gap_asset_events_do_not_trigger_reevaluation_but_directory_facts_refresh`
+  records this known watcher gap and verifies fresh rule evaluation after create/delete;
+  it does not test server publication. Separately, source inspection shows that the
+  server ignores opening `pubspec.yaml`, while cross-file publication only targets
+  open documents. This affects all manifest-anchored diagnostics:
+  `sort-pub-dependencies`, `secure-pubspec-urls`, `package-names` and `unused-assets`.
+  Their editor publication and asset-triggered reevaluation remain open adapter work,
+  not guarantees supplied by the manifest snapshot.
 - [ ] Expand `crates/falcon_cli/tests/project_parity_tests.rs` around actual risk:
   diagnostics identity/range/severity/message, suppression, config changes,
   incomplete analysis and cross-file invalidation. Shared stages already live in
