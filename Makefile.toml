@@ -284,3 +284,16 @@ alias = "watch"
 [tasks.ci_rustup_show]
 command = "rustup"
 args    = [ "show" ]
+
+# Optional incremental compiler lane; never substitutes for verify-full.
+[tasks.iterate-check]
+command = "python3"
+args    = [ "scripts/verify.py", "iterate-check", "${@}" ]
+
+[tasks.iterate-build]
+command = "python3"
+args    = [ "scripts/verify.py", "iterate-build", "${@}" ]
+
+[tasks.iterate-test]
+command = "python3"
+args    = [ "scripts/verify.py", "iterate-test", "${@}" ]

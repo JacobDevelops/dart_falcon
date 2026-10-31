@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fresh, bounded verification. No scheduler, pass cache, or detached workers."""
+"""Fresh, bounded verification. No wrapper scheduler or pass cache; Blaze may retain its shared daemon."""
 import argparse
 import hashlib
 import json
@@ -42,11 +42,13 @@ def plan(tier, scope, root=ROOT):
                  else ["verify-tooling", "lint", "check", "test", "ci_validate", "build_release"])
         return [["@cargo", "clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings"]
                 if task == "clippy_workspace" else ["makers", task] for task in tasks]
-    if tier == "package":
+    if tier == "package" or tier.startswith("iterate-"):
         manifests = [root / "Cargo.toml", root / "xtask/Cargo.toml", *sorted((root / "crates").glob("*/Cargo.toml"))]
         packages = {tomllib.loads(p.read_text()).get("package", {}).get("name") for p in manifests}
         if scope not in packages or not scope:
             raise ValueError("package requires an existing workspace package name")
+        if tier.startswith("iterate-"):
+            return [["blaze", tier.removeprefix("iterate-"), "--locked", "-p", scope]]
         return [
             ["@cargo", "clippy", "--locked", "-p", scope, "--all-targets", "--", "-D", "warnings"],
             ["@cargo", "nextest", "run", "--locked", "-p", scope, "--all-targets"],
@@ -57,6 +59,21 @@ def plan(tier, scope, root=ROOT):
     if not (root / "crates/falcon_rules/tests/corpus" / scope).is_dir():
         raise ValueError(f"no corpus directory for {scope}")
     return [["@cargo", "xtask", "validate-rules", "--rule", scope]]
+
+
+def iteration_environment(env, root=ROOT):
+    env = env.copy()
+    # Keep Blaze output out of Cargo/mbx's final-verification artifacts.
+    env["CARGO_TARGET_DIR"] = str(root / "target-blaze")
+    env.setdefault("BLAZE_TESTS", "affected")
+    return env
+
+
+def require_blaze_version(env, root=ROOT):
+    version = tomllib.loads((root / "mise.toml").read_text())["tools"]["blaze"]
+    actual = subprocess.check_output(["blaze", "--version"], cwd=root, env=env, text=True, timeout=10)
+    if actual.split()[:2] != ["blaze", version]:
+        raise ValueError(f"iteration requires Blaze {version}; install the pinned tool with mise install blaze")
 
 
 def fingerprint(root):
@@ -134,13 +151,13 @@ def run(commands, root, env, timeout):
             return code if code > 0 else 128 - code
         if fingerprint(root) != before:
             raise ValueError("source changed during verification; this run is not a pass")
-    print(f"verify: passed this scope on source sha256:{before}; no result cached", flush=True)
+    print(f"verify: passed this scope on source sha256:{before}; wrapper caches no result", flush=True)
     return 0
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("tier", choices=("rule", "package", "fast", "full"))
+    parser.add_argument("tier", choices=("rule", "package", "fast", "full", "iterate-check", "iterate-build", "iterate-test"))
     parser.add_argument("scope", nargs="?")
     parser.add_argument("--dry-run", action="store_true", help="show commands and budgets without running checks")
     parser.add_argument("--timeout", type=int, default=1800, help="maximum seconds per command (default 1800)")
@@ -150,6 +167,11 @@ def main():
             raise ValueError("timeout must be positive")
         env = environment()
         commands = plan(args.tier, args.scope)
+        iteration = args.tier.startswith("iterate-")
+        if iteration:
+            env = iteration_environment(env)
+            print("Blaze iteration only: cached eligible tests may be reused; this is not final Rust verification.", flush=True)
+            print("Blaze target:", env["CARGO_TARGET_DIR"], flush=True)
         for command in commands:
             if command[0] == "@cargo":
                 command[0] = env.get("CARGO_CMD", "mbx")
@@ -157,6 +179,8 @@ def main():
         if args.dry_run:
             print(json.dumps(commands, indent=2))
             return 0
+        if iteration:
+            require_blaze_version(env)
         return run(commands, ROOT, env, args.timeout)
     except (ValueError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         print(f"verify: failed: {error}", file=sys.stderr)

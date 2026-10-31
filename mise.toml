@@ -4,6 +4,7 @@ wrappers = { cargo = { command = "mbx", env = { MBX_CARGO_SHIM_MODE = "1" } } }
 
 # Rust comes from rustup via rust-toolchain.toml; mise installs the other tools.
 [tools]
+blaze         = "0.20261029.1"
 bun           = "latest"
 dart          = "latest"
 mr-boxington  = "latest"
@@ -15,6 +16,7 @@ knope         = { version = "0.23.1", version_prefix = "knope/v" }
 hyperfine     = "2.0.0"
 
 [tool_alias]
+blaze         = "github:indexable-inc/blaze"
 cargo-nextest = "github:nextest-rs/nextest"
 cargo-watch   = "github:watchexec/cargo-watch"
 knope         = "github:knope-dev/knope"

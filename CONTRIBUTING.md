@@ -30,6 +30,7 @@ Verification requires Python 3.11+ and Git as well as the tools above. Choose a
 scope while iterating, then run the full gate on the settled final change:
 
 ```sh
+makers iterate-test falcon_syntax       # optional pinned Blaze edit loop
 makers verify-rule avoid-dynamic       # one CLI corpus; not registration coverage
 makers verify-package falcon_analyze   # package Clippy, nextest and doctests
 makers verify-fast                     # formatting, workspace Clippy and tests

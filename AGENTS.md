@@ -47,6 +47,8 @@ Read CONTRIBUTING's **The gates** before checks. Use `makers verify-rule <id>`
 or `makers verify-package <package>` while iterating; use `makers verify-fast`
 for a coherent settled slice. The coordinator runs `makers verify-full` (alias
 `makers A`) once on the settled final candidate, not once per agent or edit.
+Use `makers iterate-check <package>` or `makers iterate-test <package>` for the
+optional pinned Blaze edit loop; its cached feedback is not Rust verification.
 Scoped/fast checks do not replace final coverage. Use `makers verify-tooling`
 for changes to verification tooling itself; report heavier gates not run.
 

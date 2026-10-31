@@ -71,11 +71,45 @@ these provenance-aware entrypoints; low-level tasks remain available.
 
 Record the command, reported source fingerprint, actual toolchain/environment,
 exit result and review scope in the change handoff. A source fingerprint is not
-an approval or proof of semantic correctness. Every invocation executes fresh
-checks; prior output never suppresses execution. Do not use a personal runner's
+an approval or proof of semantic correctness. Every verification-tier invocation executes fresh
+checks; prior output never suppresses their execution. The optional Blaze
+iteration tiers below have a separate test-reuse contract. Do not use a personal runner's
 joined/cached result to certify a changed source tree or toolchain.
 
+## Optional Blaze iteration
+
+`mise install blaze` installs the pinned official `indexable-inc/blaze` release.
+Use these package-scoped commands between edits:
+
+```sh
+makers iterate-check falcon_syntax
+makers iterate-build dart_falcon
+makers iterate-test falcon_syntax
+```
+
+They require the version pinned in `mise.toml`, use separate `target-blaze/`
+artifacts per workspace, and retain the wrapper's timeout/source-drift checks.
+The compiler's persistent database shares unchanged code across Git worktrees.
+`iterate-test` defaults to Blaze's `affected` mode: eligible prior test passes
+may be reused by reachable-code/input keys. `BLAZE_TESTS=all` forces execution;
+`BLAZE_TESTS=verify` checks retained passes. The summary distinguishes reused tests
+from executed tests. Filesystem/environment/process-dependent tests are generally
+not reusable without Blaze's experimental sandbox; Falcon does not enable it.
+There is no claim that two whole test commands join into exactly one execution.
+
+Blaze uses its own compiler/toolchain and has incomplete borrow checking. These
+commands are iteration feedback, not a substitute for mbx Clippy, nextest or the
+final `verify-full` gate. Do not set `CARGO_CMD=blaze`. No full-gate receipt is
+cached or reused. Build-script, dependency and unsupported-code failures remain
+failures; use the scoped Rust gates when the pinned Blaze cannot handle a package.
+
+The daemon outlives a command and keeps compiler state in memory. The normal
+per-user daemon is shared; do not stop it to clean up an individual task.
+`BLAZE_HOME` selects a separate daemon for owned experiments. Cancellation stops
+the client/check process group, not a shared daemon. `CARGO_BUILD_JOBS` and thread
+budgets do not cap Blaze worker memory. Its pinned `BLAZE_MEMORY_MAX` evicts idle
+workers but exempts busy/recent workers, so it is not a hard cap either. Resource
+limits for experiments belong to their owned process scope, not global settings.
+
 Personal Numen coordination, loops and review dispatch stay outside the OSS
-repository. Those tools should invoke these contributor-facing commands. Blaze
-may be useful as an optional edit-loop experiment, but its distinct compiler and
-toolchain do not replace the Cargo/mbx correctness gates; it is not required here.
+repository. Those tools should invoke these contributor-facing commands.

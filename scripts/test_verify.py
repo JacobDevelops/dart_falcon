@@ -38,6 +38,22 @@ class VerificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 verify.plan(tier, scope)
 
+    def test_iteration_is_explicit_pinned_and_isolates_compiler_outputs(self):
+        self.assertEqual(verify.plan("iterate-test", "falcon_syntax"),
+                         [["blaze", "test", "--locked", "-p", "falcon_syntax"]])
+        original = {"CARGO_TARGET_DIR": "/shared/cargo"}
+        env = verify.iteration_environment(original, self.root)
+        self.assertEqual(original["CARGO_TARGET_DIR"], "/shared/cargo")
+        self.assertEqual(env["CARGO_TARGET_DIR"], str(self.root / "target-blaze"))
+        self.assertEqual(env["BLAZE_TESTS"], "affected")
+        self.assertEqual(verify.iteration_environment({"BLAZE_TESTS": "all"})["BLAZE_TESTS"], "all")
+        (self.root / "mise.toml").write_text('[tools]\nblaze = "0.20261029.1"\n')
+        with patch("verify.subprocess.check_output", return_value="blaze 0.20261029.1 (revision)"):
+            verify.require_blaze_version(env, self.root)
+        with patch("verify.subprocess.check_output", return_value="blaze 0.0.0"):
+            with self.assertRaises(ValueError):
+                verify.require_blaze_version(env, self.root)
+
     def test_budgets_reach_children_without_changing_parent(self):
         output = self.base / "env.json"
         with patch.dict(os.environ, {}, clear=True):
