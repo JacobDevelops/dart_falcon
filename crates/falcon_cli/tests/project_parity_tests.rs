@@ -291,24 +291,31 @@ fn unreadable_directory_blocks_cli_and_editor_results_and_recovers() {
     );
     lsp.watched_files_changed(std::slice::from_ref(&hidden));
     let published = lsp.cross_file_pass();
-    assert!(
-        published
-            .iter()
-            .find(|(key, _)| key == &uri)
-            .unwrap()
-            .1
-            .is_empty()
+    let diagnostics = &published.iter().find(|(key, _)| key == &uri).unwrap().1;
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].rule, "incomplete-analysis");
+    assert_eq!(diagnostics[0].severity, Severity::Warning);
+    assert_eq!(
+        diagnostics[0].message,
+        format!("{error}; cross-file results are suppressed.")
     );
+    assert_eq!((diagnostics[0].line, diagnostics[0].col), (1, 1));
+    assert_eq!((diagnostics[0].span.start, diagnostics[0].span.end), (0, 0));
+    assert_eq!(diagnostics[0].file_path, orphan.to_string_lossy());
     fs::set_permissions(&hidden, fs::Permissions::from_mode(0o700)).unwrap();
     fs::write(&bridge, "export '../src/orphan.dart';\n").unwrap();
     lsp.watched_files_changed(std::slice::from_ref(&bridge));
     let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
     assert!(cli.diagnostics.is_empty());
     assert_eq!(cli.exit_code, 0);
+    let recovered = lsp.cross_file_pass();
     assert!(
-        lsp.cross_file_pass()
+        recovered
             .iter()
-            .all(|(_, diagnostics)| diagnostics.is_empty())
+            .find(|(key, _)| key == &uri)
+            .unwrap()
+            .1
+            .is_empty()
     );
     fs::write(&bridge, "// export removed again\n").unwrap();
     lsp.watched_files_changed(std::slice::from_ref(&bridge));
@@ -415,12 +422,22 @@ fn unreadable_directories_fail_only_when_included_descendants_are_possible() {
         fs::set_permissions(&hidden, fs::Permissions::from_mode(0o700)).unwrap();
         assert_eq!(cli.is_ok(), complete, "{includes:?}: {hidden_relative}");
         let diagnostics = &published.iter().find(|(key, _)| key == &uri).unwrap().1;
-        assert_eq!(diagnostics.len(), usize::from(complete));
+        assert_eq!(diagnostics.len(), 1);
         if let Ok(cli) = cli {
             assert_eq!(cli.diagnostics.len(), 1);
             assert_eq!(diagnostics[0].rule, "unused-files");
         } else {
-            assert!(cli.unwrap_err().contains(&*hidden.to_string_lossy()));
+            let error = cli.unwrap_err();
+            assert!(error.contains(&*hidden.to_string_lossy()));
+            assert_eq!(diagnostics[0].rule, "incomplete-analysis");
+            assert_eq!(diagnostics[0].severity, Severity::Warning);
+            assert_eq!(
+                diagnostics[0].message,
+                format!("{error}; cross-file results are suppressed.")
+            );
+            assert_eq!((diagnostics[0].line, diagnostics[0].col), (1, 1));
+            assert_eq!((diagnostics[0].span.start, diagnostics[0].span.end), (0, 0));
+            assert_eq!(diagnostics[0].file_path, orphan.to_string_lossy());
         }
     }
 }
@@ -456,12 +473,8 @@ fn required_source_failure_blocks_partial_projects_and_recovers() {
     let uri = format!("file://{}", orphan.display());
     let mut lsp = LspState::new_with_sdk_locator(Some(config), |_| None);
     lsp.open(&uri, "class Orphan {}\n".into(), Some(1));
-    assert!(
-        falcon_cli::collect_check_with_sdk_locator(&options, |_| None)
-            .unwrap()
-            .diagnostics
-            .is_empty()
-    );
+    let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+    assert!(cli.diagnostics.is_empty());
     assert!(
         lsp.cross_file_pass()
             .iter()
@@ -495,7 +508,16 @@ fn required_source_failure_blocks_partial_projects_and_recovers() {
     lsp.watched_files_changed(std::slice::from_ref(&bridge));
     let published = lsp.cross_file_pass();
     let (_, diagnostics) = published.iter().find(|(key, _)| key == &uri).unwrap();
-    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+    assert_eq!(diagnostics[0].rule, "incomplete-analysis");
+    assert_eq!(diagnostics[0].severity, Severity::Warning);
+    assert_eq!(
+        diagnostics[0].message,
+        format!("{error}; cross-file results are suppressed.")
+    );
+    assert_eq!((diagnostics[0].line, diagnostics[0].col), (1, 1));
+    assert_eq!((diagnostics[0].span.start, diagnostics[0].span.end), (0, 0));
+    assert_eq!(diagnostics[0].file_path, orphan.to_string_lossy());
 
     // Restoring the export must not resurrect the pre-failure orphan warning.
     fs::write(&bridge, "export 'src/orphan.dart';\n").unwrap();
@@ -507,8 +529,10 @@ fn required_source_failure_blocks_partial_projects_and_recovers() {
     assert!(
         published
             .iter()
-            .all(|(_, diagnostics)| diagnostics.is_empty()),
-        "{published:#?}"
+            .find(|(key, _)| key == &uri)
+            .unwrap()
+            .1
+            .is_empty()
     );
 
     // A new absence warning proves recovery did not leave the LSP incomplete.

@@ -92,10 +92,22 @@ These entries describe implemented foundation, not acceptance of the open items.
   They print a skip when permissions are bypassed. WalkDir I/O failures still need
   permission guards: no existing public injectable traversal-error seam was found.
   Optional member-manifest and dependency-watch discovery failures retain warnings.
-  Optional/external metadata, unsupported/failed analysis and an explicit
-  editor-facing incompleteness signal still need the broader contract (this slice
-  retains the existing log-only signal). This slice does not certify the overall
-  acceptance below.
+  The editor now publishes non-rule `incomplete-analysis` warnings for required
+  source and discovery failures through the normal open-document publication path.
+  Referencing import/export/part URI ranges are preferred, then a failing open file
+  at line zero, otherwise affected open documents at line zero (one per path/document).
+  One warning notification is sent per incomplete episode, separately from config
+  warnings; successful recovery clears diagnostics and re-arms the notification.
+  Protocol tests cover discovered invalid-UTF-8 sources, real Falcon suppression
+  syntax, repeated edits, independently expected cross-file recovery, re-breaks,
+  closing documents, recovery/re-break without open documents, config disabling,
+  and a disabled cross-file configuration with semantic rules. State tests cover
+  required companion acquisition (invalid UTF-8 and oversized) at directive ranges,
+  rejected open documents at line zero, and deterministic symlink-loop discovery
+  anchors and episodes. Optional/external metadata and unsupported/failed analysis
+  still need the broader completeness contract, including worker-failure acceptance
+  beyond rejected open documents. V1-1 remains unchecked; these required-source
+  slices do not certify the overall acceptance below.
 - Acceptance: unreadable, disappearing, invalid-UTF-8 and oversized sources plus
   worker failure cannot yield an unqualified clean complete-project result;
   recovery yields current diagnostics, not stale results. Assert exit/publication

@@ -1,6 +1,113 @@
 use super::*;
 
 #[test]
+fn incomplete_source_diagnostics_choose_precise_anchors_and_deduplicate_paths() {
+    let directory = tempfile::tempdir().unwrap();
+    let first = directory.path().join("first.dart");
+    let second = directory.path().join("second.dart");
+    let companion = directory.path().join("broken.dart");
+    let other = directory.path().join("other.dart");
+    let mut state = LspState::new_from(None, |_| None, directory.path().to_path_buf());
+    state.open(
+        &format!("file://{}", first.display()),
+        "part 'broken.dart';\npart 'broken.dart';\n".into(),
+        Some(1),
+    );
+    state.open(
+        &format!("file://{}", second.display()),
+        "class Second {}".into(),
+        Some(1),
+    );
+    for path in [&companion, &other, &second] {
+        state.required_source_failures.insert(
+            path.clone(),
+            falcon_analyze::SourceFailure {
+                path: path.clone(),
+                source: Arc::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "invalid UTF-8",
+                )),
+            },
+        );
+    }
+    let mut output = HashMap::new();
+    state.add_incomplete_diagnostics(&mut output);
+    let first_warnings = &output[first.to_str().unwrap()];
+    assert_eq!(first_warnings.len(), 2);
+    let companion_warning = first_warnings
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("broken.dart"))
+        .unwrap();
+    assert_eq!(
+        companion_warning.span,
+        falcon_syntax::cst::Span::new(5, 18).into()
+    );
+    assert_eq!(
+        companion_warning.severity,
+        falcon_diagnostics::Severity::Warning
+    );
+    let second_warnings = &output[second.to_str().unwrap()];
+    assert_eq!(second_warnings.len(), 2);
+    assert!(
+        second_warnings
+            .iter()
+            .all(|diagnostic| diagnostic.span == falcon_syntax::cst::Span::new(0, 0).into())
+    );
+    assert!(
+        first_warnings
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("second.dart"))
+    );
+}
+
+#[test]
+fn rejected_open_document_warns_at_its_start_and_close_clears_the_episode() {
+    let directory = tempfile::tempdir().unwrap();
+    let lib = directory.path().join("lib");
+    std::fs::create_dir(&lib).unwrap();
+    let rejected = lib.join("rejected.dart");
+    let observer = lib.join("observer.dart");
+    let config = directory.path().join("falcon.json");
+    std::fs::write(&config, r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#).unwrap();
+    std::fs::write(&rejected, "class Rejected {}").unwrap();
+    std::fs::write(&observer, "class Observer {}").unwrap();
+    let rejected_uri = format!("file://{}", rejected.display());
+    let observer_uri = format!("file://{}", observer.display());
+    let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
+    state.open(&observer_uri, "class Observer {}".into(), Some(1));
+    state.parser_failure_path = Some(rejected.clone());
+    state.open(&rejected_uri, "class Rejected {}".into(), Some(1));
+    assert!(state.document(&rejected_uri).unwrap().parsed.is_rejected());
+    let failed = state.cross_file_pass();
+    let diagnostic = failed
+        .iter()
+        .find(|(uri, _)| uri == &rejected_uri)
+        .unwrap()
+        .1
+        .iter()
+        .find(|d| d.rule == falcon_diagnostics::INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID)
+        .unwrap();
+    assert_eq!(diagnostic.span, falcon_syntax::cst::Span::new(0, 0).into());
+    assert!(diagnostic.message.contains(rejected.to_str().unwrap()));
+    assert!(state.take_incomplete_message().is_some());
+    state.parser_failure_path = None;
+    state.close(&rejected_uri);
+    let recovered = state.cross_file_pass();
+    assert!(
+        recovered
+            .iter()
+            .any(|(uri, diagnostics)| uri == &observer_uri
+                && diagnostics.iter().any(|d| d.rule == "unused-files"))
+    );
+    assert!(recovered.iter().all(|(_, diagnostics)| {
+        diagnostics
+            .iter()
+            .all(|d| d.rule != falcon_diagnostics::INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID)
+    }));
+    assert_eq!(state.incomplete_episode, IncompleteEpisode::Complete);
+}
+
+#[test]
 fn invalid_secondary_root_edit_retains_last_good_rules() {
     let directory = tempfile::tempdir().unwrap();
     let first = directory.path().join("first");
@@ -2039,6 +2146,18 @@ mod source_size_tests {
         }
     }
 
+    fn incomplete_warning(state: &mut LspState, path: &Path) -> Diagnostic {
+        let mut incomplete = HashMap::new();
+        state.add_incomplete_diagnostics(&mut incomplete);
+        incomplete[path.to_str().unwrap()]
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.rule == falcon_diagnostics::INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID
+            })
+            .unwrap()
+            .clone()
+    }
+
     #[test]
     fn required_companion_reads_preserve_per_file_semantics_and_recover_cross_file_results() {
         for failure in ["invalid", "oversized"] {
@@ -2049,7 +2168,7 @@ mod source_size_tests {
             std::fs::create_dir_all(&lib).unwrap();
             std::fs::write(directory.path().join("pubspec.yaml"), "name: companions\n").unwrap();
             let main = lib.join("main.dart");
-            let source = "import 'api.dart'; import 'companion.dart'; void main() { api(); }";
+            let source = "import 'api.dart'; part 'companion.dart'; void main() { api(); }";
             std::fs::write(&main, source).unwrap();
             std::fs::write(lib.join("api.dart"), "int api() => 1;").unwrap();
             let companion = lib.join("companion.dart");
@@ -2092,7 +2211,11 @@ mod source_size_tests {
             state.ensure_semantic_snapshot();
             assert!(state.semantic_snapshot.is_some(), "{failure}");
             assert!(state.semantic_source_incomplete, "{failure}");
+            assert_eq!(state.required_source_failures[&companion].path, companion);
             assert!(state.cross_file_diagnostics().is_empty(), "{failure}");
+            let warning = incomplete_warning(&mut state, &main);
+            assert_eq!(warning.span, falcon_syntax::cst::Span::new(24, 40).into());
+            assert!(warning.message.contains("companion.dart"));
             let diagnostics = state.analyze(&observer_uri);
             assert!(
                 diagnostics
@@ -2139,6 +2262,56 @@ mod source_size_tests {
 
     #[cfg(unix)]
     #[test]
+    fn walked_metadata_failure_anchors_only_on_referencing_directive() {
+        let directory = tempfile::tempdir().unwrap();
+        let failed = directory.path().join("loop.dart");
+        std::os::unix::fs::symlink(&failed, &failed).unwrap();
+        let main = directory.path().join("main.dart");
+        let other = directory.path().join("other.dart");
+        let source = "import 'loop.dart'; void main() {}";
+        std::fs::write(&main, source).unwrap();
+        std::fs::write(&other, "class Other {}").unwrap();
+        let mut state = LspState::new(None);
+        state.initialize_workspace_roots(vec![directory.path().to_path_buf()]);
+        state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+        let main_uri = format!("file://{}", main.display());
+        let other_uri = format!("file://{}", other.display());
+        state.open(&main_uri, source.into(), Some(1));
+        state.open(&other_uri, "class Other {}".into(), Some(1));
+        assert!(state.project_discovery_failures.iter().any(|failure| {
+            matches!(
+                failure,
+                falcon_project::DiscoveryFailure::Metadata { path, .. } if path == &failed
+            )
+        }));
+        let published = state.cross_file_pass();
+        let warnings: Vec<_> = published
+            .iter()
+            .flat_map(|(uri, diagnostics)| {
+                diagnostics
+                    .iter()
+                    .filter(|diagnostic| diagnostic.rule == "incomplete-analysis")
+                    .map(move |diagnostic| (uri, diagnostic))
+            })
+            .collect();
+        assert_eq!(warnings.len(), 1);
+        let (uri, warning) = warnings[0];
+        assert_eq!(uri, &main_uri);
+        assert_eq!(warning.severity, falcon_diagnostics::Severity::Warning);
+        assert_eq!(warning.span, falcon_syntax::cst::Span::new(7, 18).into());
+        assert!(warning.message.contains(&failed.display().to_string()));
+        assert!(
+            state
+                .document(&other_uri)
+                .unwrap()
+                .last_diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.rule != "incomplete-analysis")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn failed_discovery_is_incomplete_until_roots_recover_or_disappear() {
         for (walked, dynamic) in [(false, false), (true, false), (false, true), (true, true)] {
             let directory = tempfile::tempdir().unwrap();
@@ -2168,14 +2341,36 @@ mod source_size_tests {
             let builds = state.semantic_snapshot_build_count;
             assert!(walks > 0);
             assert!(builds > 0);
-            for _ in 0..2 {
+            for attempt in 0..2 {
                 let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
                 assert!(!complete);
                 assert_eq!(files.len(), 1);
                 assert_eq!(files[0].path(), source);
                 assert!(state.project_paths.is_some());
                 state.analyze(&uri);
-                state.cross_file_pass();
+                let published = state.cross_file_pass();
+                let diagnostics = &published
+                    .iter()
+                    .find(|(target, _)| target == &uri)
+                    .unwrap()
+                    .1;
+                let warnings: Vec<_> = diagnostics
+                    .iter()
+                    .filter(|diagnostic| diagnostic.rule == "incomplete-analysis")
+                    .collect();
+                assert_eq!(warnings.len(), 1);
+                assert_eq!(warnings[0].span, falcon_syntax::cst::Span::new(0, 0).into());
+                assert!(
+                    warnings[0]
+                        .message
+                        .contains(&failed.to_string_lossy().to_string())
+                );
+                assert!(
+                    warnings[0]
+                        .message
+                        .contains("cross-file results are suppressed")
+                );
+                assert_eq!(state.take_incomplete_message().is_some(), attempt == 0);
                 assert!(state.revalidate_disk().is_empty());
                 assert_eq!(state.workspace_walk_count, walks);
                 assert_eq!(state.semantic_snapshot_build_count, builds);
@@ -2188,6 +2383,19 @@ mod source_size_tests {
             assert_eq!(files.len(), 1);
             assert_eq!(state.workspace_walk_count, walks + 1);
             assert!(state.reported_discovery_failures.is_empty());
+            let recovered_publications = state.cross_file_pass();
+            assert!(
+                recovered_publications
+                    .iter()
+                    .any(|(target, _)| target == &uri)
+            );
+            assert!(
+                recovered_publications
+                    .iter()
+                    .flat_map(|(_, diagnostics)| diagnostics)
+                    .all(|diagnostic| diagnostic.rule != "incomplete-analysis")
+            );
+            assert_eq!(state.incomplete_episode, IncompleteEpisode::Complete);
             std::fs::create_dir(&failed).unwrap();
             let recovered = failed.join("recovered.dart");
             std::fs::write(&recovered, "class Recovered {}").unwrap();
@@ -2358,16 +2566,27 @@ mod source_size_tests {
                 std::fs::write(&path, contents).unwrap();
             }
             let mut complete = true;
-            let result = LspState::read_project_source(&path, true, &mut complete);
+            let mut failures = HashMap::new();
+            let result = LspState::read_project_source(&path, true, &mut complete, &mut failures);
             let readable = contents.as_ref().is_some_and(|bytes| bytes.is_ascii());
             assert_eq!(result.is_ok(), readable);
             assert_eq!(complete, readable);
+            assert_eq!(failures.contains_key(&path), !readable);
             let mut optional_complete = true;
-            let _ = LspState::read_project_source(&path, false, &mut optional_complete);
+            let _ =
+                LspState::read_project_source(&path, false, &mut optional_complete, &mut failures);
             assert!(optional_complete);
         }
         let mut complete = true;
-        assert!(LspState::read_project_source(directory.path(), true, &mut complete).is_err());
+        assert!(
+            LspState::read_project_source(
+                directory.path(),
+                true,
+                &mut complete,
+                &mut HashMap::new()
+            )
+            .is_err()
+        );
         assert!(!complete);
     }
 

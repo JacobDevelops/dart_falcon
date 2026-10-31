@@ -241,6 +241,13 @@ enum ProjectView {
     CrossFile,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum IncompleteEpisode {
+    Complete,
+    Pending,
+    Announced,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct FileStamp {
     modified: Option<std::time::SystemTime>,
@@ -407,6 +414,8 @@ pub struct LspState {
     /// A failed project parse or semantic build invalidates the complete view until its inputs change.
     semantic_snapshot_error: Option<std::io::Error>,
     semantic_source_incomplete: bool,
+    required_source_failures: HashMap<PathBuf, falcon_analyze::SourceFailure>,
+    incomplete_episode: IncompleteEpisode,
     #[cfg(test)]
     parser_failure_path: Option<PathBuf>,
     #[cfg(test)]
@@ -539,6 +548,8 @@ impl LspState {
             previous_semantic_snapshot: None,
             semantic_snapshot_error: None,
             semantic_source_incomplete: false,
+            required_source_failures: HashMap::new(),
+            incomplete_episode: IncompleteEpisode::Complete,
             #[cfg(test)]
             parser_failure_path: None,
             #[cfg(test)]
@@ -678,14 +689,39 @@ impl LspState {
 
     /// Configuration warnings and errors awaiting delivery to the editor.
     pub fn take_config_messages(&mut self) -> Vec<ShowMessageParams> {
-        self.pending_config_messages
-            .extend(self.environment.take_warnings().into_iter().map(|message| {
-                ShowMessageParams {
+        let source_warnings: HashSet<_> = if self.cross_file_rules_enabled() {
+            self.external_libraries
+                .source_failures(|path| self.environment.project_source_required(path, &[]))
+                .iter()
+                .map(|failure| format!("{}: {}", failure.path.display(), failure.source))
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        // Required source errors use the dedicated episode notification, not the config batch.
+        self.pending_config_messages.extend(
+            self.environment
+                .take_warnings()
+                .into_iter()
+                .filter(|message| !source_warnings.contains(message))
+                .map(|message| ShowMessageParams {
                     typ: MessageType::WARNING,
                     message,
-                }
-            }));
+                }),
+        );
         std::mem::take(&mut self.pending_config_messages)
+    }
+
+    /// Deliver the incomplete-analysis warning independently of configuration warnings.
+    pub fn take_incomplete_message(&mut self) -> Option<ShowMessageParams> {
+        if self.incomplete_episode != IncompleteEpisode::Pending || self.documents.is_empty() {
+            return None;
+        }
+        self.incomplete_episode = IncompleteEpisode::Announced;
+        Some(ShowMessageParams {
+            typ: MessageType::WARNING,
+            message: "Analysis is incomplete; cross-file results are suppressed.".to_string(),
+        })
     }
 
     /// Mutable package roots for native LSP watching. Versioned hosted packages
@@ -985,6 +1021,12 @@ impl LspState {
             }
             // A malformed rules config must not suppress manifest-driven
             // analysis: retain the last good rules and refresh open documents.
+        }
+        if self.documents.is_empty()
+            && self.incomplete_episode != IncompleteEpisode::Complete
+            && self.cross_file_rules_enabled()
+        {
+            self.cross_file_pass();
         }
         self.open_uris()
             .into_iter()
@@ -1652,6 +1694,15 @@ impl LspState {
         self.cross_file_external_cache = None;
         self.pending_semantic_affected.clear();
         self.invalidate_semantic_snapshot();
+        if !self.cross_file_rules_enabled() {
+            self.required_source_failures.clear();
+            self.project_discovery_failures.clear();
+            self.incomplete_episode = IncompleteEpisode::Complete;
+        } else if self.documents.is_empty()
+            && self.incomplete_episode != IncompleteEpisode::Complete
+        {
+            self.cross_file_pass();
+        }
         let current_environment = self.environment.config_stamps();
         if self
             .environment_stamps
@@ -1697,7 +1748,8 @@ impl LspState {
         }
         // Compute the cross-file map first so its immutable borrow ends before the
         // per-document `analyze`/mutation loop below (avoids &self vs &mut self).
-        let cross_file_map = self.cross_file_diagnostics();
+        let mut cross_file_map = self.cross_file_diagnostics();
+        self.add_incomplete_diagnostics(&mut cross_file_map);
         let mut published = Vec::new();
         for uri in self.open_uris() {
             let path = self.documents[&uri].path.to_string_lossy();
@@ -1728,6 +1780,133 @@ impl LspState {
             published.push((uri, merged));
         }
         published
+    }
+
+    fn add_incomplete_diagnostics(&mut self, output: &mut HashMap<String, Vec<Diagnostic>>) {
+        let mut failures: HashMap<_, _> = self
+            .required_source_failures
+            .iter()
+            .map(|(path, failure)| (path.clone(), (failure.to_string(), false)))
+            .collect();
+        for failure in self
+            .external_libraries
+            .source_failures(|path| self.environment.project_source_required(path, &[]))
+        {
+            failures.insert(failure.path.clone(), (failure.to_string(), false));
+        }
+        for failure in &self.project_discovery_failures {
+            let (falcon_project::DiscoveryFailure::Metadata { path, .. }
+            | falcon_project::DiscoveryFailure::Traversal { path, .. }) = failure;
+            let traversal = matches!(failure, falcon_project::DiscoveryFailure::Traversal { .. });
+            failures.insert(path.clone(), (failure.to_string(), traversal));
+        }
+        for doc in self
+            .documents
+            .values()
+            .filter(|doc| doc.parsed.is_rejected())
+        {
+            if let Some(diagnostic) = doc.syntax_diagnostics.first() {
+                failures.insert(
+                    doc.path.clone(),
+                    (
+                        format!("{}: {}", doc.path.display(), diagnostic.message),
+                        false,
+                    ),
+                );
+            }
+        }
+        if failures.is_empty() {
+            self.incomplete_episode = IncompleteEpisode::Complete;
+            return;
+        }
+        if self.incomplete_episode == IncompleteEpisode::Complete {
+            self.incomplete_episode = IncompleteEpisode::Pending;
+        }
+        let packages = package_identities(
+            self.documents
+                .values()
+                .map(|doc| doc.path.as_path())
+                .chain(failures.keys().map(PathBuf::as_path)),
+        );
+        let directives: HashMap<_, _> = self
+            .documents
+            .iter()
+            .map(|(uri, doc)| (uri, Self::incomplete_directive_targets(doc, &packages)))
+            .collect();
+        let mut failures: Vec<_> = failures.into_iter().collect();
+        failures.sort_by(|left, right| left.0.cmp(&right.0));
+        let mut anchors = Vec::with_capacity(self.documents.len());
+        for (path, (reason, traversal)) in failures {
+            anchors.clear();
+            if !traversal {
+                for (uri, doc) in &self.documents {
+                    if let Some(&span) = directives[uri].get(&path) {
+                        anchors.push((doc, span));
+                    }
+                }
+            }
+            if anchors.is_empty() {
+                if let Some(doc) = self.documents.values().find(|doc| doc.path == path) {
+                    anchors.push((doc, falcon_syntax::cst::Span::new(0, 0)));
+                } else {
+                    anchors.extend(
+                        self.documents
+                            .values()
+                            .map(|doc| (doc, falcon_syntax::cst::Span::new(0, 0))),
+                    );
+                }
+            }
+            for (doc, span) in anchors.drain(..) {
+                output
+                    .entry(doc.path.to_string_lossy().into_owned())
+                    .or_default()
+                    .push(Diagnostic::new(
+                        falcon_diagnostics::INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID,
+                        falcon_diagnostics::Severity::Warning,
+                        format!("{reason}; cross-file results are suppressed."),
+                        doc.path.to_string_lossy(),
+                        span,
+                    ));
+            }
+        }
+    }
+
+    fn incomplete_directive_targets(
+        doc: &DocumentState,
+        packages: &[PackageIdentity],
+    ) -> HashMap<PathBuf, falcon_syntax::cst::Span> {
+        let program = doc.parsed.program();
+        program
+            .imports()
+            .flat_map(|node| {
+                std::iter::once(node.uri()).chain(
+                    node.configurable_uris()
+                        .map(falcon_syntax::cst::ConfigurableUri::uri),
+                )
+            })
+            .chain(program.exports().flat_map(|node| {
+                std::iter::once(node.uri()).chain(
+                    node.configurable_uris()
+                        .map(falcon_syntax::cst::ConfigurableUri::uri),
+                )
+            }))
+            .chain(
+                program
+                    .part_of_directive()
+                    .and_then(falcon_syntax::cst::PartOfDirective::uri),
+            )
+            .chain(
+                program
+                    .part_directives()
+                    .map(falcon_syntax::cst::PartDirective::uri),
+            )
+            .filter_map(|uri| {
+                import_path(&doc.path, &uri.value(), packages).map(|path| (path, uri.span()))
+            })
+            .fold(HashMap::new(), |mut targets, (path, span)| {
+                targets.entry(path).or_insert(span);
+                targets
+            })
     }
 
     fn prepare_cross_file_indexes(&mut self, files: &[ProjectFile], reuse_snapshot: bool) -> bool {
@@ -2482,6 +2661,7 @@ impl LspState {
                     .entry(path.to_path_buf())
                     .or_insert(fallback_stamp);
             }
+            self.required_source_failures.remove(path);
             match falcon_analyze::acquire_source(path).companion(path) {
                 Ok(None) => {}
                 Ok(Some(source)) => {
@@ -2532,6 +2712,8 @@ impl LspState {
                     warn!("failed to read {}: {}", path.display(), error);
                     if required(path) {
                         self.semantic_source_incomplete = true;
+                        self.required_source_failures
+                            .insert(path.to_path_buf(), error);
                     }
                 }
             }
@@ -2691,10 +2873,6 @@ impl LspState {
         let mut worker_failure = None;
         for (normalized, is_dart) in &paths {
             if !is_dart && matches!(view, ProjectView::Semantic) {
-                if !self.dynamic_file_watching && !self.fallback_stamps.contains_key(normalized) {
-                    let stamp = FileStamp::read(normalized);
-                    self.fallback_stamps.insert(normalized.clone(), stamp);
-                }
                 continue;
             }
             let path = normalized.as_path();
@@ -2733,7 +2911,12 @@ impl LspState {
                     .entry(path.to_path_buf())
                     .or_insert(fallback_stamp);
             }
-            let Ok(source) = Self::read_project_source(path, *is_dart, &mut complete) else {
+            let Ok(source) = Self::read_project_source(
+                path,
+                *is_dart,
+                &mut complete,
+                &mut self.required_source_failures,
+            ) else {
                 continue;
             };
             if let Some(cached) = self.disk_files.get_mut(path)
@@ -2778,6 +2961,15 @@ impl LspState {
     }
 
     fn prepare_project_files(&mut self, paths: &[(PathBuf, bool)], view: ProjectView) -> usize {
+        if matches!(view, ProjectView::Semantic) {
+            self.required_source_failures.clear();
+        } else {
+            self.required_source_failures.retain(|path, _| {
+                !self.documents.values().any(|doc| doc.path == *path)
+                    && (self.semantic_source_incomplete
+                        || paths.iter().any(|(candidate, _)| candidate == path))
+            });
+        }
         self.refresh_environment(
             paths
                 .iter()
@@ -2785,6 +2977,14 @@ impl LspState {
                 .map(|(path, _)| path.as_path()),
         );
         self.refresh_document_versions();
+        if !self.dynamic_file_watching && matches!(view, ProjectView::Semantic) {
+            for (path, is_dart) in paths {
+                if !is_dart && !self.fallback_stamps.contains_key(path) {
+                    self.fallback_stamps
+                        .insert(path.clone(), FileStamp::read(path));
+                }
+            }
+        }
         paths.len() + self.documents.len()
     }
 
@@ -2806,18 +3006,28 @@ impl LspState {
         path: &Path,
         required: bool,
         complete: &mut bool,
-    ) -> std::io::Result<String> {
+        failures: &mut HashMap<PathBuf, falcon_analyze::SourceFailure>,
+    ) -> Result<String, Arc<std::io::Error>> {
         let result = if required {
             match falcon_analyze::acquire_source(path) {
-                falcon_analyze::SourceAcquisition::Acquired(source) => Ok(source),
+                falcon_analyze::SourceAcquisition::Acquired(source) => {
+                    failures.remove(path);
+                    Ok(source)
+                }
                 falcon_analyze::SourceAcquisition::Oversized(error)
                 | falcon_analyze::SourceAcquisition::Failed(error) => {
                     *complete = false;
+                    let error = Arc::new(error);
+                    let failure = falcon_analyze::SourceFailure {
+                        path: path.to_path_buf(),
+                        source: Arc::clone(&error),
+                    };
+                    failures.insert(path.to_path_buf(), failure);
                     Err(error)
                 }
             }
         } else {
-            falcon_config::read_metadata_text(path)
+            falcon_config::read_metadata_text(path).map_err(Arc::new)
         };
         match result {
             Ok(source) => Ok(source),

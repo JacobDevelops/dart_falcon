@@ -134,6 +134,17 @@ impl ExternalLibraries {
             .cloned()
     }
 
+    /// Return every unreadable source owned by this analysis scope.
+    pub fn source_failures(&self, required: impl Fn(&Path) -> bool) -> Vec<crate::SourceFailure> {
+        self.source_failures
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|failure| required(&failure.path))
+            .cloned()
+            .collect()
+    }
+
     fn retain_reachable_failures(
         &mut self,
         environment: &AnalysisEnvironment,

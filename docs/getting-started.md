@@ -171,6 +171,18 @@ All of them launch the `falcon` binary from your `PATH`, so install falcon with 
 channel above first. See [installation.md](./installation.md#editor-extensions)
 for details.
 
+If a required source cannot be read (including invalid UTF-8 or oversized files),
+or project discovery fails, Falcon publishes an `incomplete-analysis` warning with
+the failing path and reason. It points to an open document's referencing URI when
+possible, otherwise to line zero of the failing open file or affected open documents.
+Cross-file results are suppressed until analysis recovers. Required companion or
+semantic-snapshot failures also make fix-all unavailable; discovery-only failures
+do not change fix-all availability.
+One warning notification is shown per incomplete episode; recovery clears the
+diagnostics and a later failure can notify again. These are server diagnostics
+(`source: falcon`), not configurable rule findings: ignore comments cannot suppress
+them. The CLI reports these failures as errors instead.
+
 ## CI usage
 
 Download the release binary and run `falcon check`; a non-zero exit fails the job:

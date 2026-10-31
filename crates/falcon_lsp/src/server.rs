@@ -1144,16 +1144,14 @@ fn hover(state: &LspState, params: &HoverParams, cancelled: &dyn Fn() -> bool) -
     })
 }
 
-/// Run the cross-file pass and publish merged diagnostics for every open
-/// document whose cross-file set changed. A no-op when no cross-file rule is
-/// enabled, so per-file-only configs keep their exact prior publish behavior.
+/// Publish changed cross-file results and incomplete-analysis warnings.
 fn cross_file_pass_and_publish(
     connection: &Connection,
     state: &mut LspState,
     debounce: &mut Debounce,
 ) -> Result<(), ServerError> {
     if !state.cross_file_rules_enabled() {
-        return publish_config_messages(connection, state);
+        return Ok(());
     }
     let uris = debounce.drain();
     for (uri, diagnostics) in state.analyze_affected_many(&uris) {
@@ -1162,7 +1160,16 @@ fn cross_file_pass_and_publish(
     for (uri, diagnostics) in state.cross_file_pass() {
         publish(connection, state, &uri, &diagnostics)?;
     }
-    publish_config_messages(connection, state)
+    if let Some(message) = state.take_incomplete_message() {
+        connection.sender.send(
+            ServerNotification::new(
+                lsp_types::notification::ShowMessage::METHOD.to_string(),
+                message,
+            )
+            .into(),
+        )?;
+    }
+    Ok(())
 }
 
 /// Publish the already-computed result for `uri`, then re-analyze and publish

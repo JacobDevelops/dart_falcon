@@ -34,6 +34,7 @@ struct TestClient {
     server: Option<JoinHandle<()>>,
     next_id: i32,
     workspace: TempDir,
+    warnings: Vec<lsp_types::ShowMessageParams>,
 }
 
 impl TestClient {
@@ -57,6 +58,7 @@ impl TestClient {
             server: Some(server),
             next_id: 0,
             workspace,
+            warnings: Vec::new(),
         };
         this.initialize();
         this
@@ -113,6 +115,11 @@ impl TestClient {
 
     /// The FIFO server completes prior notification handlers before answering this request.
     fn drain_publishes(&mut self) -> Vec<PublishDiagnosticsParams> {
+        self.drain_publishes_with_warnings(0)
+    }
+
+    fn drain_publishes_with_warnings(&mut self, expected: usize) -> Vec<PublishDiagnosticsParams> {
+        let before = self.warnings.len();
         let deadline = Instant::now() + RECV_TIMEOUT;
         let id = self.request("falcon/testBarrier", ());
         let mut out = Vec::new();
@@ -127,6 +134,15 @@ impl TestClient {
                 .expect("timed out waiting for publish barrier")
             {
                 Message::Notification(note) => {
+                    if note.method == lsp_types::notification::ShowMessage::METHOD {
+                        assert!(
+                            self.warnings.len() - before < expected,
+                            "unexpected showMessage: {note:?}"
+                        );
+                        self.warnings
+                            .push(serde_json::from_value(note.params).unwrap());
+                        continue;
+                    }
                     assert_eq!(
                         note.method,
                         lsp_types::notification::PublishDiagnostics::METHOD
@@ -138,6 +154,14 @@ impl TestClient {
                 }
                 Message::Response(resp) => {
                     assert_eq!(resp.id, id, "barrier response must echo the request id");
+                    assert_eq!(self.warnings.len() - before, expected);
+                    for warning in &self.warnings[before..] {
+                        assert_eq!(warning.typ, lsp_types::MessageType::WARNING);
+                        assert_eq!(
+                            warning.message,
+                            "Analysis is incomplete; cross-file results are suppressed."
+                        );
+                    }
                     assert_eq!(
                         resp.error
                             .expect("unsupported barrier method must fail")
@@ -190,6 +214,20 @@ impl TestClient {
                 },
                 text: None,
             },
+        );
+    }
+
+    fn close(&self, uri: &str) {
+        self.notify(
+            lsp_types::notification::DidCloseTextDocument::METHOD,
+            serde_json::json!({"textDocument":{"uri":uri}}),
+        );
+    }
+
+    fn watch(&self, uri: &str) {
+        self.notify(
+            lsp_types::notification::DidChangeWatchedFiles::METHOD,
+            serde_json::json!({"changes":[{"uri":uri,"type":2}]}),
         );
     }
 
@@ -410,8 +448,11 @@ fn pubspec_less_non_lib_files_not_flagged() {
 /// the single per-file publish for the opened document.
 #[test]
 fn disabled_cross_file_rules_publish_nothing() {
-    let mut client = TestClient::start(DISABLE_CROSS_FILE);
+    let mut client = TestClient::start(
+        r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-ignoring-return-values":"warn"}}},"cross-file":{"enabled":false}}"#,
+    );
     let orphan_uri = write_corpus(&client);
+    fs::write(client.workspace_file("lib/broken.dart"), [0xff]).unwrap();
 
     client.open(&orphan_uri, "class OrphanThing {}\n", 1);
     let publishes = client.drain_publishes();
@@ -424,5 +465,133 @@ fn disabled_cross_file_rules_publish_nothing() {
         !has_rule(&publishes[0], "unused-files"),
         "no cross-file diagnostic when disabled: {publishes:?}"
     );
+    client.shutdown();
+}
+
+#[test]
+fn incomplete_analysis_warns_once_per_episode_and_recovers_cross_file_results() {
+    let mut client = TestClient::start(ENABLE_UNUSED_FILES);
+    client.write_file("lib/main.dart", "void main() {}\n");
+    let source = "// falcon-ignore cross-file/correctness/incomplete-analysis: server warnings must remain\npart 'broken.dart';\nclass OrphanThing {}\n";
+    let uri = client.write_file("lib/orphan.dart", source);
+    let broken = client.workspace_file("lib/broken.dart");
+    fs::write(&broken, [0xff]).unwrap();
+    client.open(&uri, source, 1);
+    let first = client.drain_publishes_with_warnings(1);
+    let diagnostic = first
+        .iter()
+        .rev()
+        .find(|p| p.uri.as_str() == uri)
+        .unwrap()
+        .diagnostics
+        .iter()
+        .find(|d| {
+            matches!(&d.code,
+            Some(lsp_types::NumberOrString::String(code)) if code == "incomplete-analysis")
+        })
+        .unwrap();
+    assert_eq!(
+        diagnostic.severity,
+        Some(lsp_types::DiagnosticSeverity::WARNING)
+    );
+    assert_eq!(diagnostic.source.as_deref(), Some("falcon"));
+    assert_eq!(diagnostic.range.start, lsp_types::Position::new(1, 5));
+    assert_eq!(diagnostic.range.end, lsp_types::Position::new(1, 18));
+    assert!(diagnostic.message.contains("broken.dart"));
+    assert!(
+        diagnostic
+            .message
+            .contains("cross-file results are suppressed")
+    );
+    assert!(!any_publish_has_rule(&first, &uri, "unused-files"));
+    assert_eq!(client.warnings.len(), 1);
+    assert_eq!(client.warnings[0].typ, lsp_types::MessageType::WARNING);
+
+    client.notify(
+        lsp_types::notification::DidChangeTextDocument::METHOD,
+        serde_json::json!({
+            "textDocument": {"uri": uri, "version": 2},
+            "contentChanges": [{"text": format!("{source}\n")}]
+        }),
+    );
+    let still_broken = client.drain_publishes();
+    assert!(any_publish_has_rule(
+        &still_broken,
+        &uri,
+        "incomplete-analysis"
+    ));
+    assert_eq!(client.warnings.len(), 1);
+
+    fs::write(&broken, "part of 'orphan.dart';\n").unwrap();
+    client.save(&uri);
+    let recovered = client.drain_publishes();
+    let final_publish = recovered
+        .iter()
+        .rev()
+        .find(|p| p.uri.as_str() == uri)
+        .unwrap();
+    assert!(!has_rule(final_publish, "incomplete-analysis"));
+    assert!(has_rule(final_publish, "unused-files"), "{recovered:?}");
+    assert_eq!(client.warnings.len(), 1);
+
+    fs::write(&broken, [0xff]).unwrap();
+    client.save(&uri);
+    let broken_again = client.drain_publishes_with_warnings(1);
+    assert!(any_publish_has_rule(
+        &broken_again,
+        &uri,
+        "incomplete-analysis"
+    ));
+    assert_eq!(client.warnings.len(), 2);
+    client.shutdown();
+}
+
+#[test]
+fn incomplete_episode_recovers_and_rebreaks_without_open_documents() {
+    let mut client = TestClient::start(ENABLE_UNUSED_FILES);
+    let source = "part 'broken.dart';\nclass OrphanThing {}\n";
+    let uri = client.write_file("lib/orphan.dart", source);
+    let broken = client.workspace_file("lib/broken.dart");
+    fs::write(&broken, [0xff]).unwrap();
+    client.open(&uri, source, 1);
+    client.drain_publishes_with_warnings(1);
+    client.close(&uri);
+    let closed = client.drain_publishes();
+    assert!(
+        closed
+            .iter()
+            .any(|p| p.uri.as_str() == uri && p.diagnostics.is_empty())
+    );
+    fs::write(&broken, "part of 'orphan.dart';\n").unwrap();
+    client.watch(&uri_for(&broken));
+    assert_eq!(client.drain_publishes().len(), 0);
+    fs::write(&broken, [0xff]).unwrap();
+    client.watch(&uri_for(&broken));
+    assert_eq!(client.drain_publishes().len(), 0);
+    client.open(&uri, source, 2);
+    let reopened = client.drain_publishes_with_warnings(1);
+    assert!(any_publish_has_rule(&reopened, &uri, "incomplete-analysis"));
+    client.shutdown();
+}
+
+#[test]
+fn disabling_cross_file_rules_clears_incomplete_diagnostics() {
+    let mut client = TestClient::start(ENABLE_UNUSED_FILES);
+    let source = "class OrphanThing {}\n";
+    let uri = client.write_file("lib/orphan.dart", source);
+    fs::write(client.workspace_file("lib/broken.dart"), [0xff]).unwrap();
+    client.open(&uri, source, 1);
+    client.drain_publishes_with_warnings(1);
+    let config = client.workspace_file("falcon.json");
+    fs::write(&config, DISABLE_CROSS_FILE).unwrap();
+    client.watch(&uri_for(&config));
+    let recovered = client.drain_publishes();
+    let last = recovered
+        .iter()
+        .rev()
+        .find(|p| p.uri.as_str() == uri)
+        .unwrap();
+    assert!(!has_rule(last, "incomplete-analysis"), "{recovered:?}");
+    assert!(!has_rule(last, "unused-files"), "{recovered:?}");
     client.shutdown();
 }
