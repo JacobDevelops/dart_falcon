@@ -277,6 +277,14 @@ fn collect_selected_check(
         &walked.missing_paths,
         &walked.filtered_paths,
     );
+    let mut environment = match sdk_locator {
+        Some(locator) => AnalysisEnvironment::with_sdk_locator(locator),
+        None => AnalysisEnvironment::default(),
+    };
+    environment.extend(walked.manifest_paths.iter().map(PathBuf::as_path));
+    for warning in environment.take_warnings() {
+        eprintln!("warning: {warning}");
+    }
     if files.is_empty() && manifests.is_empty() {
         crate::adoption::apply_baseline(options, config, &root, &mut unmatched, &HashMap::new())?;
         crate::report::count_package_diagnostics(&mut packages, &unmatched);
@@ -292,10 +300,6 @@ fn collect_selected_check(
     }
     // Package configurations give every file its language version; resolving
     // runs also load the SDK and dependency libraries project files import.
-    let mut environment = match sdk_locator {
-        Some(locator) => AnalysisEnvironment::with_sdk_locator(locator),
-        None => AnalysisEnvironment::default(),
-    };
     environment.set_project_roots(falcon_project::required_source_roots(
         files.iter().map(|(path, _)| path.as_path()),
     ));

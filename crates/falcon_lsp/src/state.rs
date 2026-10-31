@@ -1203,6 +1203,12 @@ impl LspState {
                 diagnostics: vec![diagnostic],
             };
         }
+        if path.file_name().is_some_and(|name| name == "pubspec.yaml") {
+            return DocumentParse {
+                parsed: ParsedFile::lexical(source),
+                diagnostics: Vec::new(),
+            };
+        }
         let result = ParsedFile::try_parse_for_package(source, package_version);
         let result = Self::inject_parser_failure(path, parser_failure_path, result);
         document_parse_result(path, result)
@@ -2811,15 +2817,12 @@ impl LspState {
                 }
             }
         } else {
-            falcon_analyze::read_source(path)
+            falcon_config::read_metadata_text(path)
         };
         match result {
             Ok(source) => Ok(source),
             Err(error) => {
                 warn!("failed to read {}: {}", path.display(), error);
-                if falcon_analyze::is_source_too_large(&error) {
-                    *complete = false;
-                }
                 Err(error)
             }
         }

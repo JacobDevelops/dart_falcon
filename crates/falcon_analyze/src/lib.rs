@@ -34,8 +34,8 @@ pub use cross_file::{
     SemanticIndexes,
 };
 pub use environment::packages::{
-    FilePackage, PackageMetadata, canonical_package_path, enclosing_pubspec, package_identities,
-    package_identity,
+    FilePackage, ManifestSnapshot, PackageMetadata, canonical_package_path, enclosing_pubspec,
+    package_identities, package_identity,
 };
 pub use environment::{
     AnalysisEnvironment, DartSdk, EnvironmentCacheKey, ExternalLibraries, ExternalOrigin,

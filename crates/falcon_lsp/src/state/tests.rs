@@ -2371,14 +2371,68 @@ mod source_size_tests {
         assert!(!complete);
     }
 
+    fn assert_manifest_warning_recovery(state: &mut LspState, rejected: &PathBuf) {
+        let diagnostics = state.cross_file_diagnostics();
+        assert!(
+            diagnostics
+                .values()
+                .flatten()
+                .all(|diagnostic| diagnostic.rule != "secure-pubspec-urls")
+        );
+        let warnings = state.take_config_messages();
+        let manifest_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|warning| warning.message.contains(&*rejected.to_string_lossy()))
+            .collect();
+        assert_eq!(manifest_warnings.len(), 1, "{warnings:?}");
+        assert!(
+            manifest_warnings[0]
+                .message
+                .contains("maximum supported metadata size")
+        );
+        state.cross_file_diagnostics();
+        assert_eq!(state.take_config_messages().len(), 0);
+        std::fs::write(rejected, "name: example\nhomepage: http://example.com\n").unwrap();
+        state.watched_files_changed(std::slice::from_ref(rejected));
+        let diagnostics = state.cross_file_diagnostics();
+        let secure: Vec<_> = diagnostics
+            .values()
+            .flatten()
+            .filter(|diagnostic| diagnostic.rule == "secure-pubspec-urls")
+            .collect();
+        assert_eq!(secure.len(), 1);
+        assert_eq!(secure[0].file_path, rejected.to_string_lossy());
+        assert_eq!(secure[0].severity, falcon_diagnostics::Severity::Warning);
+        assert_eq!(
+            secure[0].message,
+            "The `http` protocol shouldn't be used because it isn't secure."
+        );
+        assert_eq!((secure[0].span.start, secure[0].span.end), (24, 42));
+        std::fs::File::create(rejected)
+            .unwrap()
+            .set_len(u64::from(u32::MAX) + 1)
+            .unwrap();
+        state.watched_files_changed(std::slice::from_ref(rejected));
+        state.cross_file_diagnostics();
+        let warnings = state.take_config_messages();
+        assert_eq!(
+            warnings
+                .iter()
+                .filter(|warning| warning.message.contains(&*rejected.to_string_lossy()))
+                .count(),
+            1,
+            "{warnings:?}"
+        );
+    }
+
     #[test]
-    fn oversized_disk_sources_clear_cross_file_diagnostics_and_recover() {
+    fn oversized_required_sources_clear_cross_file_results_but_optional_manifests_do_not() {
         for name in ["oversized.dart", "pubspec.yaml"] {
             let directory = tempfile::tempdir().unwrap();
             let config = directory.path().join("falcon.json");
             std::fs::write(
                 &config,
-                r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#,
+                r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"},"security":{"secure-pubspec-urls":"warn"}}}}"#,
             )
             .unwrap();
             let lib = directory.path().join("lib");
@@ -2395,6 +2449,18 @@ mod source_size_tests {
                     .iter()
                     .any(|diagnostic| diagnostic.rule == "unused-files")
             }));
+            if name == "pubspec.yaml" {
+                let manifest = directory.path().join(name);
+                std::fs::write(&manifest, "name: example\nhomepage: http://example.com\n").unwrap();
+                state.watched_files_changed(std::slice::from_ref(&manifest));
+                assert!(
+                    state
+                        .cross_file_diagnostics()
+                        .values()
+                        .flatten()
+                        .any(|diagnostic| diagnostic.rule == "secure-pubspec-urls")
+                );
+            }
 
             let rejected = directory.path().join(name);
             std::fs::File::create(&rejected)
@@ -2403,6 +2469,12 @@ mod source_size_tests {
                 .unwrap();
             state.watched_files_changed(std::slice::from_ref(&rejected));
             let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+            if name == "pubspec.yaml" {
+                assert!(complete);
+                assert!(files.iter().all(|file| file.path() != rejected));
+                assert_manifest_warning_recovery(&mut state, &rejected);
+                continue;
+            }
             assert!(!complete);
             assert!(files.iter().all(|file| file.path() != rejected));
             assert!(state.cross_file_diagnostics().is_empty());

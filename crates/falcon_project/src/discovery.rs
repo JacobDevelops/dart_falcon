@@ -94,6 +94,8 @@ pub struct ProjectDiscovery {
 pub struct WalkOutput {
     pub files: Vec<(PathBuf, String)>,
     pub manifests: Vec<(PathBuf, String)>,
+    /// Every discovered manifest, including those whose optional source cannot be read.
+    pub manifest_paths: Vec<PathBuf>,
     pub missing_paths: Vec<PathBuf>,
     /// Explicit supported files rejected by the configured path filter.
     pub filtered_paths: Vec<PathBuf>,
@@ -151,8 +153,7 @@ impl std::error::Error for DiscoveryFailure {
 ///
 /// # Errors
 ///
-/// Returns an error if discovery fails, a required source cannot be read,
-/// or a manifest exceeds the size limit.
+/// Returns an error if discovery fails or a required source cannot be read.
 pub fn walk_project(
     paths: &[PathBuf],
     filter: &PathFilter,
@@ -175,8 +176,9 @@ pub fn walk_project(
             }
         }
     }
+    output.manifest_paths.clone_from(&discovery.manifests);
     for path in discovery.manifests {
-        if let Some(source) = read_manifest(&path)? {
+        if let Some(source) = read_manifest(&path) {
             output.manifests.push((path, source));
         }
     }
@@ -488,15 +490,12 @@ fn collect_file(
     results.push(path.to_path_buf());
 }
 
-fn read_manifest(path: &Path) -> Result<Option<String>, String> {
-    match falcon_analyze::read_source(path) {
-        Ok(source) => Ok(Some(source)),
-        Err(error) if falcon_analyze::is_source_too_large(&error) => {
-            Err(format!("failed to read file {}: {error}", path.display()))
-        }
+fn read_manifest(path: &Path) -> Option<String> {
+    match falcon_config::read_metadata_text(path) {
+        Ok(source) => Some(source),
         Err(error) => {
-            tracing::warn!(path = %path.display(), %error, "failed to read file");
-            Ok(None)
+            tracing::warn!(path = %path.display(), %error, "failed to read optional manifest");
+            None
         }
     }
 }

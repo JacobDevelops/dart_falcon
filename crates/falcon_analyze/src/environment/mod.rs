@@ -207,6 +207,7 @@ struct PackageDiscovery {
 #[derive(Debug, Default)]
 struct EnvironmentWarnings {
     seen: std::collections::BTreeSet<String>,
+    manifests_seen: std::collections::BTreeSet<String>,
     pending: Vec<String>,
 }
 
@@ -302,13 +303,17 @@ impl AnalysisEnvironment {
     }
 
     /// Clear discovered contexts while retaining the SDK discovery policy.
+    ///
+    /// # Panics
+    /// Panics if the environment warning mutex is poisoned.
     pub fn reset(&mut self) {
         let warnings = Arc::clone(&self.warnings);
+        warnings.lock().unwrap().manifests_seen.clear();
         *self = Self::new(self.sdk_locator);
         self.warnings = warnings;
     }
 
-    /// Newly encountered environment failures, deduplicated for this environment.
+    /// Newly encountered failures; manifest warnings deduplicate until discovery resets.
     #[must_use]
     ///
     /// # Panics
@@ -323,6 +328,14 @@ impl AnalysisEnvironment {
         let message = format!("{}: {error}", path.display());
         let mut warnings = self.warnings.lock().unwrap();
         if warnings.seen.insert(message.clone()) {
+            warnings.pending.push(message);
+        }
+    }
+
+    fn warn_manifest(&self, path: &Path, error: impl std::fmt::Display) {
+        let message = format!("{}: {error}", path.display());
+        let mut warnings = self.warnings.lock().unwrap();
+        if warnings.manifests_seen.insert(message.clone()) && !warnings.pending.contains(&message) {
             warnings.pending.push(message);
         }
     }
@@ -745,6 +758,15 @@ impl AnalysisEnvironment {
                 }
                 Arc::new(PackageMetadata::load(&manifest))
             });
+            match package.snapshot() {
+                packages::ManifestSnapshot::Malformed(reason) => {
+                    self.warn_manifest(&manifest, format!("malformed manifest: {reason}"));
+                }
+                packages::ManifestSnapshot::Inaccessible(error) => {
+                    self.warn_manifest(&manifest, error);
+                }
+                packages::ManifestSnapshot::Missing | packages::ManifestSnapshot::Valid { .. } => {}
+            }
             (manifest, package)
         });
         let mut discovery = self.package_discovery.lock().unwrap();

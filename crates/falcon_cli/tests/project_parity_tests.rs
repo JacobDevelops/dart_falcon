@@ -8,6 +8,105 @@ use falcon_diagnostics::Severity;
 use falcon_lsp::LspState;
 use tempfile::tempdir;
 
+#[test]
+fn optional_manifest_failures_recover_to_fresh_secure_url_diagnostics() {
+    for broken in [b"homepage: [".as_slice(), &[0xff], b"oversized"] {
+        let temp = tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        let manifest = root.join("pubspec.yaml");
+        let dart = root.join("main.dart");
+        fs::write(&dart, "void main() {}\n").unwrap();
+        let config = root.join("falcon.json");
+        fs::write(&config, r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"security":{"secure-pubspec-urls":"warn"}}}}"#).unwrap();
+        fs::write(&manifest, "name: example\nhomepage: http://example.com\n").unwrap();
+        let options = CheckOptions {
+            paths: vec![root],
+            config_path: Some(config.clone()),
+            quiet: true,
+            ..Default::default()
+        };
+        let control = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+        assert_eq!(control.diagnostics.len(), 1);
+        assert_eq!(control.diagnostics[0].rule, "secure-pubspec-urls");
+        fs::write(&manifest, broken).unwrap();
+        if broken == b"oversized" {
+            fs::File::options()
+                .write(true)
+                .open(&manifest)
+                .unwrap()
+                .set_len(falcon_config::MAX_METADATA_BYTES + 1)
+                .unwrap();
+        }
+        let mut lsp = LspState::new_with_sdk_locator(Some(config), |_| None);
+        let uri = format!("file://{}", dart.display());
+        let manifest_uri = format!("file://{}", manifest.display());
+        lsp.open(&uri, "void main() {}\n".into(), Some(1));
+        let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+        assert!(cli.diagnostics.is_empty(), "{:?}", cli.diagnostics);
+        assert!(
+            lsp.cross_file_pass()
+                .iter()
+                .all(|(_, diagnostics)| diagnostics.is_empty())
+        );
+        let warnings = lsp.take_config_messages();
+        assert_eq!(
+            warnings
+                .iter()
+                .filter(|warning| warning.message.contains(&*manifest.to_string_lossy()))
+                .count(),
+            1,
+            "{warnings:?}"
+        );
+        fs::write(&manifest, "name: example\nhomepage: http://example.com\n").unwrap();
+        lsp.watched_files_changed(std::slice::from_ref(&manifest));
+        let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+        lsp.open(
+            &manifest_uri,
+            fs::read_to_string(&manifest).unwrap(),
+            Some(1),
+        );
+        let published = lsp.cross_file_pass();
+        let diagnostics = &published
+            .iter()
+            .find(|(uri, _)| uri == &manifest_uri)
+            .unwrap()
+            .1;
+        assert_eq!(
+            serde_json::to_value(diagnostics).unwrap(),
+            serde_json::to_value(&cli.diagnostics).unwrap()
+        );
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.rule, "secure-pubspec-urls");
+        assert_eq!(diagnostic.file_path, manifest.to_string_lossy());
+        assert_eq!(diagnostic.severity, Severity::Warning);
+        assert_eq!(
+            diagnostic.message,
+            "The `http` protocol shouldn't be used because it isn't secure."
+        );
+        assert_eq!((diagnostic.line, diagnostic.col), (2, 11));
+        assert_eq!((diagnostic.span.start, diagnostic.span.end), (24, 42));
+        assert!(lsp.change(
+            &manifest_uri,
+            "name: example\nhomepage: https://example.com\n".into(),
+            Some(2)
+        ));
+        let unsaved = lsp.cross_file_pass();
+        assert!(unsaved.iter().any(|(_, diagnostics)| {
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.rule == "secure-pubspec-urls")
+        }));
+        fs::write(&manifest, "name: example\nhomepage: https://example.com\n").unwrap();
+        lsp.watched_files_changed(std::slice::from_ref(&manifest));
+        assert!(
+            lsp.cross_file_pass()
+                .iter()
+                .all(|(_, diagnostics)| diagnostics.is_empty())
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn explicit_metadata_failure_exits_nonzero_and_names_the_input() {

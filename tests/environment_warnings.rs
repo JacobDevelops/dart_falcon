@@ -3,6 +3,114 @@ use std::process::Command;
 use tempfile::tempdir;
 
 #[test]
+fn discovered_broken_manifests_warn_without_enclosing_analyzed_sources() {
+    for nested_sources in [false, true] {
+        for broken in [b"homepage: [".as_slice(), &[0xff], b"oversized"] {
+            let project = tempdir().unwrap();
+            let manifest = project.path().join("pubspec.yaml");
+            fs::write(&manifest, broken).unwrap();
+            if broken == b"oversized" {
+                fs::File::options()
+                    .write(true)
+                    .open(&manifest)
+                    .unwrap()
+                    .set_len(16 * 1024 * 1024 + 1)
+                    .unwrap();
+            }
+            fs::write(project.path().join("falcon.json"), r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false}}}"#).unwrap();
+            if nested_sources {
+                let package = project.path().join("packages/a");
+                fs::create_dir_all(&package).unwrap();
+                fs::write(package.join("pubspec.yaml"), "name: a\n").unwrap();
+                fs::write(package.join("main.dart"), "void main() {}\n").unwrap();
+            }
+            let output = Command::new(env!("CARGO_BIN_EXE_falcon"))
+                .args(["check", ".", "--format", "json"])
+                .current_dir(project.path())
+                .env_remove("DART_SDK")
+                .env_remove("FLUTTER_ROOT")
+                .env("PATH", "")
+                .output()
+                .unwrap();
+            if nested_sources || broken == b"homepage: [" {
+                assert!(output.status.success(), "{output:?}");
+            } else {
+                assert_eq!(output.status.code(), Some(1));
+                assert!(String::from_utf8_lossy(&output.stdout).contains("unmatched-path"));
+            }
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            assert_eq!(
+                stderr
+                    .lines()
+                    .filter(|line| line.contains("warning:")
+                        && line.contains(&*manifest.to_string_lossy()))
+                    .count(),
+                1,
+                "{stderr}"
+            );
+        }
+    }
+}
+
+#[test]
+fn optional_manifest_warning_and_secure_url_recovery_reach_cli_output() {
+    for broken in [b"homepage: [".as_slice(), &[0xff], b"oversized"] {
+        let project = tempdir().unwrap();
+        let manifest = project.path().join("pubspec.yaml");
+        fs::write(project.path().join("main.dart"), "void main() {}\n").unwrap();
+        fs::write(project.path().join("falcon.json"), r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"security":{"secure-pubspec-urls":"warn"}}}}"#).unwrap();
+        fs::write(&manifest, broken).unwrap();
+        if broken == b"oversized" {
+            fs::File::options()
+                .write(true)
+                .open(&manifest)
+                .unwrap()
+                .set_len(16 * 1024 * 1024 + 1)
+                .unwrap();
+        }
+        let check = || {
+            Command::new(env!("CARGO_BIN_EXE_falcon"))
+                .args(["check", ".", "--format", "json"])
+                .current_dir(project.path())
+                .env_remove("DART_SDK")
+                .env_remove("FLUTTER_ROOT")
+                .env("PATH", "")
+                .output()
+                .unwrap()
+        };
+        let failed = check();
+        assert!(failed.status.success(), "{failed:?}");
+        let stderr = String::from_utf8(failed.stderr).unwrap();
+        assert_eq!(
+            stderr
+                .lines()
+                .filter(|line| line.contains("warning:") && line.contains("pubspec.yaml"))
+                .count(),
+            1,
+            "{stderr}"
+        );
+        assert!(
+            !String::from_utf8(failed.stdout)
+                .unwrap()
+                .contains("secure-pubspec-urls")
+        );
+        fs::write(&manifest, "name: example\nhomepage: http://example.com\n").unwrap();
+        let recovered = check();
+        let stdout = String::from_utf8(recovered.stdout).unwrap();
+        assert!(stdout.contains("secure-pubspec-urls"), "{stdout}");
+        assert!(
+            stdout.contains("The `http` protocol shouldn't be used because it isn't secure."),
+            "{stdout}"
+        );
+        assert!(
+            !String::from_utf8(recovered.stderr)
+                .unwrap()
+                .contains("warning:")
+        );
+    }
+}
+
+#[test]
 fn malformed_package_config_is_reported_on_stderr() {
     let project = tempfile::tempdir().unwrap();
     std::fs::create_dir(project.path().join(".dart_tool")).unwrap();

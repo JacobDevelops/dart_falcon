@@ -40,8 +40,8 @@ These entries describe implemented foundation, not acceptance of the open items.
   CLI collection aborts on any required source read failure, naming the path and
   reason; LSP deliberately stays live but marks collection incomplete and suppresses
   all cross-file results. Companion failures retain partial semantic snapshots for per-file rules.
-  Optional metadata remains separate: ordinary manifest failures still warn/skip,
-  and oversized manifests retain their existing rejection behavior.
+  Optional metadata remains separate: manifest failures, including oversized
+  manifests, warn and skip rather than rejecting the project (bounded in V1-3a).
   `required_source_acquisition_retains_read_outcomes` covers acquired text,
   disappearance after discovery, invalid UTF-8, oversize and other I/O failure.
   `failed_required_disk_reads_are_incomplete_but_optional_reads_are_not` checks
@@ -150,11 +150,25 @@ These entries describe implemented foundation, not acceptance of the open items.
 ### V1-3 — Own project facts and frontend parity
 
 - [ ] Move rule-side metadata acquisition behind a shared bounded project snapshot.
-  Evidence: `crates/falcon_rules/src/cross_file/secure_pubspec_urls.rs`,
-  `sort_pub_dependencies.rs`, `flutter_assets.rs`, and
-  `lint/support/package_manifests.rs` still acquire external facts during rule work.
-  First slice: one manifest consumer and its CLI/LSP recovery test. Specify missing,
-  malformed, inaccessible and changed metadata separately before migrating others.
+  V1-3a migrates `secure_pubspec_urls.rs`, the smallest consumer needing only
+  manifest text and YAML, to `falcon_analyze::PackageMetadata::snapshot`.
+  Its closed `ManifestSnapshot` captures bounded optional metadata once per
+  environment: Missing is silent and emits nothing; Malformed emits no rule
+  diagnostic and warns with the path; Inaccessible (I/O, invalid UTF-8 or the
+  metadata size limit) warns with path and reason and skips the secure-URL check
+  for that package, not other rules. Shared discovery emits these warnings
+  whichever rules are enabled, including discovered manifests without Dart files.
+  Valid snapshots retain the exact source and parsed YAML, preserving diagnostics.
+  Changed metadata is captured per CLI run; the LSP refreshes on disk change
+  (save or watcher); unsaved buffers are not facts. Warning deduplication lasts
+  until invalidation, so a later failure episode warns again.
+  CLI subprocess and CLI/LSP parity recovery tests cover malformed YAML, invalid
+  UTF-8 and sparse oversized manifests, exact recovered diagnostic identity,
+  range, severity and message, and saved changes clearing stale diagnostics.
+  Remaining rule-side readers: `sort_pub_dependencies.rs`, `flutter_assets.rs`,
+  `lint/support/package_manifests.rs`, `cross_file/package_names.rs`,
+  `unused_dependencies.rs`, `unused_dev_dependencies.rs`, `banned_imports.rs`
+  (via `package_identity`) and `cross_file.rs`; migrate these separately.
 - [ ] Expand `crates/falcon_cli/tests/project_parity_tests.rs` around actual risk:
   diagnostics identity/range/severity/message, suppression, config changes,
   incomplete analysis and cross-file invalidation. Shared stages already live in

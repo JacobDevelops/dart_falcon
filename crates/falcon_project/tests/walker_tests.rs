@@ -46,19 +46,26 @@ fn test_walk_single_dart_file() {
 }
 
 #[test]
-fn oversized_sources_and_manifests_abort_collection() {
-    for name in ["oversized.dart", "pubspec.yaml"] {
-        let temp = tempdir().unwrap();
-        fs::File::create(temp.path().join(name))
-            .unwrap()
-            .set_len(u64::from(u32::MAX) + 1)
-            .unwrap();
-        fs::write(temp.path().join("small.dart"), "void main() {}").unwrap();
-        let error =
-            walk_project(&[temp.path().to_path_buf()], &PathFilter::default(), true).unwrap_err();
-        assert!(error.contains(name));
-        assert!(error.contains("maximum supported source size"));
-    }
+fn oversized_sources_abort_but_optional_manifests_are_skipped() {
+    let temp = tempdir().unwrap();
+    let oversized = temp.path().join("oversized.dart");
+    fs::File::create(&oversized)
+        .unwrap()
+        .set_len(u64::from(u32::MAX) + 1)
+        .unwrap();
+    fs::write(temp.path().join("small.dart"), "void main() {}").unwrap();
+    let error =
+        walk_project(&[temp.path().to_path_buf()], &PathFilter::default(), true).unwrap_err();
+    assert!(error.contains("oversized.dart"));
+    assert!(error.contains("maximum supported source size"));
+    fs::remove_file(oversized).unwrap();
+    fs::File::create(temp.path().join("pubspec.yaml"))
+        .unwrap()
+        .set_len(falcon_config::MAX_METADATA_BYTES + 1)
+        .unwrap();
+    let project = walk_project(&[temp.path().to_path_buf()], &PathFilter::default(), true).unwrap();
+    assert_eq!(project.files.len(), 1);
+    assert_eq!(project.manifests, []);
 }
 
 #[test]

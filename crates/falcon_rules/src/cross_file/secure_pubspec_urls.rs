@@ -1,13 +1,13 @@
 //! Disallow insecure URL schemes in `pubspec.yaml` string values.
 
-use std::path::Path;
+use std::{collections::HashSet, path::Path};
 
 use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use serde_yaml::Value;
 
-use super::{project_pubspecs, yaml_string_span};
+use super::yaml_string_span;
 
 #[derive(Default)]
 pub struct SecurePubspecUrls;
@@ -15,31 +15,35 @@ pub struct SecurePubspecUrls;
 impl CrossFileRule for SecurePubspecUrls {
     fn prepare_project(
         &self,
-        _environment: &falcon_analyze::AnalysisEnvironment,
+        environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         _config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
     ) -> Vec<Diagnostic> {
-        project_pubspecs(files)
-            .into_iter()
-            .flat_map(|path| check_pubspec(&path))
+        let mut seen = HashSet::new();
+        files
+            .iter()
+            .filter_map(|file| environment.package(file.path()))
+            .filter(|package| seen.insert(&package.manifest))
+            .flat_map(|package| match package.snapshot() {
+                falcon_analyze::ManifestSnapshot::Valid { source, yaml } => {
+                    check_pubspec(&package.manifest, source, yaml)
+                }
+                falcon_analyze::ManifestSnapshot::Missing
+                | falcon_analyze::ManifestSnapshot::Malformed(_)
+                | falcon_analyze::ManifestSnapshot::Inaccessible(_) => Vec::new(),
+            })
             .collect()
     }
 }
 
-fn check_pubspec(path: &Path) -> Vec<Diagnostic> {
-    let Ok(source) = falcon_config::read_metadata_text(path) else {
-        return Vec::new();
-    };
-    let Ok(root) = serde_yaml::from_str::<Value>(&source) else {
-        return Vec::new();
-    };
+fn check_pubspec(path: &Path, source: &str, root: &Value) -> Vec<Diagnostic> {
 
-    url_values(&root)
+    url_values(root)
         .into_iter()
         .filter_map(|value| {
             let protocol = insecure_protocol(value.as_str()?)?;
-            let span = yaml_string_span(&source, &root, value)?;
+            let span = yaml_string_span(source, root, value)?;
             let mut diagnostic = Diagnostic::new(
                 "",
                 Severity::Warning,
@@ -47,7 +51,7 @@ fn check_pubspec(path: &Path) -> Vec<Diagnostic> {
                 path.to_string_lossy().into_owned(),
                 span,
             );
-            diagnostic.resolve_position(&source);
+            diagnostic.resolve_position(source);
             Some(diagnostic)
         })
         .collect()
@@ -137,6 +141,10 @@ mod tests {
     fn fixture_reports_every_insecure_url() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/corpus/secure-pubspec-urls/cross-file/bad-nested/pubspec.yaml");
-        assert_eq!(check_pubspec(&path).len(), 6);
+        let package = falcon_analyze::PackageMetadata::load(&path);
+        let falcon_analyze::ManifestSnapshot::Valid { source, yaml } = package.snapshot() else {
+            panic!("valid fixture manifest");
+        };
+        assert_eq!(check_pubspec(&path, source, yaml).len(), 6);
     }
 }

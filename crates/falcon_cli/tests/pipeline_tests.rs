@@ -42,30 +42,29 @@ fn non_json_reports_render_paths_beneath_regular_files() {
 
 #[test]
 fn oversized_sources_abort_before_partial_workspace_analysis() {
-    for name in ["oversized.dart", "pubspec.yaml"] {
-        let temp = tempdir().unwrap();
-        let config = temp.path().join("falcon.json");
-        fs::write(
+    let name = "oversized.dart";
+    let temp = tempdir().unwrap();
+    let config = temp.path().join("falcon.json");
+    fs::write(
             &config,
             r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#,
         )
         .unwrap();
-        fs::write(temp.path().join("orphan.dart"), "class Orphan {}").unwrap();
-        fs::File::create(temp.path().join(name))
-            .unwrap()
-            .set_len(u64::from(u32::MAX) + 1)
-            .unwrap();
-        let options = CheckOptions {
-            paths: vec![temp.path().to_path_buf()],
-            config_path: Some(config),
-            quiet: true,
-            ..Default::default()
-        };
-        let error = collect_check(&options).unwrap_err();
-        assert!(error.contains(name));
-        assert!(error.contains("maximum supported source size"));
-        assert_ne!(run_check(&options), 0);
-    }
+    fs::write(temp.path().join("orphan.dart"), "class Orphan {}").unwrap();
+    fs::File::create(temp.path().join(name))
+        .unwrap()
+        .set_len(u64::from(u32::MAX) + 1)
+        .unwrap();
+    let options = CheckOptions {
+        paths: vec![temp.path().to_path_buf()],
+        config_path: Some(config),
+        quiet: true,
+        ..Default::default()
+    };
+    let error = collect_check(&options).unwrap_err();
+    assert!(error.contains(name));
+    assert!(error.contains("maximum supported source size"));
+    assert_ne!(run_check(&options), 0);
 }
 
 #[test]

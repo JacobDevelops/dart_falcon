@@ -349,7 +349,12 @@ pub fn analyze_sources(
     } else {
         Vec::new()
     };
-    environment.extend(files.iter().map(|(path, _)| path.as_path()));
+    environment.extend(
+        files
+            .iter()
+            .chain(manifests)
+            .map(|(path, _)| path.as_path()),
+    );
     tracing::info!(
         file_count = files.len(),
         rule_count = analysis.registry.rules().len(),

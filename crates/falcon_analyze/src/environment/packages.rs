@@ -5,38 +5,51 @@ use std::sync::Arc;
 
 use crate::{PackageIdentity, canonical_or_lexical};
 
+/// Bounded optional manifest facts captured once for an environment evaluation.
+#[derive(Debug, Clone)]
+pub enum ManifestSnapshot {
+    Missing,
+    Malformed(String),
+    Inaccessible(Arc<std::io::Error>),
+    Valid {
+        source: String,
+        yaml: serde_yaml::Value,
+    },
+}
+
 /// A package manifest as observed when the analysis environment was discovered.
 #[derive(Debug, Clone)]
 pub struct PackageMetadata {
     pub manifest: PathBuf,
     pub identity: PackageIdentity,
     pub(super) root: PathBuf,
-    yaml: Option<serde_yaml::Value>,
+    snapshot: ManifestSnapshot,
 }
 
 impl PackageMetadata {
     ///
     /// # Panics
     /// Panics if the manifest path has no parent directory.
+    #[must_use]
     pub fn load(manifest: &Path) -> Self {
-        let source = falcon_config::read_metadata_text(manifest).ok();
-        let yaml = source
-            .as_deref()
-            .and_then(|source| serde_yaml::from_str::<serde_yaml::Value>(source).ok());
+        Self::from_acquired(manifest, falcon_config::read_metadata_text(manifest))
+    }
+
+    pub(super) fn from_acquired(manifest: &Path, acquired: std::io::Result<String>) -> Self {
+        let source = acquired.as_deref().ok();
+        let parsed = source.map(serde_yaml::from_str::<serde_yaml::Value>);
+        let yaml = parsed.as_ref().and_then(|result| result.as_ref().ok());
         let name = yaml
             .as_ref()
             .and_then(|yaml| yaml.get("name"))
             .and_then(serde_yaml::Value::as_str)
             .map(str::to_owned)
             .or_else(|| {
-                source
-                    .as_deref()
-                    .filter(|_| yaml.is_none())
-                    .and_then(|source| {
-                        source.lines().find_map(|line| {
-                            serde_yaml::from_str::<String>(line.strip_prefix("name:")?.trim()).ok()
-                        })
+                source.filter(|_| yaml.is_none()).and_then(|source| {
+                    source.lines().find_map(|line| {
+                        serde_yaml::from_str::<String>(line.strip_prefix("name:")?.trim()).ok()
                     })
+                })
             })
             .unwrap_or_default();
         let root = canonical_or_lexical(manifest.parent().unwrap());
@@ -47,14 +60,37 @@ impl PackageMetadata {
                 lib_root: canonical_lib_root(&root),
             },
             root,
-            yaml,
+            snapshot: match acquired {
+                Ok(source) => match parsed.unwrap() {
+                    Ok(yaml) => ManifestSnapshot::Valid { source, yaml },
+                    Err(error) => ManifestSnapshot::Malformed(error.to_string()),
+                },
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    ManifestSnapshot::Missing
+                }
+                Err(error) => ManifestSnapshot::Inaccessible(Arc::new(error)),
+            },
+        }
+    }
+
+    #[must_use]
+    pub fn snapshot(&self) -> &ManifestSnapshot {
+        &self.snapshot
+    }
+
+    fn yaml(&self) -> Option<&serde_yaml::Value> {
+        match &self.snapshot {
+            ManifestSnapshot::Valid { yaml, .. } => Some(yaml),
+            ManifestSnapshot::Missing
+            | ManifestSnapshot::Malformed(_)
+            | ManifestSnapshot::Inaccessible(_) => None,
         }
     }
 
     /// The strictly parsed name; malformed manifests are not valid import owners.
     #[must_use]
     pub fn parsed_name(&self) -> Option<&str> {
-        self.yaml.as_ref()?.as_mapping()?.get("name")?.as_str()
+        self.yaml()?.as_mapping()?.get("name")?.as_str()
     }
 
     /// Preserve canonical directory lookups for saved and virtual symlink aliases.
@@ -72,7 +108,7 @@ impl PackageMetadata {
 
     #[must_use]
     pub fn checks_flutter_web_imports(&self) -> bool {
-        self.yaml.as_ref().is_some_and(|yaml| {
+        self.yaml().is_some_and(|yaml| {
             !yaml["dependencies"]["flutter"].is_null()
                 && yaml["flutter"]["plugin"]["platforms"]["web"].is_null()
         })
@@ -246,6 +282,39 @@ pub fn package_identities<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Vec<
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn manifest_snapshots_distinguish_failures_and_retain_captured_facts() {
+        let temp = tempfile::tempdir().unwrap();
+        let manifest = temp.path().join("pubspec.yaml");
+        assert!(matches!(
+            PackageMetadata::load(&manifest).snapshot(),
+            ManifestSnapshot::Missing
+        ));
+        std::fs::write(&manifest, "homepage: [").unwrap();
+        assert!(matches!(
+            PackageMetadata::load(&manifest).snapshot(),
+            ManifestSnapshot::Malformed(_)
+        ));
+        std::fs::write(&manifest, [0xff]).unwrap();
+        assert!(matches!(
+            PackageMetadata::load(&manifest).snapshot(),
+            ManifestSnapshot::Inaccessible(_)
+        ));
+        let original = "name: example\nhomepage: http://example.com\n";
+        std::fs::write(&manifest, original).unwrap();
+        let captured = PackageMetadata::load(&manifest);
+        std::fs::write(&manifest, "name: changed\n").unwrap();
+        let ManifestSnapshot::Valid { source, yaml } = captured.snapshot() else {
+            panic!("valid captured snapshot");
+        };
+        assert_eq!(source, original);
+        assert_eq!(yaml["name"].as_str(), Some("example"));
+        assert_eq!(
+            PackageMetadata::load(&manifest).parsed_name(),
+            Some("changed")
+        );
+    }
+
     use super::*;
     use crate::{AnalysisEnvironment, AnalyzeContext, ParsedFile};
     use falcon_config::FalconConfig;
