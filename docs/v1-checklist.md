@@ -120,10 +120,50 @@ These entries describe implemented foundation, not acceptance of the open items.
 
 ### V1-5 — Establish representative profiling and the performance gate
 
-- [ ] Audit `crates/falcon_rules/benches/rules_bench.rs` semantic contexts and assert
+- [x] Audit `crates/falcon_rules/benches/rules_bench.rs` semantic contexts and assert
   representative semantic diagnostics before timing. Label isolated rule versus
   shared-registry costs. `benches/jfit_mobile_bench.rs` is opt-in/private and uses a
   narrower unresolved path; retain it as such, not as the release baseline.
+  Contexts use production `build_semantic_indexes` and library grouping with every
+  file rule enabled, but omit environment, external libraries and companion loading.
+  Setup asserts exactly one `avoid-print`, `avoid-unrelated-type-casts` and
+  `unnecessary-null-checks` diagnostic on `semantic.dart` in both execution lanes.
+  `standalone_rule_project_facts_warm` includes one rule's own semantic/structural
+  walk over 12 files, not just its visitor; these costs must not be summed as
+  exclusive per-rule work. `shared_registry_project_facts_warm` includes shared
+  traversal and registry postprocessing over the same files. Both time per-file
+  resolution/inference. Parsing, project fact preparation, context construction and
+  lazy context cache warmup are untimed; stack-pool worker handoffs are untimed.
+  Package-domain rules (Flutter, Riverpod, etc.) may bail out without SDK/packages:
+  the labels claim project facts, not useful resolved work for every rule.
+  The private corpus path was removed; the unchanged personal bench requires
+  `JFIT_PATH`. These synthetic cases make no full-analysis or release timing claim.
+  Evidence uses JJ change `kqssxssk` (amending `1c18c9bf`) with benchmark-source
+  SHA-256 `3606fdb8cece2072ca893062c039dc7dca9a22148e1a67f9d3b4353f5d112b34`;
+  Linux x86_64, rustc `1.101.0-nightly (16d1ffac1 2026-10-26)`, cargo
+  `1.101.0-nightly (cad07cf8e 2026-10-23)`, no SDK/private corpus:
+  - Smoke command: `MBX_CACHE_LINKS=false numen run -- cargo bench -p falcon_rules
+    --bench rules_bench -- --test`; checks both lanes without reporting timings.
+  - Negative control: remove all four context `with_*` fact attachments, then run
+    `MBX_CACHE_LINKS=false numen run -- cargo bench -p falcon_rules --bench
+    rules_bench -- --test shared_registry`. It exits 101 before timing on the
+    standalone `avoid-unrelated-type-casts` assertion (zero, expected one).
+    This is a combined missing-facts control, not an independent negative proof
+    for each assertion or the cross-file import; the control stops at the first
+    failing rule in registry order.
+    Negative benchmark-source SHA-256:
+    `b92f4363dfa523afc50bf34b2041cf6265089a3fa63836d4840ac971f9c36f00`.
+  - Nextest reproduction of the `makers test` all-targets path:
+    `/usr/bin/time -f 'NEXTEST_BENCH_WALL_SECONDS=%e' numen run -- cargo nextest
+    run --locked -p falcon_rules --all-targets -E 'binary(rules_bench)'
+    --no-tests=pass`. It runs 526 test processes plus listing: before reducing
+    standalone setup, 53.47 s wall / 51.443 s test time; afterward, 20.87 s /
+    19.597 s, all 526 pass. Setup now runs standalone assertions only for the
+    three representative rules on `semantic.dart`; shared runs warm all contexts.
+    These single-host test-runner observations are not rule-performance claims.
+  - Prior settled gate command: `numen run -- makers verify-fast`; its handoff
+    records the result and whole-tree fingerprint before the shared-worker panic
+    guard was added. The smoke command above was rerun with that guard.
 - [ ] Add portable representative full-analysis cases using the existing pinned
   public corpus/bench-compare machinery, with recorded configurations, failures,
   toolchain and corpus revisions. Verify the work performed, not just duration.
