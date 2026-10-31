@@ -15,11 +15,9 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = {
     "CARGO_BUILD_JOBS": "2",
-    "NEXTEST_TEST_THREADS": "2",
-    "RUST_TEST_THREADS": "2",
-    "RAYON_NUM_THREADS": "2",
+    "NEXTEST_TEST_THREADS": "4",
+    "RUST_TEST_THREADS": "4",
     "MBX_SCHEDULER_TESTS": "1",
-    "MBX_SCHEDULER_PRIORITY": "low",
     "PYTHONDONTWRITEBYTECODE": "1",
 }
 
@@ -28,9 +26,7 @@ def environment():
     env = os.environ.copy()
     for name, value in DEFAULTS.items():
         env.setdefault(name, value)
-    for name in ("CARGO_BUILD_JOBS", "NEXTEST_TEST_THREADS", "RUST_TEST_THREADS", "RAYON_NUM_THREADS"):
-        if not env[name].isdigit() or int(env[name]) < 1:
-            raise ValueError(f"{name} must be a positive integer for verification")
+    # Let each tool validate its own overrides (e.g. nextest num-cpus, Rayon 0).
     return env
 
 

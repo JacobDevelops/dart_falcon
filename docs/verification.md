@@ -21,23 +21,33 @@ values override them. Benchmarks and normal Falcon execution are unaffected.
 | Variable | Default | Controls |
 | --- | --- | --- |
 | `CARGO_BUILD_JOBS` | 2 | One Cargo build's jobs |
-| `NEXTEST_TEST_THREADS` | 2 | Concurrent nextest test processes |
-| `RUST_TEST_THREADS` | 2 | Threads inside libtest harnesses |
-| `RAYON_NUM_THREADS` | 2 | Rayon pools in tests, corpus runner and child Falcon processes |
+| `NEXTEST_TEST_THREADS` | 4 | Concurrent nextest test processes |
+| `RUST_TEST_THREADS` | 4 | Threads inside libtest harnesses |
 | `MBX_SCHEDULER_TESTS` | 1 | mbx admission for supported test runs |
-| `MBX_SCHEDULER_PRIORITY` | low | Yield at admission to normal-priority mbx work |
 
-These are conservative local starting points, not memory limits or a promise of
-responsiveness. The limits multiply: two corpus workers may each start a Falcon
-process with two analysis workers. mbx uses its existing shared compiler/test
-CPU and memory admission; cache hits and independent work can proceed. Its memory
-estimates are not OS-enforced caps, and other applications consume resources too.
-Check overrides before increasing the budget across several workspaces.
+Compilation and test defaults match the corresponding LOKE values: two compile
+jobs, four nextest tests and four libtest threads. Falcon sets them in this wrapper;
+LOKE sets compilation/libtest in cargo-make and nextest in its profile. Falcon's
+low-level tasks still bypass these wrapper defaults. The wrapper also passes this
+environment to Blaze iteration, but nextest/mbx settings do not schedule Blaze's
+own compiler or test runner, and Cargo's job count is not a Blaze memory/CPU cap.
+
+Falcon does not set `RAYON_NUM_THREADS` or `MBX_SCHEDULER_PRIORITY`: caller values
+or the underlying tool defaults apply. All explicit overrides pass through,
+including native forms such as nextest's `num-cpus`; each tool validates its own
+settings. No global machine setting is changed.
+
+These defaults are not memory limits or a promise of responsiveness. Concurrent
+tests can each start Rayon pools or child analysis processes; no wrapper limit is
+imposed on those pools now. mbx retains its shared compiler/test admission and
+cache reuse, but its memory estimates are not OS-enforced caps. Account for other
+workspaces and applications when selecting explicit overrides.
 
 Use current mbx (test scheduling is supported by 1.28.0). Plain Cargo remains an
 option with `CARGO_CMD=cargo`; per-command thread limits remain but mbx admission
 and compiler-cache sharing do not. Doctests and directly executed corpus children
-are not individually scheduled by mbx; their fan-out is limited by this wrapper.
+are not individually scheduled by mbx. Libtest honors its thread setting, but
+this wrapper does not impose a general bound on child-process fan-out.
 Nextest's existing timeout includes time spent waiting for mbx admission. Inspect
 runner stderr when a test times out; a timeout is a failure, never a skipped pass.
 

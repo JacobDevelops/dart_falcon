@@ -52,8 +52,9 @@ validation build uses the existing `ci_validate` task to avoid separate CLI and
 benchmark builds with different dev-dependency features. The separate OSS corpus
 CI job still runs; a local full pass does not claim that job or website/Dart checks.
 
-The wrapper limits compile jobs, nextest processes, libtest threads and Rayon
-workers independently. It enables mbx test admission without creating another
+The wrapper defaults to two compile jobs, four nextest processes and four libtest
+threads, preserving explicit overrides. It leaves Rayon and mbx priority to the
+caller/tool defaults and enables mbx test admission without creating another
 scheduler; separate checks/workspaces can progress together. It checks source
 bytes before and after commands and never reuses a previous passing result.
 See [verification scopes and resource budgets](docs/verification.md).

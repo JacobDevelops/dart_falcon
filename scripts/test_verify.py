@@ -41,6 +41,11 @@ class VerificationTests(unittest.TestCase):
     def test_iteration_is_explicit_pinned_and_isolates_compiler_outputs(self):
         self.assertEqual(verify.plan("iterate-test", "falcon_syntax"),
                          [["blaze", "test", "--locked", "-p", "falcon_syntax"]])
+        with patch.dict(os.environ, {}, clear=True):
+            iteration = verify.iteration_environment(verify.environment(), self.root)
+        self.assertNotIn("RAYON_NUM_THREADS", iteration)
+        self.assertNotIn("MBX_SCHEDULER_PRIORITY", iteration)
+        self.assertEqual(iteration["BLAZE_TESTS"], "affected")
         original = {"CARGO_TARGET_DIR": "/shared/cargo"}
         env = verify.iteration_environment(original, self.root)
         self.assertEqual(original["CARGO_TARGET_DIR"], "/shared/cargo")
@@ -64,11 +69,19 @@ class VerificationTests(unittest.TestCase):
         actual = json.loads(output.read_text())
         for key, value in verify.DEFAULTS.items():
             self.assertEqual(actual[key], value)
-        with patch.dict(os.environ, {"RAYON_NUM_THREADS": "3"}):
-            self.assertEqual(verify.environment()["RAYON_NUM_THREADS"], "3")
-        with patch.dict(os.environ, {"CARGO_BUILD_JOBS": "0"}):
-            with self.assertRaises(ValueError):
-                verify.environment()
+        self.assertEqual(actual["CARGO_BUILD_JOBS"], "2")
+        self.assertEqual(actual["NEXTEST_TEST_THREADS"], "4")
+        self.assertEqual(actual["RUST_TEST_THREADS"], "4")
+        self.assertEqual(actual["MBX_SCHEDULER_TESTS"], "1")
+        for name in ("RAYON_NUM_THREADS", "MBX_SCHEDULER_PRIORITY"):
+            self.assertNotIn(name, actual)
+        overrides = {"CARGO_BUILD_JOBS": "-1", "NEXTEST_TEST_THREADS": "num-cpus",
+                     "RUST_TEST_THREADS": "3", "RAYON_NUM_THREADS": "0",
+                     "MBX_SCHEDULER_PRIORITY": "low", "MBX_SCHEDULER_TESTS": "0"}
+        with patch.dict(os.environ, overrides, clear=True):
+            for env in (verify.environment(), verify.iteration_environment(verify.environment())):
+                for name, value in overrides.items():
+                    self.assertEqual(env[name], value)
 
     def test_fingerprint_tracks_new_deleted_staged_modes_and_symlinks(self):
         first = verify.fingerprint(self.root)
