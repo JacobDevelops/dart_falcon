@@ -24,7 +24,6 @@ use std::path::Path;
 
 use falcon_analyze::{
     AnalysisEnvironment, CrossFileRule, DependencyInput, ManifestSnapshot, ProjectFile,
-    canonical_package_path,
 };
 use falcon_config::FalconConfig;
 use falcon_diagnostics::Diagnostic;
@@ -53,7 +52,7 @@ impl CrossFileRule for UnusedDevDependencies {
             })
             .filter_map(|file| {
                 let pubspec = &environment.package(file.path())?.manifest;
-                (!is_library_file(file.path(), pubspec)).then_some(pubspec.clone())
+                (!is_library_file(environment, file.path(), pubspec)).then_some(pubspec.clone())
             })
             .collect();
         let mut diagnostics = Vec::new();
@@ -98,7 +97,7 @@ fn analysis_options_packages(
     }
     let mut visited = HashSet::new();
     while let Some(path) = pending.pop() {
-        if !visited.insert(canonical_package_path(&path)) {
+        if !visited.insert(environment.canonical_path(&path)) {
             continue;
         }
         if visited.len() > 4096 {

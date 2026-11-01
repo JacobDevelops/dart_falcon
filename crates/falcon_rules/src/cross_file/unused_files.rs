@@ -22,9 +22,7 @@ use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::cst::{FunctionKind, Program, TopLevelDecl};
 
-use super::{
-    build_reference_graph, canonical_package_path, has_lib_component, is_under_lib, project_packages,
-};
+use super::{build_reference_graph, has_lib_component, is_under_lib, project_packages};
 
 #[derive(Default)]
 pub struct UnusedFiles;
@@ -44,9 +42,9 @@ impl CrossFileRule for UnusedFiles {
         let packages = project_packages(&file_packages);
         let canons: Vec<PathBuf> = files
             .iter()
-            .map(|f| canonical_package_path(f.path()))
+            .map(|f| environment.canonical_path(f.path()))
             .collect();
-        let adj = build_reference_graph(files, &canons, &file_packages, &packages);
+        let adj = build_reference_graph(environment, files, &canons, &file_packages, &packages);
 
         // Two spellings of one real file must share reachability, so both the
         // BFS and the flag check below go through the first index seen for a
@@ -64,7 +62,8 @@ impl CrossFileRule for UnusedFiles {
         let mut reachable = vec![false; files.len()];
         let mut queue = VecDeque::new();
         for (i, f) in files.iter().enumerate() {
-            if is_root(f.program(), &canons[i], file_packages[i].identity()) && !reachable[repr[i]] {
+            if is_root(f.program(), &canons[i], file_packages[i].identity()) && !reachable[repr[i]]
+            {
                 reachable[repr[i]] = true;
                 queue.push_back(repr[i]);
             }
@@ -304,7 +303,10 @@ mod tests {
                 package.join("lib/example.dart").to_str().unwrap(),
                 "export 'package:example/src/live.dart';",
             ));
-            files.push(pf(package.join("lib/src/live.dart").to_str().unwrap(), "class Live {}"));
+            files.push(pf(
+                package.join("lib/src/live.dart").to_str().unwrap(),
+                "class Live {}",
+            ));
             let dead = package.join("lib/src/dead.dart");
             files.push(pf(dead.to_str().unwrap(), "class Dead {}"));
             expected.push(dead.to_string_lossy().into_owned());
@@ -358,8 +360,13 @@ mod tests {
             ),
         ];
         let mut expected = vec![
-            alpha.join("lib/src/shared.dart").to_string_lossy().into_owned(),
-            beta.join("lib/src/dead.dart").to_string_lossy().into_owned(),
+            alpha
+                .join("lib/src/shared.dart")
+                .to_string_lossy()
+                .into_owned(),
+            beta.join("lib/src/dead.dart")
+                .to_string_lossy()
+                .into_owned(),
         ];
         expected.sort();
         assert_eq!(flagged(&files), expected);

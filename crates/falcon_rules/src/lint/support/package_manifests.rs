@@ -1,4 +1,3 @@
-use falcon_analyze::canonical_package_path;
 use serde_yaml::{Mapping, Value};
 use std::collections::HashSet;
 use std::path::Path;
@@ -70,8 +69,12 @@ pub(crate) fn imported_package(uri: &str) -> Option<&str> {
     (!package.is_empty() && !path.is_empty()).then_some(package)
 }
 
-pub(crate) fn is_library_file(file: &Path, pubspec: &Path) -> bool {
-    let file = canonical_package_path(file);
+pub(crate) fn is_library_file(
+    environment: &falcon_analyze::AnalysisEnvironment,
+    file: &Path,
+    pubspec: &Path,
+) -> bool {
+    let file = environment.canonical_path(file);
     let root = pubspec.parent().unwrap_or_else(|| Path::new(""));
-    file.starts_with(canonical_package_path(&root.join("lib")))
+    file.starts_with(environment.canonical_path(&root.join("lib")))
 }

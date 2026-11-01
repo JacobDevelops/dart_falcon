@@ -55,16 +55,15 @@ impl CrossFileRule for UnusedAssets {
                         variant,
                         files: if !variant && entry.path.ends_with('/') {
                             let directory = package.pubspec.with_file_name(&entry.path);
-                            match directory_files(&directory, &entry.path) {
-                                DirectoryFiles::Files(paths) => {
-                                    environment.clear_optional_metadata_warning(&directory);
-                                    Some(paths)
-                                }
-                                DirectoryFiles::Absent => None,
-                                DirectoryFiles::Inaccessible(path, error) => {
-                                    environment.warn_optional_metadata(&directory, &path, error);
-                                    None
-                                }
+                            match environment.directory_files(&directory) {
+                                falcon_analyze::DependencyInput::Present(names) => Some(
+                                    names
+                                        .iter()
+                                        .map(|name| format!("{}{name}", entry.path))
+                                        .collect(),
+                                ),
+                                falcon_analyze::DependencyInput::Missing
+                                | falcon_analyze::DependencyInput::Unknown(_) => None,
                             }
                         } else {
                             None
@@ -226,49 +225,6 @@ fn mark_referenced(
             }
         }
     }
-}
-
-enum DirectoryFiles {
-    Absent,
-    Files(Vec<String>),
-    Inaccessible(std::path::PathBuf, std::io::Error),
-}
-
-fn directory_files(directory: &Path, path: &str) -> DirectoryFiles {
-    use std::io::{Error, ErrorKind};
-
-    let entries = match std::fs::read_dir(directory) {
-        Ok(entries) => entries,
-        Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {
-            return DirectoryFiles::Absent;
-        }
-        Err(error) => return DirectoryFiles::Inaccessible(directory.to_path_buf(), error),
-    };
-    let mut paths = Vec::new();
-    for child in entries {
-        let child = match child {
-            Ok(child) => child,
-            Err(error) if error.kind() == ErrorKind::NotFound => continue,
-            Err(error) => return DirectoryFiles::Inaccessible(directory.to_path_buf(), error),
-        };
-        let child_path = child.path();
-        let metadata = match std::fs::metadata(&child_path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == ErrorKind::NotFound => continue,
-            Err(error) => return DirectoryFiles::Inaccessible(child_path, error),
-        };
-        if metadata.is_file() {
-            let name = child.file_name();
-            let Some(name) = name.to_str() else {
-                return DirectoryFiles::Inaccessible(
-                    child_path,
-                    Error::new(ErrorKind::InvalidData, "asset file name is not valid UTF-8"),
-                );
-            };
-            paths.push(format!("{path}{name}"));
-        }
-    }
-    DirectoryFiles::Files(paths)
 }
 
 fn is_resolution_variant(path: &str) -> bool {

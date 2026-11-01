@@ -161,7 +161,7 @@ These entries describe implemented foundation, not acceptance of the open items.
 
 ### V1-3 — Own project facts and frontend parity
 
-- [ ] Move rule-side metadata acquisition behind a shared bounded project snapshot.
+- [x] Move rule-side metadata acquisition behind a shared bounded project snapshot.
   V1-3a migrates `secure_pubspec_urls.rs`, the smallest consumer needing only
   manifest text and YAML, to `falcon_analyze::PackageMetadata::snapshot`.
   Its closed `ManifestSnapshot` captures bounded optional metadata once per
@@ -202,19 +202,16 @@ These entries describe implemented foundation, not acceptance of the open items.
   capture leaves both rules' diagnostics unchanged; valid-manifest corpus diagnostics
   remain identical. Duplicate YAML keys classify the snapshot as Malformed: both
   asset rules skip it and discovery warns once.
-  Remaining asset IO is specifically `unused-assets`' direct `read_dir` expansion
-  of declared directories and `metadata(...).is_file()` checks on their children,
-  not globbing or existence checks for individual declarations. `missing-assets`
-  checks declarations, not disk existence. These queries stay rule-side and uncached:
-  the CLI evaluates them once per run, and every subsequent LSP evaluation reads
-  current directory contents. Moving them into the manifest snapshot would add a
-  second invalidation lifecycle without making publication coherent.
+  V1-3c initially retained `unused-assets`' directory expansion and regular-file
+  checks outside the manifest snapshot; V1-3g moves these raw directory facts into
+  the shared generation/event owner below. `missing-assets` still checks declarations,
+  not disk existence.
   Missing/non-directory paths are silent and exempt; dangling symlinks skip only
   that entry. Other directory/entry IO errors and non-UTF-8 file names exempt the
   directory and warn with path and reason through the environment warning channel,
-  deduplicated by declared directory until a successful directory read or discovery
-  reset. A successful directory read re-arms that directory's warning, so a subsequent
-  failure warns again without an environment reset. CLI subprocess tests cover the
+  deduplicated by declared directory until a successful refreshed directory read or
+  discovery reset. A successful refresh re-arms that directory's warning, so a
+  subsequent failure warns again without an environment reset. CLI subprocess tests cover the
   warning channel; the LSP test covers break → fix (diagnostic returns) → break,
   including one new warning in the second episode.
   V1-3e captures localization settings, template text and sibling ARB locales in the
@@ -248,12 +245,52 @@ These entries describe implemented foundation, not acceptance of the open items.
   ancestors; mutable dependency watchers name exact input files and executable directories.
   Executable probes stream entries until a matching file, without a directory-size cutoff.
   Disabled rules retain main's existing dependency-source event invalidation behavior.
-  Remaining exclusions: other rule-side filesystem facts remain:
-  `no_deep_package_imports` reads
-  dependency files; avoid_missing_test_files and conditional_uri_does_not_exist
-  probe file existence; unused_assets retains the directory IO noted in V1-3c;
-  path-canonicalization helpers still access the filesystem. The metadata box and
-  broader frontend parity box remain open.
+  V1-3g closes the remaining rule-side filesystem exclusions. The environment lazily
+  memoizes bounded dependency export syntax, regular-file existence, immediate
+  directory file names (at most 100,000 entries), and canonical package paths.
+  Rules retain export, URI, test-file and asset policy. Missing inputs, including
+  non-directory ancestors and dangling entries, remain silent. Malformed/inaccessible
+  inputs warn once per failure episode and make only their dependent consumer unknown;
+  an unknown dependency export invalidates that barrel's deep-import proof rather
+  than preserving a partial closure. Dependency source acquisition is bounded to
+  8 MiB, with the existing 512-library/8 MiB traversal budget retained in the rule.
+  Oversized and Dart-parse-error sources retain main's silent per-file skip, so an
+  unrelated oversized/broken sibling cannot hide a small valid export. Source facts
+  retain only byte lengths and raw export URI/flag records, not parsed ASTs or source
+  buffers; unchanged idle polls compare size/mtime, permissions and Unix ctime without
+  parsing dependency sources. The remaining closure budget is checked before reads.
+  Existence/canonical memos retain at most 256 entries. Enabled existence consumers
+  watch bounded workspace roots rather than accumulating one watcher per typed URI;
+  events match captured keys and their canonical/alias ancestors. Eviction retains
+  at most 256 parent directories for event matching; workspace-root fallback applies
+  only if those directories overflow too. Idle polls remain quiet on unchanged disk
+  state. Failure episodes outlive memo eviction; unrelated fact kinds cannot re-arm them.
+  Raw directory facts retain the per-directory entry bound.
+  Standalone rule contexts share one fallback facts owner rather than creating one
+  environment per rule preparation; deprecated-member and path-pattern behavior is
+  unchanged when no project environment is supplied.
+  Canonical comparisons retain separate package-path and lexical-fallback semantics;
+  the latter reuse captured source paths before acquiring other path facts.
+  CLI runs capture fresh facts; normalized LSP save/watcher paths refresh affected
+  file/directory memos. Existence changes reanalyze open documents; Dart and directory
+  events also refresh project membership. Mixed event batches retain the deferred
+  cross-file publication pass. Explicit workspace boundaries include pubspec-less
+  documents; alias/canonical and symlinked-directory events invalidate the same facts.
+  Newly captured facts acquire watchers only inside analyzed project boundaries,
+  never outside-workspace/hosted dependency paths.
+  Deleted-after-capture, unchanged memo identity, outside-boundary watcher exclusion,
+  create/delete publication for missing-test/conditional-URI diagnostics, conservative
+  unreadable dependency sources, dangling assets and warning recovery have regressions.
+  Before/after full diagnostic JSON matched for 112 corpus invocations across all 18 directly changed rules and shared barrel consumers.
+  Filesystem audit command:
+  `rg -n 'std::fs|read_dir|metadata\(|\.is_file\(|\.is_dir\(|\.exists\(|canonicalize|File::open' crates/falcon_rules/src`.
+  Result: **zero production project-fact acquisitions**. Remaining hits are test-only
+  fixture IO; cached `FilePackage::metadata()` getters; the conditional URI resolver's
+  shared-fact query; warning emission; configuration/option/rule-name normalization;
+  compile-time metadata combination; or documentation/examples. Path normalization
+  in rule code is lexical or delegates to the environment's canonical facts. The
+  broader frontend parity box remains separate and open.
+
 - [x] Close LSP manifest-diagnostic publication and declared-asset watcher parity (V1-3d).
   Initialization schedules the same cross-file pass through the existing debounce
   and outbox, publishing closed manifest findings before any Dart document opens.

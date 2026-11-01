@@ -1020,9 +1020,15 @@ impl LspState {
         let normalized: Vec<_> = paths.iter().map(|path| watched_path(path)).collect();
         let paths = normalized.as_slice();
         self.environment.refresh_dependency_inputs(paths);
+        if paths
+            .iter()
+            .any(|path| is_dart_file(path) && self.environment.file_existence_event(path))
+        {
+            return false;
+        }
         paths
             .iter()
-            .all(|path| self.environment.dependency_input_event(path))
+            .all(|path| !path.is_dir() && self.environment.dependency_input_event(path))
             && !paths.iter().any(|path| {
                 self.environment
                     .inputs_affected_by(self.environment_stamps.as_ref(), path)
@@ -1058,7 +1064,7 @@ impl LspState {
             return Vec::new();
         }
         if self.refresh_watched_metadata(paths) {
-            return self.cross_file_pass();
+            return self.metadata_event_updates(paths);
         }
         // Discovery can capture new disk bytes while retaining a known context.
         // Check original link locations before watcher normalization follows them.
@@ -1154,6 +1160,23 @@ impl LspState {
         if self.documents.is_empty() {
             return self.cross_file_pass();
         }
+        self.reanalyze_open_documents()
+    }
+
+    fn metadata_event_updates(&mut self, paths: &[PathBuf]) -> Vec<(String, Vec<Diagnostic>)> {
+        let mut updates = if paths
+            .iter()
+            .any(|path| self.environment.file_existence_event(&watched_path(path)))
+        {
+            self.reanalyze_open_documents()
+        } else {
+            Vec::new()
+        };
+        updates.extend(self.cross_file_pass());
+        updates
+    }
+
+    fn reanalyze_open_documents(&mut self) -> Vec<(String, Vec<Diagnostic>)> {
         self.open_uris()
             .into_iter()
             .map(|uri| {
@@ -1409,6 +1432,8 @@ impl LspState {
     /// Discover new directories without polling dependency/configuration files.
     /// Watcher events or quiet-boundary fallback handle configuration changes.
     fn refresh_environment<'a>(&mut self, paths: impl Iterator<Item = &'a Path> + Clone) {
+        self.environment
+            .set_rule_filesystem_roots(&self.workspace_roots);
         if !self.environment.covers(paths.clone())
             || !self
                 .environment
@@ -2067,11 +2092,10 @@ impl LspState {
     pub(crate) fn watched_content_change_relevant(&mut self, path: &Path) -> bool {
         self.refresh_asset_paths();
         self.refresh_localization_paths();
-        self.localization_event_relevant(&falcon_analyze::lexical_normalize(path))
-            || self
-                .environment
-                .dependency_input_event(&falcon_analyze::lexical_normalize(path))
-            || !self.asset_file_event(&watched_path(path))
+        let path = watched_path(path);
+        self.localization_event_relevant(&path)
+            || self.environment.dependency_content_event(&path)
+            || !self.asset_file_event(&path)
     }
 
     /// Run the cross-file rules over the whole workspace and republish the

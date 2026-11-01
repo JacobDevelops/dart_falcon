@@ -5,13 +5,13 @@
 //! Own-package imports are exempt; `src/` imports are left to `implementation-imports`.
 //! Only unrestricted export paths within the dependency's library root establish
 //! a violation; exports with combinators or conditional alternatives are skipped.
-//! Missing, unreadable or malformed sources are skipped. Export traversal is cached
+//! Missing, oversized, or syntactically invalid sources are skipped. Unreadable or
+//! non-UTF-8 sources make the dependent barrel unknown. Export traversal is cached
 //! per package configuration and package, bounded to 512 libraries and 8 MiB of source.
 //! Libraries beyond those limits cannot establish a violation. Analyzed source snapshots
 //! take precedence over files on disk.
 
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use falcon_analyze::{
@@ -21,7 +21,7 @@ use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use falcon_syntax::cst::Program;
 
-use super::{ResolvedRef, canonical_package_path, project_packages, resolve_directive_uri};
+use super::{ResolvedRef, project_packages, resolve_directive_uri};
 
 #[derive(Default)]
 pub struct NoDeepPackageImports;
@@ -47,7 +47,7 @@ impl CrossFileRule for NoDeepPackageImports {
         let packages = project_packages(&file_packages);
         let sources: HashMap<_, _> = files
             .iter()
-            .map(|file| (canonical_package_path(file.path()), file))
+            .map(|file| (environment.canonical_path(file.path()), file))
             .collect();
         let mut dependencies: HashMap<_, HashMap<String, Option<PackageBarrel>>> = HashMap::new();
         let mut diagnostics = Vec::new();
@@ -91,9 +91,10 @@ impl CrossFileRule for NoDeepPackageImports {
                                 }
                                 &package.lib_root
                             };
-                            let root = canonical_package_path(root);
+                            let root = environment.canonical_path(root);
                             let path = root.join(format!("{name}.dart"));
-                            let exported = export_closure(name, &root, &path, &sources);
+                            let exported =
+                                export_closure(environment, name, &root, &path, &sources)?;
                             Some(PackageBarrel {
                                 root,
                                 path,
@@ -109,12 +110,12 @@ impl CrossFileRule for NoDeepPackageImports {
                         let Some(target) = config.resolve_package_uri(&value) else {
                             continue;
                         };
-                        canonical_package_path(&target)
+                        environment.canonical_path(&target)
                     } else {
                         let Some(decoded) = falcon_analyze::percent_decode(relative) else {
                             continue;
                         };
-                        canonical_package_path(&barrel.root.join(decoded))
+                        environment.canonical_path(&barrel.root.join(decoded))
                     };
                     let Ok(relative) = target.strip_prefix(&barrel.root) else {
                         continue;
@@ -139,11 +140,12 @@ impl CrossFileRule for NoDeepPackageImports {
 }
 
 fn export_closure(
+    environment: &AnalysisEnvironment,
     name: &str,
     root: &Path,
     barrel: &Path,
     sources: &HashMap<PathBuf, &ProjectFile>,
-) -> HashSet<PathBuf> {
+) -> Option<HashSet<PathBuf>> {
     let package = PackageIdentity {
         name: name.to_owned(),
         lib_root: root.to_owned(),
@@ -164,42 +166,31 @@ fn export_closure(
                 continue;
             }
             remaining_bytes -= file.source().len();
-            push_exports(file.program(), &path, &package, &mut pending);
+            push_exports(environment, file.program(), &path, &package, &mut pending);
             exported.insert(path);
         } else {
-            let Ok(metadata) = std::fs::metadata(&path) else {
-                continue;
+            let source = match environment.dependency_source(&path, remaining_bytes) {
+                falcon_analyze::DependencyInput::Present(source) => source,
+                falcon_analyze::DependencyInput::Missing => continue,
+                falcon_analyze::DependencyInput::Unknown(_) => return None,
             };
-            if !metadata.is_file() || metadata.len() > remaining_bytes as u64 {
+            if source.byte_len > remaining_bytes {
                 continue;
             }
-            let Ok(file) = std::fs::File::open(&path) else {
-                continue;
-            };
-            let mut source = String::new();
-            if file
-                .take(remaining_bytes as u64 + 1)
-                .read_to_string(&mut source)
-                .is_err()
-            {
-                continue;
+            remaining_bytes -= source.byte_len;
+            for export in &source.exports {
+                if !export.has_combinators && !export.has_configurable_uris {
+                    push_export(environment, &export.uri, &path, &package, &mut pending);
+                }
             }
-            if source.len() > remaining_bytes {
-                continue;
-            }
-            remaining_bytes -= source.len();
-            let parsed = falcon_dart_parser::parse(&source);
-            if !parsed.errors.is_empty() {
-                continue;
-            }
-            push_exports(parsed.tree.program(&source), &path, &package, &mut pending);
             exported.insert(path);
         }
     }
-    exported
+    Some(exported)
 }
 
 fn push_exports(
+    environment: &AnalysisEnvironment,
     program: Program<'_>,
     path: &Path,
     package: &PackageIdentity,
@@ -209,16 +200,29 @@ fn push_exports(
         if export.combinators().next().is_some() || export.configurable_uris().next().is_some() {
             continue;
         }
-        let value = export.uri().value();
-        let Some(decoded) = falcon_analyze::percent_decode(&value) else {
-            continue;
-        };
-        if let Some(ResolvedRef::Path(target)) =
-            resolve_directive_uri(path, &decoded, Some(package), std::slice::from_ref(package))
-            && target.starts_with(&package.lib_root)
-        {
-            pending.push(target);
-        }
+        push_export(environment, &export.uri().value(), path, package, pending);
+    }
+}
+
+fn push_export(
+    environment: &AnalysisEnvironment,
+    value: &str,
+    path: &Path,
+    package: &PackageIdentity,
+    pending: &mut Vec<PathBuf>,
+) {
+    let Some(decoded) = falcon_analyze::percent_decode(value) else {
+        return;
+    };
+    if let Some(ResolvedRef::Path(target)) = resolve_directive_uri(
+        environment,
+        path,
+        &decoded,
+        Some(package),
+        std::slice::from_ref(package),
+    ) && target.starts_with(&package.lib_root)
+    {
+        pending.push(target);
     }
 }
 
@@ -259,14 +263,89 @@ mod tests {
     #[test]
     fn oversized_dependency_source_is_not_parsed() {
         let directory = tempfile::tempdir().unwrap();
-        let root = canonical_package_path(directory.path());
+        let root = falcon_analyze::canonical_package_path(directory.path());
         let barrel = root.join("other.dart");
         let target = root.join("a.dart");
         std::fs::write(&target, "class A {}").unwrap();
         std::fs::write(&barrel, "export 'a.dart';").unwrap();
-        assert!(export_closure("other", &root, &barrel, &HashMap::new()).contains(&target));
+        assert!(
+            export_closure(
+                &AnalysisEnvironment::default(),
+                "other",
+                &root,
+                &barrel,
+                &HashMap::new()
+            )
+            .unwrap()
+            .contains(&target)
+        );
         let source = format!("export 'a.dart'; /*{}*/", " ".repeat(8 * 1024 * 1024));
         std::fs::write(&barrel, source).unwrap();
-        assert!(!export_closure("other", &root, &barrel, &HashMap::new()).contains(&target));
+        assert!(
+            export_closure(
+                &AnalysisEnvironment::default(),
+                "other",
+                &root,
+                &barrel,
+                &HashMap::new()
+            )
+            .unwrap()
+            .is_empty()
+        );
+    }
+    #[test]
+    fn unreadable_dependency_source_is_unknown_and_warning_rearms_after_recovery() {
+        let root = tempfile::tempdir().unwrap();
+        let barrel = root.path().join("barrel.dart");
+        let target = root.path().join("value.dart");
+        std::fs::write(&barrel, "export 'value.dart';").unwrap();
+        std::fs::write(&target, [0xff]).unwrap();
+        let environment = AnalysisEnvironment::default();
+        for expected in [1, 0] {
+            environment.refresh_dependency_inputs(std::slice::from_ref(&target));
+            assert!(
+                export_closure(&environment, "other", root.path(), &barrel, &HashMap::new())
+                    .is_none()
+            );
+            assert_eq!(environment.take_warnings().len(), expected);
+        }
+        std::fs::write(&target, "class Value {}").unwrap();
+        environment.refresh_dependency_inputs(std::slice::from_ref(&target));
+        assert!(
+            export_closure(&environment, "other", root.path(), &barrel, &HashMap::new())
+                .unwrap()
+                .contains(&environment.canonical_path(&target))
+        );
+        std::fs::write(&target, [0xff]).unwrap();
+        environment.refresh_dependency_inputs(std::slice::from_ref(&target));
+        assert!(
+            export_closure(&environment, "other", root.path(), &barrel, &HashMap::new()).is_none()
+        );
+        assert_eq!(environment.take_warnings().len(), 1);
+    }
+
+    #[test]
+    fn oversized_and_parse_error_siblings_do_not_hide_small_exports() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = falcon_analyze::canonical_package_path(directory.path());
+        let barrel = root.join("other.dart");
+        let target = root.join("a.dart");
+        std::fs::write(&target, "class A {}").unwrap();
+        std::fs::write(
+            &barrel,
+            "export 'a.dart'; export 'huge.dart'; export 'broken.dart';",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("huge.dart"),
+            format!("/*{}*/", " ".repeat(9 * 1024 * 1024)),
+        )
+        .unwrap();
+        std::fs::write(root.join("broken.dart"), "class {").unwrap();
+        let environment = AnalysisEnvironment::default();
+        let closure =
+            export_closure(&environment, "other", &root, &barrel, &HashMap::new()).unwrap();
+        assert!(closure.contains(&target));
+        assert_eq!(environment.take_warnings(), Vec::<String>::new());
     }
 }

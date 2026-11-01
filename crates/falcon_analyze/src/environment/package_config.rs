@@ -160,10 +160,9 @@ impl PackageConfig {
         self.package_library_containing_canonical(&path)
     }
 
-    pub(crate) fn package_library_containing_canonical(
-        &self,
-        path: &Path,
-    ) -> Option<&ConfiguredPackage> {
+    /// Find a library using an already captured canonical path, without filesystem I/O.
+    #[must_use]
+    pub fn package_library_containing_canonical(&self, path: &Path) -> Option<&ConfiguredPackage> {
         self.packages
             .iter()
             .filter(|package| path.starts_with(&package.lib_root))

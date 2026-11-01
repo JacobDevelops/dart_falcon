@@ -44,7 +44,7 @@ impl CrossFileRule for AvoidImportingEntrypointExports {
         let mut barrels: HashMap<_, _> = files
             .iter()
             .filter(|file| file.program().exports().next().is_some())
-            .map(|file| (super::canonical_package_path(file.path()), true))
+            .map(|file| (environment.canonical_path(file.path()), true))
             .collect();
         let mut analyzed_seeded = false;
         let mut diagnostics = Vec::new();
@@ -67,7 +67,7 @@ impl CrossFileRule for AvoidImportingEntrypointExports {
             let Some(package) = file_package.identity() else {
                 continue;
             };
-            let source = super::canonical_package_path(file.path());
+            let source = environment.canonical_path(file.path());
             if settings.only_in_src
                 && !source
                     .strip_prefix(&package.lib_root)
@@ -83,6 +83,7 @@ impl CrossFileRule for AvoidImportingEntrypointExports {
                 ) {
                     let value = uri.value();
                     let Some(ResolvedRef::Path(target)) = resolve_directive_uri(
+                        environment,
                         &source,
                         &value,
                         Some(package),
@@ -100,7 +101,7 @@ impl CrossFileRule for AvoidImportingEntrypointExports {
                         analyzed_seeded = true;
                         for file in files {
                             barrels
-                                .entry(super::canonical_package_path(file.path()))
+                                .entry(environment.canonical_path(file.path()))
                                 .or_insert(false);
                         }
                     }

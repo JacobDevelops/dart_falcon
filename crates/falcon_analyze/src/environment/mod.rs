@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use packages::{FilePackage, PackageMetadata};
 
-pub use dependency_inputs::DependencyInput;
+pub use dependency_inputs::{DependencyExport, DependencyInput, DependencySource};
 pub use external::{ExternalLibraries, ExternalOrigin, ExternalTarget};
 pub use falcon_syntax::language_version::{Feature, LanguageVersion};
 pub use localization::LocalizationTemplate;
@@ -263,6 +263,7 @@ pub struct AnalysisEnvironment {
     localization: HashMap<PathBuf, localization::LocalizationSnapshot>,
     dependency_inputs: Arc<Mutex<dependency_inputs::Inputs>>,
     normalized_paths: HashMap<PathBuf, PathBuf>,
+    rule_filesystem_roots: Vec<PathBuf>,
 }
 
 impl Default for AnalysisEnvironment {
@@ -322,6 +323,7 @@ impl AnalysisEnvironment {
             localization: HashMap::new(),
             dependency_inputs: Arc::default(),
             normalized_paths: HashMap::new(),
+            rule_filesystem_roots: Vec::new(),
         }
     }
 

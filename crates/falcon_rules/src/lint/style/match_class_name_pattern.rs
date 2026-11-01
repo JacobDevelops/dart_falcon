@@ -109,11 +109,12 @@ fn matching_path(ctx: &AnalyzeContext<'_>) -> String {
     let file_package = ctx.file_package();
     let absolute =
         std::path::absolute(ctx.file_path()).unwrap_or_else(|_| ctx.file_path().to_path_buf());
-    let canonical = falcon_analyze::canonical_or_lexical(&absolute);
+    let environment = ctx.filesystem_environment();
+    let canonical = environment.canonical_or_lexical_path(&absolute);
     let root = file_package
         .metadata()
         .and_then(|metadata| metadata.manifest.parent())
-        .map(falcon_analyze::canonical_or_lexical);
+        .map(|path| environment.canonical_or_lexical_path(path));
     let relative = root
         .as_ref()
         .and_then(|root| canonical.strip_prefix(root).ok());

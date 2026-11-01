@@ -30,7 +30,7 @@ use glob::MatchOptions;
 
 use crate::lint::options::{self, Glob, nonblank_message, nonempty_patterns};
 
-use super::{ResolvedRef, canonical_or_lexical, resolve_directive_uri};
+use super::{ResolvedRef, resolve_directive_uri};
 
 #[derive(Default)]
 pub struct BannedImports;
@@ -98,7 +98,7 @@ impl CrossFileRule for BannedImports {
             };
             let package = &metadata.identity;
             let root = metadata.manifest.parent().unwrap();
-            let Some(relative) = package_relative(file.path(), root, package) else {
+            let Some(relative) = package_relative(environment, file.path(), root, package) else {
                 continue;
             };
             let mut applicable = boundaries
@@ -118,12 +118,15 @@ impl CrossFileRule for BannedImports {
                     let value = uri.value();
                     let target = if !value.contains(':') || value.starts_with("package:") {
                         match resolve_directive_uri(
+                            environment,
                             file.path(),
                             &value,
                             Some(package),
                             std::slice::from_ref(package),
                         ) {
-                            Some(ResolvedRef::Path(path)) => package_relative(&path, root, package),
+                            Some(ResolvedRef::Path(path)) => {
+                                package_relative(environment, &path, root, package)
+                            }
                             _ => None,
                         }
                     } else {
@@ -157,8 +160,13 @@ fn matches(patterns: &[Glob], value: &str) -> bool {
         .any(|pattern| pattern.matches_with(value, MATCH_OPTIONS))
 }
 
-fn package_relative(path: &Path, root: &Path, package: &PackageIdentity) -> Option<String> {
-    let path = canonical_or_lexical(path);
+fn package_relative(
+    environment: &falcon_analyze::AnalysisEnvironment,
+    path: &Path,
+    root: &Path,
+    package: &PackageIdentity,
+) -> Option<String> {
+    let path = environment.canonical_or_lexical_path(path);
     if let Ok(relative) = path.strip_prefix(root) {
         return Some(relative.to_string_lossy().replace('\\', "/"));
     }

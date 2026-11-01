@@ -32,7 +32,7 @@ impl CrossFileRule for MissingAssets {
             for file in package
                 .files
                 .iter()
-                .filter(|file| is_library_file(file.path(), &package.pubspec))
+                .filter(|file| is_library_file(environment, file.path(), &package.pubspec))
             {
                 for literal in asset_strings(file).filter(|literal| !has_package_argument(*literal))
                 {

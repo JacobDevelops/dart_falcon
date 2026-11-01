@@ -30,7 +30,6 @@ use falcon_syntax::cst::{ExportDirective, ImportDirective, Program};
 
 use crate::lint::support::uri::uri_scheme;
 
-
 #[derive(Default)]
 pub struct ConditionalUriDoesNotExist;
 
@@ -56,6 +55,7 @@ impl Rule for ConditionalUriDoesNotExist {
             .environment()
             .and_then(|environment| environment.package_config(ctx.file_path()));
         let resolver = Resolver {
+            environment: ctx.filesystem_environment(),
             file: ctx.file_path(),
             config,
             sdk_library: &|uri| {
@@ -69,7 +69,10 @@ impl Rule for ConditionalUriDoesNotExist {
                     let uri = configuration.uri();
                     let value = uri_value(uri);
                     (resolver.exists(&value) == Some(false)).then(|| {
-                        ctx.diagnostic(format!("The target of the conditional URI `{value}` doesn't exist."), uri.span())
+                        ctx.diagnostic(
+                            format!("The target of the conditional URI `{value}` doesn't exist."),
+                            uri.span(),
+                        )
                     })
                 })
                 .collect(),
@@ -78,6 +81,7 @@ impl Rule for ConditionalUriDoesNotExist {
 }
 
 struct Resolver<'a> {
+    environment: &'a falcon_analyze::AnalysisEnvironment,
     file: &'a Path,
     config: Option<&'a PackageConfig>,
     /// Whether the SDK defines a `dart:` library; `None` without an SDK.
@@ -127,18 +131,19 @@ impl Resolver<'_> {
                 }
                 if let Some(base) = self.base() {
                     let path = merge(&base, rest);
-                    Some(self.package_exists(&remove_dot_segments(&path), fragment))
+                    self.package_exists(&remove_dot_segments(&path), fragment)
                 } else {
                     if query || fragment {
                         return Some(false);
                     }
                     let directory = self.file.parent().unwrap_or(Path::new(""));
-                    Some(directory.join(percent_decode(rest)?).is_file())
+                    self.environment
+                        .file_exists(&directory.join(percent_decode(rest)?))
                 }
             }
             "package" => {
                 let path = &rest["package:".len()..];
-                Some(self.package_exists(&remove_dot_segments(path), fragment))
+                self.package_exists(&remove_dot_segments(path), fragment)
             }
             "dart" => {
                 let library = &rest["dart:".len()..];
@@ -156,7 +161,11 @@ impl Resolver<'_> {
                     authority.find('/').map_or("", |slash| &authority[slash..])
                 });
                 let path = PathBuf::from(percent_decode(path)?);
-                Some(path.is_absolute() && path.is_file())
+                if path.is_absolute() {
+                    self.environment.file_exists(&path)
+                } else {
+                    Some(false)
+                }
             }
             _ => Some(false),
         }
@@ -165,9 +174,9 @@ impl Resolver<'_> {
     /// The `package:` URI path (`name/dir/file.dart`) of the containing file
     /// when it lies in a package's `lib/` directory.
     fn base(&self) -> Option<String> {
-        let package = self.config?.package_library_containing(self.file)?;
+        let file = self.environment.canonical_or_lexical_path(self.file);
+        let package = self.config?.package_library_containing_canonical(&file)?;
         let (name, lib_root) = (package.name.as_str(), package.lib_root.as_path());
-        let file = falcon_analyze::canonical_or_lexical(self.file);
         let relative = file.strip_prefix(lib_root).ok()?;
         let mut path = name.to_string();
         for component in relative.components() {
@@ -178,16 +187,19 @@ impl Resolver<'_> {
     }
 
     /// Whether `package:<path>` names an existing file.
-    fn package_exists(&self, path: &str, fragment: bool) -> bool {
+    fn package_exists(&self, path: &str, fragment: bool) -> Option<bool> {
         let Some(config) = self.config else {
-            return false;
+            return Some(false);
         };
         let (_, rest) = path.split_once('/').unwrap_or((path, ""));
         if fragment || rest.is_empty() {
-            return false;
+            return Some(false);
         }
         let target = config.resolve_package_uri(&format!("package:{path}"));
-        target.is_some_and(|target| target.is_file())
+        match target {
+            Some(target) => self.environment.file_exists(&target),
+            None => Some(false),
+        }
     }
 }
 
@@ -253,6 +265,7 @@ mod tests {
         ).unwrap();
         let file = root.join("lib/bad_package_uris.dart");
         let resolver = Resolver {
+            environment: &falcon_analyze::AnalysisEnvironment::default(),
             file: &file,
             config: Some(&config),
             sdk_library: &|_| None,
@@ -285,6 +298,7 @@ mod tests {
     #[test]
     fn package_uris_without_configuration_are_missing() {
         let resolver = Resolver {
+            environment: &falcon_analyze::AnalysisEnvironment::default(),
             file: std::path::Path::new("lib/main.dart"),
             config: None,
             sdk_library: &|_| None,
@@ -311,7 +325,11 @@ mod tests {
         let config = falcon_config::FalconConfig::default();
         let context =
             AnalyzeContext::new(&file, &config, &parsed).with_environment(Some(&environment));
-        let diagnostics = ConditionalUriDoesNotExist.analyze(ConditionalUriDoesNotExist::NAME, parsed.program(), &context);
+        let diagnostics = ConditionalUriDoesNotExist.analyze(
+            ConditionalUriDoesNotExist::NAME,
+            parsed.program(),
+            &context,
+        );
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(
             &source[diagnostics[0].span.start..diagnostics[0].span.end],
@@ -328,5 +346,29 @@ mod tests {
         assert_eq!(resolve("app/a.dart", "../../lib/b.dart"), "lib/b.dart");
         assert_eq!(resolve("app/a.dart", "./b.dart"), "app/b.dart");
         assert_eq!(remove_dot_segments("app/../app/b.dart"), "app/b.dart");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn unsaved_file_under_symlinked_lib_keeps_lexical_base_semantics() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = falcon_analyze::canonical_or_lexical(dir.path()).join("ws");
+        std::fs::create_dir_all(ws.join(".dart_tool")).unwrap();
+        std::fs::create_dir_all(ws.join("sources")).unwrap();
+        std::fs::write(ws.join("pubspec.yaml"), "name: app\n").unwrap();
+        std::fs::write(ws.join("sources/impl.dart"), "").unwrap();
+        std::os::unix::fs::symlink(ws.join("sources"), ws.join("lib")).unwrap();
+        let config = falcon_analyze::PackageConfig::parse(
+            &ws.join(".dart_tool/package_config.json"),
+            r#"{"configVersion":2,"packages":[{"name":"app","rootUri":"../","packageUri":"lib/"}]}"#,
+        ).unwrap();
+        let file = ws.join("lib/new.dart");
+        let resolver = Resolver {
+            environment: &falcon_analyze::AnalysisEnvironment::default(),
+            file: &file,
+            config: Some(&config),
+            sdk_library: &|_| None,
+        };
+        assert_eq!(resolver.base().as_deref(), Some("app/new.dart"));
+        assert_eq!(resolver.exists("impl.dart?v=1"), Some(true));
     }
 }

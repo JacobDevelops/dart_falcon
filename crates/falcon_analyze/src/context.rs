@@ -30,6 +30,7 @@ pub struct AnalysisCache<'a> {
     package: OnceLock<crate::environment::packages::FilePackage>,
     same_package: Mutex<HashMap<std::path::PathBuf, bool>>,
     constants: ConstantCache,
+    filesystem_environment: OnceLock<AnalysisEnvironment>,
     config_errors: Mutex<Vec<Diagnostic>>,
 }
 
@@ -70,6 +71,15 @@ pub struct AnalyzeContext<'a> {
 }
 
 impl<'a> AnalyzeContext<'a> {
+    /// Shared disk facts, including for standalone callers without a project environment.
+    pub fn filesystem_environment(&self) -> &AnalysisEnvironment {
+        self.environment.unwrap_or_else(|| {
+            self.cache
+                .filesystem_environment
+                .get_or_init(AnalysisEnvironment::default)
+        })
+    }
+
     /// Construct a non-resolving context.
     pub fn new(
         file_path: &'a std::path::Path,

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use falcon_analyze::{AnalysisEnvironment, ProjectFile};
 use falcon_syntax::cst::*;
 
-use super::{ResolvedRef, canonical_package_path, project_packages, resolve_directive_uri};
+use super::{ResolvedRef, project_packages, resolve_directive_uri};
 
 pub(super) struct Declaration<'a> {
     pub name: &'a str,
@@ -53,7 +53,7 @@ impl<'a> ProjectExports<'a> {
         let identities = project_packages(&file_packages);
         let paths: Vec<_> = files
             .iter()
-            .map(|file| canonical_package_path(file.path()))
+            .map(|file| environment.canonical_path(file.path()))
             .collect();
         let packages: Vec<_> = file_packages
             .iter()
@@ -90,6 +90,7 @@ impl<'a> ProjectExports<'a> {
             }
         }
         let exports = collect_exports(
+            environment,
             files,
             &paths,
             &packages,
@@ -150,6 +151,7 @@ impl<'a> ProjectExports<'a> {
 }
 
 fn collect_exports<'a>(
+    environment: &AnalysisEnvironment,
     files: &'a [ProjectFile],
     paths: &[PathBuf],
     packages: &[Option<usize>],
@@ -183,6 +185,7 @@ fn collect_exports<'a>(
                     continue;
                 };
                 let Some(ResolvedRef::Path(path)) = resolve_directive_uri(
+                    environment,
                     &paths[index],
                     &decoded,
                     Some(&identities[package]),
@@ -206,6 +209,7 @@ fn collect_exports<'a>(
                 continue;
             };
             let Some(ResolvedRef::Path(path)) = resolve_directive_uri(
+                environment,
                 &paths[index],
                 &decoded,
                 Some(&identities[package]),

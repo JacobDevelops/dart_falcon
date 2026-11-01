@@ -824,6 +824,7 @@ impl<'ctx> Uses<'ctx> {
         let Some(package) = ctx.package() else {
             return;
         };
+        let environment = ctx.filesystem_environment();
         let uses = self;
         for (uri, combinators, directive_span) in program
             .imports()
@@ -836,6 +837,7 @@ impl<'ctx> Uses<'ctx> {
         {
             let Some(crate::cross_file::ResolvedRef::Path(path)) =
                 crate::cross_file::resolve_directive_uri(
+                    environment,
                     ctx.file_path(),
                     &uri.value(),
                     Some(package),

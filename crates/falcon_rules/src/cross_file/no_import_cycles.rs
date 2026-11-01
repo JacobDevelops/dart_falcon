@@ -18,7 +18,7 @@ use falcon_analyze::{AnalysisEnvironment, CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span};
 
-use super::{ResolvedRef, canonical_package_path, project_packages, resolve_directive_uri};
+use super::{ResolvedRef, project_packages, resolve_directive_uri};
 
 #[derive(Default)]
 pub struct NoImportCycles;
@@ -31,7 +31,7 @@ impl CrossFileRule for NoImportCycles {
         _config: &FalconConfig,
         _indexes: Option<&falcon_analyze::SemanticIndexes>,
     ) -> Vec<Diagnostic> {
-        let (paths, representatives) = canonical_representatives(files);
+        let (paths, representatives) = canonical_representatives(environment, files);
         let file_packages: Vec<_> = files
             .iter()
             .map(|file| environment.file_package(file.path()))
@@ -62,13 +62,14 @@ impl CrossFileRule for NoImportCycles {
             });
             for uri in imports.chain(exports) {
                 let target = match resolve_directive_uri(
+                    environment,
                     &paths[index],
                     &uri.value(),
                     file_packages[representative].identity(),
                     &packages,
                 ) {
                     Some(ResolvedRef::Path(path)) => by_path
-                        .get(canonical_package_path(&path).as_path())
+                        .get(environment.canonical_path(&path).as_path())
                         .copied(),
                     // Without package identity a suffix match cannot prove an import.
                     Some(ResolvedRef::Suffix(_)) | None => None,
@@ -118,15 +119,15 @@ impl CrossFileRule for NoImportCycles {
                 .unwrap();
             let root = file_packages[representatives[start]]
                 .metadata()
-                .and_then(|package| package.manifest.parent().map(canonical_package_path));
+                .and_then(|package| package.manifest.parent())
+                .map(|path| environment.canonical_path(path));
             let message = cycle_message(&paths, &cycle, root.as_deref());
+            let file = &files[representatives[start]];
             diagnostics.push(Diagnostic::new(
                 "",
                 Severity::Warning,
                 message,
-                files[representatives[start]].path()
-                    .to_string_lossy()
-                    .into_owned(),
+                file.path().to_string_lossy().into_owned(),
                 span,
             ));
         }
@@ -134,10 +135,13 @@ impl CrossFileRule for NoImportCycles {
     }
 }
 
-fn canonical_representatives(files: &[ProjectFile]) -> (Vec<PathBuf>, Vec<usize>) {
+fn canonical_representatives(
+    environment: &falcon_analyze::AnalysisEnvironment,
+    files: &[ProjectFile],
+) -> (Vec<PathBuf>, Vec<usize>) {
     let mut representatives = BTreeMap::new();
     for (index, file) in files.iter().enumerate() {
-        let canonical = canonical_package_path(file.path());
+        let canonical = environment.canonical_path(file.path());
         let representative = representatives.entry(canonical).or_insert(index);
         // Path ordering normalizes `.` components; compare original spellings.
         if file.path().as_os_str() < files[*representative].path().as_os_str() {
@@ -453,9 +457,9 @@ mod tests {
             let diagnostics = diagnostics(&files);
             assert_eq!(diagnostics.len(), 1);
             assert_eq!(
-                            &files[0].source()[diagnostics[0].span.start..diagnostics[0].span.end],
-                            "'b.dart'"
-                        );
+                &files[0].source()[diagnostics[0].span.start..diagnostics[0].span.end],
+                "'b.dart'"
+            );
         }
     }
 

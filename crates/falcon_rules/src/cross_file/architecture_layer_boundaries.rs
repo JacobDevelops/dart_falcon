@@ -25,7 +25,7 @@ use falcon_analyze::{AnalysisEnvironment, CrossFileRule, ProjectFile, SemanticIn
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 
-use super::{ResolvedRef, canonical_package_path, program_reference_uris, resolve_directive_uri};
+use super::{ResolvedRef, program_reference_uris, resolve_directive_uri};
 
 #[derive(Default)]
 pub struct ArchitectureLayerBoundaries;
@@ -45,7 +45,7 @@ impl CrossFileRule for ArchitectureLayerBoundaries {
             let Some(package) = file_package.identity() else {
                 continue;
             };
-            let source = canonical_package_path(file.path());
+            let source = environment.canonical_path(file.path());
             let Ok(source_relative) = source.strip_prefix(&package.lib_root) else {
                 continue;
             };
@@ -54,6 +54,7 @@ impl CrossFileRule for ArchitectureLayerBoundaries {
             };
             for uri in program_reference_uris(file.program()) {
                 let Some(ResolvedRef::Path(target)) = resolve_directive_uri(
+                    environment,
                     &source,
                     &uri.value(),
                     Some(package),

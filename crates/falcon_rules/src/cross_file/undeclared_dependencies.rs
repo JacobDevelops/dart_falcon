@@ -38,7 +38,7 @@ impl CrossFileRule for UndeclaredDependencies {
             else {
                 continue;
             };
-            let is_library = is_library_file(file.path(), pubspec);
+            let is_library = is_library_file(environment, file.path(), pubspec);
             let imports = file.program().imports().flat_map(|directive| {
                 std::iter::once(directive.uri()).chain(
                     directive

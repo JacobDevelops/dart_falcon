@@ -54,7 +54,7 @@ impl CrossFileRule for AvoidMissingTestFiles {
             let Some(package) = file_package.identity() else {
                 continue;
             };
-            let source = super::canonical_package_path(file.path());
+            let source = environment.canonical_path(file.path());
             let Ok(relative) = source.strip_prefix(&package.lib_root) else {
                 continue;
             };
@@ -77,7 +77,7 @@ impl CrossFileRule for AvoidMissingTestFiles {
             };
             let mut test = root.join("test").join(relative);
             test.set_file_name(format!("{}_test.dart", stem.to_string_lossy()));
-            if test.is_file() {
+            if environment.file_exists(&test) != Some(false) {
                 continue;
             }
             diagnostics.push(Diagnostic::new(

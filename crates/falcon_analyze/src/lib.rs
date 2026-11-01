@@ -38,9 +38,9 @@ pub use environment::packages::{
     package_identities, package_identity,
 };
 pub use environment::{
-    AnalysisEnvironment, DartSdk, DependencyInput, EnvironmentCacheKey, ExternalLibraries,
-    ExternalOrigin, ExternalTarget, Feature, LanguageVersion, PackageConfig, SdkLocator,
-    percent_decode, percent_encode,
+    AnalysisEnvironment, DartSdk, DependencyExport, DependencyInput, DependencySource,
+    EnvironmentCacheKey, ExternalLibraries, ExternalOrigin, ExternalTarget, Feature,
+    LanguageVersion, PackageConfig, SdkLocator, percent_decode, percent_encode,
 };
 pub use function_bodies::{BodyOwner, FunctionBodies};
 pub use intern::InternedString;

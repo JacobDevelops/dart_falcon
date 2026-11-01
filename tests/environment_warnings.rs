@@ -37,7 +37,7 @@ fn asset_directory_failures_warn_once_and_exempt_the_directory() {
     let warnings: Vec<_> = stderr
         .lines()
         .filter(|line| {
-            line.starts_with("warning:") && line.contains("asset file name is not valid UTF-8")
+            line.starts_with("warning:") && line.contains("file name is not valid UTF-8")
         })
         .collect();
     assert_eq!(warnings.len(), 1, "{stderr}");

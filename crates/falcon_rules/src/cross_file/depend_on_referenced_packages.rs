@@ -15,8 +15,6 @@ use falcon_analyze::{CrossFileRule, ProjectFile};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 
-use super::canonical_or_lexical;
-
 #[derive(Default)]
 pub struct DependOnReferencedPackages;
 
@@ -47,7 +45,8 @@ impl CrossFileRule for DependOnReferencedPackages {
             let Some(manifest) = manifest else {
                 continue;
             };
-            let regular_dependency_required = is_public_or_executable(file.path(), pubspec);
+            let regular_dependency_required =
+                is_public_or_executable(environment, file.path(), pubspec);
             let replacement_enabled = replacement.is_some_and(|meta| {
                 config
                     .resolve_cross_file_rule_for(
@@ -81,7 +80,7 @@ impl CrossFileRule for DependOnReferencedPackages {
                 }
                 if replacement_enabled
                     && (!manifest.dev_dependencies.contains(package)
-                        || is_library_file(file.path(), pubspec))
+                        || is_library_file(environment, file.path(), pubspec))
                 {
                     continue;
                 }
@@ -102,9 +101,13 @@ impl CrossFileRule for DependOnReferencedPackages {
     }
 }
 
-fn is_public_or_executable(file: &Path, pubspec: &Path) -> bool {
+fn is_public_or_executable(
+    environment: &falcon_analyze::AnalysisEnvironment,
+    file: &Path,
+    pubspec: &Path,
+) -> bool {
     let root = pubspec.parent().unwrap_or_else(|| Path::new(""));
-    let file = canonical_or_lexical(file);
+    let file = environment.canonical_or_lexical_path(file);
     let Ok(relative) = file.strip_prefix(root) else {
         return false;
     };
@@ -144,11 +147,16 @@ mod tests {
             "hook/link.dart",
         ] {
             assert!(
-                is_public_or_executable(&workspace.join(path), &manifest),
+                is_public_or_executable(
+                    &falcon_analyze::AnalysisEnvironment::default(),
+                    &workspace.join(path),
+                    &manifest
+                ),
                 "{path}"
             );
         }
         assert!(!is_public_or_executable(
+            &falcon_analyze::AnalysisEnvironment::default(),
             &workspace.join("test/test.dart"),
             &manifest
         ));
@@ -189,7 +197,8 @@ mod tests {
             .map(|relative| {
                 let path = root.join(relative);
                 let source = std::fs::read_to_string(&path).unwrap();
-                let (snapshot, errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+                let (snapshot, errors) =
+                    falcon_analyze::ParsedFile::parse_for_package(source, None);
                 assert!(errors.is_empty());
                 ProjectFile::new(path, std::sync::Arc::new(snapshot))
                     .expect("parsed fixture must be accepted by the project")
@@ -200,7 +209,8 @@ mod tests {
                 .analyze_project(
                     "depend-on-referenced-packages",
                     &falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
-                        files.iter().map(ProjectFile::path), |_| None,
+                        files.iter().map(ProjectFile::path),
+                        |_| None,
                     ),
                     &files,
                     &FalconConfig::default(),
@@ -215,26 +225,32 @@ mod tests {
     fn public_scope_is_lib_bin_and_hooks() {
         let pubspec = Path::new("/project/pubspec.yaml");
         assert!(is_public_or_executable(
+            &falcon_analyze::AnalysisEnvironment::default(),
             Path::new("/project/lib/api.dart"),
             pubspec
         ));
         assert!(is_public_or_executable(
+            &falcon_analyze::AnalysisEnvironment::default(),
             Path::new("/project/bin/tool.dart"),
             pubspec
         ));
         assert!(is_public_or_executable(
+            &falcon_analyze::AnalysisEnvironment::default(),
             Path::new("/project/hook/build.dart"),
             pubspec
         ));
         assert!(is_public_or_executable(
+            &falcon_analyze::AnalysisEnvironment::default(),
             Path::new("/project/hook/link.dart"),
             pubspec
         ));
         assert!(!is_public_or_executable(
+            &falcon_analyze::AnalysisEnvironment::default(),
             Path::new("/project/hook/helper.dart"),
             pubspec
         ));
         assert!(!is_public_or_executable(
+            &falcon_analyze::AnalysisEnvironment::default(),
             Path::new("/project/test/api_test.dart"),
             pubspec
         ));

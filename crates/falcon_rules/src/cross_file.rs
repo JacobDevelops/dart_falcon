@@ -44,8 +44,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::lint::support::package_manifests::manifest_sections;
+#[cfg(test)]
+use falcon_analyze::canonical_or_lexical;
+#[cfg(test)]
 use falcon_analyze::canonical_package_path;
-use falcon_analyze::{PackageIdentity, ProjectFile, canonical_or_lexical};
+use falcon_analyze::{PackageIdentity, ProjectFile};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::cst::Program;
 use marked_yaml::{
@@ -270,6 +273,7 @@ pub fn project_packages(file_packages: &[falcon_analyze::FilePackage]) -> Vec<Pa
 /// Resolve an `import`/`export`/`part` URI (already the string value, without
 /// quotes) relative to `from_file`. `dart:` URIs resolve to `None` (external).
 pub fn resolve_directive_uri(
+    environment: &falcon_analyze::AnalysisEnvironment,
     from_file: &Path,
     uri: &str,
     own_package: Option<&PackageIdentity>,
@@ -279,25 +283,28 @@ pub fn resolve_directive_uri(
         return None;
     }
     if let Some(rest) = uri.strip_prefix("package:") {
-        if let Some(package) = own_package
-            && rest
-                .split_once('/')
-                .is_some_and(|(name, _)| name == package.name)
-        {
-            return falcon_analyze::import_path(from_file, uri, std::slice::from_ref(package))
-                .map(ResolvedRef::Path);
+        let (name, subpath) = rest.split_once('/')?;
+        let own_package = own_package.filter(|package| package.name == name);
+        if packages.is_empty() && own_package.is_none() {
+            return (!subpath.is_empty()).then(|| ResolvedRef::Suffix(format!("lib/{subpath}")));
         }
-        if packages.is_empty() {
-            // No known package: preserve tolerant fixture/pubspec-less matching.
-            let (_, sub) = rest.split_once('/')?;
-            return (!sub.is_empty()).then(|| ResolvedRef::Suffix(format!("lib/{sub}")));
+        let mut matches = packages.iter().filter(|package| package.name == name);
+        let package = own_package
+            .filter(|package| package.name == name)
+            .or_else(|| matches.next())?;
+        if own_package.is_none_or(|package| package.name != name) && matches.next().is_some() {
+            return None;
         }
-        return falcon_analyze::import_path(from_file, uri, packages).map(ResolvedRef::Path);
+        let root = environment.canonical_path(&package.lib_root);
+        let target = environment.canonical_path(&root.join(subpath));
+        return target
+            .starts_with(root)
+            .then_some(ResolvedRef::Path(target));
     }
     let from_dir = from_file.parent().unwrap_or_else(|| Path::new(""));
-    Some(ResolvedRef::Path(canonical_package_path(
-        &from_dir.join(uri),
-    )))
+    Some(ResolvedRef::Path(
+        environment.canonical_path(&from_dir.join(uri)),
+    ))
 }
 
 /// Conditional alternatives also keep platform-specific files reachable.
@@ -474,6 +481,7 @@ pub fn has_lib_component(path: &Path) -> bool {
 /// resolves to every file it matches. Unresolvable/external URIs contribute no
 /// edge. Duplicate edges are harmless for the reachability traversal that uses it.
 pub fn build_reference_graph(
+    environment: &falcon_analyze::AnalysisEnvironment,
     files: &[ProjectFile],
     canons: &[PathBuf],
     file_packages: &[falcon_analyze::FilePackage],
@@ -489,6 +497,7 @@ pub fn build_reference_graph(
     for (i, f) in files.iter().enumerate() {
         for uri in program_reference_uris(f.program()) {
             match resolve_directive_uri(
+                environment,
                 &canons[i],
                 &uri.value(),
                 file_packages[i].identity(),

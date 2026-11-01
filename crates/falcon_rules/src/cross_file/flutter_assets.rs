@@ -451,7 +451,9 @@ mod tests {
         let config = FalconConfig::default();
         let before = rule.prepare_project(&environment, &files, &config, None);
         assert_eq!(before.len(), 1);
-        std::os::unix::fs::symlink("absent.png", directory.join("broken.png")).unwrap();
+        let broken = directory.join("broken.png");
+        std::os::unix::fs::symlink("absent.png", &broken).unwrap();
+        environment.refresh_dependency_inputs(&[broken]);
         assert_eq!(
             serde_json::to_value(rule.prepare_project(&environment, &files, &config, None))
                 .unwrap(),
@@ -489,7 +491,11 @@ mod tests {
         assert!(diagnostics.is_empty());
         assert_eq!(
             environment.take_warnings(),
-            [format!("{}: {reason}", cycle.display())],
+            [format!(
+                "{}: {}: {reason}",
+                directory.display(),
+                cycle.display()
+            )],
         );
     }
 

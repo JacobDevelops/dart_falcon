@@ -19,10 +19,7 @@ use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use falcon_syntax::cst::*;
 
-use super::{
-    canonical_package_path, has_lib_component, is_under_lib, project_packages,
-    resolve_directive_uri,
-};
+use super::{has_lib_component, is_under_lib, project_packages, resolve_directive_uri};
 
 #[derive(Default)]
 pub struct UnusedCode;
@@ -67,11 +64,11 @@ impl CrossFileRule for UnusedCode {
 
         // Files re-exported by another file: treat every public member as used
         // (the export surfaces the whole file's API).
-        let exported = collect_exported_files(files, &file_packages, &packages);
+        let exported = collect_exported_files(environment, files, &file_packages, &packages);
 
         let mut diags = Vec::new();
         for (idx, f) in files.iter().enumerate() {
-            let canon = canonical_package_path(f.path());
+            let canon = environment.canonical_path(f.path());
             let package = file_packages[idx].identity();
             if !is_under_lib(&canon, package)
                 || (!packages.is_empty() && package.is_none() && !has_lib_component(&canon))
@@ -179,15 +176,17 @@ fn candidates<'a>(program: Program<'a>) -> Vec<Candidate<'a>> {
 
 /// Files that appear as the target of an `export` directive anywhere in the set.
 fn collect_exported_files(
+    environment: &falcon_analyze::AnalysisEnvironment,
     files: &[ProjectFile],
     file_packages: &[falcon_analyze::FilePackage],
     packages: &[falcon_analyze::PackageIdentity],
 ) -> super::ReferenceSet {
     let mut refs = super::ReferenceSet::default();
     for (index, f) in files.iter().enumerate() {
-        let from = canonical_package_path(f.path());
+        let from = environment.canonical_path(f.path());
         for exp in f.program().exports() {
             if let Some(r) = resolve_directive_uri(
+                environment,
                 &from,
                 &exp.uri().value(),
                 file_packages[index].identity(),
@@ -244,7 +243,8 @@ mod tests {
         std::os::unix::fs::symlink(&package, &workspace).unwrap();
         std::os::unix::fs::symlink(&sources, package.join("lib")).unwrap();
         let file = |path: PathBuf, source: &str| {
-            let (parsed, parsed_errors) = falcon_analyze::ParsedFile::parse_for_package(source, None);
+            let (parsed, parsed_errors) =
+                falcon_analyze::ParsedFile::parse_for_package(source, None);
             assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
             ProjectFile::new(path, std::sync::Arc::new(parsed))
                 .expect("parsed fixture must be accepted by the project")
