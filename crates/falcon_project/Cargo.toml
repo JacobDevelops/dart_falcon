@@ -17,6 +17,9 @@ serde_yaml.workspace = true
 tracing.workspace    = true
 walkdir.workspace    = true
 
+[features]
+test-support = [  ]
+
 [dev-dependencies]
 falcon_analyze               = { path = "../falcon_analyze", features = [ "test-support" ] }
 falcon_syntax                = { path = "../falcon_syntax" }

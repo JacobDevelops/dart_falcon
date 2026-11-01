@@ -13,13 +13,14 @@ use std::sync::Arc;
 use lsp_types::{MessageType, ShowMessageParams, Uri};
 
 use falcon_analyze::{
-    AnalysisEnvironment, AnalyzeContext, CrossFileRuleRegistry, ExternalIndexParts,
-    ExternalLibraries, ExternalOrigin, ExternalSources, ExternalTarget, IdentityIndex,
-    IdentitySource, LibraryGrouping, PackageIdentity, ParsedFile, ProjectFile, RuleRegistry,
-    SemanticIndexes, SignatureIndex, TypeIndex, build_semantic_indexes, canonical_or_lexical,
-    import_path, library_unit, package_identities, syntax_error_diagnostics,
-    update_semantic_indexes,
+    AnalysisEnvironment, AnalyzeContext, ExternalIndexParts, ExternalLibraries, ExternalOrigin,
+    ExternalSources, ExternalTarget, IdentityIndex, IdentitySource, LibraryGrouping,
+    PackageIdentity, ParsedFile, ProjectFile, SemanticIndexes, SignatureIndex, TypeIndex,
+    build_semantic_indexes, canonical_or_lexical, import_path, library_unit, package_identities,
+    syntax_error_diagnostics, update_semantic_indexes,
 };
+#[cfg(test)]
+use falcon_analyze::{CrossFileRuleRegistry, RuleRegistry};
 use falcon_config::FalconConfig;
 use falcon_dart_parser::ParseError;
 use falcon_diagnostics::Diagnostic;
@@ -329,65 +330,16 @@ struct RootConfig {
     analysis: ProjectAnalysis,
 }
 
-/// Client capability and workspace lifecycle flags, grouped by responsibility.
-pub struct ClientCapabilities {
+/// Capabilities negotiated during client initialization.
+pub(crate) struct ClientCapabilities {
     code_action_resolve: bool,
     workspace_document_changes: bool,
     pub(crate) workspace_apply_edit: bool,
-    semantics: SemanticFlags,
 }
 
-pub struct SemanticFlags {
-    cross_file_resolve_semantics: bool,
-    resolve_semantics: bool,
-    workspace: WorkspaceFlags,
-}
-
-pub struct WorkspaceFlags {
+struct WorkspaceFlags {
     workspace_initialized: bool,
     dynamic_file_watching: bool,
-}
-
-impl std::ops::Deref for ClientCapabilities {
-    type Target = SemanticFlags;
-
-    fn deref(&self) -> &Self::Target {
-        &self.semantics
-    }
-}
-
-impl std::ops::DerefMut for ClientCapabilities {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.semantics
-    }
-}
-
-impl std::ops::Deref for SemanticFlags {
-    type Target = WorkspaceFlags;
-
-    fn deref(&self) -> &Self::Target {
-        &self.workspace
-    }
-}
-
-impl std::ops::DerefMut for SemanticFlags {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.workspace
-    }
-}
-
-impl std::ops::Deref for LspState {
-    type Target = ClientCapabilities;
-
-    fn deref(&self) -> &Self::Target {
-        &self.capabilities
-    }
-}
-
-impl std::ops::DerefMut for LspState {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.capabilities
-    }
 }
 
 #[derive(Default)]
@@ -398,20 +350,25 @@ enum CrossFileSchedule {
     Pending,
 }
 
+#[cfg(test)]
+#[derive(PartialEq)]
+enum BuildPanic {
+    Semantic,
+    CrossFileIndex,
+}
+
 /// Server-side cache: open documents, active config, enabled rule set.
 pub struct LspState {
     documents: HashMap<String, DocumentState>,
-    capabilities: ClientCapabilities,
+    pub(crate) capabilities: ClientCapabilities,
+    workspace: WorkspaceFlags,
     config: FalconConfig,
     additional_root_configs: Vec<RootConfig>,
     config_path: Option<PathBuf>,
     pending_config_messages: Vec<ShowMessageParams>,
     last_config_messages: Vec<(MessageType, String)>,
     config_start_dir: PathBuf,
-    rules: RuleRegistry,
-    /// Cross-file rules; empty unless enabled by config. When empty the
-    /// cross-file pass is skipped entirely (the whole-workspace walk is expensive).
-    cross_file_rules: CrossFileRuleRegistry,
+    analysis: ProjectAnalysis,
     published_manifests: HashMap<String, Vec<Diagnostic>>,
     cross_file_worker_failed: bool,
     cross_file_schedule: CrossFileSchedule,
@@ -437,7 +394,7 @@ pub struct LspState {
     #[cfg(test)]
     parser_failure_path: Option<PathBuf>,
     #[cfg(test)]
-    build_panic: bool,
+    build_panic: Option<BuildPanic>,
     /// Dependents from the graph before an edit, retained until that edit is analyzed.
     pending_semantic_affected: HashMap<String, HashSet<String>>,
     body_only_changes: HashMap<String, usize>,
@@ -483,6 +440,86 @@ pub struct LspState {
 }
 
 impl LspState {
+    #[cfg(test)]
+    fn configure_resolution(&mut self, file_rules: bool, cross_file_rules: bool) {
+        for (names, rules, enabled, resolving_rule) in [
+            (
+                self.analysis
+                    .registry()
+                    .rules()
+                    .iter()
+                    .map(|(name, _)| *name)
+                    .collect::<Vec<_>>(),
+                &mut self.config.linter.rules,
+                file_rules,
+                "avoid-constant-conditions",
+            ),
+            (
+                self.analysis
+                    .cross_file_registry()
+                    .rules()
+                    .iter()
+                    .map(|(name, _)| *name)
+                    .collect(),
+                &mut self.config.cross_file.rules,
+                cross_file_rules,
+                "unnecessary-nullable",
+            ),
+        ] {
+            if enabled
+                && names
+                    .iter()
+                    .any(|name| falcon_rules::rule_requires_resolution(name))
+            {
+                continue;
+            }
+            for name in names.into_iter().chain(std::iter::once(resolving_rule)) {
+                if falcon_rules::rule_requires_resolution(name) {
+                    let meta = falcon_rules::meta::meta_for(name).unwrap();
+                    rules
+                        .groups
+                        .entry(meta.group.as_str().into())
+                        .or_default()
+                        .insert(
+                            name.into(),
+                            serde_json::from_value(serde_json::json!(if enabled {
+                                "warn"
+                            } else {
+                                "off"
+                            }))
+                            .unwrap(),
+                        );
+                }
+            }
+        }
+        self.config.linter.enabled |= file_rules;
+        self.analysis = ProjectAnalysis::new(&self.config);
+    }
+
+    #[cfg(test)]
+    fn edit_test_registries(
+        &mut self,
+        edit: impl FnOnce(&mut RuleRegistry, &mut CrossFileRuleRegistry),
+    ) {
+        self.analysis.edit_registries(edit);
+    }
+
+    fn resolve_semantics(&self) -> bool {
+        self.analysis.resolve()
+            || self
+                .additional_root_configs
+                .iter()
+                .any(|root| root.analysis.resolve())
+    }
+
+    fn cross_file_resolve_semantics(&self) -> bool {
+        self.analysis.cross_file_resolve()
+            || self
+                .additional_root_configs
+                .iter()
+                .any(|root| root.analysis.cross_file_resolve())
+    }
+
     /// Create state with config from `config_path`, or discovery from the
     /// current directory when `None` (same order as the CLI: cwd → git root →
     /// `$HOME/.falcon.json` → defaults).
@@ -534,23 +571,16 @@ impl LspState {
             .map(|message| (message.typ, message.message.clone()))
             .collect();
         let analysis = ProjectAnalysis::new(&config);
-        let cross_file_resolve_semantics = analysis.cross_file_resolve();
-        let resolve_semantics = analysis.resolve();
-        let (rules, cross_file_rules) = analysis.into_registries();
         Self {
             documents: HashMap::new(),
             capabilities: ClientCapabilities {
                 code_action_resolve: false,
                 workspace_document_changes: false,
                 workspace_apply_edit: false,
-                semantics: SemanticFlags {
-                    cross_file_resolve_semantics,
-                    resolve_semantics,
-                    workspace: WorkspaceFlags {
-                        workspace_initialized: false,
-                        dynamic_file_watching: true,
-                    },
-                },
+            },
+            workspace: WorkspaceFlags {
+                workspace_initialized: false,
+                dynamic_file_watching: true,
             },
             config,
             additional_root_configs: Vec::new(),
@@ -558,8 +588,7 @@ impl LspState {
             pending_config_messages,
             last_config_messages,
             config_start_dir,
-            rules,
-            cross_file_rules,
+            analysis,
             published_manifests: HashMap::new(),
             cross_file_worker_failed: false,
             cross_file_schedule: CrossFileSchedule::default(),
@@ -578,7 +607,7 @@ impl LspState {
             #[cfg(test)]
             parser_failure_path: None,
             #[cfg(test)]
-            build_panic: false,
+            build_panic: None,
             pending_semantic_affected: HashMap::new(),
             body_only_changes: HashMap::new(),
             semantic_snapshot_build_count: 0,
@@ -643,7 +672,7 @@ impl LspState {
                     .unwrap_or_else(|| root.clone())
             })
             .collect();
-        self.workspace_initialized = true;
+        self.workspace.workspace_initialized = true;
         let messages = self.reload_additional_root_configs();
         for message in messages {
             if !self
@@ -669,8 +698,6 @@ impl LspState {
             self.fallback_config_stamps.entry(path).or_insert(stamp);
         }
         let mut messages = Vec::with_capacity(self.workspace_roots.len().saturating_sub(1));
-        let mut resolve_semantics = self.resolve_semantics;
-        let mut cross_file_resolve_semantics = self.cross_file_resolve_semantics;
         self.additional_root_configs.reserve(
             self.workspace_roots
                 .len()
@@ -691,8 +718,6 @@ impl LspState {
                     config
                 });
             let analysis = ProjectAnalysis::new(&config);
-            resolve_semantics |= analysis.resolve();
-            cross_file_resolve_semantics |= analysis.cross_file_resolve();
             let entry = RootConfig { config, analysis };
             if let Some(existing) = self.additional_root_configs.get_mut(index) {
                 *existing = entry;
@@ -700,8 +725,6 @@ impl LspState {
                 self.additional_root_configs.push(entry);
             }
         }
-        self.resolve_semantics = resolve_semantics;
-        self.cross_file_resolve_semantics = cross_file_resolve_semantics;
         messages
     }
 
@@ -833,8 +856,8 @@ impl LspState {
 
     /// Dynamic clients own invalidation; fallback scans run at quiet boundaries.
     pub fn set_dynamic_file_watching(&mut self, dynamic: bool) {
-        if self.dynamic_file_watching != dynamic {
-            self.dynamic_file_watching = dynamic;
+        if self.workspace.dynamic_file_watching != dynamic {
+            self.workspace.dynamic_file_watching = dynamic;
             self.project_paths = None;
             self.project_discovery_watches.clear();
             self.fallback_stamps.clear();
@@ -856,7 +879,7 @@ impl LspState {
     }
 
     fn capture_fallback_dependency_watches(&mut self) {
-        if self.dynamic_file_watching {
+        if self.workspace.dynamic_file_watching {
             return;
         }
         let filter = falcon_config::PathFilter::default();
@@ -909,7 +932,7 @@ impl LspState {
     }
 
     pub fn revalidate_disk(&mut self) -> Vec<(String, Vec<Diagnostic>)> {
-        if self.dynamic_file_watching {
+        if self.workspace.dynamic_file_watching {
             return Vec::new();
         }
         #[cfg(test)]
@@ -975,7 +998,7 @@ impl LspState {
         }
         let discovery_needed = self.project_paths.is_none()
             && self.semantic_snapshot_error.is_none()
-            && ((self.resolve_semantics
+            && ((self.resolve_semantics()
                 && self.documents.values().any(|doc| !doc.parsed.is_rejected()))
                 || (self.cross_file_rules_enabled()
                     && self.documents.values().all(|doc| !doc.parsed.is_rejected())));
@@ -1294,7 +1317,7 @@ impl LspState {
             .filter_map(|(file, _)| {
                 let index = self.root_index(file);
                 let rules = if index == 0 {
-                    &self.cross_file_rules
+                    self.analysis.cross_file_registry()
                 } else {
                     self.additional_root_configs[index - 1]
                         .analysis
@@ -1357,7 +1380,7 @@ impl LspState {
         {
             let index = self.root_index(file);
             let rules = if index == 0 {
-                &self.cross_file_rules
+                self.analysis.cross_file_registry()
             } else {
                 self.additional_root_configs[index - 1]
                     .analysis
@@ -1584,7 +1607,7 @@ impl LspState {
         let (path, unresolved_path) = document_path(uri, &self.workspace_roots);
         let source_error = reject_oversized_buffer(&path, &mut text);
         self.pending_semantic_affected.remove(uri);
-        if self.resolve_semantics && !self.documents.is_empty() {
+        if self.resolve_semantics() && !self.documents.is_empty() {
             self.ensure_semantic_snapshot();
         }
         self.refresh_environment(std::iter::once(path.as_path()));
@@ -1720,7 +1743,7 @@ impl LspState {
         {
             if path != doc.path {
                 self.body_only_changes.remove(uri);
-                if self.resolve_semantics {
+                if self.resolve_semantics() {
                     let affected = self.affected_open_uris(uri);
                     self.pending_semantic_affected
                         .entry(uri.to_string())
@@ -1776,7 +1799,7 @@ impl LspState {
         // Read only this file: an unsaved buffer is never evidence of disk contents.
         self.disk_read_count += 1;
         let stamp = FileStamp::read(&path);
-        if !self.dynamic_file_watching {
+        if !self.workspace.dynamic_file_watching {
             self.fallback_stamps.insert(path.clone(), stamp.clone());
         }
         let disk = falcon_analyze::read_source(&path).ok().and_then(|source| {
@@ -1830,7 +1853,7 @@ impl LspState {
             return Vec::new();
         }
         if !self.documents[uri].parsed.is_rejected() {
-            if self.resolve_semantics {
+            if self.resolve_semantics() {
                 self.ensure_semantic_snapshot();
             }
             let file_path = self.documents[uri].path.clone();
@@ -1862,7 +1885,7 @@ impl LspState {
         });
         let root_index = self.root_index(&file_path);
         let (config, rules) = if root_index == 0 {
-            (&self.config, &self.rules)
+            (&self.config, self.analysis.registry())
         } else {
             let entry = &self.additional_root_configs[root_index - 1];
             (&entry.config, entry.analysis.registry())
@@ -1943,7 +1966,7 @@ impl LspState {
             uris.sort();
             return uris;
         }
-        if !self.resolve_semantics {
+        if !self.resolve_semantics() {
             return if self.documents.contains_key(uri) {
                 vec![uri.to_string()]
             } else {
@@ -2001,25 +2024,14 @@ impl LspState {
             None if self.additional_root_configs.is_empty() => return Vec::new(),
             None => self.config.clone(),
         };
-        if !self.workspace_initialized {
+        if !self.workspace.workspace_initialized {
             self.workspace_roots = vec![workspace_root.clone()];
             self.workspace_root = workspace_root;
         }
         self.config = config;
         self.project_paths = None;
         self.watched_dependency_generation += 1;
-        let analysis = ProjectAnalysis::new(&self.config);
-        self.cross_file_resolve_semantics = analysis.cross_file_resolve();
-        self.resolve_semantics = analysis.resolve();
-        (self.rules, self.cross_file_rules) = analysis.into_registries();
-        self.resolve_semantics |= self
-            .additional_root_configs
-            .iter()
-            .any(|entry| entry.analysis.resolve());
-        self.cross_file_resolve_semantics |= self
-            .additional_root_configs
-            .iter()
-            .any(|entry| entry.analysis.cross_file_resolve());
+        self.analysis = ProjectAnalysis::new(&self.config);
         self.asset_paths = None;
         self.localization_paths = None;
         self.environment.clear_localization();
@@ -2045,8 +2057,8 @@ impl LspState {
             self.reset_external_environment();
         }
         debug!(
-            rule_count = self.rules.rules().len(),
-            cross_file_rule_count = self.cross_file_rules.rules().len(),
+            rule_count = self.analysis.registry().rules().len(),
+            cross_file_rule_count = self.analysis.cross_file_registry().rules().len(),
             "config reloaded"
         );
         if self.documents.is_empty()
@@ -2081,7 +2093,7 @@ impl LspState {
 
     /// Whether any workspace root enables cross-file rules.
     pub fn cross_file_rules_enabled(&self) -> bool {
-        !self.cross_file_rules.is_empty()
+        !self.analysis.cross_file_registry().is_empty()
             || self
                 .additional_root_configs
                 .iter()
@@ -2274,7 +2286,7 @@ impl LspState {
             let traversal = matches!(failure, falcon_project::DiscoveryFailure::Traversal { .. });
             failures.insert(path.clone(), (failure.to_string(), traversal));
         }
-        if !self.cross_file_rules_enabled() && !self.resolve_semantics {
+        if !self.cross_file_rules_enabled() && !self.resolve_semantics() {
             failures.clear();
         }
         for doc in self
@@ -2422,7 +2434,7 @@ impl LspState {
     }
 
     fn prepare_cross_file_indexes(&mut self, files: &[ProjectFile], reuse_snapshot: bool) -> bool {
-        if !reuse_snapshot && self.cross_file_resolve_semantics {
+        if !reuse_snapshot && self.cross_file_resolve_semantics() {
             // Dependency waves would otherwise parse on Rayon's global small-stack workers.
             if let Err(error) =
                 falcon_analyze::with_rules_stack(|| self.ensure_cross_file_indexes(files))
@@ -2481,7 +2493,7 @@ impl LspState {
         {
             return HashMap::new();
         }
-        if self.resolve_semantics && !self.documents.is_empty() {
+        if self.resolve_semantics() && !self.documents.is_empty() {
             self.ensure_semantic_snapshot();
         }
         if self.semantic_snapshot_error.is_some() {
@@ -2528,7 +2540,7 @@ impl LspState {
         };
         let result = (0..self.workspace_roots.len()).try_fold(Vec::new(), |mut all, index| {
             let (config, rules) = if index == 0 {
-                (&self.config, &self.cross_file_rules)
+                (&self.config, self.analysis.cross_file_registry())
             } else {
                 let entry = &self.additional_root_configs[index - 1];
                 (&entry.config, entry.analysis.cross_file_registry())
@@ -2602,7 +2614,10 @@ impl LspState {
 
     fn ensure_cross_file_indexes(&mut self, files: &[ProjectFile]) {
         #[cfg(test)]
-        assert!(!self.build_panic, "semantic build regression");
+        assert!(
+            self.build_panic != Some(BuildPanic::CrossFileIndex),
+            "cross-file index build regression"
+        );
         let dart_files = || files.iter().filter(|file| is_dart_file(file.path()));
         let packages = package_identities(files.iter().map(ProjectFile::path));
         if self.cross_file_index_cache.as_ref().is_some_and(|cache| {
@@ -2786,7 +2801,7 @@ impl LspState {
             .iter()
             .map(|file| (file.path(), file.program(), file.source()))
             .collect();
-        let dynamic = self.dynamic_file_watching;
+        let dynamic = self.workspace.dynamic_file_watching;
         let environment = &self.environment;
         let stamps = std::sync::Mutex::new(&mut self.fallback_stamps);
         let libraries = ExternalLibraries::load_with_source_observer(
@@ -3065,7 +3080,7 @@ impl LspState {
         self.refresh_document_versions();
         // Saves and open-file watcher events can invalidate membership without
         // changing an open tree. A cached snapshot must not prevent its refill.
-        if !self.resolve_semantics
+        if !self.resolve_semantics()
             || self.semantic_snapshot_error.is_some()
             || (self.project_paths.is_some() && self.semantic_snapshot.is_some())
         {
@@ -3084,7 +3099,10 @@ impl LspState {
 
     fn build_semantic_snapshot(&mut self) {
         #[cfg(test)]
-        assert!(!self.build_panic, "semantic build regression");
+        assert!(
+            self.build_panic != Some(BuildPanic::Semantic),
+            "semantic build regression"
+        );
         let capture =
             tracing::debug_span!(target: "falcon::stages", "source_snapshot_capture").entered();
         let (mut files, _) = self.collect_project_files(ProjectView::Semantic);
@@ -3154,7 +3172,7 @@ impl LspState {
                 .iter()
                 .map(|file| (file.path(), file.program(), file.source()))
                 .collect();
-            let dynamic = self.dynamic_file_watching;
+            let dynamic = self.workspace.dynamic_file_watching;
             let environment = &self.environment;
             let stamps = std::sync::Mutex::new(&mut self.fallback_stamps);
             self.external_libraries.extend_with_source_observer(
@@ -3235,7 +3253,7 @@ impl LspState {
             }
             self.disk_read_count += 1;
             let fallback_stamp = stamp.clone();
-            if !self.dynamic_file_watching {
+            if !self.workspace.dynamic_file_watching {
                 self.fallback_stamps
                     .entry(path.to_path_buf())
                     .or_insert(fallback_stamp);
@@ -3485,7 +3503,7 @@ impl LspState {
             };
             self.disk_read_count += 1;
             let fallback_stamp = stamp.clone();
-            if !self.dynamic_file_watching {
+            if !self.workspace.dynamic_file_watching {
                 self.fallback_stamps
                     .entry(path.to_path_buf())
                     .or_insert(fallback_stamp);
@@ -3553,7 +3571,7 @@ impl LspState {
                 .map(|(path, _)| path.as_path()),
         );
         self.refresh_document_versions();
-        if !self.dynamic_file_watching && matches!(view, ProjectView::Semantic) {
+        if !self.workspace.dynamic_file_watching && matches!(view, ProjectView::Semantic) {
             for (path, is_dart) in paths {
                 if !is_dart && !self.fallback_stamps.contains_key(path) {
                     self.fallback_stamps
@@ -3653,7 +3671,7 @@ impl LspState {
             self.project_discovery_watches.clear();
             self.project_discovery_failures.clear();
             for (index, root) in self.workspace_roots.iter().enumerate() {
-                let discover = if self.dynamic_file_watching {
+                let discover = if self.workspace.dynamic_file_watching {
                     falcon_project::discover_project
                 } else {
                     discover_project_with_watches

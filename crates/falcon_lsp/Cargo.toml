@@ -24,6 +24,7 @@ tracing.workspace    = true
 
 [dev-dependencies]
 falcon_analyze               = { path = "../falcon_analyze", features = [ "test-support" ] }
+falcon_project               = { path = "../falcon_project", features = [ "test-support" ] }
 tempfile.workspace           = true
 serde.workspace              = true
 tracing-subscriber.workspace = true

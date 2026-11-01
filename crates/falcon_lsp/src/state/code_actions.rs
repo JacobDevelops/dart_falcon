@@ -182,7 +182,7 @@ impl QuickFixContext<'_> {
 
 impl LspState {
     pub(crate) fn configure_code_actions(&mut self, params: &serde_json::Value) {
-        self.code_action_resolve = params
+        self.capabilities.code_action_resolve = params
             .pointer("/capabilities/textDocument/codeAction/dataSupport")
             .and_then(serde_json::Value::as_bool)
             == Some(true)
@@ -190,11 +190,11 @@ impl LspState {
                 .pointer("/capabilities/textDocument/codeAction/resolveSupport/properties")
                 .and_then(serde_json::Value::as_array)
                 .is_some_and(|properties| properties.iter().any(|property| property == "edit"));
-        self.workspace_document_changes = params
+        self.capabilities.workspace_document_changes = params
             .pointer("/capabilities/workspace/workspaceEdit/documentChanges")
             .and_then(serde_json::Value::as_bool)
             == Some(true);
-        self.workspace_apply_edit = params
+        self.capabilities.workspace_apply_edit = params
             .pointer("/capabilities/workspace/applyEdit")
             .and_then(serde_json::Value::as_bool)
             == Some(true);
@@ -241,7 +241,7 @@ impl LspState {
                 document,
                 config,
                 lines: &lines,
-                document_changes: self.workspace_document_changes,
+                document_changes: self.capabilities.workspace_document_changes,
             }
             .append_actions(params, cancelled, &mut actions)?;
         }
@@ -285,8 +285,8 @@ impl LspState {
                 action.disabled = Some(lsp_types::CodeActionDisabled {
                     reason: "Falcon cannot fix a document with syntax errors".to_owned(),
                 });
-            } else if !self.code_action_resolve {
-                if !self.workspace_apply_edit {
+            } else if !self.capabilities.code_action_resolve {
+                if !self.capabilities.workspace_apply_edit {
                     continue;
                 }
                 action.command = Some(lsp_types::Command {
@@ -326,7 +326,7 @@ impl LspState {
         if document.has_parse_errors() {
             return Err("Falcon cannot fix a document with syntax errors".to_owned());
         }
-        if self.resolve_semantics && self.semantic_snapshot.is_none() {
+        if self.resolve_semantics() && self.semantic_snapshot.is_none() {
             self.ensure_semantic_snapshot();
         }
         self.refresh_required_source_roots(&[]);
@@ -388,7 +388,7 @@ impl LspState {
                     outcome.source,
                     &LineIndex::new(document.text()),
                 )],
-                self.workspace_document_changes,
+                self.capabilities.workspace_document_changes,
             ));
         }
         Ok(action)

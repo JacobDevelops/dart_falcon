@@ -222,7 +222,7 @@ fn body_shift_before_typed_build_and_generic_class_reuses_indexes_and_positions(
     std::fs::write(&path, &before).unwrap();
     let uri = uri(&path);
     let mut state = state(directory.path());
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     state.open(&uri, before.clone(), Some(1));
     let builds = state.semantic_snapshot_build_count;
     let topologies = state.semantic_topology_build_count;
@@ -303,8 +303,7 @@ fn cross_file_only_body_reuse_preserves_types_after_save_close_and_same_text_rer
     std::fs::write(&path, &before).unwrap();
     let uri = uri(&path);
     let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
-    state.resolve_semantics = false;
-    state.cross_file_resolve_semantics = true;
+    state.configure_resolution(false, false);
     state.open(&uri, before, Some(1));
     let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
     assert!(complete);

@@ -111,6 +111,50 @@ fn rejected_open_document_warns_at_its_start_and_close_clears_the_episode() {
 }
 
 #[test]
+fn secondary_root_requirements_follow_its_registered_rules_on_reload() {
+    let directory = tempfile::tempdir().unwrap();
+    let first = directory.path().join("first");
+    let second = directory.path().join("second");
+    for root in [&first, &second] {
+        std::fs::create_dir(root).unwrap();
+        std::fs::write(
+            root.join("falcon.json"),
+            r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false}}}"#,
+        ).unwrap();
+    }
+    let mut state = LspState::new_from(None, |_| None, first.clone());
+    state.initialize_workspace_roots(vec![first, second.clone()]);
+    for (config, file, cross_file) in [
+        (
+            r#"{"linter":{"rules":{"recommended":false,"correctness":{"avoid-constant-conditions":"warn"}}},"cross-file":{"rules":{"recommended":false}}}"#,
+            true,
+            false,
+        ),
+        (
+            r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"correctness":{"unnecessary-nullable":"warn"}}}}"#,
+            false,
+            true,
+        ),
+        (
+            r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false}}}"#,
+            false,
+            false,
+        ),
+    ] {
+        std::fs::write(second.join("falcon.json"), config).unwrap();
+        state.reload_config();
+        assert!(!state.analysis.resolve());
+        assert!(!state.analysis.cross_file_resolve());
+        assert_eq!(
+            state.additional_root_configs[0].analysis.resolve(),
+            file || cross_file
+        );
+        assert_eq!(state.resolve_semantics(), file || cross_file);
+        assert_eq!(state.cross_file_resolve_semantics(), cross_file);
+    }
+}
+
+#[test]
 fn invalid_secondary_root_edit_retains_last_good_rules() {
     let directory = tempfile::tempdir().unwrap();
     let first = directory.path().join("first");
@@ -636,7 +680,7 @@ fn edit_reuses_workspace_disk_parses_and_discovery() {
     let uri = format!("file://{}", main.display());
     let dependent_uri = format!("file://{}", dependent.display());
     let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     state.open(&uri, std::fs::read_to_string(&main).unwrap(), Some(1));
     state.open(&dependent_uri, dependent_source.into(), Some(1));
     state.cross_file_pass();
@@ -750,7 +794,7 @@ fn return_type_edits_rebuild_indexes_and_refresh_dependent_diagnostics() {
         let api_uri = format!("file://{}", api.display());
         let dependent_uri = format!("file://{}", dependent.display());
         let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
-        state.resolve_semantics = true;
+        state.configure_resolution(true, false);
         state.open(&api_uri, before.into(), Some(1));
         let initial = state.open(&dependent_uri, dependent_source.into(), Some(1));
         assert!(
@@ -810,7 +854,7 @@ fn declaration_updates_rebuild_only_affected_libraries_in_both_views() {
         }
         let uri = format!("file://{}", directory.path().join("api.dart").display());
         let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
-        state.resolve_semantics = semantic;
+        state.configure_resolution(semantic, false);
         state.open(&uri, "void api() {}".into(), Some(1));
         let rebuilds = if semantic {
             state.ensure_semantic_snapshot();
@@ -853,7 +897,7 @@ fn import_and_part_edits_rebuild_only_affected_libraries_in_both_views() {
             let uri = format!("file://{}", directory.path().join("main.dart").display());
             let mut state =
                 LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
-            state.resolve_semantics = semantic;
+            state.configure_resolution(semantic, false);
             let external = directory.path().join("external.dart");
             state
                 .config
@@ -942,7 +986,7 @@ fn coalesced_part_regrouping_keeps_old_and_new_dependents() {
         })
         .collect();
     let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     for (uri, (_, source)) in uris.iter().zip(sources) {
         state.open(uri, source.into(), Some(1));
     }
@@ -977,7 +1021,7 @@ fn closing_coalesced_declaration_edit_restores_disk_before_incremental_update() 
     .unwrap();
     let uri = format!("file://{}", path.display());
     let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     state.open(&uri, "void api() {}".into(), Some(1));
     let rebuilds = state.semantic_library_rebuild_count;
     state.change(&uri, "int api() => 1;".into(), Some(2));
@@ -1011,7 +1055,7 @@ fn coalesced_declaration_and_directive_edits_match_fresh_semantics() {
         |_| None,
         directory.path().to_path_buf(),
     );
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     let uris: Vec<_> = sources
         .iter()
         .map(|(name, source)| {
@@ -1042,7 +1086,7 @@ fn coalesced_declaration_and_directive_edits_match_fresh_semantics() {
             |_| None,
             directory.path().to_path_buf(),
         );
-        fresh.resolve_semantics = true;
+        fresh.configure_resolution(true, false);
         for uri in &uris {
             fresh.open(uri, state.documents[uri].text().into(), Some(2));
         }
@@ -1131,7 +1175,7 @@ fn body_only_edits_refresh_loop_mutation_facts_without_rebuilding_indexes() {
     std::fs::write(&path, &before).unwrap();
     let uri = format!("file://{}", path.display());
     let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     let initial = state.open(&uri, before.clone(), Some(1));
     assert_eq!(
         initial
@@ -1185,8 +1229,7 @@ fn cross_file_only_indexes_reuse_explicit_bodies_but_rebuild_changed_return_type
     std::fs::write(&path, before).unwrap();
     let uri = format!("file://{}", path.display());
     let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
-    state.resolve_semantics = false;
-    state.cross_file_resolve_semantics = true;
+    state.configure_resolution(false, false);
     state.open(&uri, before.into(), Some(1));
     let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
     assert!(complete);
@@ -1246,7 +1289,7 @@ fn atomic_source_replacement_reuses_discovery() {
     std::fs::write(&support, "class Before {}").unwrap();
     let uri = format!("file://{}", main.display());
     let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     state.open(&uri, "void main() {}".into(), Some(1));
     let parses = state.disk_parse_count;
     let walks = state.workspace_walk_count;
@@ -1281,7 +1324,7 @@ fn unsupported_directory_entries_reuse_discovery() {
     std::fs::write(&main, "void main() {}").unwrap();
     let uri = format!("file://{}", main.display());
     let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     state.open(&uri, "void main() {}".into(), Some(1));
     let walks = state.workspace_walk_count;
     let parses = state.disk_parse_count;
@@ -1388,7 +1431,7 @@ fn watched_disk_changes_refresh_cached_cross_file_input() {
     std::fs::write(&support, "class Before {}").unwrap();
     let uri = format!("file://{}", main.display());
     let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     state.open(&uri, "void main() {}".into(), Some(1));
     let parses = state.disk_parse_count;
     let walks = state.workspace_walk_count;
@@ -1714,9 +1757,9 @@ mod source_size_tests {
                     .any(|diagnostic| diagnostic.rule == "secure-pubspec-urls")
         }));
         assert!(state.cross_file_pass().is_empty());
-        state
-            .cross_file_rules
-            .register("secure-pubspec-urls", Box::new(Panics));
+        state.edit_test_registries(|_, cross_file_rules| {
+            cross_file_rules.register("secure-pubspec-urls", Box::new(Panics));
+        });
         let failed = state.cross_file_pass();
         assert!(state.cross_file_worker_failed);
         assert_eq!(failed.len(), 1);
@@ -1772,7 +1815,7 @@ mod source_size_tests {
         let rejected = Arc::clone(&state.document(&uri).unwrap().parsed);
         assert_rejected_snapshot(&rejected, SOURCE);
         assert_failure(&state.analyze(&uri));
-        state.resolve_semantics = true;
+        state.configure_resolution(true, false);
         state.ensure_semantic_snapshot();
         let snapshot = state.semantic_snapshot.as_ref().unwrap();
         assert!(!snapshot.by_path.contains_key(&failure_path));
@@ -1787,10 +1830,12 @@ mod source_size_tests {
             assert!(files.iter().all(|file| file.path() != failure_path));
         }
         let runs = Arc::new(AtomicUsize::new(0));
-        state.cross_file_rules.register(
-            "count-cross-runs",
-            Box::new(CountCrossRuns(Arc::clone(&runs))),
-        );
+        state.edit_test_registries(|_, cross_file_rules| {
+            cross_file_rules.register(
+                "count-cross-runs",
+                Box::new(CountCrossRuns(Arc::clone(&runs))),
+            );
+        });
         assert!(state.cross_file_diagnostics().is_empty());
         assert_eq!(runs.load(Ordering::SeqCst), 0);
         state.parser_failure_path = None;
@@ -1846,7 +1891,7 @@ mod source_size_tests {
             std::fs::write(&path, SOURCE).unwrap();
             super::dependency_tests::write_package_version(root, "2.19");
             let mut state = LspState::new_from(Some(config), |_| None, root.to_path_buf());
-            state.resolve_semantics = resolve_semantics;
+            state.configure_resolution(resolve_semantics, false);
             let before = state.open(&uri, SOURCE.into(), Some(1));
             assert!(
                 before
@@ -1863,7 +1908,7 @@ mod source_size_tests {
             state.parser_failure_path = Some(canonical_or_lexical(&path));
             super::dependency_tests::write_package_version(root, "3.0");
             state.watched_files_changed(&[root.join(".dart_tool/package_config.json")]);
-            assert_eq!(state.resolve_semantics, resolve_semantics);
+            assert_eq!(state.resolve_semantics(), resolve_semantics);
             let diagnostics = state.analyze(&uri);
             assert_eq!(diagnostics.len(), 1);
             assert_eq!(
@@ -1915,7 +1960,7 @@ mod source_size_tests {
             let config = app.join("falcon.json");
             std::fs::write(&config, "{}").unwrap();
             let mut state = LspState::new_from(Some(config), |_| None, app.clone());
-            state.resolve_semantics = true;
+            state.configure_resolution(true, false);
             let failed = if companion {
                 let defining = dep.join("leaf.dart");
                 std::fs::write(
@@ -1955,10 +2000,12 @@ mod source_size_tests {
             let source = std::fs::read_to_string(&failed).unwrap();
             std::fs::write(&failed, format!("{source}\n")).unwrap();
             let runs = Arc::new(AtomicUsize::new(0));
-            state.cross_file_rules.register(
-                "count-cross-runs",
-                Box::new(CountCrossRuns(Arc::clone(&runs))),
-            );
+            state.edit_test_registries(|_, cross_file_rules| {
+                cross_file_rules.register(
+                    "count-cross-runs",
+                    Box::new(CountCrossRuns(Arc::clone(&runs))),
+                );
+            });
             state.watched_files_changed(std::slice::from_ref(&failed));
             let published = state.cross_file_pass();
             assert_eq!(published.len(), 2);
@@ -1998,48 +2045,72 @@ mod source_size_tests {
         }
     }
 
+    fn build_panic_workspace() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let directory = tempfile::tempdir().unwrap();
+        let app = directory.path().join("app");
+        let dep = directory.path().join("dep/lib");
+        std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
+        std::fs::create_dir_all(&dep).unwrap();
+        std::fs::write(
+            app.join(".dart_tool/package_config.json"),
+            r#"{"configVersion":2,"packages":[{"name":"app","rootUri":"../","packageUri":""},{"name":"dep","rootUri":"../../dep","packageUri":"lib/"}]}"#,
+        )
+        .unwrap();
+        std::fs::write(dep.join("dep.dart"), "class Dep {}").unwrap();
+        std::fs::write(app.join("falcon.json"), "{}").unwrap();
+        (directory, app, dep)
+    }
+
     #[test]
     fn build_panics_publish_once_and_recover_on_dependency_events() {
         for cross_file in [false, true] {
-            let directory = tempfile::tempdir().unwrap();
-            let app = directory.path().join("app");
-            let dep = directory.path().join("dep/lib");
-            std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
-            std::fs::create_dir_all(&dep).unwrap();
-            std::fs::write(
-                app.join(".dart_tool/package_config.json"),
-                r#"{"configVersion":2,"packages":[{"name":"app","rootUri":"../","packageUri":""},{"name":"dep","rootUri":"../../dep","packageUri":"lib/"}]}"#,
-            )
-            .unwrap();
-            let dependency = dep.join("dep.dart");
-            std::fs::write(&dependency, "class Dep {}").unwrap();
-            let dependency = canonical_or_lexical(&dependency);
-            let config = app.join("falcon.json");
-            std::fs::write(&config, "{}").unwrap();
-            let mut state = LspState::new_from(Some(config), |_| None, app.clone());
-            // Without per-file semantic rules, only the cross-file view loads dependencies.
-            state.resolve_semantics = !cross_file;
-            state.cross_file_resolve_semantics = cross_file;
+            let (_directory, app, dep) = build_panic_workspace();
+            let dependency = canonical_or_lexical(&dep.join("dep.dart"));
+            let mut state =
+                LspState::new_from(Some(app.join("falcon.json")), |_| None, app.clone());
+            state.configure_resolution(!cross_file, cross_file);
             let runs = Arc::new(AtomicUsize::new(0));
-            state.cross_file_rules.register(
-                "count-cross-runs",
-                Box::new(CountCrossRuns(Arc::clone(&runs))),
-            );
+            state.edit_test_registries(|_, cross_file_rules| {
+                cross_file_rules.register(
+                    "count-cross-runs",
+                    Box::new(CountCrossRuns(Arc::clone(&runs))),
+                );
+            });
             let uri = format!("file://{}", app.join("main.dart").display());
             state.open(&uri, "import 'package:dep/dep.dart';".into(), Some(1));
+            if cross_file {
+                let extra_uri = format!("file://{}", dep.join("unsaved.dart").display());
+                state.open(&extra_uri, "class Unsaved {}".into(), Some(1));
+            }
             state.cross_file_pass();
-            assert!(if cross_file {
-                state.cross_file_external_cache.is_some() && state.cross_file_index_cache.is_some()
-            } else {
-                !state.external_libraries.libraries().is_empty()
-            });
+            assert_eq!(state.analysis.cross_file_resolve(), cross_file);
+            assert!(state.semantic_snapshot.is_some());
+            assert!(!state.external_libraries.libraries().is_empty());
+            if cross_file {
+                let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+                assert!(complete);
+                state.external_indexes = None;
+                state.cross_file_index_cache = None;
+                state.ensure_cross_file_indexes(&files);
+                assert!(state.cross_file_external_cache.is_some());
+                assert!(state.cross_file_index_cache.is_some());
+            }
             runs.store(0, Ordering::SeqCst);
             state.invalidate_semantic_snapshot();
             state.cross_file_index_cache = None;
-            state.build_panic = true;
+            state.build_panic = Some(if cross_file {
+                BuildPanic::CrossFileIndex
+            } else {
+                BuildPanic::Semantic
+            });
+            if cross_file {
+                state.ensure_semantic_snapshot();
+                assert!(state.semantic_snapshot.is_some());
+                state.external_indexes = None;
+            }
             let resets = state.external_reset_count;
             let published = state.cross_file_pass();
-            assert_eq!(published.len(), 1);
+            assert_eq!(published.len(), if cross_file { 2 } else { 1 });
             let failures: Vec<_> = published[0]
                 .1
                 .iter()
@@ -2048,7 +2119,11 @@ mod source_size_tests {
                 })
                 .collect();
             assert_eq!(failures.len(), 1, "{:?}", published[0].1);
-            assert!(failures[0].message.contains("semantic build regression"));
+            assert!(failures[0].message.contains(if cross_file {
+                "cross-file index build regression"
+            } else {
+                "semantic build regression"
+            }));
             assert!(
                 published[0].1.iter().any(|diagnostic| {
                     diagnostic.rule == falcon_diagnostics::INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID
@@ -2068,22 +2143,27 @@ mod source_size_tests {
             );
 
             // The failure stays recorded instead of rebuilding on every pass.
-            state.build_panic = false;
+            state.build_panic = None;
             state.cross_file_pass();
             assert_eq!(runs.load(Ordering::SeqCst), 0);
             assert!(state.semantic_snapshot.is_none());
             assert!(state.cross_file_index_cache.is_none());
 
             let recovered = state.watched_files_changed(std::slice::from_ref(&dependency));
-            assert_eq!(recovered.len(), 1);
+            assert_eq!(recovered.len(), if cross_file { 2 } else { 1 });
             assert!(recovered[0].1.iter().all(|diagnostic| {
                 diagnostic.rule != falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
             }));
             assert!(state.semantic_snapshot_error.is_none());
+            if cross_file {
+                state.external_indexes = None;
+                state.cross_file_index_cache = None;
+            }
             state.cross_file_pass();
             assert_eq!(runs.load(Ordering::SeqCst), 1);
-            assert_eq!(state.semantic_snapshot.is_some(), !cross_file);
+            assert!(state.semantic_snapshot.is_some());
             assert_eq!(state.cross_file_index_cache.is_some(), cross_file);
+            assert_eq!(state.cross_file_external_cache.is_some(), cross_file);
         }
     }
 
@@ -2429,7 +2509,7 @@ mod source_size_tests {
             state.initialize_workspace_roots(roots);
             state.set_dynamic_file_watching(dynamic);
             state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
-            state.resolve_semantics = true;
+            state.configure_resolution(true, false);
             let uri = format!("file://{}", source.display());
             state.open(&uri, "class Valid {}".into(), Some(1));
             let walks = state.workspace_walk_count;
@@ -2626,7 +2706,7 @@ mod source_size_tests {
 
         let healthy = canonical_or_lexical(&directory.path().join("healthy.dart"));
         let healthy_uri = format!("file://{}", healthy.display());
-        state.resolve_semantics = true;
+        state.configure_resolution(true, false);
         state.open(&healthy_uri, "void healthy() {}".into(), Some(1));
         state.ensure_semantic_snapshot();
         let snapshot = state.semantic_snapshot.as_ref().unwrap();
@@ -2799,7 +2879,7 @@ mod source_size_tests {
                     .iter()
                     .all(|diagnostic| diagnostic.rule != "unused-files")
             );
-            state.resolve_semantics = true;
+            state.configure_resolution(true, false);
             state.invalidate_semantic_snapshot();
             state.ensure_semantic_snapshot();
             let snapshot = state.semantic_snapshot.as_ref().unwrap();
@@ -2825,6 +2905,71 @@ mod source_size_tests {
 #[cfg(test)]
 mod config_tests {
     use super::*;
+
+    #[test]
+    fn reload_keeps_primary_registries_requirements_and_capabilities_together() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("falcon.json");
+        let structural = r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false}}}"#;
+        std::fs::write(&config, structural).unwrap();
+        let mut state = LspState::new_from(
+            Some(config.clone()),
+            |_| None,
+            directory.path().to_path_buf(),
+        );
+        state.configure_code_actions(&serde_json::json!({"capabilities":{
+            "textDocument":{"codeAction":{"dataSupport":true,"resolveSupport":{"properties":["edit"]}}},
+            "workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true}}
+        }}));
+        let uri = format!("file://{}", directory.path().join("main.dart").display());
+        state.open(&uri, "void main() { if (3 > 2) {} }\n".into(), Some(1));
+        for (source, file, cross_file) in [
+            (
+                r#"{"linter":{"rules":{"recommended":false,"correctness":{"avoid-constant-conditions":"warn"}}},"cross-file":{"rules":{"recommended":false}}}"#,
+                true,
+                false,
+            ),
+            (
+                r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"correctness":{"unnecessary-nullable":"warn"}}}}"#,
+                false,
+                true,
+            ),
+            (structural, false, false),
+        ] {
+            std::fs::write(&config, source).unwrap();
+            state.reload_config();
+            assert_eq!(
+                state
+                    .analysis
+                    .registry()
+                    .rules()
+                    .iter()
+                    .any(|(name, _)| *name == "avoid-constant-conditions"),
+                file
+            );
+            assert_eq!(
+                state
+                    .analysis
+                    .cross_file_registry()
+                    .rules()
+                    .iter()
+                    .any(|(name, _)| *name == "unnecessary-nullable"),
+                cross_file
+            );
+            assert_eq!(state.resolve_semantics(), file || cross_file);
+            assert_eq!(state.cross_file_resolve_semantics(), cross_file);
+            assert_eq!(
+                state
+                    .analyze(&uri)
+                    .iter()
+                    .any(|diagnostic| diagnostic.rule == "avoid-constant-conditions"),
+                file
+            );
+            assert!(state.capabilities.code_action_resolve);
+            assert!(state.capabilities.workspace_document_changes);
+            assert!(state.capabilities.workspace_apply_edit);
+        }
+    }
 
     #[test]
     fn canonicalizing_loader_preserves_legacy_rule_configuration() {
@@ -3911,7 +4056,7 @@ mod dependency_tests {
             let buffer = "int api() => 1;\n";
             let mut state = LspState::new(Some(config_path));
             state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
-            assert_eq!(state.resolve_semantics, resolve);
+            assert_eq!(state.resolve_semantics(), resolve);
             state.open(&main_uri, "void main() {}\n".into(), Some(1));
             state.open(&uri, buffer.into(), Some(1));
             assert!(state.document(&uri).unwrap().unresolved_path);
@@ -4956,7 +5101,7 @@ mod environment_regressions {
         for semantic in [false, true] {
             let dir = tempfile::tempdir().unwrap();
             let mut state = state(dir.path());
-            state.resolve_semantics = semantic;
+            state.configure_resolution(semantic, false);
             let path = dir.path().join("main.dart");
             let uri = format!("file://{}", path.display());
             let source = "void f(Object o) { switch (o) { case 1 + 2: break; } }";
@@ -4989,7 +5134,7 @@ mod environment_regressions {
             std::fs::create_dir(&root).unwrap();
             std::os::unix::fs::symlink(&root, &alias).unwrap();
             let mut state = state(&alias);
-            state.resolve_semantics = semantic;
+            state.configure_resolution(semantic, false);
             let uri = format!("file://{}", alias.join("new_directory/main.dart").display());
             let source = "void f(Object o) { switch (o) { case 1 + 2: break; } }";
             state.open(&uri, source.into(), Some(1));
@@ -5441,12 +5586,14 @@ fn file_rule_worker_failure_qualifies_publication_and_recovers_current_source() 
     std::fs::write(directory.path().join("main.dart"), "class Before {}").unwrap();
     let uri = format!("file://{}", directory.path().join("main.dart").display());
     let mut state = LspState::new_from(None, |_| None, directory.path().to_path_buf());
-    state.rules = RuleRegistry::new();
-    state.rules.register("panics", Box::new(Panics));
-    state.cross_file_rules = CrossFileRuleRegistry::new();
-    state
-        .cross_file_rules
-        .register("current-source", Box::new(CurrentSource));
+    state.edit_test_registries(|rules, _| *rules = RuleRegistry::new());
+    state.edit_test_registries(|rules, _| rules.register("panics", Box::new(Panics)));
+    state.edit_test_registries(|_, cross_file_rules| {
+        *cross_file_rules = CrossFileRuleRegistry::new();
+    });
+    state.edit_test_registries(|_, cross_file_rules| {
+        cross_file_rules.register("current-source", Box::new(CurrentSource));
+    });
     state.open(&uri, "class Before {}".into(), Some(1));
     state.analyze(&uri);
     let failed = state.cross_file_pass();
@@ -5468,7 +5615,7 @@ fn file_rule_worker_failure_qualifies_publication_and_recovers_current_source() 
             .iter()
             .any(|diagnostic| diagnostic.rule == "current-source")
     );
-    state.rules = RuleRegistry::new();
+    state.edit_test_registries(|rules, _| *rules = RuleRegistry::new());
     state.open(&uri, "class After {}".into(), Some(2));
     state.analyze(&uri);
     let recovered = state.cross_file_pass();
@@ -5508,11 +5655,11 @@ fn project_worker_failures_recover_all_publications_after_only_one_document_chan
     for semantic_failure in [false, true] {
         let directory = tempfile::tempdir().unwrap();
         let mut state = LspState::new_from(None, |_| None, directory.path().to_path_buf());
-        state.rules = RuleRegistry::new();
-        state.cross_file_rules = CrossFileRuleRegistry::new();
-        state
-            .cross_file_rules
-            .register("current-source", Box::new(ProjectRule(false)));
+        state.edit_test_registries(|rules, _| *rules = RuleRegistry::new());
+        state.edit_test_registries(|_, cross_file_rules| {
+            *cross_file_rules = CrossFileRuleRegistry::new();
+            cross_file_rules.register("current-source", Box::new(ProjectRule(false)));
+        });
         let uris: Vec<_> = ["a", "b"]
             .iter()
             .map(|name| {
@@ -5530,13 +5677,17 @@ fn project_worker_failures_recover_all_publications_after_only_one_document_chan
         }
         state.cross_file_pass();
         if semantic_failure {
-            state.resolve_semantics = true;
+            state.config.linter.rules.recommended = Some(false);
+            state.configure_resolution(true, false);
+            state.edit_test_registries(|_, cross_file_rules| {
+                cross_file_rules.register("current-source", Box::new(ProjectRule(false)));
+            });
             state.invalidate_semantic_snapshot();
-            state.build_panic = true;
+            state.build_panic = Some(BuildPanic::Semantic);
         } else {
-            state
-                .cross_file_rules
-                .register("current-source", Box::new(ProjectRule(true)));
+            state.edit_test_registries(|_, cross_file_rules| {
+                cross_file_rules.register("current-source", Box::new(ProjectRule(true)));
+            });
         }
         let failed = state.cross_file_pass();
         assert_eq!(failed.len(), 2, "{failed:?}");
@@ -5554,11 +5705,11 @@ fn project_worker_failures_recover_all_publications_after_only_one_document_chan
                 "{diagnostics:?}"
             );
         }
-        state.build_panic = false;
-        state.cross_file_rules = CrossFileRuleRegistry::new();
-        state
-            .cross_file_rules
-            .register("current-source", Box::new(ProjectRule(false)));
+        state.build_panic = None;
+        state.edit_test_registries(|_, cross_file_rules| {
+            *cross_file_rules = CrossFileRuleRegistry::new();
+            cross_file_rules.register("current-source", Box::new(ProjectRule(false)));
+        });
         assert!(state.change(&uris[0], "class After {}".into(), Some(2)));
         state.analyze_affected_many(std::slice::from_ref(&uris[0]));
         let recovered = state.cross_file_pass();
@@ -5589,6 +5740,28 @@ fn external_worker_failure_clears_when_import_removed() {
     external_parser_worker_recovery(true);
 }
 
+fn assert_external_parser_failure(diagnostics: &[Diagnostic]) {
+    assert!(
+        diagnostics.iter().any(
+            |diagnostic| diagnostic.rule == RULES_THREAD_ERROR_DIAGNOSTIC_ID
+                && diagnostic.message.contains("external parser regression")
+        ),
+        "{diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule == INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID),
+        "{diagnostics:?}"
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "comment-references"),
+        "{diagnostics:?}"
+    );
+}
+
 fn external_parser_worker_recovery(remove_import: bool) {
     for semantic in [false, true] {
         let project = tempfile::tempdir().unwrap();
@@ -5607,43 +5780,53 @@ fn external_parser_worker_recovery(remove_import: bool) {
         let part = dependency.path().join("lib/part.dart");
         std::fs::write(
             &part,
-            "// falcon-test:external-parser-failure\npart of 'dep.dart';",
+            if semantic {
+                "// falcon-test:external-parser-failure\npart of 'dep.dart';"
+            } else {
+                "part of 'dep.dart';"
+            },
         )
         .unwrap();
         std::fs::write(root.join("falcon.json"), r#"{"linter":{"rules":{"recommended":false,"correctness":{"comment-references":"warn"}}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#).unwrap();
         let mut state = LspState::new_from(None, |_| None, root);
-        state.resolve_semantics = semantic;
-        state.cross_file_resolve_semantics = !semantic;
+        state.configure_resolution(true, !semantic);
+        state.set_dynamic_file_watching(true);
         if semantic {
-            state.cross_file_rules = CrossFileRuleRegistry::new();
+            state.edit_test_registries(|_, cross_file_rules| {
+                *cross_file_rules = CrossFileRuleRegistry::new();
+            });
         }
         let uri = format!("file://{}", main.display());
         state.open(&uri, source.into(), Some(1));
+        if !semantic {
+            let extra_uri = format!(
+                "file://{}",
+                dependency.path().join("lib/unsaved.dart").display()
+            );
+            state.open(&extra_uri, "class Unsaved {}".into(), Some(1));
+        }
         state.analyze(&uri);
+        if !semantic {
+            assert!(state.semantic_snapshot.is_some());
+            assert!(state.external_libraries.worker_failure().is_none());
+            std::fs::write(
+                &part,
+                "// falcon-test:external-parser-failure\npart of 'dep.dart';",
+            )
+            .unwrap();
+            state.cross_file_external_cache = None;
+            state.cross_file_index_cache = None;
+        }
         let failed = state.cross_file_pass();
+        if !semantic {
+            assert!(state.external_libraries.worker_failure().is_none());
+        }
         let diagnostics = &failed
             .iter()
             .find(|(published, _)| published == &uri)
             .unwrap()
             .1;
-        assert!(
-            diagnostics.iter().any(|diagnostic| diagnostic.rule
-                == RULES_THREAD_ERROR_DIAGNOSTIC_ID
-                && diagnostic.message.contains("external parser regression")),
-            "{diagnostics:?}"
-        );
-        assert!(
-            diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.rule == INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID),
-            "{diagnostics:?}"
-        );
-        assert!(
-            !diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.rule == "comment-references"),
-            "{diagnostics:?}"
-        );
+        assert_external_parser_failure(diagnostics);
         if remove_import {
             exercise_external_worker_reachability(&mut state, &uri, source);
         }
@@ -5663,10 +5846,6 @@ fn external_parser_worker_recovery(remove_import: bool) {
             )),
             "{diagnostics:?}"
         );
-        if !semantic {
-            state.resolve_semantics = true;
-            state.invalidate_semantic_snapshot();
-        }
         assert!(
             state
                 .analyze(&uri)
@@ -5939,8 +6118,7 @@ fn retained_cross_file_indexes_refresh_failures_and_required_cache_failures_qual
         .set_len(u64::from(u32::MAX) + 1)
         .unwrap();
     let mut state = LspState::new_from(None, |_| None, app);
-    state.resolve_semantics = false;
-    state.cross_file_resolve_semantics = false;
+    state.configure_resolution(false, false);
     let uri = format!("file://{}", main.display());
     state.open(&uri, source.into(), Some(1));
     let file = ProjectFile::new(main.clone(), Arc::clone(&state.documents[&uri].parsed)).unwrap();
@@ -5992,7 +6170,7 @@ fn partial_package_roots_prevent_reusing_a_semantic_view_with_extra_package_file
     std::fs::write(&main, "void main() {}").unwrap();
     std::fs::write(&extra, "class Extra {}").unwrap();
     let mut state = LspState::new_from(None, |_| None, root);
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     let uri = format!("file://{}", main.display());
     state.open(&uri, "void main() {}".into(), Some(1));
     state.open(

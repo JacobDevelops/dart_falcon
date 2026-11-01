@@ -693,7 +693,7 @@ These entries describe implemented foundation, not acceptance of the open items.
 
 ## Recommended cleanup after the enforcing slices
 
-- [ ] R1 — Replace the `LspState → ClientCapabilities → SemanticFlags →
+- [x] R1 — Replace the `LspState → ClientCapabilities → SemanticFlags →
   WorkspaceFlags` mutable `Deref` chain in `crates/falcon_lsp/src/state.rs` with
   explicit ownership/access. Keep the primary root's registries and resolution
   requirements together instead of splitting them via `into_registries` and
@@ -701,6 +701,7 @@ These entries describe implemented foundation, not acceptance of the open items.
   separately so they cannot contradict registered rule requirements. This is
   maintainability debt, not by itself a proven behavioral bug. Preserve
   capability/configuration lifecycle tests.
+  Evidence: explicit capability/workspace fields and retained primary `ProjectAnalysis`; primary/secondary reload and capability lifecycle coverage, independent index/parser failure recovery regressions (five mutants rejected), 630 LSP/project/CLI tests, strict workspace Clippy, formatting and docgen checks passed.
 - [ ] R2 — Remove repeated conversions/retained data only where callers and
   profiling justify them. Keep shared immutable indexes and useful caches; no
   blanket clone/Arc ban or byte-count-based redesign.

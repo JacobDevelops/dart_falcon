@@ -258,12 +258,11 @@ impl ProjectAnalysis {
         Self::from_registries(registry, cross_file_registry)
     }
 
+    /// Construct a plan from registries, deriving all requirements together.
+    #[must_use]
     fn from_registries(registry: RuleRegistry, cross_file_registry: CrossFileRuleRegistry) -> Self {
-        let cross_file_resolve = cross_file_registry
-            .rules()
-            .iter()
-            .any(|(name, _)| falcon_rules::rule_requires_resolution(name));
-        let resolve = falcon_rules::requires_resolution(&registry) || cross_file_resolve;
+        let (resolve, cross_file_resolve) =
+            Self::derive_resolution(&registry, &cross_file_registry);
         let collect_programs = !cross_file_registry.is_empty();
         Self {
             registry,
@@ -272,6 +271,20 @@ impl ProjectAnalysis {
             collect_programs,
             cross_file_resolve,
         }
+    }
+
+    fn derive_resolution(
+        registry: &RuleRegistry,
+        cross_file_registry: &CrossFileRuleRegistry,
+    ) -> (bool, bool) {
+        let cross_file_resolve = cross_file_registry
+            .rules()
+            .iter()
+            .any(|(name, _)| falcon_rules::rule_requires_resolution(name));
+        (
+            falcon_rules::requires_resolution(registry) || cross_file_resolve,
+            cross_file_resolve,
+        )
     }
 
     /// File rules enabled by this plan.
@@ -309,10 +322,15 @@ impl ProjectAnalysis {
         self.collect_programs = !self.cross_file_registry.is_empty() || (enabled && self.resolve);
     }
 
-    /// Transfer rule ownership to a frontend retaining its own analysis caches.
-    #[must_use]
-    pub fn into_registries(self) -> (RuleRegistry, CrossFileRuleRegistry) {
-        (self.registry, self.cross_file_registry)
+    #[cfg(feature = "test-support")]
+    pub fn edit_registries(
+        &mut self,
+        edit: impl FnOnce(&mut RuleRegistry, &mut CrossFileRuleRegistry),
+    ) {
+        edit(&mut self.registry, &mut self.cross_file_registry);
+        (self.resolve, self.cross_file_resolve) =
+            Self::derive_resolution(&self.registry, &self.cross_file_registry);
+        self.collect_programs |= !self.cross_file_registry.is_empty();
     }
 
     #[cfg(test)]

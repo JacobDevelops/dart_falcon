@@ -9,7 +9,7 @@ fn workspace(dynamic: bool) -> (tempfile::TempDir, LspState, String) {
     let uri = format!("file://{}", main.display());
     let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
     state.set_dynamic_file_watching(dynamic);
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     (directory, state, uri)
 }
 
@@ -302,7 +302,7 @@ fn localization_arb_create_change_delete_republishes_without_semantic_rebuild() 
     std::fs::create_dir_all(&messages).unwrap();
     state.reload_config();
     state.open(&uri, "void main() {}".into(), Some(1));
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     state.analyze(&uri);
     state.cross_file_pass();
     let builds = state.semantic_snapshot_build_count;
@@ -417,7 +417,7 @@ fn localization_settings_refresh_external_watch_roots_without_semantic_rebuild()
     std::fs::write(directory.path().join("pubspec.yaml"), "name: app\n").unwrap();
     state.reload_config();
     state.open(&uri, "void main() {}".into(), Some(1));
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     state.analyze(&uri);
     state.cross_file_pass();
     let builds = state.semantic_snapshot_build_count;
@@ -464,7 +464,7 @@ fn asset_events_publish_and_clear_manifest_without_rebuilding_semantics() {
     let uri = format!("file://{}", source.display());
     state.reload_config();
     state.open(&uri, text.into(), Some(1));
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     state.analyze(&uri);
     let manifest_key = manifest.to_string_lossy().into_owned();
     let initial = state.cross_file_diagnostics();
@@ -777,7 +777,7 @@ fn fallback_refreshes_mutable_dependencies_and_package_configuration() {
     std::fs::write(&local, "class LocalOriginal {}").unwrap();
     let mut state = LspState::new_from(Some(config), |_| None, app.clone());
     state.set_dynamic_file_watching(false);
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     let uri = format!("file://{}", app.join("main.dart").display());
     state.open(
         &uri,
@@ -834,7 +834,7 @@ fn fallback_refreshes_nested_manifests_without_cross_file_rules() {
     )
     .unwrap();
     state.reload_config();
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     state.open(&uri, "void main() {}".into(), Some(1));
     assert!(state.fallback_stamps.contains_key(&manifest));
     let resets = state.external_reset_count;
@@ -875,7 +875,7 @@ fn disabled_rules_do_not_repeat_changed_directory_publications() {
     )
     .unwrap();
     state.reload_config();
-    assert!(!state.resolve_semantics);
+    assert!(!state.resolve_semantics());
     assert!(!state.cross_file_rules_enabled());
     std::fs::create_dir(directory.path().join("new_directory")).unwrap();
     let modified = std::fs::metadata(directory.path())
@@ -973,7 +973,7 @@ fn fallback_discovers_new_mutable_dependency_subdirectories() {
     std::fs::write(dependency.join("api.dart"), "export 'generated/new.dart';").unwrap();
     let mut state = LspState::new_from(Some(app.join("falcon.json")), |_| None, app.clone());
     state.set_dynamic_file_watching(false);
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     let uri = format!("file://{}", app.join("main.dart").display());
     state.open(
         &uri,
@@ -1070,7 +1070,7 @@ fn rejected_buffers_do_not_trigger_idle_discovery_publications() {
             std::fs::write(directory.path().join("falcon.json"),
                 r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"error"}}}}"#).unwrap();
             state.reload_config();
-            assert!(!state.resolve_semantics);
+            assert!(!state.resolve_semantics());
             assert!(state.cross_file_rules_enabled());
         }
         state.open(&uri, "void main() {}".into(), Some(1));
@@ -1327,7 +1327,7 @@ fn fallback_preserves_pre_discovery_build_failure_until_source_event() {
     let (directory, mut state, uri) = workspace(false);
     let source = directory.path().join("closed.dart");
     std::fs::write(&source, "class Before {}").unwrap();
-    state.build_panic = true;
+    state.build_panic = Some(BuildPanic::Semantic);
     let initial = state.open(&uri, "void main() {}".into(), Some(1));
     assert!(initial.iter().any(|diagnostic| {
         diagnostic.rule == falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
@@ -1337,7 +1337,7 @@ fn fallback_preserves_pre_discovery_build_failure_until_source_event() {
     let error = state.semantic_snapshot_error.as_ref().unwrap().to_string();
     assert!(error.contains("semantic build regression"));
 
-    state.build_panic = false;
+    state.build_panic = None;
     let repeated = state.analyze(&uri);
     assert!(repeated.iter().any(|diagnostic| {
         diagnostic.rule == falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
@@ -1408,10 +1408,10 @@ fn dependency_probe_workspace(
         serde_json::to_vec(&serde_json::json!({"configVersion":2,"packages":(["external","tool"].map(|name|
             serde_json::json!({"name":name,"rootUri":dependencies.path().join(name),"packageUri":"lib/"})))})).unwrap()).unwrap();
     std::fs::write(app.path().join("falcon.json"),
-        serde_json::to_vec(&serde_json::json!({"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,
+        serde_json::to_vec(&serde_json::json!({"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,
             "correctness":{"unused-dependencies":if enabled {"warn"} else {"off"},"unused-dev-dependencies":if enabled {"warn"} else {"off"}}}}})).unwrap()).unwrap();
     state.reload_config();
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     state.open(
         &uri,
         "import 'package:external/api.dart';\nvoid main() { Api(); }".into(),
@@ -1594,7 +1594,7 @@ fn disabled_dependency_probes_do_not_discover_package_root_contexts() {
         app.path().to_path_buf(),
     );
     state.set_dynamic_file_watching(true);
-    state.resolve_semantics = true;
+    state.configure_resolution(true, false);
     state.cross_file_pass();
     assert!(
         state

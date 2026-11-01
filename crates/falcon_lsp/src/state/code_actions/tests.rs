@@ -97,7 +97,7 @@ fn lazy_actions_require_data_support_and_edit_resolution() {
     state.configure_code_actions(&serde_json::json!({
         "capabilities": { "textDocument": { "codeAction": { "dataSupport": true } } }
     }));
-    assert!(!state.code_action_resolve);
+    assert!(!state.capabilities.code_action_resolve);
 }
 
 #[test]
@@ -143,7 +143,7 @@ fn fallback_commands_require_negotiated_apply_edit_support() {
 #[test]
 fn lazy_safe_fix_all_requires_an_effective_safe_fix() {
     let (_directory, mut state, uri) = fixture();
-    state.code_action_resolve = true;
+    state.capabilities.code_action_resolve = true;
     state.documents.get_mut(&uri).unwrap().last_diagnostics[0]
         .fix
         .as_mut()
@@ -241,7 +241,7 @@ fn cursor_at_diagnostic_end_offers_quick_fix() {
 #[test]
 fn resolving_rejects_changed_cancelled_and_syntax_error_documents() {
     let (_directory, mut state, uri) = fixture();
-    state.code_action_resolve = true;
+    state.capabilities.code_action_resolve = true;
     let action = state
         .code_actions(&params(&uri, Some(SAFE_FIX_ALL)), &|| false)
         .unwrap()
@@ -296,7 +296,7 @@ fn resolving_rejects_changed_cancelled_and_syntax_error_documents() {
 #[test]
 fn resolving_rejects_failed_semantic_snapshot() {
     let (_directory, mut state, uri) = fixture();
-    state.code_action_resolve = true;
+    state.capabilities.code_action_resolve = true;
     let action = state
         .code_actions(&params(&uri, Some(SAFE_FIX_ALL)), &|| false)
         .unwrap()

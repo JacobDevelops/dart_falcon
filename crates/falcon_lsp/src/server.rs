@@ -1218,7 +1218,7 @@ fn execute_command(
 ) -> Result<(), ServerError> {
     let result = serde_json::from_value::<lsp_types::ExecuteCommandParams>(request.params);
     let response = match result {
-        Ok(_) if !state.workspace_apply_edit => Response::new_err(
+        Ok(_) if !state.capabilities.workspace_apply_edit => Response::new_err(
             request.id,
             ErrorCode::RequestFailed as i32,
             "Client does not support workspace/applyEdit".to_owned(),
