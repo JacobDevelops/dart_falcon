@@ -264,6 +264,11 @@ fn read_companion_sources(
         )
     };
     if let Some((libraries, _, _)) = externals
+        && let Some(error) = libraries.worker_failure()
+    {
+        return Err(error);
+    }
+    if let Some((libraries, _, _)) = externals
         && let Some(error) = libraries.source_failure(required)
     {
         return Err(error);

@@ -506,7 +506,24 @@ fn run_with_state(
     let worker = std::thread::Builder::new()
         .name("falcon-lsp-analysis".to_string())
         .spawn(move || {
-            analysis_worker_with(&worker_options, state, watching, &receiver, &sender, |_| {})
+            analysis_worker_with(
+                &worker_options,
+                state,
+                watching,
+                &receiver,
+                &sender,
+                |message| {
+                    #[cfg(all(feature = "test-support", debug_assertions))]
+                    if let Message::Notification(notification) = message
+                        && notification.method == DidOpenTextDocument::METHOD
+                        && notification.params["textDocument"]["uri"]
+                            == "falcon-test:///controller-panic"
+                    {
+                        panic!("controller worker regression");
+                    }
+                    let _ = message;
+                },
+            )
         })?;
     let result = relay(connection, &input, &output);
     drop(input);

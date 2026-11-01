@@ -14,6 +14,11 @@ use super::{AnalysisEnvironment, LanguageVersion};
 use crate::intern::{InternedString, StringInterner};
 use crate::resolve::canonical_or_lexical;
 
+#[cfg(test)]
+thread_local! {
+    static PARSER_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Canonical forms of raw resolution targets; `None` when already canonical.
 type CanonicalPaths = RwLock<FxHashMap<PathBuf, Option<PathBuf>>>;
 
@@ -54,8 +59,7 @@ pub struct ExternalLibrary {
     pub context: Option<usize>,
     /// Smallest configured context in this instance's equivalence group.
     pub copy_context: Option<usize>,
-    /// At least one declared part URI could not be resolved. Resolved paths
-    /// that cannot be read contribute no declarations, as in the analyzer.
+    /// At least one declared part could not supply declarations, so absence is unknown.
     pub has_unresolved_parts: bool,
 }
 
@@ -81,6 +85,7 @@ pub struct ExternalLibraries {
     project_companions: std::collections::BTreeMap<PathBuf, Vec<PathBuf>>,
     companion_dependencies: FxHashMap<PathBuf, CompanionDependencies>,
     source_failures: std::sync::Mutex<Vec<crate::SourceFailure>>,
+    worker_failure: Option<crate::SourceFailure>,
 }
 
 /// Source-validated directives: unchanged snapshots need not reparse unopened parts.
@@ -143,6 +148,21 @@ impl ExternalLibraries {
             .filter(|failure| required(&failure.path))
             .cloned()
             .collect()
+    }
+
+    /// Return a parser worker failure, even when the failing source is optional.
+    pub fn worker_failure(&self) -> Option<crate::SourceFailure> {
+        self.worker_failure.clone()
+    }
+
+    /// Whether acquisition or parser worker failures qualify these external facts.
+    pub fn has_failures(&self) -> bool {
+        self.worker_failure.is_some()
+            || !self
+                .source_failures
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_empty()
     }
 
     fn retain_reachable_failures(
@@ -290,7 +310,7 @@ impl ExternalLibraries {
                     .companion(&failure.path)
                     .is_ok()
             });
-        if recovered {
+        if recovered || self.worker_failure.is_some() {
             *self = Self::default();
         }
         self.canonical_paths
@@ -428,6 +448,10 @@ impl ExternalLibraries {
             .get_mut()
             .unwrap_or_else(PoisonError::into_inner)
             .retain(|failure| failure.path != path);
+        self.worker_failure = self
+            .worker_failure
+            .take()
+            .filter(|failure| failure.path != path);
         let source = match crate::acquire_source(path).companion(path) {
             Ok(Some(source)) => source,
             Ok(None) => {
@@ -455,7 +479,13 @@ impl ExternalLibraries {
             let file = match read_source(environment, path, &source, package_version) {
                 Ok(file) => file,
                 Err(error) => {
-                    environment.warn(path, error);
+                    environment.warn(path, format!("parser worker failed: {error}"));
+                    self.worker_failure = Some(crate::SourceFailure {
+                        path: path.to_path_buf(),
+                        source: Arc::new(std::io::Error::other(format!(
+                            "parser worker failed: {error}"
+                        ))),
+                    });
                     self.companion_dependencies.remove(path);
                     return None;
                 }
@@ -667,15 +697,20 @@ impl ExternalLibraries {
                 if local {
                     self.attempted_project_paths.insert(path.clone());
                 }
-                let loaded = match loaded {
-                    Ok(loaded) => loaded,
-                    Err(error) => {
-                        environment.warn(&path, format!("parser worker failed: {error}"));
+                let (library, dependencies) = match loaded {
+                    Ok(Some(loaded)) => loaded,
+                    Ok(None) => continue,
+                    Err(failure) => {
+                        environment.warn(&failure.path, &failure.source);
+                        if self
+                            .worker_failure
+                            .as_ref()
+                            .is_none_or(|previous| failure.path < previous.path)
+                        {
+                            self.worker_failure = Some(failure);
+                        }
                         continue;
                     }
-                };
-                let Some((library, dependencies)) = loaded else {
-                    continue;
                 };
                 let mut project_owned = false;
                 for file in library.files.iter().filter(|file| is_project(&file.path)) {
@@ -1365,7 +1400,7 @@ fn load_library(
     origin: ExternalOrigin,
     observe_source: &(impl Fn(&Path, &ExternalOrigin) + Sync),
     failures: &std::sync::Mutex<Vec<crate::SourceFailure>>,
-) -> std::io::Result<Option<(ExternalLibrary, Vec<PathBuf>)>> {
+) -> Result<Option<(ExternalLibrary, Vec<PathBuf>)>, crate::SourceFailure> {
     // Each file parses at its package's language version (SDK: current).
     let read = |path: &Path| {
         let package_version = context.and_then(|index| {
@@ -1404,7 +1439,11 @@ fn load_library(
             .filter(|part| seen.insert(part.clone()))
             .collect();
         for part in parts {
-            files.extend(read(&part)?);
+            if let Some(file) = read(&part)? {
+                files.push(file);
+            } else {
+                has_unresolved_parts = true;
+            }
         }
         index += 1;
     }
@@ -1456,7 +1495,7 @@ fn read(
     path: &Path,
     package_version: Option<LanguageVersion>,
     failures: &std::sync::Mutex<Vec<crate::SourceFailure>>,
-) -> std::io::Result<Option<ExternalFile>> {
+) -> Result<Option<ExternalFile>, crate::SourceFailure> {
     let source = match crate::acquire_source(path).companion(path) {
         Ok(Some(source)) => source,
         Ok(None) => return Ok(None),
@@ -1469,7 +1508,14 @@ fn read(
             return Ok(None);
         }
     };
-    read_source(environment, path, &source, package_version).map(Some)
+    read_source(environment, path, &source, package_version)
+        .map(Some)
+        .map_err(|error| crate::SourceFailure {
+            path: path.to_path_buf(),
+            source: Arc::new(std::io::Error::other(format!(
+                "parser worker failed: {error}"
+            ))),
+        })
 }
 
 fn read_source(
@@ -1478,6 +1524,10 @@ fn read_source(
     source: &str,
     package_version: Option<LanguageVersion>,
 ) -> std::io::Result<ExternalFile> {
+    #[cfg(test)]
+    if PARSER_FAILURE.replace(false) {
+        return falcon_dart_parser::with_stack(|| panic!("external parser regression"));
+    }
     let (parsed, errors) = crate::ParsedFile::try_parse_for_package(source, package_version)
         .map_err(|(_, error)| error)?;
     let program = parsed.program();
@@ -1580,6 +1630,95 @@ impl AnalysisEnvironment {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn external_parser_worker_failure_names_the_part_and_recovers_current_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let app = root.join("main.dart");
+        let dependency = root.join("dep.dart");
+        let part = root.join("part.dart");
+        let source = "import 'dep.dart';";
+        std::fs::write(&app, source).unwrap();
+        std::fs::write(&dependency, "part 'part.dart'; class Before {}").unwrap();
+        std::fs::write(&part, "part of 'dep.dart'; class BeforePart {}").unwrap();
+        let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
+        let parsed = falcon_dart_parser::parse(source);
+        let roots = [(app.as_path(), parsed.tree.program(source), source)];
+        let mut libraries = ExternalLibraries::load_with_source_observer(
+            &environment,
+            &roots,
+            |path| path == app,
+            |path, _| {
+                if path == part {
+                    PARSER_FAILURE.set(true);
+                }
+            },
+        );
+        let failure = libraries.worker_failure().unwrap();
+        assert_eq!(failure.path, part);
+        assert!(failure.to_string().contains("external parser regression"));
+        assert!(failure.to_string().contains("parser worker failed"));
+        assert!(libraries.libraries().is_empty());
+        assert!(libraries.source_failure(|_| false).is_none());
+        std::fs::write(&dependency, "part 'part.dart'; class After {}").unwrap();
+        std::fs::write(&part, "part of 'dep.dart'; class AfterPart {}").unwrap();
+        libraries.extend(&environment, &roots, |path| path == app);
+        assert!(libraries.worker_failure().is_none());
+        let library = &libraries.libraries()[0];
+        assert!(!library.has_unresolved_parts);
+        assert_eq!(library.files.len(), 2);
+        assert!(library.files[0].parsed.source().contains("class After {}"));
+        assert!(
+            library.files[1]
+                .parsed
+                .source()
+                .contains("class AfterPart {}")
+        );
+    }
+
+    #[test]
+    fn disappearing_external_part_is_unknown_and_next_generation_uses_current_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let app = root.join("main.dart");
+        let dependency = root.join("dep.dart");
+        let part = root.join("part.dart");
+        let source = "import 'dep.dart';";
+        std::fs::write(&app, source).unwrap();
+        std::fs::write(&dependency, "part 'part.dart'; class Before {}").unwrap();
+        std::fs::write(&part, "part of 'dep.dart'; class BeforePart {}").unwrap();
+        let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
+        let parsed = falcon_dart_parser::parse(source);
+        let roots = [(app.as_path(), parsed.tree.program(source), source)];
+        let libraries = ExternalLibraries::load_with_source_observer(
+            &environment,
+            &roots,
+            |path| path == app,
+            |path, _| {
+                if path == part {
+                    std::fs::remove_file(path).unwrap();
+                }
+            },
+        );
+        assert_eq!(libraries.libraries().len(), 1);
+        assert!(libraries.libraries()[0].has_unresolved_parts);
+        assert_eq!(libraries.libraries()[0].files.len(), 1);
+        assert!(libraries.worker_failure().is_none());
+        std::fs::write(&dependency, "part 'part.dart'; class After {}").unwrap();
+        std::fs::write(&part, "part of 'dep.dart'; class AfterPart {}").unwrap();
+        let recovered = ExternalLibraries::load(&environment, &roots, |path| path == app);
+        let library = &recovered.libraries()[0];
+        assert!(!library.has_unresolved_parts);
+        assert_eq!(library.files.len(), 2);
+        assert!(library.files[0].parsed.source().contains("class After {}"));
+        assert!(
+            library.files[1]
+                .parsed
+                .source()
+                .contains("class AfterPart {}")
+        );
+    }
 
     #[test]
     fn index_inputs_reject_new_context_aliases_for_existing_instances() {

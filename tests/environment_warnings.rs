@@ -413,3 +413,196 @@ fn collected_package_companions_abort_cli_analysis() {
     assert!(stderr.contains("companion.dart"), "{stderr}");
     assert!(stderr.contains("UTF-8"), "{stderr}");
 }
+
+#[test]
+fn future_package_version_warns_once_without_failing_the_cli() {
+    let project = tempdir().unwrap();
+    let configuration = project.path().join(".dart_tool/package_config.json");
+    fs::create_dir(configuration.parent().unwrap()).unwrap();
+    fs::write(
+        configuration,
+        r#"{"configVersion":2,"packages":[{"name":"app","rootUri":"../","languageVersion":"99.0"}]}"#,
+    ).unwrap();
+    fs::write(project.path().join("main.dart"), "void main() {}\n").unwrap();
+    fs::write(
+        project.path().join("falcon.json"),
+        r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false}}}"#,
+    ).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_falcon"))
+        .args(["check", ".", "--format", "json"])
+        .current_dir(project.path())
+        .env_remove("DART_SDK")
+        .env_remove("FLUTTER_ROOT")
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
+        serde_json::json!([]),
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(
+        stderr.matches("unsupported Dart 99.0").count(),
+        1,
+        "{stderr}"
+    );
+    assert!(stderr.contains("latest supported Dart 3.13"), "{stderr}");
+}
+
+#[test]
+fn broken_package_config_cannot_prove_a_dependency_unused_and_recovery_is_current() {
+    for broken in [
+        b"{".as_slice(),
+        &[0xff],
+        b"oversized",
+        br#"{"configVersion":2,"packages":[{"name":"app","rootUri":"../"},{"name":"native"}]}"#,
+    ] {
+        let project = tempdir().unwrap();
+        let configuration = project.path().join(".dart_tool/package_config.json");
+        fs::create_dir(configuration.parent().unwrap()).unwrap();
+        fs::write(&configuration, broken).unwrap();
+        if broken == b"oversized" {
+            fs::File::options()
+                .write(true)
+                .open(&configuration)
+                .unwrap()
+                .set_len(16 * 1024 * 1024 + 1)
+                .unwrap();
+        }
+        fs::write(project.path().join("main.dart"), "void main() {}\n").unwrap();
+        fs::write(
+            project.path().join("pubspec.yaml"),
+            "name: app\ndependencies:\n  native: any\n",
+        )
+        .unwrap();
+        fs::write(project.path().join("falcon.json"), r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-dependencies":"warn"}}}}"#).unwrap();
+        let run = || {
+            Command::new(env!("CARGO_BIN_EXE_falcon"))
+                .args(["check", ".", "--format", "json"])
+                .current_dir(project.path())
+                .env_remove("DART_SDK")
+                .env_remove("FLUTTER_ROOT")
+                .env("PATH", "")
+                .output()
+                .unwrap()
+        };
+        let failed = run();
+        assert!(failed.status.success(), "{failed:?}");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&failed.stdout).unwrap(),
+            serde_json::json!([])
+        );
+        let warning = String::from_utf8_lossy(&failed.stderr);
+        assert!(warning.contains("package_config.json"), "{warning}");
+        fs::write(&configuration, r#"{"configVersion":2,"packages":[{"name":"app","rootUri":"../"},{"name":"native","rootUri":"../native/"}]}"#).unwrap();
+        fs::create_dir(project.path().join("native")).unwrap();
+        fs::write(project.path().join("native/pubspec.yaml"), "name: native\n").unwrap();
+        let recovered = run();
+        assert!(recovered.status.success(), "{recovered:?}");
+        let diagnostics: serde_json::Value = serde_json::from_slice(&recovered.stdout).unwrap();
+        assert_eq!(diagnostics.as_array().unwrap().len(), 1, "{diagnostics}");
+        assert_eq!(diagnostics[0]["rule"], "unused-dependencies");
+        assert!(
+            diagnostics[0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("native")
+        );
+    }
+}
+
+#[test]
+fn optional_external_parts_preserve_cross_file_eligibility_and_recover_current_diagnostics() {
+    for failure in ["missing", "invalid-utf8", "oversized", "unreadable"] {
+        let project = tempdir().unwrap();
+        let dependency = tempdir().unwrap();
+        let source = "import 'package:dep/dep.dart' as dep;\n/// [dep.Missing]\nclass App {}\nvoid main() {}\n";
+        fs::write(project.path().join("main.dart"), source).unwrap();
+        fs::create_dir_all(project.path().join("lib/src")).unwrap();
+        fs::write(
+            project.path().join("lib/src/orphan.dart"),
+            "class Orphan {}",
+        )
+        .unwrap();
+        fs::write(project.path().join("pubspec.yaml"), "name: app\n").unwrap();
+        fs::create_dir(project.path().join(".dart_tool")).unwrap();
+        fs::write(project.path().join(".dart_tool/package_config.json"), format!(
+            r#"{{"configVersion":2,"packages":[{{"name":"app","rootUri":"../","packageUri":"lib/"}},{{"name":"dep","rootUri":"file://{}/","packageUri":"lib/"}}]}}"#,
+            dependency.path().display(),
+        )).unwrap();
+        fs::create_dir(dependency.path().join("lib")).unwrap();
+        fs::write(
+            dependency.path().join("lib/dep.dart"),
+            "part 'part.dart'; class Known {}",
+        )
+        .unwrap();
+        let part = dependency.path().join("lib/part.dart");
+        match failure {
+            "missing" => {}
+            "invalid-utf8" => fs::write(&part, [0xff]).unwrap(),
+            "oversized" => fs::File::create(&part)
+                .unwrap()
+                .set_len(u64::from(u32::MAX) + 1)
+                .unwrap(),
+            "unreadable" => {
+                #[cfg(unix)]
+                std::os::unix::fs::symlink("part.dart", &part).unwrap();
+                #[cfg(not(unix))]
+                continue;
+            }
+            _ => unreachable!(),
+        }
+        fs::write(project.path().join("falcon.json"), r#"{"linter":{"rules":{"recommended":false,"correctness":{"comment-references":"warn"}}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#).unwrap();
+        let run = || {
+            Command::new(env!("CARGO_BIN_EXE_falcon"))
+                .args(["check", ".", "--format", "json"])
+                .current_dir(project.path())
+                .env_remove("DART_SDK")
+                .env_remove("FLUTTER_ROOT")
+                .env("PATH", "")
+                .output()
+                .unwrap()
+        };
+        let failed = run();
+        assert!(failed.status.success(), "{failure}: {failed:?}");
+        let diagnostics: serde_json::Value = serde_json::from_slice(&failed.stdout).unwrap();
+        let rules: Vec<_> = diagnostics
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|diagnostic| diagnostic["rule"].as_str().unwrap())
+            .collect();
+        assert_eq!(rules, ["unused-files"], "{failure}: {diagnostics}");
+        if failure != "missing" {
+            let warning = String::from_utf8_lossy(&failed.stderr);
+            assert!(
+                warning.contains(&*part.to_string_lossy()),
+                "{failure}: {warning}"
+            );
+        }
+        if part.symlink_metadata().is_ok() {
+            fs::remove_file(&part).unwrap();
+        }
+        fs::write(&part, "part of 'dep.dart'; class Recovered {}").unwrap();
+        let recovered = run();
+        assert!(recovered.status.success(), "{failure}: {recovered:?}");
+        let diagnostics: serde_json::Value = serde_json::from_slice(&recovered.stdout).unwrap();
+        let mut rules: Vec<_> = diagnostics
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|diagnostic| diagnostic["rule"].as_str().unwrap())
+            .collect();
+        rules.sort_unstable();
+        assert_eq!(
+            rules,
+            ["comment-references", "unused-files"],
+            "{failure}: {diagnostics}"
+        );
+        assert!(diagnostics.as_array().unwrap().iter().any(|diagnostic| {
+            diagnostic["rule"] == "comment-references"
+                && diagnostic["message"].as_str().unwrap().contains("Missing")
+        }));
+    }
+}

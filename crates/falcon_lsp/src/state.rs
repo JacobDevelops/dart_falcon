@@ -1554,7 +1554,7 @@ impl LspState {
         source: Box<str>,
         package_version: Option<LanguageVersion>,
         source_error: Option<Diagnostic>,
-        parser_failure_path: Option<&Path>,
+        #[cfg(test)] parser_failure_path: Option<&Path>,
     ) -> DocumentParse {
         if let Some(diagnostic) = source_error {
             return DocumentParse {
@@ -1573,6 +1573,7 @@ impl LspState {
             };
         }
         let result = ParsedFile::try_parse_for_package(source, package_version);
+        #[cfg(test)]
         let result = Self::inject_parser_failure(path, parser_failure_path, result);
         document_parse_result(path, result)
     }
@@ -1589,16 +1590,13 @@ impl LspState {
         let package_version = self.environment.package_language_version(&path);
         let language_version = self.environment.language_version(&path, &text);
         let source = text.into_boxed_str();
-        #[cfg(test)]
-        let parser_failure_path = self.parser_failure_path.as_deref();
-        #[cfg(not(test))]
-        let parser_failure_path = None;
         let parsed = Self::parse_document(
             &path,
             source,
             package_version,
             source_error,
-            parser_failure_path,
+            #[cfg(test)]
+            self.parser_failure_path.as_deref(),
         );
         let syntax_diagnostics = parsed.diagnostics;
         let next_parsed = Arc::new(parsed.parsed);
@@ -1666,16 +1664,13 @@ impl LspState {
         self.refresh_environment(std::iter::once(path.as_path()));
         let package_version = self.environment.package_language_version(&path);
         let source = text.into_boxed_str();
-        #[cfg(test)]
-        let parser_failure_path = self.parser_failure_path.as_deref();
-        #[cfg(not(test))]
-        let parser_failure_path = None;
         let parsed = Self::parse_document(
             &path,
             source,
             package_version,
             source_error,
-            parser_failure_path,
+            #[cfg(test)]
+            self.parser_failure_path.as_deref(),
         );
         let doc = self.documents.get_mut(uri).expect("document checked above");
         let next_parsed = Arc::new(parsed.parsed);
@@ -2117,21 +2112,12 @@ impl LspState {
             self.cross_file_schedule = CrossFileSchedule::Pending;
             return Vec::new();
         }
-        if !self.cross_file_rules_enabled() {
-            return self
-                .published_manifests
-                .drain()
-                .map(|(uri, _)| (uri, Vec::new()))
-                .collect();
-        }
         self.cross_file_worker_failed = false;
         let mut cross_file_map = self.cross_file_diagnostics();
         self.refresh_asset_paths();
         self.add_incomplete_diagnostics(&mut cross_file_map);
         let mut published = self.document_cross_file_publications(&cross_file_map);
-        if !self.cross_file_worker_failed {
-            published.extend(self.manifest_publications(cross_file_map));
-        }
+        published.extend(self.manifest_publications(cross_file_map));
         published
     }
 
@@ -2254,7 +2240,7 @@ impl LspState {
             .map(|uri| uri.to_string())
     }
 
-    fn add_incomplete_diagnostics(&mut self, output: &mut HashMap<String, Vec<Diagnostic>>) {
+    fn incomplete_failures(&self) -> HashMap<PathBuf, (String, bool)> {
         let mut failures: HashMap<_, _> = self
             .required_source_failures
             .iter()
@@ -2266,11 +2252,21 @@ impl LspState {
         {
             failures.insert(failure.path.clone(), (failure.to_string(), false));
         }
+        for failure in self.cross_file_external_cache.iter().flat_map(|cache| {
+            cache
+                .libraries
+                .source_failures(|path| self.environment.project_source_required(path, &[]))
+        }) {
+            failures.insert(failure.path.clone(), (failure.to_string(), false));
+        }
         for failure in &self.project_discovery_failures {
             let (falcon_project::DiscoveryFailure::Metadata { path, .. }
             | falcon_project::DiscoveryFailure::Traversal { path, .. }) = failure;
             let traversal = matches!(failure, falcon_project::DiscoveryFailure::Traversal { .. });
             failures.insert(path.clone(), (failure.to_string(), traversal));
+        }
+        if !self.cross_file_rules_enabled() && !self.resolve_semantics {
+            failures.clear();
         }
         for doc in self
             .documents
@@ -2287,12 +2283,52 @@ impl LspState {
                 );
             }
         }
+        if let Some(error) = &self.semantic_snapshot_error {
+            let path = self.workspace_root.clone();
+            failures.insert(path, (format!("analysis worker failed: {error}"), true));
+        }
+        if self.cross_file_worker_failed {
+            failures
+                .entry(self.workspace_root.clone())
+                .or_insert_with(|| ("cross-file analysis worker failed".to_owned(), true));
+        }
+        for doc in self.documents.values() {
+            if let Some(diagnostic) = doc.last_diagnostics.iter().find(|diagnostic| {
+                diagnostic.rule == falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
+            }) {
+                failures.insert(
+                    doc.path.clone(),
+                    (
+                        format!("{}: {}", doc.path.display(), diagnostic.message),
+                        false,
+                    ),
+                );
+            }
+        }
+        failures
+    }
+
+    fn add_incomplete_diagnostics(&mut self, output: &mut HashMap<String, Vec<Diagnostic>>) {
+        let failures = self.incomplete_failures();
         if failures.is_empty() {
             self.incomplete_episode = IncompleteEpisode::Complete;
             return;
         }
         if self.incomplete_episode == IncompleteEpisode::Complete {
             self.incomplete_episode = IncompleteEpisode::Pending;
+        }
+        for uri in self.published_manifests.keys() {
+            let path = uri_to_path(uri);
+            output
+                .entry(path.to_string_lossy().into_owned())
+                .or_default()
+                .push(Diagnostic::new(
+                    falcon_diagnostics::INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID,
+                    falcon_diagnostics::Severity::Warning,
+                    "Analysis is incomplete; cross-file results are suppressed.",
+                    path.to_string_lossy(),
+                    falcon_syntax::cst::Span::new(0, 0),
+                ));
         }
         let packages = package_identities(
             self.documents
@@ -2388,6 +2424,7 @@ impl LspState {
                 falcon_analyze::with_rules_stack(|| self.ensure_cross_file_indexes(files))
             {
                 warn!("cross-file index worker failed: {error}");
+                self.reset_external_layer();
                 // Per-file publication carries the failure until inputs change, without reloading.
                 self.semantic_snapshot = None;
                 self.previous_semantic_snapshot = None;
@@ -2395,9 +2432,28 @@ impl LspState {
                 return false;
             }
         }
+        if let Some(failure) = self.external_libraries.worker_failure().or_else(|| {
+            self.cross_file_external_cache
+                .as_ref()
+                .and_then(|cache| cache.libraries.worker_failure())
+        }) {
+            self.record_semantic_worker_failure(
+                &failure.path,
+                std::io::Error::other(failure.source.to_string()),
+            );
+            self.cross_file_index_cache = None;
+            return false;
+        }
         if let Some(error) = self
             .external_libraries
             .source_failure(|path| self.environment.project_source_required(path, &[]))
+            .or_else(|| {
+                self.cross_file_external_cache.as_ref().and_then(|cache| {
+                    cache
+                        .libraries
+                        .source_failure(|path| self.environment.project_source_required(path, &[]))
+                })
+            })
         {
             warn!("{error}");
             self.semantic_source_incomplete = true;
@@ -2414,7 +2470,12 @@ impl LspState {
         // Rejected references are unknown, not absent: a partial workspace must
         // not produce unused-file/declaration diagnostics for otherwise valid files.
         if !self.cross_file_rules_enabled()
-            || self.documents.values().any(|doc| doc.parsed.is_rejected())
+            || self.documents.values().any(|doc| {
+                doc.parsed.is_rejected()
+                    || doc.last_diagnostics.iter().any(|diagnostic| {
+                        diagnostic.rule == falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
+                    })
+            })
         {
             return HashMap::new();
         }
@@ -2493,14 +2554,7 @@ impl LspState {
             Ok(diags) => diags,
             Err(error) => return self.cross_file_worker_diagnostics(&error),
         };
-        let mut roots = self.environment.dependency_input_watch_roots();
-        roots.extend(self.environment.dependency_input_watch_files());
-        roots.sort();
-        roots.dedup();
-        if roots != self.dependency_probe_roots {
-            self.dependency_probe_roots = roots;
-            self.watched_dependency_generation += 1;
-        }
+        self.refresh_dependency_probe_roots();
         let mut grouped: HashMap<String, Vec<Diagnostic>> = HashMap::new();
         for diag in diags {
             grouped
@@ -2515,6 +2569,17 @@ impl LspState {
             }
         }
         grouped
+    }
+
+    fn refresh_dependency_probe_roots(&mut self) {
+        let mut roots = self.environment.dependency_input_watch_roots();
+        roots.extend(self.environment.dependency_input_watch_files());
+        roots.sort();
+        roots.dedup();
+        if roots != self.dependency_probe_roots {
+            self.dependency_probe_roots = roots;
+            self.watched_dependency_generation += 1;
+        }
     }
 
     fn cross_file_worker_diagnostics(
@@ -2762,6 +2827,9 @@ impl LspState {
         }) {
             cache.roots = graph_roots;
             cache.watched_paths = watched_paths;
+            if cache.libraries.has_failures() || libraries.has_failures() {
+                cache.libraries = libraries;
+            }
         } else {
             let indexes = (!depends_on_project).then(|| {
                 ExternalIndexCache::build(ExternalSources {
@@ -2923,6 +2991,7 @@ impl LspState {
         }
     }
 
+    #[cfg(test)]
     fn inject_parser_failure(
         path: &Path,
         parser_failure_path: Option<&Path>,
@@ -3127,6 +3196,12 @@ impl LspState {
         files: &mut Vec<ProjectFile>,
     ) -> Option<(PathBuf, std::io::Error)> {
         self.semantic_source_incomplete = false;
+        if let Some(failure) = self.external_libraries.worker_failure() {
+            return Some((
+                failure.path,
+                std::io::Error::other(failure.source.to_string()),
+            ));
+        }
         let required = |path: &Path| self.environment.project_source_required(path, &[]);
         if let Some(error) = self.external_libraries.source_failure(required) {
             warn!("{error}");
@@ -3432,16 +3507,13 @@ impl LspState {
             if *is_dart {
                 self.disk_parse_count += 1;
             }
-            #[cfg(test)]
-            let parser_failure_path = self.parser_failure_path.as_deref();
-            #[cfg(not(test))]
-            let parser_failure_path = None;
             let file = match Self::parse_project_source(
                 path,
                 source,
                 language_version,
                 *is_dart,
-                parser_failure_path,
+                #[cfg(test)]
+                self.parser_failure_path.as_deref(),
             ) {
                 Ok(file) => file,
                 Err(error) => {
@@ -3641,13 +3713,14 @@ impl LspState {
         source: String,
         language_version: Option<LanguageVersion>,
         is_dart: bool,
-        parser_failure_path: Option<&Path>,
+        #[cfg(test)] parser_failure_path: Option<&Path>,
     ) -> std::io::Result<ProjectFile> {
         if !is_dart {
             return Ok(manifest_file(path.to_path_buf(), source));
         }
         let result = ParsedFile::try_parse_for_package(source, language_version);
         let result = result.map_err(|(_, error)| error);
+        #[cfg(test)]
         let result = if parser_failure_path == Some(path) {
             falcon_dart_parser::with_stack(|| panic!("project parser regression"))
         } else {

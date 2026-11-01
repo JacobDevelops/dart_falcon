@@ -34,7 +34,7 @@ These entries describe implemented foundation, not acceptance of the open items.
 
 ### V1-1 — Make analysis completeness explicit
 
-- [ ] Agree and implement a shared completeness contract. The required-project-source
+- [x] Agree and implement a shared completeness contract. The required-project-source
   first slice uses `falcon_analyze::SourceAcquisition` to distinguish acquired text,
   oversized sources and failed reads retaining their I/O error kind.
   CLI collection aborts on any required source read failure, naming the path and
@@ -65,7 +65,8 @@ These entries describe implemented foundation, not acceptance of the open items.
   optional and warn. Project autofix also discovers enclosing pub/Melos workspaces.
   Missing, directory and not-a-directory directive targets remain silently absent;
   disappearance after required-source discovery retains the earlier V1-1a contract.
-  External-source completeness remains open. Deterministic companion tests cover
+  External libraries with unavailable parts retain unknown, not absent, names and
+  members; readable declarations remain usable. Deterministic companion tests cover
   invalid UTF-8 and sparse oversized files, CLI current-directory/path-spelling
   invariance, errors/nonzero exits and actual `unnecessary-new` write controls,
   direct autofix and LSP fix-all refusal, and LSP per-file semantic retention/cross-file
@@ -104,10 +105,51 @@ These entries describe implemented foundation, not acceptance of the open items.
   and a disabled cross-file configuration with semantic rules. State tests cover
   required companion acquisition (invalid UTF-8 and oversized) at directive ranges,
   rejected open documents at line zero, and deterministic symlink-loop discovery
-  anchors and episodes. Optional/external metadata and unsupported/failed analysis
-  still need the broader completeness contract, including worker-failure acceptance
-  beyond rejected open documents. V1-1 remains unchecked; these required-source
-  slices do not certify the overall acceptance below.
+  anchors and episodes.
+  Shared completeness contract, including the remaining external/worker classes:
+  - Required source/discovery failures abort CLI analysis nonzero with path/reason,
+    before a clean summary. The LSP remains live, publishes `incomplete-analysis`,
+    clears obsolete cross-file findings, and suppresses the entire cross-file pass.
+    Recovery re-enables rules against the current source, not retained old findings.
+  - Optional metadata and external path-dependency/SDK/pub-cache reads warn without
+    failing the project. Missing/non-file directive targets remain silently absent,
+    but unavailable external parts make dependent name/member absence unknown.
+    Manifest snapshots, package configuration, analysis-options includes, localization
+    inputs, native-plugin/resource/build-tool facts and barrel-export inputs retain
+    unknown outcomes: their dependent checks skip or conservatively exempt, never
+    infer absence from an acquisition/parse failure. An invalid package configuration,
+    including partially invalid entries, cannot establish an unused dependency.
+    Independent rules remain eligible; optional failures do not publish
+    `incomplete-analysis` or turn the CLI exit nonzero.
+  - Caught parser/rule/semantic-index/cross-file worker failures are never optional:
+    CLI exits nonzero even when the configured diagnostic exit code is zero.
+    Failure diagnostics name the source and worker failure; the LSP adds
+    `incomplete-analysis`, suppresses cross-file rules, and replaces stale manifest
+    publications too. Successful retries rebuild failed semantic/external facts and
+    publish current diagnostics. Parser injection is `cfg(test)` only.
+  - Fatal controller-thread panics and native stack-overflow aborts terminate the
+    process nonzero, rather than leaving a live server with stale publications.
+    Cargo profiles retain unwinding; the relay propagates the controller join error
+    without waiting for client shutdown. `controller_panic_exits_nonzero_without_waiting_for_client_shutdown`
+    spawns the real binary with a test-only/debug-only seam and holds stdin open.
+    The parser's 150-frame guard and `recursive_robustness_tests`/deep interpolation
+    regressions prevent adversarial nesting from exhausting the native stack.
+    Recovery from fatal termination is a fresh process/client restart.
+  - No located SDK is supported syntax/model-facts mode, not a required-source
+    failure; unresolved SDK facts remain unknown. Future package language versions
+    warn once through CLI/LSP configuration warnings and use the latest supported
+    version, without marking analysis incomplete.
+  Evidence includes CLI/LSP optional-external-part tests for disappearing/missing,
+  invalid-UTF-8, oversized and deterministic unreadable symlink-loop sources: an
+  independent `unused-files` finding remains eligible while an unknown doc reference
+  is exempt, then recovery produces a new `comment-references` finding. SDK external
+  part tests assert `DocName::Unknown`; compact external tests assert unknown members.
+  External parser panic/disappearance tests require fresh recovered declarations.
+  CLI completion tests and LSP file-rule, cross-file-rule, project-parser and semantic
+  panic tests independently assert nonzero/qualification, cross-file suppression and
+  current-source recovery. Broken package-config tests assert warning/exit/publication
+  behavior and an independently expected new unused-dependency finding after repair;
+  future-version tests assert warning-once behavior and no incomplete signal.
 - Acceptance: unreadable, disappearing, invalid-UTF-8 and oversized sources plus
   worker failure cannot yield an unqualified clean complete-project result;
   recovery yields current diagnostics, not stale results. Assert exit/publication

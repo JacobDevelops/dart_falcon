@@ -429,7 +429,7 @@ pub fn complete_analysis(
         .iter()
         .any(|d| d.rule == RULES_THREAD_ERROR_DIAGNOSTIC_ID);
     falcon_rules::apply_severities(diagnostics, config);
-    if !registry.is_empty() {
+    if !failed && !registry.is_empty() {
         match cross_file_diagnostics(environment, registry, files, config, indexes) {
             Ok(cross_file) => diagnostics.extend(cross_file),
             Err(error) => {

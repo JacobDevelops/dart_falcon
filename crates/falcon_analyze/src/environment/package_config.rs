@@ -28,6 +28,7 @@ pub struct PackageConfig {
     pub packages: Vec<ConfiguredPackage>,
     /// `flutterRoot`, written by `flutter pub get`.
     pub flutter_root: Option<PathBuf>,
+    complete: bool,
 }
 
 impl PackageConfig {
@@ -87,6 +88,7 @@ impl PackageConfig {
             return None;
         }
         let base = absolute(path.parent()?);
+        let mut complete = true;
         let packages = json
             .get("packages")?
             .as_array()?
@@ -104,9 +106,18 @@ impl PackageConfig {
                     Some(value) => {
                         let version = value.as_str().and_then(LanguageVersion::parse);
                         if version.is_none() {
+                            complete = false;
                             report(format!("invalid languageVersion in package entry {index}"));
                         }
-                        version
+                        version.map(|version| {
+                            if version > LanguageVersion::CURRENT {
+                                report(format!(
+                                    "package {name} requests unsupported Dart {version}; analysis uses latest supported Dart {}",
+                                    LanguageVersion::CURRENT,
+                                ));
+                            }
+                            version.min(LanguageVersion::CURRENT)
+                        })
                     }
                     None => None,
                 };
@@ -118,6 +129,7 @@ impl PackageConfig {
                 })
                 })();
                 if parsed.is_none() {
+                    complete = false;
                     report(format!("invalid package entry {index}: expected name and resolvable rootUri/packageUri"));
                 }
                 parsed
@@ -131,7 +143,14 @@ impl PackageConfig {
             path: path.to_path_buf(),
             packages,
             flutter_root,
+            complete,
         })
+    }
+
+    /// Whether every package entry supplied usable identity and language facts.
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        self.complete
     }
 
     #[must_use]
@@ -358,6 +377,27 @@ mod tests {
             None
         );
         assert_eq!(config.resolve_package_uri("package:missing/a.dart"), None);
+    }
+
+    #[test]
+    fn future_package_versions_warn_and_use_latest_supported_version() {
+        let mut warnings = Vec::new();
+        let config = PackageConfig::parse_with_report(
+            Path::new("/work/.dart_tool/package_config.json"),
+            r#"{"configVersion":2,"packages":[{"name":"app","rootUri":"../","languageVersion":"99.0"}]}"#,
+            |warning| warnings.push(warning),
+        ).unwrap();
+        assert_eq!(
+            config.language_version(Path::new("/work/main.dart")),
+            Some(LanguageVersion::CURRENT),
+        );
+        assert_eq!(
+            warnings,
+            [format!(
+                "package app requests unsupported Dart 99.0; analysis uses latest supported Dart {}",
+                LanguageVersion::CURRENT,
+            )]
+        );
     }
 
     #[test]

@@ -756,7 +756,12 @@ mod file_watching_tests {
                 json!({"changes":[{"uri":broken_uri,"type":1}]}),
             );
             let suppressed = publications(&client.drain());
-            assert!(suppressed.iter().any(|publication| publication.uri == uri && publication.diagnostics.is_empty()));
+            let manifest_publication = suppressed
+                .iter()
+                .find(|publication| publication.uri == uri)
+                .unwrap();
+            assert_eq!(manifest_publication.diagnostics.len(), 1);
+            assert!(has_rule(manifest_publication, "incomplete-analysis"));
             std::fs::remove_file(&broken).unwrap();
             client.notify(
                 "workspace/didChangeWatchedFiles",

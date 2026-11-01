@@ -301,6 +301,7 @@ dependencies = [
  "falcon_config",
  "falcon_dart_parser",
  "falcon_diagnostics",
+ "falcon_lsp",
  "falcon_project",
  "falcon_rules",
  "serde_json",

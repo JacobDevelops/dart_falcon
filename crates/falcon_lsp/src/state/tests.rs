@@ -1,4 +1,7 @@
 use super::*;
+use falcon_diagnostics::{
+    INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID, RULES_THREAD_ERROR_DIAGNOSTIC_ID, Severity, Span,
+};
 
 #[test]
 fn incomplete_source_diagnostics_choose_precise_anchors_and_deduplicate_paths() {
@@ -1682,7 +1685,7 @@ mod source_size_tests {
     }
 
     #[test]
-    fn cross_rule_worker_failure_retains_manifest_publication_until_recovery() {
+    fn cross_rule_worker_failure_qualifies_manifest_publication_until_recovery() {
         struct Panics;
         impl falcon_analyze::CrossFileRule for Panics {
             fn prepare_project(
@@ -1710,16 +1713,22 @@ mod source_size_tests {
                     .iter()
                     .any(|diagnostic| diagnostic.rule == "secure-pubspec-urls")
         }));
-        let retained = state.published_manifests.clone();
         assert!(state.cross_file_pass().is_empty());
         state
             .cross_file_rules
             .register("secure-pubspec-urls", Box::new(Panics));
-        assert!(state.cross_file_pass().is_empty());
+        let failed = state.cross_file_pass();
         assert!(state.cross_file_worker_failed);
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0].0, uri);
+        assert_eq!(failed[0].1.len(), 1);
         assert_eq!(
-            serde_json::to_value(&state.published_manifests).unwrap(),
-            serde_json::to_value(retained).unwrap()
+            failed[0].1[0].rule,
+            falcon_diagnostics::INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID
+        );
+        assert_eq!(
+            state.published_manifests[&uri][0].rule,
+            falcon_diagnostics::INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID
         );
         state.reload_config();
         std::fs::write(&manifest, "name: app\nhomepage: https://example.com\n").unwrap();
@@ -1962,6 +1971,12 @@ mod source_size_tests {
                     .collect();
                 assert_eq!(failures.len(), 1, "{diagnostics:?}");
                 assert!(failures[0].message.contains("project parser regression"));
+                assert!(
+                    diagnostics.iter().any(|diagnostic| {
+                        diagnostic.rule == falcon_diagnostics::INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID
+                    }),
+                    "{diagnostics:?}"
+                );
             }
             assert_eq!(runs.load(Ordering::SeqCst), 0);
             assert!(state.semantic_snapshot.is_none());
@@ -2024,6 +2039,13 @@ mod source_size_tests {
                 .collect();
             assert_eq!(failures.len(), 1, "{:?}", published[0].1);
             assert!(failures[0].message.contains("semantic build regression"));
+            assert!(
+                published[0].1.iter().any(|diagnostic| {
+                    diagnostic.rule == falcon_diagnostics::INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID
+                }),
+                "{:?}",
+                published[0].1
+            );
             assert_eq!(runs.load(Ordering::SeqCst), 0);
             assert!(
                 state
@@ -5369,5 +5391,241 @@ mod environment_regressions {
             assert_eq!(leaf.files.len(), 2);
             assert_eq!(leaf.files[1].path, part);
         }
+    }
+}
+
+#[test]
+fn file_rule_worker_failure_qualifies_publication_and_recovers_current_source() {
+    struct Panics;
+    impl falcon_analyze::Rule for Panics {
+        fn prepare<'a>(
+            &self,
+            _: falcon_syntax::cst::Program<'a>,
+            _: &'a falcon_analyze::AnalyzeContext<'a>,
+        ) -> falcon_analyze::RulePreparation<'a> {
+            panic!("file worker regression");
+        }
+    }
+    struct CurrentSource;
+    impl falcon_analyze::CrossFileRule for CurrentSource {
+        fn prepare_project(
+            &self,
+            _: &AnalysisEnvironment,
+            files: &[ProjectFile],
+            _: &FalconConfig,
+            _: Option<&SemanticIndexes>,
+        ) -> Vec<Diagnostic> {
+            vec![Diagnostic::new(
+                "current-source",
+                Severity::Warning,
+                files[0].source(),
+                files[0].path().to_string_lossy(),
+                Span { start: 0, end: 0 },
+            )]
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("main.dart"), "class Before {}").unwrap();
+    let uri = format!("file://{}", directory.path().join("main.dart").display());
+    let mut state = LspState::new_from(None, |_| None, directory.path().to_path_buf());
+    state.rules = RuleRegistry::new();
+    state.rules.register("panics", Box::new(Panics));
+    state.cross_file_rules = CrossFileRuleRegistry::new();
+    state
+        .cross_file_rules
+        .register("current-source", Box::new(CurrentSource));
+    state.open(&uri, "class Before {}".into(), Some(1));
+    state.analyze(&uri);
+    let failed = state.cross_file_pass();
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0].0, uri);
+    assert!(failed[0].1.iter().any(|diagnostic| {
+        diagnostic.rule == RULES_THREAD_ERROR_DIAGNOSTIC_ID
+            && diagnostic.message.contains("file worker regression")
+    }));
+    assert!(
+        failed[0]
+            .1
+            .iter()
+            .any(|diagnostic| { diagnostic.rule == INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID })
+    );
+    assert!(
+        !failed[0]
+            .1
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "current-source")
+    );
+    state.rules = RuleRegistry::new();
+    state.open(&uri, "class After {}".into(), Some(2));
+    state.analyze(&uri);
+    let recovered = state.cross_file_pass();
+    assert_eq!(recovered.len(), 1);
+    assert_eq!(recovered[0].0, uri);
+    assert_eq!(recovered[0].1.len(), 1);
+    assert_eq!(recovered[0].1[0].rule, "current-source");
+    assert_eq!(recovered[0].1[0].message, "class After {}");
+}
+
+#[test]
+fn future_package_version_warning_is_once_and_does_not_mark_analysis_incomplete() {
+    let directory = tempfile::tempdir().unwrap();
+    let configuration = directory.path().join(".dart_tool/package_config.json");
+    std::fs::create_dir(configuration.parent().unwrap()).unwrap();
+    std::fs::write(
+        &configuration,
+        r#"{"configVersion":2,"packages":[{"name":"app","rootUri":"../","languageVersion":"99.0"}]}"#,
+    ).unwrap();
+    let source = directory.path().join("main.dart");
+    std::fs::write(&source, "void main() {}\n").unwrap();
+    let uri = format!("file://{}", source.display());
+    let mut state = LspState::new_from(None, |_| None, directory.path().to_path_buf());
+    state.open(&uri, "void main() {}\n".into(), Some(1));
+    state.analyze(&uri);
+    let messages = state.take_config_messages();
+    let warnings: Vec<_> = messages
+        .iter()
+        .filter(|message| message.message.contains("unsupported Dart 99.0"))
+        .collect();
+    assert_eq!(warnings.len(), 1, "{messages:?}");
+    assert_eq!(warnings[0].typ, lsp_types::MessageType::WARNING);
+    assert!(warnings[0].message.contains("latest supported Dart 3.13"));
+    let publications = state.cross_file_pass();
+    assert!(
+        !publications
+            .iter()
+            .flat_map(|(_, diagnostics)| diagnostics)
+            .any(|diagnostic| { diagnostic.rule == INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID })
+    );
+    state.analyze(&uri);
+    assert_eq!(state.take_config_messages(), []);
+    assert!(state.take_incomplete_message().is_none());
+}
+
+#[test]
+fn broken_package_config_exempts_dependency_until_current_metadata_recovers() {
+    let directory = tempfile::tempdir().unwrap();
+    let configuration = directory.path().join(".dart_tool/package_config.json");
+    std::fs::create_dir(configuration.parent().unwrap()).unwrap();
+    std::fs::write(&configuration, "{").unwrap();
+    let manifest = directory.path().join("pubspec.yaml");
+    std::fs::write(&manifest, "name: app\ndependencies:\n  native: any\n").unwrap();
+    std::fs::write(directory.path().join("falcon.json"), r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-dependencies":"warn"}}}}"#).unwrap();
+    let source = directory.path().join("main.dart");
+    std::fs::write(&source, "void main() {}\n").unwrap();
+    let uri = format!("file://{}", source.display());
+    let mut state = LspState::new_from(None, |_| None, directory.path().to_path_buf());
+    state.open(&uri, "void main() {}\n".into(), Some(1));
+    state.analyze(&uri);
+    let publications = state.cross_file_pass();
+    assert!(
+        publications
+            .iter()
+            .all(|(_, diagnostics)| diagnostics.is_empty()),
+        "{publications:?}"
+    );
+    assert!(state.take_config_messages().iter().any(|message| {
+        message.typ == lsp_types::MessageType::WARNING
+            && message.message.contains("package_config.json")
+    }));
+    std::fs::create_dir(directory.path().join("native")).unwrap();
+    std::fs::write(
+        directory.path().join("native/pubspec.yaml"),
+        "name: native\n",
+    )
+    .unwrap();
+    std::fs::write(&configuration, r#"{"configVersion":2,"packages":[{"name":"app","rootUri":"../"},{"name":"native","rootUri":"../native/"}]}"#).unwrap();
+    state.watched_files_changed(&[configuration]);
+    state.analyze(&uri);
+    let recovered = state.cross_file_pass();
+    let manifest_uri = format!("file://{}", manifest.display());
+    let diagnostics = &recovered
+        .iter()
+        .find(|(uri, _)| uri == &manifest_uri)
+        .unwrap()
+        .1;
+    assert_eq!(diagnostics.len(), 1, "{recovered:?}");
+    assert_eq!(diagnostics[0].rule, "unused-dependencies");
+    assert!(diagnostics[0].message.contains("native"));
+}
+
+#[test]
+fn optional_external_part_publications_stay_qualified_by_unknown_facts_and_recover() {
+    for failure in ["missing", "invalid-utf8", "oversized", "unreadable"] {
+        let project = tempfile::tempdir().unwrap();
+        let dependency = tempfile::tempdir().unwrap();
+        let source = "import 'package:dep/dep.dart' as dep;\n/// [dep.Missing]\nclass App {}\nvoid main() {}\n";
+        let main = project.path().join("main.dart");
+        let orphan = project.path().join("lib/src/orphan.dart");
+        std::fs::create_dir_all(orphan.parent().unwrap()).unwrap();
+        std::fs::write(&main, source).unwrap();
+        std::fs::write(&orphan, "class Orphan {}").unwrap();
+        std::fs::write(project.path().join("pubspec.yaml"), "name: app\n").unwrap();
+        std::fs::create_dir(project.path().join(".dart_tool")).unwrap();
+        std::fs::write(project.path().join(".dart_tool/package_config.json"), format!(
+            r#"{{"configVersion":2,"packages":[{{"name":"app","rootUri":"../","packageUri":"lib/"}},{{"name":"dep","rootUri":"file://{}/","packageUri":"lib/"}}]}}"#,
+            dependency.path().display(),
+        )).unwrap();
+        std::fs::create_dir(dependency.path().join("lib")).unwrap();
+        std::fs::write(
+            dependency.path().join("lib/dep.dart"),
+            "part 'part.dart'; class Known {}",
+        )
+        .unwrap();
+        let part = dependency.path().join("lib/part.dart");
+        match failure {
+            "missing" => {}
+            "invalid-utf8" => std::fs::write(&part, [0xff]).unwrap(),
+            "oversized" => std::fs::File::create(&part)
+                .unwrap()
+                .set_len(u64::from(u32::MAX) + 1)
+                .unwrap(),
+            "unreadable" => {
+                #[cfg(unix)]
+                std::os::unix::fs::symlink("part.dart", &part).unwrap();
+                #[cfg(not(unix))]
+                continue;
+            }
+            _ => unreachable!(),
+        }
+        std::fs::write(project.path().join("falcon.json"), r#"{"linter":{"rules":{"recommended":false,"correctness":{"comment-references":"warn"}}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#).unwrap();
+        let main_uri = format!("file://{}", main.display());
+        let orphan_uri = format!("file://{}", orphan.display());
+        let mut state = LspState::new_from(None, |_| None, project.path().to_path_buf());
+        state.open(&main_uri, source.into(), Some(1));
+        state.open(&orphan_uri, "class Orphan {}".into(), Some(1));
+        state.analyze(&main_uri);
+        state.analyze(&orphan_uri);
+        let failed = state.cross_file_pass();
+        let diagnostics: Vec<_> = failed
+            .iter()
+            .flat_map(|(_, diagnostics)| diagnostics)
+            .collect();
+        assert_eq!(diagnostics.len(), 1, "{failure}: {failed:?}");
+        assert_eq!(diagnostics[0].rule, "unused-files");
+        assert!(state.take_incomplete_message().is_none());
+        if failure != "missing" {
+            let messages = state.take_config_messages();
+            assert!(
+                messages
+                    .iter()
+                    .any(|message| message.message.contains(&*part.to_string_lossy())),
+                "{failure}: {messages:?}"
+            );
+        }
+        if part.symlink_metadata().is_ok() {
+            std::fs::remove_file(&part).unwrap();
+        }
+        std::fs::write(&part, "part of 'dep.dart'; class Recovered {}").unwrap();
+        let mut recovered = state.watched_files_changed(&[part]);
+        recovered.extend(state.cross_file_pass());
+        let main_diagnostics = &recovered
+            .iter()
+            .find(|(uri, _)| uri == &main_uri)
+            .unwrap()
+            .1;
+        assert_eq!(main_diagnostics.len(), 1, "{failure}: {recovered:?}");
+        assert_eq!(main_diagnostics[0].rule, "comment-references");
+        assert!(main_diagnostics[0].message.contains("Missing"));
+        assert!(state.take_incomplete_message().is_none());
     }
 }

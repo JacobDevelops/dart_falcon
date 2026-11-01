@@ -229,7 +229,7 @@ enum DefaultSdk {
     Loaded(Option<DartSdk>),
 }
 
-type RootPackageConfig = Arc<std::sync::OnceLock<Option<Arc<PackageConfig>>>>;
+type RootPackageConfig = Arc<std::sync::OnceLock<DependencyInput<Arc<PackageConfig>>>>;
 
 /// Package configurations, SDKs and language versions for a set of files.
 ///
@@ -917,7 +917,7 @@ impl AnalysisEnvironment {
     /// # Panics
     /// Panics if an environment cache lock is poisoned.
     #[must_use]
-    pub fn package_root_config(&self, root: &Path) -> Option<Arc<PackageConfig>> {
+    pub fn package_root_config(&self, root: &Path) -> DependencyInput<Arc<PackageConfig>> {
         let slot = Arc::clone(
             self.package_root_contexts
                 .lock()
@@ -926,18 +926,35 @@ impl AnalysisEnvironment {
                 .or_default(),
         );
         slot.get_or_init(|| {
-            let path = PackageConfig::discover(root)?;
+            let Some(path) = PackageConfig::discover(root) else {
+                return DependencyInput::Missing;
+            };
             if let Some(context) = self
                 .contexts
                 .iter()
                 .find(|context| context.config.path == path)
             {
-                return Some(Arc::new(context.config.clone()));
+                return if context.config.is_complete() {
+                    DependencyInput::Present(Arc::new(context.config.clone()))
+                } else {
+                    DependencyInput::Unknown(
+                        "package configuration contains invalid entries".into(),
+                    )
+                };
             }
-            let source = self.read_optional(&path)?;
-            let config = PackageConfig::parse_with_report(&path, &source, |message| {
+            let Some(source) = self.read_optional(&path) else {
+                return DependencyInput::Unknown("package configuration is unreadable".into());
+            };
+            let Some(config) = PackageConfig::parse_with_report(&path, &source, |message| {
                 self.warn(&path, message);
-            })?;
+            }) else {
+                return DependencyInput::Unknown("package configuration is invalid".into());
+            };
+            if !config.is_complete() {
+                return DependencyInput::Unknown(
+                    "package configuration contains invalid entries".into(),
+                );
+            }
             let lock = self
                 .read_optional(&root.join("pubspec.lock"))
                 .and_then(|source| serde_yaml::from_str::<serde_yaml::Value>(&source).ok());
@@ -955,7 +972,7 @@ impl AnalysisEnvironment {
                 .map(|package| crate::canonical_or_lexical(&package.root))
                 .collect();
             self.probe_mutable_roots.lock().unwrap().extend(roots);
-            Some(Arc::new(config))
+            DependencyInput::Present(Arc::new(config))
         })
         .clone()
     }

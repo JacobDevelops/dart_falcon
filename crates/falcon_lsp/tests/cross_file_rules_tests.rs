@@ -509,10 +509,9 @@ fn pubspec_less_non_lib_files_not_flagged() {
     client.shutdown();
 }
 
-/// (3) With cross-file rules disabled, no cross-file diagnostics are published — only
-/// the single per-file publish for the opened document.
+/// Disabled cross-file rules do not hide failures in inputs needed by semantic rules.
 #[test]
-fn disabled_cross_file_rules_publish_nothing() {
+fn disabled_cross_file_rules_still_qualify_incomplete_semantic_analysis() {
     let mut client = TestClient::start(
         r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-ignoring-return-values":"warn"}}},"cross-file":{"enabled":false}}"#,
     );
@@ -520,16 +519,32 @@ fn disabled_cross_file_rules_publish_nothing() {
     fs::write(client.workspace_file("lib/broken.dart"), [0xff]).unwrap();
 
     client.open(&orphan_uri, "class OrphanThing {}\n", 1);
-    let publishes = client.drain_publishes();
-    assert_eq!(
-        publishes.len(),
-        1,
-        "disabled cross-file rules must yield exactly one (per-file) publish: {publishes:?}"
-    );
-    assert!(
-        !has_rule(&publishes[0], "unused-files"),
-        "no cross-file diagnostic when disabled: {publishes:?}"
-    );
+    let publishes = client.drain_publishes_with_warnings(1);
+    let last = publishes
+        .iter()
+        .rev()
+        .find(|publication| publication.uri.as_str() == orphan_uri)
+        .unwrap();
+    assert!(has_rule(last, "incomplete-analysis"), "{publishes:?}");
+    assert!(!any_publish_has_rule(
+        &publishes,
+        &orphan_uri,
+        "unused-files"
+    ));
+    fs::write(
+        client.workspace_file("lib/broken.dart"),
+        "class Recovered {}\n",
+    )
+    .unwrap();
+    client.watch(&uri_for(&client.workspace_file("lib/broken.dart")));
+    let recovered = client.drain_publishes();
+    let last = recovered
+        .iter()
+        .rev()
+        .find(|publication| publication.uri.as_str() == orphan_uri)
+        .unwrap();
+    assert!(!has_rule(last, "incomplete-analysis"), "{recovered:?}");
+    assert!(!has_rule(last, "unused-files"), "{recovered:?}");
     client.shutdown();
 }
 
@@ -640,7 +655,7 @@ fn incomplete_episode_recovers_and_rebreaks_without_open_documents() {
 }
 
 #[test]
-fn disabling_cross_file_rules_clears_incomplete_diagnostics() {
+fn disabling_cross_file_rules_keeps_incomplete_semantic_analysis_qualified() {
     let mut client = TestClient::start(ENABLE_UNUSED_FILES);
     let source = "class OrphanThing {}\n";
     let uri = client.write_file("lib/orphan.dart", source);
@@ -649,6 +664,20 @@ fn disabling_cross_file_rules_clears_incomplete_diagnostics() {
     client.drain_publishes_with_warnings(1);
     let config = client.workspace_file("falcon.json");
     fs::write(&config, DISABLE_CROSS_FILE).unwrap();
+    client.watch(&uri_for(&config));
+    let qualified = client.drain_publishes_with_warnings(1);
+    let last = qualified
+        .iter()
+        .rev()
+        .find(|p| p.uri.as_str() == uri)
+        .unwrap();
+    assert!(has_rule(last, "incomplete-analysis"), "{qualified:?}");
+    assert!(!has_rule(last, "unused-files"), "{qualified:?}");
+    fs::write(
+        &config,
+        r#"{"linter":{"enabled":false},"cross-file":{"enabled":false}}"#,
+    )
+    .unwrap();
     client.watch(&uri_for(&config));
     let recovered = client.drain_publishes();
     let last = recovered

@@ -987,12 +987,13 @@ fn unreadable_project_companion_still_warns_once() {
 }
 
 #[test]
-fn absent_sdk_parts_do_not_hide_missing_doc_names() {
+fn unavailable_sdk_parts_leave_missing_doc_names_unknown() {
     for (part, unreadable) in [
         ("missing.dart", false),
         ("missing.dart", true),
         ("existing.dart/child.dart", false),
         ("invalid.dart", false),
+        ("oversized.dart", false),
     ] {
         let (dir, app) = workspace();
         let sdk = dir.path().join("flutter/bin/cache/dart-sdk/lib/core");
@@ -1001,7 +1002,6 @@ fn absent_sdk_parts_do_not_hide_missing_doc_names() {
             format!("library dart.core;\npart '{part}';\nclass Object {{}}\n"),
         )
         .unwrap();
-        // The analyzer treats failed reads and invalid UTF-8 as empty parts.
         if unreadable {
             fs::create_dir(sdk.join("missing.dart")).unwrap();
         }
@@ -1010,6 +1010,12 @@ fn absent_sdk_parts_do_not_hide_missing_doc_names() {
         }
         if part == "invalid.dart" {
             fs::write(sdk.join(part), [0xff]).unwrap();
+        }
+        if part == "oversized.dart" {
+            fs::File::create(sdk.join(part))
+                .unwrap()
+                .set_len(u64::from(u32::MAX) + 1)
+                .unwrap();
         }
         let source = "/// [Object] exists, but [Missing] does not.\nvoid f() {}\n";
         let (parsed_tree, errors) = ParsedFile::parse_for_package(source, None);
@@ -1025,7 +1031,7 @@ fn absent_sdk_parts_do_not_hide_missing_doc_names() {
             .iter()
             .find(|library| library.origin == ExternalOrigin::Sdk("dart:core".into()))
             .unwrap();
-        assert!(!core.has_unresolved_parts);
+        assert!(core.has_unresolved_parts);
         let sources = [IdentitySource {
             path: &app,
             parsed: &parsed,
@@ -1047,7 +1053,7 @@ fn absent_sdk_parts_do_not_hide_missing_doc_names() {
         ));
         assert_eq!(
             identities.doc_name(library, "Missing"),
-            falcon_analyze::DocName::Absent
+            falcon_analyze::DocName::Unknown
         );
     }
 }
@@ -1155,7 +1161,7 @@ fn indexes_sdk_and_dependency_declarations() {
 }
 
 #[test]
-fn compact_external_missing_parts_distinguish_absent_and_unresolved() {
+fn compact_external_unavailable_parts_keep_absence_unknown() {
     use falcon_analyze::{MemberKind, MemberResult};
 
     let (dir, app) = workspace();
@@ -1168,11 +1174,10 @@ fn compact_external_missing_parts_distinguish_absent_and_unresolved() {
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], fixture_sdk);
     std::fs::create_dir_all(dir.path().join("cache/dep/lib/unreadable.dart")).unwrap();
     write(dir.path(), "cache/dep/lib/not-a-directory", "");
-    // Failed part reads are empty units; an unresolved part URI stays unknown.
     for (missing_part, absent) in [
-        ("missing.dart", MemberResult::Absent),
-        ("not-a-directory/missing.dart", MemberResult::Absent),
-        ("unreadable.dart", MemberResult::Absent),
+        ("missing.dart", MemberResult::Unknown),
+        ("not-a-directory/missing.dart", MemberResult::Unknown),
+        ("unreadable.dart", MemberResult::Unknown),
         ("package:unconfigured/missing.dart", MemberResult::Unknown),
     ] {
         write(

@@ -5,6 +5,9 @@ version.workspace = true
 edition.workspace = true
 description       = "LSP server implementation (JSON-RPC 2.0 / LSP 3.17) for falcon"
 
+[features]
+test-support = [  ]
+
 [dependencies]
 falcon_analyze       = { path = "../falcon_analyze" }
 falcon_dart_parser   = { path = "../falcon_dart_parser" }

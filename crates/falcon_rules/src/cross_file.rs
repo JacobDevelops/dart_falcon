@@ -390,7 +390,11 @@ fn unused_dependency_diagnostics(
     let Some(package_root) = pubspec.parent() else {
         return Vec::new();
     };
-    let package_config = environment.package_root_config(package_root);
+    let package_config = match environment.package_root_config(package_root) {
+        falcon_analyze::DependencyInput::Present(configuration) => Some(configuration),
+        falcon_analyze::DependencyInput::Missing => None,
+        falcon_analyze::DependencyInput::Unknown(_) => return Vec::new(),
+    };
     let mut diagnostics = Vec::new();
     for (name, value) in dependencies.iter() {
         let resolved = package_config

@@ -294,3 +294,109 @@ fn preview_refreshes_project_snapshot_without_writing() {
     assert_eq!(file.source(), after);
     assert_eq!(fs::read_to_string(path).unwrap(), before);
 }
+
+#[test]
+fn worker_failure_forces_nonzero_and_skips_cross_file_until_recovery() {
+    use falcon_analyze::{AnalyzeContext, CrossFileRule, Rule, RulePreparation, RuleRegistry};
+    use falcon_config::FalconConfig;
+    use falcon_diagnostics::{Diagnostic, Severity, Span};
+
+    struct Panics;
+    impl Rule for Panics {
+        fn prepare<'a>(
+            &self,
+            _: falcon_syntax::cst::Program<'a>,
+            _: &'a AnalyzeContext<'a>,
+        ) -> RulePreparation<'a> {
+            panic!("file worker regression");
+        }
+    }
+    struct CurrentSource;
+    impl CrossFileRule for CurrentSource {
+        fn prepare_project(
+            &self,
+            _: &falcon_analyze::AnalysisEnvironment,
+            files: &[falcon_analyze::ProjectFile],
+            _: &FalconConfig,
+            _: Option<&falcon_analyze::SemanticIndexes>,
+        ) -> Vec<Diagnostic> {
+            vec![Diagnostic::new(
+                "current-source",
+                Severity::Warning,
+                files[0].source(),
+                files[0].path().to_string_lossy(),
+                Span { start: 0, end: 0 },
+            )]
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("main.dart");
+    let environment =
+        falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);
+    let config = FalconConfig::default();
+    let mut rules = RuleRegistry::new();
+    rules.register("panics", Box::new(Panics));
+    let mut cross = falcon_analyze::CrossFileRuleRegistry::new();
+    cross.register("current-source", Box::new(CurrentSource));
+    let options = super::CheckOptions {
+        error_exit_code: 0,
+        ..Default::default()
+    };
+    let inputs = vec![(path.clone(), "class Before {}".to_owned())];
+    let (mut diagnostics, files, _) = falcon_analyze::analyze_sequential_collecting_resolving(
+        &rules,
+        &inputs,
+        &config,
+        true,
+        false,
+        falcon_analyze::Workspace::default(),
+    )
+    .unwrap();
+    let failed = falcon_project::complete_analysis(
+        &environment,
+        &cross,
+        &files,
+        &config,
+        None,
+        &mut diagnostics,
+    );
+    assert!(failed);
+    assert_eq!(
+        super::check_exit_code(&options, false, &diagnostics, failed),
+        1
+    );
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].file_path, path.to_string_lossy());
+    assert_eq!(
+        diagnostics[0].rule,
+        falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
+    );
+    assert!(diagnostics[0].message.contains("file worker regression"));
+
+    let inputs = vec![(path, "class After {}".to_owned())];
+    let (mut diagnostics, files, _) = falcon_analyze::analyze_sequential_collecting_resolving(
+        &RuleRegistry::new(),
+        &inputs,
+        &config,
+        true,
+        false,
+        falcon_analyze::Workspace::default(),
+    )
+    .unwrap();
+    let failed = falcon_project::complete_analysis(
+        &environment,
+        &cross,
+        &files,
+        &config,
+        None,
+        &mut diagnostics,
+    );
+    assert!(!failed);
+    assert_eq!(
+        super::check_exit_code(&options, false, &diagnostics, failed),
+        0
+    );
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].rule, "current-source");
+    assert_eq!(diagnostics[0].message, "class After {}");
+}

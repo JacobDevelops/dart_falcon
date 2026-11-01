@@ -670,6 +670,9 @@ fn load_fix_companions(
     // the external graph. Keep those in the shared project snapshot.
     let roots = falcon_project::required_source_roots(paths.iter().map(PathBuf::as_path));
     let required = |path: &Path| environment.project_source_required(path, &roots);
+    if let Some(error) = libraries.worker_failure() {
+        return Err(error);
+    }
     if let Some(error) = libraries.source_failure(required) {
         return Err(error);
     }
@@ -686,11 +689,14 @@ fn load_fix_companions(
                 continue;
             }
         };
-        let Ok((parsed, _)) =
+        let (parsed, _) =
             ParsedFile::try_parse_for_package(source, environment.package_language_version(path))
-        else {
-            continue;
-        };
+                .map_err(|(_, error)| falcon_analyze::SourceFailure {
+                path: path.to_path_buf(),
+                source: Arc::new(std::io::Error::other(format!(
+                    "parser worker failed: {error}"
+                ))),
+            })?;
         files.push(
             ProjectFile::new(path.to_path_buf(), Arc::new(parsed))
                 .expect("a successful parse produces a project snapshot"),

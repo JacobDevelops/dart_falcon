@@ -245,3 +245,34 @@ fn dependency_wave_resolves_with_one_rayon_thread() {
 fn dependency_wave_resolves_with_two_rayon_threads() {
     publishes_resolved_dependency_diagnostics("2");
 }
+
+#[cfg(debug_assertions)]
+#[test]
+fn controller_panic_exits_nonzero_without_waiting_for_client_shutdown() {
+    let root = tempfile::tempdir().unwrap();
+    let mut server = Server::start(
+        root.path(),
+        &root.path().join("missing-sdk"),
+        root.path().join("stderr.log"),
+        "1",
+    );
+    server.send(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"capabilities":{}}}"#,
+    );
+    server.send(r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#);
+    server.receive(Duration::from_secs(30), |message| {
+        message.contains(r#""id":1"#) && message.contains(r#""result""#)
+    });
+    server.send(
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"falcon-test:///controller-panic","languageId":"dart","version":1,"text":"void main() {}"}}}"#,
+    );
+    let status = server.wait_for_exit(Duration::from_secs(10));
+    assert!(!status.success(), "{status}");
+    assert!(server.child.stdin.is_some());
+    let stderr = std::fs::read_to_string(&server.stderr).unwrap();
+    assert!(stderr.contains("controller worker regression"), "{stderr}");
+    assert!(stderr.contains("LSP analysis worker panicked"), "{stderr}");
+    assert!(!server.messages.try_iter().any(|message| {
+        message.contains("textDocument/publishDiagnostics") || message.contains("0 diagnostics")
+    }));
+}
