@@ -45,7 +45,7 @@ use std::path::{Path, PathBuf};
 
 use crate::lint::support::package_manifests::manifest_sections;
 use falcon_analyze::canonical_package_path;
-use falcon_analyze::{PackageConfig, PackageIdentity, ProjectFile, canonical_or_lexical};
+use falcon_analyze::{PackageIdentity, ProjectFile, canonical_or_lexical};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::cst::Program;
 use marked_yaml::{
@@ -356,6 +356,7 @@ fn analyzed_package_usage<'a>(
 }
 
 fn unused_dependency_diagnostics(
+    environment: &falcon_analyze::AnalysisEnvironment,
     package: &falcon_analyze::PackageMetadata,
     used: &HashSet<String>,
     section: &str,
@@ -382,8 +383,7 @@ fn unused_dependency_diagnostics(
     let Some(package_root) = pubspec.parent() else {
         return Vec::new();
     };
-    let package_config =
-        PackageConfig::discover(package_root).and_then(|path| PackageConfig::load(&path));
+    let package_config = environment.package_root_config(package_root);
     let mut diagnostics = Vec::new();
     for (name, value) in dependencies.iter() {
         let resolved = package_config

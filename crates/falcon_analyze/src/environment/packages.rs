@@ -68,7 +68,12 @@ impl PackageMetadata {
                     Ok(yaml) => ManifestSnapshot::Valid { source, yaml },
                     Err(error) => ManifestSnapshot::Malformed(error.to_string()),
                 },
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                    ) =>
+                {
                     ManifestSnapshot::Missing
                 }
                 Err(error) => ManifestSnapshot::Inaccessible(Arc::new(error)),

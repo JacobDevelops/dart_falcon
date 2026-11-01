@@ -13,14 +13,19 @@
 //! `custom_lint_builder` are exempt too. Options are discovered at the package or
 //! nearest ancestor; relative scalar/list includes are followed with cycle
 //! protection. Package includes establish usage but are not followed. Resolution
-//! uses the nearest `.dart_tool/package_config.json`. Missing or unreadable tool
-//! metadata cannot establish an exemption. Nested packages are independent, and
-//! excluded or unscanned sources cannot establish usage.
+//! uses the package root's nearest `.dart_tool/package_config.json`. Missing tool
+//! metadata does not establish an exemption (an absent resolved package directory
+//! remains exempt); malformed or inaccessible probe inputs warn and conservatively
+//! skip only the dependent check. Nested packages are independent, and excluded or
+//! unscanned sources cannot establish usage.
 
 use std::collections::HashSet;
 use std::path::Path;
 
-use falcon_analyze::{CrossFileRule, ProjectFile, canonical_package_path};
+use falcon_analyze::{
+    AnalysisEnvironment, CrossFileRule, DependencyInput, ManifestSnapshot, ProjectFile,
+    canonical_package_path,
+};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::Diagnostic;
 use serde_yaml::Value;
@@ -59,17 +64,19 @@ impl CrossFileRule for UnusedDevDependencies {
             let Some(package_root) = pubspec.parent() else {
                 continue;
             };
-            let options = analysis_options_packages(package_root);
+            let Some(options) = analysis_options_packages(environment, package_root) else {
+                continue;
+            };
             let custom_lint = options.contains("custom_lint");
             used.extend(options);
             diagnostics.extend(unused_dependency_diagnostics(
+                environment,
                 package,
                 &used,
                 "dev_dependencies",
                 |name, root, resolved| {
                     root.get(name).is_some()
-                        || resolved
-                            .is_none_or(|root| !root.is_dir() || is_build_tool(root, custom_lint))
+                        || resolved.is_none_or(|root| is_build_tool(environment, root, custom_lint))
                 },
                 |name| format!(
                     "No analyzed Dart source uses `{name}`; remove the dev dependency if it is not used by build tools."
@@ -80,28 +87,32 @@ impl CrossFileRule for UnusedDevDependencies {
     }
 }
 
-fn read_yaml(path: &Path) -> Option<Value> {
-    let source = falcon_config::read_metadata_text(path).ok()?;
-    serde_yaml::from_str(&source).ok()
-}
-
-fn analysis_options_packages(root: &Path) -> HashSet<String> {
+fn analysis_options_packages(
+    environment: &AnalysisEnvironment,
+    root: &Path,
+) -> Option<HashSet<String>> {
     let mut packages = HashSet::new();
-    let Some(options) = root
-        .ancestors()
-        .map(|ancestor| ancestor.join("analysis_options.yaml"))
-        .find(|path| path.is_file())
-    else {
-        return packages;
-    };
-    let mut pending = vec![options];
+    let mut pending = Vec::new();
+    if let Some(path) = environment.dependency_ancestor_file(root, "analysis_options.yaml") {
+        pending.push(path);
+    }
     let mut visited = HashSet::new();
     while let Some(path) = pending.pop() {
         if !visited.insert(canonical_package_path(&path)) {
             continue;
         }
-        let Some(options) = read_yaml(&path) else {
-            continue;
+        if visited.len() > 4096 {
+            environment.warn_optional_metadata(
+                &path,
+                &path,
+                "analysis options include graph exceeds 4096 documents",
+            );
+            return None;
+        }
+        let options = match environment.dependency_yaml(&path) {
+            DependencyInput::Present(options) => options,
+            DependencyInput::Missing => continue,
+            DependencyInput::Unknown(_) => return None,
         };
         if let Some(plugins) = options.get("plugins") {
             plugin_packages(plugins, &mut packages);
@@ -131,7 +142,7 @@ fn analysis_options_packages(root: &Path) -> HashSet<String> {
             }
         }
     }
-    packages
+    Some(packages)
 }
 
 fn plugin_packages(plugins: &Value, packages: &mut HashSet<String>) {
@@ -144,28 +155,37 @@ fn plugin_packages(plugins: &Value, packages: &mut HashSet<String>) {
     packages.extend(names.filter_map(Value::as_str).map(ToOwned::to_owned));
 }
 
-fn is_build_tool(root: &Path, custom_lint: bool) -> bool {
-    if falcon_config::read_metadata_text(&root.join("build.yaml")).is_ok()
-        || std::fs::read_dir(root.join("bin")).is_ok_and(|entries| {
-            entries.filter_map(Result::ok).any(|entry| {
-                let path = entry.path();
-                path.extension()
-                    .is_some_and(|extension| extension == "dart")
-                    && path.is_file()
-            })
-        })
-    {
-        return true;
+fn is_build_tool(environment: &AnalysisEnvironment, root: &Path, custom_lint: bool) -> bool {
+    match environment.dependency_is_directory(root) {
+        DependencyInput::Present(true) => {}
+        DependencyInput::Missing
+        | DependencyInput::Unknown(_)
+        | DependencyInput::Present(false) => return true,
     }
-    read_yaml(&root.join("pubspec.yaml")).is_some_and(|manifest| {
-        manifest
-            .get("executables")
-            .and_then(Value::as_mapping)
-            .is_some_and(|entries| !entries.is_empty())
-            || (custom_lint
-                && manifest
-                    .get("dependencies")
-                    .and_then(Value::as_mapping)
-                    .is_some_and(|dependencies| dependencies.contains_key("custom_lint_builder")))
-    })
+    match environment.dependency_readable(&root.join("build.yaml")) {
+        DependencyInput::Present(()) | DependencyInput::Unknown(_) => return true,
+        DependencyInput::Missing => {}
+    }
+    match environment.dependency_directory(&root.join("bin"), "dart") {
+        DependencyInput::Present(true) | DependencyInput::Unknown(_) => return true,
+        DependencyInput::Missing | DependencyInput::Present(false) => {}
+    }
+    let package = environment.dependency_manifest(root);
+    match package.snapshot() {
+        ManifestSnapshot::Missing => false,
+        ManifestSnapshot::Malformed(_) | ManifestSnapshot::Inaccessible(_) => true,
+        ManifestSnapshot::Valid { yaml: manifest, .. } => {
+            manifest
+                .get("executables")
+                .and_then(Value::as_mapping)
+                .is_some_and(|entries| !entries.is_empty())
+                || (custom_lint
+                    && manifest
+                        .get("dependencies")
+                        .and_then(Value::as_mapping)
+                        .is_some_and(|dependencies| {
+                            dependencies.contains_key("custom_lint_builder")
+                        }))
+        }
+    }
 }

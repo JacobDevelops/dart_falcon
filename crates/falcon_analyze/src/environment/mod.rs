@@ -2,6 +2,7 @@
 //! configurations, language versions, the Dart SDK, and the external (SDK and
 //! dependency) libraries they import.
 
+mod dependency_inputs;
 mod external;
 mod localization;
 mod package_config;
@@ -14,11 +15,19 @@ use std::sync::{Arc, Mutex};
 
 use packages::{FilePackage, PackageMetadata};
 
+pub use dependency_inputs::DependencyInput;
 pub use external::{ExternalLibraries, ExternalOrigin, ExternalTarget};
 pub use falcon_syntax::language_version::{Feature, LanguageVersion};
 pub use localization::LocalizationTemplate;
 pub use package_config::{ConfiguredPackage, PackageConfig, percent_decode, percent_encode};
 pub use sdk::{DartSdk, Embedder};
+
+fn missing(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+    )
+}
 
 /// SDK discovery policy used by callers that supply their own environment.
 pub type SdkLocator = fn(Option<&PackageConfig>) -> Option<DartSdk>;
@@ -220,6 +229,8 @@ enum DefaultSdk {
     Loaded(Option<DartSdk>),
 }
 
+type RootPackageConfig = Arc<std::sync::OnceLock<Option<Arc<PackageConfig>>>>;
+
 /// Package configurations, SDKs and language versions for a set of files.
 ///
 /// Built once per run (or per LSP workspace state) from the analyzed paths;
@@ -231,6 +242,8 @@ pub struct AnalysisEnvironment {
     contexts: Vec<Context>,
     /// The context owning each analyzed directory (`None`: no configuration).
     directories: HashMap<PathBuf, Option<usize>>,
+    package_root_contexts: Arc<Mutex<HashMap<PathBuf, RootPackageConfig>>>,
+    probe_mutable_roots: Arc<Mutex<std::collections::BTreeSet<PathBuf>>>,
     /// The SDK for files outside any package configuration, once located.
     default_sdk: DefaultSdk,
     sdk_locator: Option<SdkLocator>,
@@ -248,6 +261,7 @@ pub struct AnalysisEnvironment {
     warnings: Arc<Mutex<EnvironmentWarnings>>,
     project_roots: Vec<PathBuf>,
     localization: HashMap<PathBuf, localization::LocalizationSnapshot>,
+    dependency_inputs: Arc<Mutex<dependency_inputs::Inputs>>,
     normalized_paths: HashMap<PathBuf, PathBuf>,
 }
 
@@ -289,6 +303,8 @@ impl AnalysisEnvironment {
         Self {
             contexts: Vec::new(),
             directories: HashMap::new(),
+            package_root_contexts: Arc::default(),
+            probe_mutable_roots: Arc::default(),
             default_sdk: DefaultSdk::NotLoaded,
             sdk_locator: locator,
             config_candidates: std::collections::BTreeSet::new(),
@@ -304,6 +320,7 @@ impl AnalysisEnvironment {
             warnings: Arc::default(),
             project_roots: Vec::new(),
             localization: HashMap::new(),
+            dependency_inputs: Arc::default(),
             normalized_paths: HashMap::new(),
         }
     }
@@ -866,21 +883,9 @@ impl AnalysisEnvironment {
                 if let Some(observer) = self.io_observer {
                     observer(self, &manifest);
                 }
-                Arc::new(PackageMetadata::load(&manifest))
+                self.manifest_snapshot(&manifest)
             });
-            match package.snapshot() {
-                packages::ManifestSnapshot::Malformed(reason) => {
-                    self.warn_optional_metadata(
-                        &manifest,
-                        &manifest,
-                        format!("malformed manifest: {reason}"),
-                    );
-                }
-                packages::ManifestSnapshot::Inaccessible(error) => {
-                    self.warn_optional_metadata(&manifest, &manifest, error);
-                }
-                packages::ManifestSnapshot::Missing | packages::ManifestSnapshot::Valid { .. } => {}
-            }
+            self.warn_manifest_snapshot(&package);
             (manifest, package)
         });
         let mut discovery = self.package_discovery.lock().unwrap();
@@ -903,6 +908,67 @@ impl AnalysisEnvironment {
     #[must_use]
     pub fn package_config(&self, path: &Path) -> Option<&PackageConfig> {
         self.config_in(self.context_index(path))
+    }
+
+    /// Resolved configuration captured lazily at the package root for enabled probes.
+    ///
+    /// # Panics
+    /// Panics if an environment cache lock is poisoned.
+    #[must_use]
+    pub fn package_root_config(&self, root: &Path) -> Option<Arc<PackageConfig>> {
+        let slot = Arc::clone(
+            self.package_root_contexts
+                .lock()
+                .unwrap()
+                .entry(root.to_path_buf())
+                .or_default(),
+        );
+        slot.get_or_init(|| {
+            let path = PackageConfig::discover(root)?;
+            if let Some(context) = self
+                .contexts
+                .iter()
+                .find(|context| context.config.path == path)
+            {
+                return Some(Arc::new(context.config.clone()));
+            }
+            let source = self.read_optional(&path)?;
+            let config = PackageConfig::parse_with_report(&path, &source, |message| {
+                self.warn(&path, message);
+            })?;
+            let lock = self
+                .read_optional(&root.join("pubspec.lock"))
+                .and_then(|source| serde_yaml::from_str::<serde_yaml::Value>(&source).ok());
+            let roots: Vec<_> = config
+                .packages
+                .iter()
+                .filter(|package| {
+                    lock.as_ref()
+                        .and_then(|lock| lock.get("packages"))
+                        .and_then(|packages| packages.get(&package.name))
+                        .and_then(|package| package.get("source"))
+                        .and_then(serde_yaml::Value::as_str)
+                        != Some("hosted")
+                })
+                .map(|package| crate::canonical_or_lexical(&package.root))
+                .collect();
+            self.probe_mutable_roots.lock().unwrap().extend(roots);
+            Some(Arc::new(config))
+        })
+        .clone()
+    }
+    fn warn_manifest_snapshot(&self, package: &PackageMetadata) {
+        match package.snapshot() {
+            packages::ManifestSnapshot::Malformed(reason) => self.warn_optional_metadata(
+                &package.manifest,
+                &package.manifest,
+                format!("malformed manifest: {reason}"),
+            ),
+            packages::ManifestSnapshot::Inaccessible(reason) => {
+                self.warn_optional_metadata(&package.manifest, &package.manifest, reason);
+            }
+            packages::ManifestSnapshot::Missing | packages::ManifestSnapshot::Valid { .. } => {}
+        }
     }
 
     /// The context of an analyzed file's directory; files in directories not

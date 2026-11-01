@@ -1963,3 +1963,88 @@ fn localization_symlink_directory_publishes_under_client_path() {
                 && diagnostics[0].message.contains("changed"))
     );
 }
+
+#[test]
+fn dependency_probe_includes_ignore_buffers_and_refresh_from_save() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(directory.path()).unwrap();
+    std::fs::create_dir_all(root.join("options")).unwrap();
+    std::fs::create_dir_all(root.join("tool/lib")).unwrap();
+    std::fs::create_dir_all(root.join(".dart_tool")).unwrap();
+    let config = root.join("falcon.json");
+    std::fs::write(&config,
+        r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-dev-dependencies":"warn"}}}}"#).unwrap();
+    std::fs::write(
+        root.join("pubspec.yaml"),
+        "name: app\ndev_dependencies:\n  tool: any\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("main.dart"), "void main() {}").unwrap();
+    std::fs::write(root.join("tool/pubspec.yaml"), "name: tool\n").unwrap();
+    std::fs::write(root.join(".dart_tool/package_config.json"),
+        r#"{"configVersion":2,"packages":[{"name":"tool","rootUri":"../tool","packageUri":"lib/"}]}"#).unwrap();
+    std::fs::write(
+        root.join("analysis_options.yaml"),
+        "include: options/common.yaml\n",
+    )
+    .unwrap();
+    let options = root.join("options/common.yaml");
+    std::fs::write(&options, "include: package:tool/options.yaml\n").unwrap();
+    let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
+    assert_eq!(state.cross_file_pass().len(), 0);
+    let uri = file_uri(&options).unwrap();
+    let (server, client) = Connection::memory();
+    let mut debounce = Debounce::default();
+    let mut watching = FileWatching::new(&serde_json::json!({}));
+    for (method, params) in [
+        (
+            DidOpenTextDocument::METHOD,
+            serde_json::json!({"textDocument": {
+                "uri": uri, "languageId":"yaml", "version":1, "text":"["
+            }}),
+        ),
+        (
+            DidChangeTextDocument::METHOD,
+            serde_json::json!({
+                "textDocument":{"uri":uri,"version":2}, "contentChanges":[{"text":"["}]
+            }),
+        ),
+    ] {
+        handle_notification(
+            &server,
+            &mut state,
+            &mut debounce,
+            &mut watching,
+            Duration::ZERO,
+            ServerNotification {
+                method: method.to_string(),
+                params,
+            },
+        )
+        .unwrap();
+    }
+    assert_eq!(client.receiver.try_iter().count(), 0);
+    std::fs::write(&options, "{}").unwrap();
+    handle_notification(
+        &server,
+        &mut state,
+        &mut debounce,
+        &mut watching,
+        Duration::ZERO,
+        ServerNotification {
+            method: DidSaveTextDocument::METHOD.to_string(),
+            params: serde_json::json!({"textDocument":{"uri":uri},"text":"["}),
+        },
+    )
+    .unwrap();
+    assert!(client.receiver.try_iter().any(|message| {
+        let Message::Notification(notification) = message else {
+            return false;
+        };
+        notification.method == PublishDiagnostics::METHOD
+            && notification
+                .params
+                .to_string()
+                .contains("unused-dev-dependencies")
+    }));
+}

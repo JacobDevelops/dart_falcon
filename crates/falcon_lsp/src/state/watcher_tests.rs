@@ -1322,3 +1322,240 @@ fn fallback_preserves_pre_discovery_build_failure_until_source_event() {
     assert!(state.project_paths.is_some());
     assert!(state.revalidate_disk().is_empty());
 }
+
+fn dependency_probe_workspace(
+    enabled: bool,
+    hosted: bool,
+) -> (tempfile::TempDir, tempfile::TempDir, LspState, String) {
+    let (app, mut state, uri) = workspace(true);
+    let dependencies = tempfile::tempdir().unwrap();
+    for name in ["external", "tool"] {
+        let root = dependencies.path().join(name);
+        std::fs::create_dir_all(root.join("lib")).unwrap();
+        std::fs::write(root.join("pubspec.yaml"), format!("name: {name}\n")).unwrap();
+        std::fs::write(root.join("lib/api.dart"), "class Api {}").unwrap();
+    }
+    let tool = dependencies.path().join("tool");
+    std::fs::create_dir(tool.join("bin")).unwrap();
+    std::fs::write(tool.join("bin/command.dart"), "void main() {}").unwrap();
+    std::fs::write(
+        app.path().join("pubspec.yaml"),
+        "name: app\ndependencies:\n  external: any\ndev_dependencies:\n  tool: any\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.path().join("pubspec.lock"),
+        format!(
+            "packages:\n  external:\n    source: path\n  tool:\n    source: {}\n",
+            if hosted { "hosted" } else { "path" }
+        ),
+    )
+    .unwrap();
+    std::fs::create_dir(app.path().join(".dart_tool")).unwrap();
+    std::fs::write(app.path().join(".dart_tool/package_config.json"),
+        serde_json::to_vec(&serde_json::json!({"configVersion":2,"packages":(["external","tool"].map(|name|
+            serde_json::json!({"name":name,"rootUri":dependencies.path().join(name),"packageUri":"lib/"})))})).unwrap()).unwrap();
+    std::fs::write(app.path().join("falcon.json"),
+        serde_json::to_vec(&serde_json::json!({"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,
+            "correctness":{"unused-dependencies":if enabled {"warn"} else {"off"},"unused-dev-dependencies":if enabled {"warn"} else {"off"}}}}})).unwrap()).unwrap();
+    state.reload_config();
+    state.resolve_semantics = true;
+    state.open(
+        &uri,
+        "import 'package:external/api.dart';\nvoid main() { Api(); }".into(),
+        Some(1),
+    );
+    state.cross_file_pass();
+    (app, dependencies, state, uri)
+}
+
+#[test]
+fn disabled_dependency_probes_preserve_main_event_behavior() {
+    let (app, dependencies, mut state, _) = dependency_probe_workspace(false, false);
+    let builds = state.semantic_snapshot_build_count;
+    let resets = state.external_reset_count;
+    assert!(builds > 0);
+    for path in [
+        app.path().join("analysis_options.yaml"),
+        app.path().join(".flutter-plugins-dependencies"),
+        dependencies.path().join("tool/build.yaml"),
+    ] {
+        std::fs::write(&path, "changed").unwrap();
+        assert!(!state.environment.dependency_input_event(&path));
+        state.watched_files_changed(&[path]);
+    }
+    assert_eq!(state.semantic_snapshot_build_count, builds);
+    assert_eq!(state.external_reset_count, resets);
+    let bin = dependencies.path().join("tool/bin/command.dart");
+    std::fs::write(&bin, "void changed() {}").unwrap();
+    state.watched_files_changed(&[bin]);
+    assert_eq!(state.external_reset_count, resets + 1);
+}
+
+#[test]
+fn dependency_probe_bin_contents_preserve_indexes_but_existence_republishes() {
+    let (app, dependencies, mut state, _) = dependency_probe_workspace(true, false);
+    let path = dependencies.path().join("tool/bin/command.dart");
+    assert!(state.environment.dependency_input_event(&path));
+    let builds = state.semantic_snapshot_build_count;
+    let resets = state.external_reset_count;
+    std::fs::write(&path, "void renamed() {}").unwrap();
+    state.watched_files_changed(std::slice::from_ref(&path));
+    assert_eq!(state.semantic_snapshot_build_count, builds);
+    assert_eq!(state.external_reset_count, resets);
+    std::fs::remove_file(&path).unwrap();
+    let updates = state.watched_files_changed(&[path]);
+    let manifest_uri = crate::server::file_uri(&app.path().join("pubspec.yaml"))
+        .unwrap()
+        .to_string();
+    assert!(updates.iter().any(|(uri, diagnostics)| {
+        uri == &manifest_uri
+            && diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.rule == "unused-dev-dependencies")
+    }));
+    assert_eq!(state.semantic_snapshot_build_count, builds);
+    assert_eq!(state.external_reset_count, resets);
+}
+
+#[test]
+fn dependency_probe_hosted_inputs_add_no_watchers() {
+    let (_, dependencies, state, _) = dependency_probe_workspace(true, true);
+    let tool = dependencies.path().join("tool");
+    assert!(
+        !state
+            .environment
+            .dependency_input_event(&tool.join("bin/command.dart"))
+    );
+    assert!(
+        state
+            .watched_dependency_roots()
+            .iter()
+            .all(|root| !root.starts_with(&tool))
+    );
+    assert!(
+        state
+            .environment
+            .dependency_input_watch_roots()
+            .iter()
+            .all(|root| !root.starts_with(&tool))
+    );
+}
+
+#[test]
+fn dependency_manifest_warning_recovers_between_disk_events() {
+    let (_app, dependencies, mut state, _) = dependency_probe_workspace(true, false);
+    let bin = dependencies.path().join("tool/bin/command.dart");
+    std::fs::remove_file(&bin).unwrap();
+    state.watched_files_changed(&[bin]);
+    let path = dependencies.path().join("tool/pubspec.yaml");
+    let _ = state.take_config_messages();
+    for (source, expected) in [("[", 1), ("name: tool\n", 0), ("[", 1)] {
+        std::fs::write(&path, source).unwrap();
+        state.watched_files_changed(std::slice::from_ref(&path));
+        let warnings = state.take_config_messages();
+        assert_eq!(
+            warnings
+                .iter()
+                .filter(|message| message.message.contains("malformed manifest"))
+                .count(),
+            expected
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn dependency_options_events_through_symlinked_workspace_republish() {
+    let (app, dependencies, mut state, _) = dependency_probe_workspace(true, false);
+    let bin = dependencies.path().join("tool/bin/command.dart");
+    std::fs::remove_file(&bin).unwrap();
+    state.watched_files_changed(&[bin]);
+    let links = tempfile::tempdir().unwrap();
+    let alias = links.path().join("app");
+    std::os::unix::fs::symlink(app.path(), &alias).unwrap();
+    let options = alias.join("analysis_options.yaml");
+    std::fs::write(&options, "include: package:tool/options.yaml\n").unwrap();
+    let updates = state.watched_files_changed(&[options]);
+    assert!(updates.iter().any(|(uri, diagnostics)| {
+        uri.ends_with("/pubspec.yaml")
+            && !diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.rule == "unused-dev-dependencies")
+    }));
+}
+
+#[test]
+fn dependency_options_ancestors_add_no_watch_roots() {
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("app");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(parent.path().join("analysis_options.yaml"), "{}").unwrap();
+    std::fs::write(
+        root.join("pubspec.yaml"),
+        "name: app\ndev_dependencies:\n  unused: any\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("main.dart"), "void main() {}").unwrap();
+    let config = root.join("falcon.json");
+    std::fs::write(&config, r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-dev-dependencies":"warn"}}}}"#).unwrap();
+    let mut state = LspState::new_from(Some(config), |_| None, root.clone());
+    state.set_dynamic_file_watching(true);
+    state.cross_file_pass();
+    assert!(
+        state
+            .environment
+            .dependency_input_watch_roots()
+            .iter()
+            .all(|path| path.starts_with(&root))
+    );
+    assert!(
+        state
+            .environment
+            .dependency_input_watch_files()
+            .iter()
+            .all(|path| path.starts_with(&root))
+    );
+    assert!(
+        state
+            .watched_dependency_roots()
+            .iter()
+            .all(|path| path.starts_with(&root))
+    );
+}
+
+#[test]
+fn disabled_dependency_probes_do_not_discover_package_root_contexts() {
+    let (app, dependencies, _, _) = dependency_probe_workspace(false, false);
+    std::fs::remove_file(app.path().join("main.dart")).unwrap();
+    let nested = app.path().join("nested");
+    std::fs::create_dir_all(nested.join(".dart_tool")).unwrap();
+    std::fs::write(
+        nested.join(".dart_tool/package_config.json"),
+        r#"{"configVersion":2,"packages":[]}"#,
+    )
+    .unwrap();
+    std::fs::write(nested.join("main.dart"), "void main() {}").unwrap();
+    let mut state = LspState::new_from(
+        Some(app.path().join("falcon.json")),
+        |_| None,
+        app.path().to_path_buf(),
+    );
+    state.set_dynamic_file_watching(true);
+    state.resolve_semantics = true;
+    state.cross_file_pass();
+    assert!(
+        state
+            .environment
+            .watched_dependency_roots()
+            .all(|root| !root.starts_with(dependencies.path()))
+    );
+    assert_eq!(
+        state.environment.dependency_input_watch_roots(),
+        Vec::<PathBuf>::new()
+    );
+    assert_eq!(
+        state.environment.dependency_input_watch_files(),
+        Vec::<PathBuf>::new()
+    );
+}

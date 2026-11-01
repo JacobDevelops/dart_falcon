@@ -18401,7 +18401,7 @@
     "sourcePath": "crates/falcon_rules/src/cross_file/unused_dependencies.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/unused-dependencies",
     "description": "Report regular pubspec dependencies with no Dart import or export in the analyzed package.",
-    "docs": "Report regular pubspec dependencies with no Dart import or export in the analyzed package.\n\nAll analyzed Dart locations count, including bin, test, tool and examples, as\ndo conditional import/export alternatives. Dev-dependencies, SDK dependencies\nand plugins registered in `.flutter-plugins-dependencies` are exempt: native\nregistration can use a plugin without a Dart import. Declared dependencies\nwhose resolved pubspec declares Flutter fonts, assets or plugin metadata are\nalso exempt, since Flutter can consume them without a Dart import. Resolution\nuses the nearest `.dart_tool/package_config.json`; missing or unreadable\ndependency metadata cannot establish this exemption. Nested packages are\nindependent. This is a source-set check, not a pub solver: excluded/unscanned\nfiles, build-time tools and native-only packages without Flutter metadata\ncannot establish usage. Suppress intentional non-Dart dependencies in pubspec.",
+    "docs": "Report regular pubspec dependencies with no Dart import or export in the analyzed package.\n\nAll analyzed Dart locations count, including bin, test, tool and examples, as\ndo conditional import/export alternatives. Dev-dependencies, SDK dependencies\nand plugins registered in `.flutter-plugins-dependencies` are exempt: native\nregistration can use a plugin without a Dart import. Declared dependencies\nwhose resolved pubspec declares Flutter fonts, assets or plugin metadata are\nalso exempt, since Flutter can consume them without a Dart import. Resolution\nuses the package root's nearest `.dart_tool/package_config.json`. Missing\ndependency manifests do not establish an exemption; malformed or inaccessible\nprobe inputs warn and conservatively skip only the dependent check. Nested packages are\nindependent. This is a source-set check, not a pub solver: excluded/unscanned\nfiles, build-time tools and native-only packages without Flutter metadata\ncannot establish usage. Suppress intentional non-Dart dependencies in pubspec.",
     "examples": {
       "bad": null,
       "good": null,
@@ -18480,7 +18480,7 @@
     "sourcePath": "crates/falcon_rules/src/cross_file/unused_dev_dependencies.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/unused-dev-dependencies",
     "description": "Report resolved pubspec dev dependencies unused by analyzed Dart sources or tools.",
-    "docs": "Report resolved pubspec dev dependencies unused by analyzed Dart sources or tools.\n\nThis rule needs `pub get`: unresolved dependencies are not reported. A package\nis checked only when at least one analyzed Dart file is outside `lib/`, since\nlibrary-only analysis cannot establish non-use of development tools. Imports\nand exports in every analyzed location and conditional alternatives count.\nDeliberately, `lib/` imports also count: `depend-on-referenced-packages` covers\ndev dependencies referenced by library code.\n\nSDK dependencies, analysis-options includes and analyzer plugins, same-named\ntop-level pubspec configuration, builders, executables and `bin/*.dart` tools\nare exempt. When `custom_lint` is enabled, resolved packages depending on\n`custom_lint_builder` are exempt too. Options are discovered at the package or\nnearest ancestor; relative scalar/list includes are followed with cycle\nprotection. Package includes establish usage but are not followed. Resolution\nuses the nearest `.dart_tool/package_config.json`. Missing or unreadable tool\nmetadata cannot establish an exemption. Nested packages are independent, and\nexcluded or unscanned sources cannot establish usage.",
+    "docs": "Report resolved pubspec dev dependencies unused by analyzed Dart sources or tools.\n\nThis rule needs `pub get`: unresolved dependencies are not reported. A package\nis checked only when at least one analyzed Dart file is outside `lib/`, since\nlibrary-only analysis cannot establish non-use of development tools. Imports\nand exports in every analyzed location and conditional alternatives count.\nDeliberately, `lib/` imports also count: `depend-on-referenced-packages` covers\ndev dependencies referenced by library code.\n\nSDK dependencies, analysis-options includes and analyzer plugins, same-named\ntop-level pubspec configuration, builders, executables and `bin/*.dart` tools\nare exempt. When `custom_lint` is enabled, resolved packages depending on\n`custom_lint_builder` are exempt too. Options are discovered at the package or\nnearest ancestor; relative scalar/list includes are followed with cycle\nprotection. Package includes establish usage but are not followed. Resolution\nuses the package root's nearest `.dart_tool/package_config.json`. Missing tool\nmetadata does not establish an exemption (an absent resolved package directory\nremains exempt); malformed or inaccessible probe inputs warn and conservatively\nskip only the dependent check. Nested packages are independent, and excluded or\nunscanned sources cannot establish usage.",
     "examples": {
       "bad": null,
       "good": null,
@@ -18535,7 +18535,7 @@
         },
         {
           "path": "bad_metadata/pubspec.yaml",
-          "content": "name: broken_tool_metadata\ndev_dependencies:\n  missing_pubspec: any #\n  malformed_pubspec: any #"
+          "content": "name: broken_tool_metadata\ndev_dependencies:\n  missing_pubspec: any #\n  malformed_pubspec: any # Unknown metadata conservatively preserves this dependency."
         },
         {
           "path": "bad_metadata/support.dart",
@@ -18803,12 +18803,6 @@
       {
         "message": "No analyzed Dart source uses `missing_pubspec`; remove the dev dependency if it is not used by build tools.",
         "line": 3,
-        "column": 3,
-        "file": "bad_metadata/pubspec.yaml"
-      },
-      {
-        "message": "No analyzed Dart source uses `malformed_pubspec`; remove the dev dependency if it is not used by build tools.",
-        "line": 4,
         "column": 3,
         "file": "bad_metadata/pubspec.yaml"
       },

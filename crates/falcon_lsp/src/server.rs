@@ -365,6 +365,9 @@ fn is_environment_document(uri: &Uri) -> bool {
                     | "pubspec_overrides.yaml"
                     | "melos.yaml"
                     | "l10n.yaml"
+                    | "analysis_options.yaml"
+                    | "build.yaml"
+                    | ".flutter-plugins-dependencies"
             )
         )
 }
@@ -842,14 +845,18 @@ fn handle_notification(
     match method.as_str() {
         DidOpenTextDocument::METHOD => {
             let params: DidOpenTextDocumentParams = parse_params!();
-            if is_environment_document(&params.text_document.uri) {
+            if is_environment_document(&params.text_document.uri)
+                || state.is_dependency_probe_document(params.text_document.uri.as_str())
+            {
                 return Ok(false);
             }
             open_and_publish(connection, state, debounce, params)?;
         }
         DidChangeTextDocument::METHOD => {
             let params: DidChangeTextDocumentParams = parse_params!();
-            if is_environment_document(&params.text_document.uri) {
+            if is_environment_document(&params.text_document.uri)
+                || state.is_dependency_probe_document(params.text_document.uri.as_str())
+            {
                 return Ok(false);
             }
             let uri = params.text_document.uri.as_str().to_string();
@@ -869,7 +876,9 @@ fn handle_notification(
         }
         DidSaveTextDocument::METHOD => {
             let params: DidSaveTextDocumentParams = parse_params!();
-            if is_environment_document(&params.text_document.uri) {
+            if is_environment_document(&params.text_document.uri)
+                || state.is_dependency_probe_document(params.text_document.uri.as_str())
+            {
                 if !watching.dynamic {
                     watched_files_and_publish(
                         connection,
@@ -893,7 +902,9 @@ fn handle_notification(
         }
         DidCloseTextDocument::METHOD => {
             let params: DidCloseTextDocumentParams = parse_params!();
-            if is_environment_document(&params.text_document.uri) {
+            if is_environment_document(&params.text_document.uri)
+                || state.is_dependency_probe_document(params.text_document.uri.as_str())
+            {
                 return Ok(false);
             }
             close_and_publish(connection, state, debounce, &params)?;

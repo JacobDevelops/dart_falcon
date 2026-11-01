@@ -6,8 +6,9 @@
 //! registration can use a plugin without a Dart import. Declared dependencies
 //! whose resolved pubspec declares Flutter fonts, assets or plugin metadata are
 //! also exempt, since Flutter can consume them without a Dart import. Resolution
-//! uses the nearest `.dart_tool/package_config.json`; missing or unreadable
-//! dependency metadata cannot establish this exemption. Nested packages are
+//! uses the package root's nearest `.dart_tool/package_config.json`. Missing
+//! dependency manifests do not establish an exemption; malformed or inaccessible
+//! probe inputs warn and conservatively skip only the dependent check. Nested packages are
 //! independent. This is a source-set check, not a pub solver: excluded/unscanned
 //! files, build-time tools and native-only packages without Flutter metadata
 //! cannot establish usage. Suppress intentional non-Dart dependencies in pubspec.
@@ -15,7 +16,9 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use falcon_analyze::{CrossFileRule, ProjectFile};
+use falcon_analyze::{
+    AnalysisEnvironment, CrossFileRule, DependencyInput, ManifestSnapshot, ProjectFile,
+};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::Diagnostic;
 
@@ -35,13 +38,17 @@ impl CrossFileRule for UnusedDependencies {
         let mut diagnostics = Vec::new();
         for (pubspec, (package, mut used)) in analyzed_package_usage(environment, files) {
             if let Some(package_root) = pubspec.parent() {
-                used.extend(native_plugins(package_root));
+                match native_plugins(environment, package_root) {
+                    Some(plugins) => used.extend(plugins),
+                    None => continue,
+                }
             }
             diagnostics.extend(unused_dependency_diagnostics(
+                environment,
                 package,
                 &used,
                 "dependencies",
-                |_, _, resolved| resolved.is_some_and(has_flutter_resources),
+                |_, _, resolved| resolved.is_some_and(|root| has_flutter_resources(environment, root)),
                 |name| format!(
                     "No analyzed Dart source uses `{name}`; remove the dependency if it is not used natively or by build tools."
                 ),
@@ -51,32 +58,32 @@ impl CrossFileRule for UnusedDependencies {
     }
 }
 
-fn native_plugins(root: &Path) -> HashSet<String> {
-    let Some(plugins) =
-        falcon_config::read_metadata_text(&root.join(".flutter-plugins-dependencies"))
-            .ok()
-            .and_then(|source| serde_json::from_str::<serde_json::Value>(&source).ok())
-    else {
-        return HashSet::new();
+fn native_plugins(environment: &AnalysisEnvironment, root: &Path) -> Option<HashSet<String>> {
+    let plugins = match environment.dependency_json(&root.join(".flutter-plugins-dependencies")) {
+        DependencyInput::Present(plugins) => plugins,
+        DependencyInput::Missing => return Some(HashSet::new()),
+        DependencyInput::Unknown(_) => return None,
     };
-    plugins
-        .get("plugins")
-        .and_then(serde_json::Value::as_object)
-        .into_iter()
-        .flat_map(|platforms| platforms.values())
-        .filter_map(serde_json::Value::as_array)
-        .flatten()
-        .filter_map(|plugin| plugin.get("name")?.as_str())
-        .map(ToOwned::to_owned)
-        .collect()
+    Some(
+        plugins
+            .get("plugins")
+            .and_then(serde_json::Value::as_object)
+            .into_iter()
+            .flat_map(|platforms| platforms.values())
+            .filter_map(serde_json::Value::as_array)
+            .flatten()
+            .filter_map(|plugin| plugin.get("name")?.as_str())
+            .map(ToOwned::to_owned)
+            .collect(),
+    )
 }
 
-fn has_flutter_resources(root: &Path) -> bool {
-    let Some(manifest) = falcon_config::read_metadata_text(&root.join("pubspec.yaml"))
-        .ok()
-        .and_then(|source| serde_yaml::from_str::<serde_yaml::Value>(&source).ok())
-    else {
-        return false;
+fn has_flutter_resources(environment: &AnalysisEnvironment, root: &Path) -> bool {
+    let package = environment.dependency_manifest(root);
+    let manifest = match package.snapshot() {
+        ManifestSnapshot::Valid { yaml, .. } => yaml,
+        ManifestSnapshot::Missing => return false,
+        ManifestSnapshot::Malformed(_) | ManifestSnapshot::Inaccessible(_) => return true,
     };
     let Some(flutter) = manifest
         .get("flutter")
@@ -124,7 +131,10 @@ mod tests {
         .unwrap();
         let config = PackageConfig::load(&PackageConfig::discover(&app).unwrap()).unwrap();
         let package = config.package("arbitrary_font_bundle").unwrap();
-        assert!(has_flutter_resources(&package.root));
+        assert!(has_flutter_resources(
+            &AnalysisEnvironment::default(),
+            &package.root
+        ));
         let source = "void main() {}";
         let files = [ProjectFile::new(
             app.join("main.dart"),
@@ -136,7 +146,8 @@ mod tests {
                 .analyze_project(
                     "unused-dependencies",
                     &falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
-                        files.iter().map(ProjectFile::path), |_| None,
+                        files.iter().map(ProjectFile::path),
+                        |_| None,
                     ),
                     &files,
                     &FalconConfig::default(),
@@ -149,13 +160,17 @@ mod tests {
             "name: arbitrary_font_bundle\nflutter:\n  fonts: []\n  assets: []\n  plugin: {}\n",
         )
         .unwrap();
-        assert!(!has_flutter_resources(&package.root));
+        assert!(!has_flutter_resources(
+            &AnalysisEnvironment::default(),
+            &package.root
+        ));
         assert_eq!(
             UnusedDependencies
                 .analyze_project(
                     "unused-dependencies",
                     &falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
-                        files.iter().map(ProjectFile::path), |_| None,
+                        files.iter().map(ProjectFile::path),
+                        |_| None,
                     ),
                     &files,
                     &FalconConfig::default(),

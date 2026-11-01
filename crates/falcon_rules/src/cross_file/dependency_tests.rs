@@ -236,3 +236,195 @@ fn malformed_manifest_fallback_name_preserves_own_package_path_boundaries() {
             .is_empty()
     );
 }
+
+fn dependency_probe_fixture() -> (tempfile::TempDir, Vec<ProjectFile>) {
+    let root = tempfile::tempdir().unwrap();
+    let app = root.path().join("app");
+    std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
+    std::fs::write(app.join("pubspec.yaml"),
+        "name: app\ndependencies:\n  dep: any\n  other: any\ndev_dependencies:\n  tool: any\n  another: any\n").unwrap();
+    let packages: Vec<_> = ["dep", "other", "tool", "another"]
+        .into_iter()
+        .map(|name| {
+            let path = root.path().join(name);
+            std::fs::create_dir_all(path.join("lib")).unwrap();
+            serde_json::json!({"name":name,"rootUri":format!("../../{name}"),"packageUri":"lib/"})
+        })
+        .collect();
+    std::fs::write(
+        app.join(".dart_tool/package_config.json"),
+        serde_json::to_vec(&serde_json::json!({"configVersion":2,"packages":packages})).unwrap(),
+    )
+    .unwrap();
+    let files = vec![
+        ProjectFile::new(
+            app.join("main.dart"),
+            Arc::new(ParsedFile::parse("void main() {}")),
+        )
+        .unwrap(),
+    ];
+    (root, files)
+}
+
+fn dependency_probe_diagnostics(
+    environment: &falcon_analyze::AnalysisEnvironment,
+    files: &[ProjectFile],
+) -> [Vec<falcon_diagnostics::Diagnostic>; 2] {
+    use falcon_analyze::CrossFileRule;
+    let config = FalconConfig::default();
+    [
+        super::unused_dependencies::UnusedDependencies.prepare_project(
+            environment,
+            files,
+            &config,
+            None,
+        ),
+        super::unused_dev_dependencies::UnusedDevDependencies.prepare_project(
+            environment,
+            files,
+            &config,
+            None,
+        ),
+    ]
+}
+
+#[test]
+fn dependency_probe_unknown_is_scoped_to_its_input_and_consumer() {
+    for (path, contents, expected) in [
+        ("app/analysis_options.yaml", "include: [", [2, 0]),
+        ("app/.flutter-plugins-dependencies", "{", [0, 2]),
+        ("dep/pubspec.yaml", "flutter: [", [1, 2]),
+        ("tool/pubspec.yaml", "executables: [", [2, 1]),
+    ] {
+        let (root, files) = dependency_probe_fixture();
+        let path = root.path().join(path);
+        std::fs::write(&path, contents).unwrap();
+        let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+            files.iter().map(ProjectFile::path),
+            |_| None,
+        );
+        for _ in 0..2 {
+            assert_eq!(
+                dependency_probe_diagnostics(&environment, &files)
+                    .map(|diagnostics| diagnostics.len()),
+                expected,
+                "{path:?}"
+            );
+        }
+        let warnings = environment.take_warnings();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains(path.to_str().unwrap()));
+    }
+}
+
+#[test]
+fn dependency_probe_missing_manifests_preserve_main_behavior() {
+    let (root, files) = dependency_probe_fixture();
+    let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+        files.iter().map(ProjectFile::path),
+        |_| None,
+    );
+    assert_eq!(
+        dependency_probe_diagnostics(&environment, &files).map(|diagnostics| diagnostics.len()),
+        [2, 2]
+    );
+    assert_eq!(environment.take_warnings(), Vec::<String>::new());
+    std::fs::remove_dir_all(root.path().join("tool")).unwrap();
+    let missing = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+        files.iter().map(ProjectFile::path),
+        |_| None,
+    );
+    assert_eq!(
+        dependency_probe_diagnostics(&missing, &files).map(|diagnostics| diagnostics.len()),
+        [2, 1]
+    );
+}
+
+#[test]
+fn dependency_probes_keep_captured_inputs_after_deletion() {
+    let (root, files) = dependency_probe_fixture();
+    for (path, contents) in [
+        (
+            "dep/pubspec.yaml",
+            "name: dep\nflutter:\n  assets: [image.png]\n",
+        ),
+        (
+            "app/.flutter-plugins-dependencies",
+            r#"{"plugins":{"ios":[{"name":"other"}]}}"#,
+        ),
+        ("app/analysis_options.yaml", "include: local.yaml\n"),
+        ("app/local.yaml", "include: package:another/options.yaml\n"),
+        ("tool/bin/command.dart", "void main() {}"),
+    ] {
+        let path = root.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+    let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+        files.iter().map(ProjectFile::path),
+        |_| None,
+    );
+    let before = dependency_probe_diagnostics(&environment, &files);
+    assert_eq!(before.each_ref().map(Vec::len), [0, 0]);
+    for path in [
+        "dep/pubspec.yaml",
+        "app/.flutter-plugins-dependencies",
+        "app/analysis_options.yaml",
+        "app/local.yaml",
+        "tool/bin/command.dart",
+        "app/.dart_tool/package_config.json",
+    ] {
+        std::fs::remove_file(root.path().join(path)).unwrap();
+    }
+    assert_eq!(
+        serde_json::to_value(dependency_probe_diagnostics(&environment, &files)).unwrap(),
+        serde_json::to_value(before).unwrap()
+    );
+}
+
+#[test]
+fn dependency_probe_resolution_uses_package_root_not_first_nested_file() {
+    let (root, _) = dependency_probe_fixture();
+    std::fs::write(
+        root.path().join("tool/pubspec.yaml"),
+        "name: tool\nflutter:\n  assets: [assets/]\n",
+    )
+    .unwrap();
+    let nested = root.path().join("app/nested");
+    std::fs::create_dir_all(nested.join(".dart_tool")).unwrap();
+    std::fs::write(nested.join(".dart_tool/package_config.json"),
+        r#"{"configVersion":2,"packages":[{"name":"dep","rootUri":"../../../tool","packageUri":"lib/"}]}"#).unwrap();
+    let files = vec![
+        ProjectFile::new(
+            nested.join("main.dart"),
+            Arc::new(ParsedFile::parse("void main() {}")),
+        )
+        .unwrap(),
+    ];
+    let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+        files.iter().map(ProjectFile::path),
+        |_| None,
+    );
+    assert_eq!(
+        dependency_probe_diagnostics(&environment, &files)[0].len(),
+        2
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn dependency_probe_build_tool_preserves_symlinked_executables() {
+    let (root, files) = dependency_probe_fixture();
+    std::fs::create_dir(root.path().join("tool/bin")).unwrap();
+    std::fs::write(root.path().join("tool/command.dart"), "void main() {}").unwrap();
+    std::os::unix::fs::symlink("../command.dart", root.path().join("tool/bin/command.dart"))
+        .unwrap();
+    let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+        files.iter().map(ProjectFile::path),
+        |_| None,
+    );
+    assert_eq!(
+        dependency_probe_diagnostics(&environment, &files)[1].len(),
+        1
+    );
+}

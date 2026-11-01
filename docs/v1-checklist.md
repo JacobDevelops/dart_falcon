@@ -234,10 +234,22 @@ These entries describe implemented foundation, not acceptance of the open items.
   and report fingerprints; only editor positions exclude the BOM. Template paths
   are lexically normalized, retaining symlink client paths. Parent-directory
   deletion clears captured template sources and diagnostics.
-  Remaining exclusions: resolved-dependency resource/build-tool probes in
-  unused_dependencies / unused_dev_dependencies still acquire dependency manifests,
-  plugin registration, analysis options, build files and executable directories.
-  Other rule-side filesystem facts also remain: no_deep_package_imports reads
+  V1-3f's resolved-dependency probes in `unused_dependencies` / `unused_dev_dependencies`
+  now consume bounded generation-owned raw documents, existence and directory facts;
+  rule policy remains in the rules. Dependency manifests reuse the `PackageMetadata`
+  snapshot owner. Missing manifests preserve the previous behavior (no resource/tool
+  exemption; absent tool directories remain exempt), while malformed/inaccessible
+  inputs warn and conservatively skip only the probe that consumes them. CLI captures
+  once per run; LSP disk events refresh enabled probes without resetting semantic
+  indexes for metadata-only or executable-content edits. Only mutable path dependencies
+  and workspace inputs acquire watchers, never hosted dependency probes. Capture/delete,
+  per-input unknown scoping, warning recovery, root-config selection and watcher lifecycle
+  tests cover this cutover. Options discovery skips non-files and watches no outside-workspace
+  ancestors; mutable dependency watchers name exact input files and executable directories.
+  Executable probes stream entries until a matching file, without a directory-size cutoff.
+  Disabled rules retain main's existing dependency-source event invalidation behavior.
+  Remaining exclusions: other rule-side filesystem facts remain:
+  `no_deep_package_imports` reads
   dependency files; avoid_missing_test_files and conditional_uri_does_not_exist
   probe file existence; unused_assets retains the directory IO noted in V1-3c;
   path-canonicalization helpers still access the filesystem. The metadata box and

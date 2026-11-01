@@ -210,12 +210,7 @@ impl LocalizationSnapshot {
     }
 }
 
-fn missing(error: &std::io::Error) -> bool {
-    matches!(
-        error.kind(),
-        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-    )
-}
+use super::missing;
 
 fn add_locale(messages: &serde_json::Value, locales: &mut HashSet<String>) {
     if let Some(locale) = messages.get("@@locale").and_then(serde_json::Value::as_str) {

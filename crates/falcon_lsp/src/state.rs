@@ -448,6 +448,7 @@ pub struct LspState {
     /// never polled on ordinary project edits.
     environment_stamps: Option<falcon_analyze::EnvironmentCacheKey>,
     localization_paths: Option<(HashSet<PathBuf>, HashSet<PathBuf>)>,
+    dependency_probe_roots: Vec<PathBuf>,
     /// Versioned hosted/SDK facts are immutable; mutable roots use client events.
     external_libraries: ExternalLibraries,
     /// Instrumentation for incremental tests: number of external-library resets.
@@ -582,6 +583,7 @@ impl LspState {
             environment,
             environment_stamps: None,
             localization_paths: None,
+            dependency_probe_roots: Vec::new(),
             external_libraries: ExternalLibraries::default(),
             external_reset_count: 0,
             external_indexes: None,
@@ -769,6 +771,7 @@ impl LspState {
                 .filter(|root| self.localization_event_relevant(root))
                 .map(Path::to_path_buf),
         );
+        roots.extend(self.environment.dependency_input_watch_roots());
         roots.sort_unstable();
         roots.dedup();
         roots
@@ -776,7 +779,11 @@ impl LspState {
 
     /// Loaded local files use exact relative patterns, never recursive parent watches.
     pub fn watched_dependency_files(&self) -> Vec<PathBuf> {
-        self.watched_local_paths.clone()
+        let mut files = self.watched_local_paths.clone();
+        files.extend(self.environment.dependency_input_watch_files());
+        files.sort_unstable();
+        files.dedup();
+        files
     }
 
     pub(crate) fn ancestor_manifests(&self) -> impl Iterator<Item = PathBuf> + '_ {
@@ -914,6 +921,7 @@ impl LspState {
                 changed.push(path.clone());
             }
         }
+        changed.extend(self.environment.dependency_input_changes());
         let current_environment = self.environment.config_stamps();
         let environment_changed = self
             .environment_stamps
@@ -995,6 +1003,43 @@ impl LspState {
             })
     }
 
+    fn refresh_watched_metadata(&mut self, paths: &[PathBuf]) -> bool {
+        self.refresh_unresolved_paths();
+        self.refresh_asset_paths();
+        self.refresh_localization_paths();
+        let normalized: Vec<_> = paths.iter().map(|path| watched_path(path)).collect();
+        let paths = normalized.as_slice();
+        self.environment.refresh_dependency_inputs(paths);
+        paths
+            .iter()
+            .all(|path| self.environment.dependency_input_event(path))
+            && !paths.iter().any(|path| {
+                self.environment
+                    .inputs_affected_by(self.environment_stamps.as_ref(), path)
+            })
+            && !paths.iter().any(|path| {
+                self.watched_project_source(path)
+                    || self
+                        .watched_local_paths
+                        .iter()
+                        .any(|cached| cached.starts_with(path))
+                    || self
+                        .cross_file_external_cache
+                        .as_ref()
+                        .is_some_and(|cache| cache.loaded(path))
+                    || self
+                        .documents
+                        .values()
+                        .any(|document| document.path.starts_with(path))
+                    || self.semantic_snapshot.as_ref().is_some_and(|snapshot| {
+                        snapshot
+                            .by_path
+                            .keys()
+                            .any(|source| source.starts_with(path))
+                    })
+            })
+    }
+
     /// Process one client watcher batch. Project-only saves retain the shared
     /// external indexes; mutable dependencies or changed resolution inputs drop
     /// the external graph once, then all open documents share the rebuilt view.
@@ -1002,9 +1047,9 @@ impl LspState {
         if paths.is_empty() {
             return Vec::new();
         }
-        self.refresh_unresolved_paths();
-        self.refresh_asset_paths();
-        self.refresh_localization_paths();
+        if self.refresh_watched_metadata(paths) {
+            return self.cross_file_pass();
+        }
         // Discovery can capture new disk bytes while retaining a known context.
         // Check original link locations before watcher normalization follows them.
         let inputs_changed = paths.iter().any(|path| {
@@ -1171,6 +1216,7 @@ impl LspState {
                     .any(|root| path.starts_with(root)))
             || self.asset_event_relevant(path)
             || self.localization_event_relevant(path)
+            || self.environment.dependency_input_event(path)
     }
 
     fn normalize_watched_path(&self, path: &Path) -> PathBuf {
@@ -1601,6 +1647,11 @@ impl LspState {
         true
     }
 
+    pub(crate) fn is_dependency_probe_document(&self, uri: &str) -> bool {
+        let path = watched_path(&uri_to_path(uri));
+        !is_dart_file(&path) && self.environment.dependency_input_event(&path)
+    }
+
     /// `textDocument/didSave`: refresh filesystem identity when resolvable and
     /// any supplied text (re-parsing only when it actually differs), then analyze.
     ///
@@ -1918,6 +1969,7 @@ impl LspState {
         self.asset_paths = None;
         self.localization_paths = None;
         self.environment.clear_localization();
+        self.environment.clear_dependency_inputs();
         if !matches!(self.cross_file_schedule, CrossFileSchedule::Immediate) {
             self.cross_file_schedule = CrossFileSchedule::Pending;
         }
@@ -1997,6 +2049,9 @@ impl LspState {
         self.refresh_asset_paths();
         self.refresh_localization_paths();
         self.localization_event_relevant(&falcon_analyze::lexical_normalize(path))
+            || self
+                .environment
+                .dependency_input_event(&falcon_analyze::lexical_normalize(path))
             || !self.asset_file_event(&watched_path(path))
     }
 
@@ -2384,6 +2439,14 @@ impl LspState {
             Ok(diags) => diags,
             Err(error) => return self.cross_file_worker_diagnostics(&error),
         };
+        let mut roots = self.environment.dependency_input_watch_roots();
+        roots.extend(self.environment.dependency_input_watch_files());
+        roots.sort();
+        roots.dedup();
+        if roots != self.dependency_probe_roots {
+            self.dependency_probe_roots = roots;
+            self.watched_dependency_generation += 1;
+        }
         let mut grouped: HashMap<String, Vec<Diagnostic>> = HashMap::new();
         for diag in diags {
             grouped
