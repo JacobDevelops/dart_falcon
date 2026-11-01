@@ -86,7 +86,7 @@ tikv-jemallocator.workspace = true
 
 [dev-dependencies]
 criterion.workspace  = true
-falcon_analyze       = { path = "crates/falcon_analyze" }
+falcon_analyze       = { path = "crates/falcon_analyze", features = [ "test-support" ] }
 falcon_config        = { path = "crates/falcon_config" }
 falcon_dart_parser   = { path = "crates/falcon_dart_parser" }
 falcon_diagnostics   = { path = "crates/falcon_diagnostics" }

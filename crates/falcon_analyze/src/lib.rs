@@ -40,7 +40,7 @@ pub use environment::packages::{
 pub use environment::{
     AnalysisEnvironment, DartSdk, DependencyExport, DependencyInput, DependencySource,
     EnvironmentCacheKey, ExternalLibraries, ExternalOrigin, ExternalTarget, Feature,
-    LanguageVersion, PackageConfig, SdkLocator, percent_decode, percent_encode,
+    LanguageVersion, PackageConfig, PackageConfigInput, SdkLocator, percent_decode, percent_encode,
 };
 pub use function_bodies::{BodyOwner, FunctionBodies};
 pub use intern::InternedString;

@@ -78,6 +78,8 @@ pub(crate) struct AutofixAnalyzer<'a> {
     declaration_library_rebuilds: usize,
     #[cfg(test)]
     body_refreshes: usize,
+    #[cfg(test)]
+    parser_failure_path: Option<std::path::PathBuf>,
 }
 
 impl<'a> AutofixAnalyzer<'a> {
@@ -124,6 +126,8 @@ impl<'a> AutofixAnalyzer<'a> {
             declaration_library_rebuilds: 0,
             #[cfg(test)]
             body_refreshes: 0,
+            #[cfg(test)]
+            parser_failure_path: None,
         }
     }
 
@@ -240,6 +244,13 @@ impl<'a> AutofixAnalyzer<'a> {
         if let Some(diagnostic) = source_size_diagnostic(path, source.len() as u64) {
             return Err(Box::new(diagnostic));
         }
+        #[cfg(test)]
+        if self.parser_failure_path.as_deref() == Some(path) {
+            let error =
+                falcon_analyze::with_rules_stack(|| panic!("autofix companion parser regression"))
+                    .unwrap_err();
+            return Err(Box::new(rules_thread_diagnostic(path, &error)));
+        }
         let (parsed, errors) = ParsedFile::try_parse_for_package(
             source,
             self.environment.package_language_version(path),
@@ -275,7 +286,10 @@ impl<'a> AutofixAnalyzer<'a> {
         let roots =
             crate::required_source_roots(project_paths.iter().map(std::path::PathBuf::as_path));
         let required = |path: &Path| self.environment.project_source_required(path, &roots);
-        if let Some(error) = libraries.source_failure(required) {
+        if let Some(error) = libraries
+            .worker_failure()
+            .or_else(|| libraries.source_failure(required))
+        {
             return Err(error);
         }
         for companion in libraries
@@ -291,9 +305,13 @@ impl<'a> AutofixAnalyzer<'a> {
                     continue;
                 }
             };
-            if let Ok((file, _)) = self.parse(companion, &source) {
-                self.companions.push(file);
-            }
+            let (file, _) = self.parse(companion, &source).map_err(|diagnostic| {
+                falcon_analyze::SourceFailure {
+                    path: companion.to_path_buf(),
+                    source: Arc::new(std::io::Error::other(diagnostic.message)),
+                }
+            })?;
+            self.companions.push(file);
         }
         self.packages = package_identities(
             std::iter::once(self.path).chain(self.companions.iter().map(ProjectFile::path)),
@@ -604,6 +622,93 @@ mod tests {
         assert!(outcome.stop.is_none());
     }
 
+    #[test]
+    fn companion_parser_worker_failure_prevents_autofix_indexes_until_recovery() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("main.dart");
+        let companion = directory.path().join("part.dart");
+        let source = "part 'part.dart'; class Main {}";
+        std::fs::write(&path, source).unwrap();
+        std::fs::write(
+            &companion,
+            "// falcon-test:external-parser-failure\npart of 'main.dart';",
+        )
+        .unwrap();
+        let config = FalconConfig::default();
+        let analysis =
+            ProjectAnalysis::for_semantic_autofix_tests(falcon_analyze::RuleRegistry::new());
+        let mut environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+        let mut analyzer = AutofixAnalyzer::new(
+            &analysis,
+            &config,
+            &mut environment,
+            &path,
+            FixContext {
+                external: None,
+                external_libraries: None,
+                project_files: &[],
+                cancelled: &|| false,
+            },
+        );
+        assert!(analyzer.analyze(source).is_empty());
+        let failure = analyzer.source_failure.take().unwrap();
+        assert_eq!(failure.path, companion);
+        assert!(failure.to_string().contains("external parser regression"));
+        assert!(analyzer.overlay.is_none());
+        assert!(analyzer.indexes.is_none());
+        std::fs::write(&companion, "part of 'main.dart'; class Current {}").unwrap();
+        analyzer.analyze(source);
+        assert!(analyzer.source_failure.is_none());
+        assert!(analyzer.overlay.is_some());
+        assert_eq!(analyzer.companions.len(), 1);
+        assert!(analyzer.companions[0].source().contains("class Current"));
+    }
+
+    #[test]
+    fn reparsed_companion_worker_failure_prevents_indexes_and_recovers_current_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("main.dart");
+        let companion = directory.path().join("part.dart");
+        let source = "part 'part.dart'; class Main {}";
+        std::fs::write(&path, source).unwrap();
+        std::fs::write(&companion, "part of 'main.dart'; class Before {}").unwrap();
+        let config = FalconConfig::default();
+        let analysis =
+            ProjectAnalysis::for_semantic_autofix_tests(falcon_analyze::RuleRegistry::new());
+        let mut environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+        let mut analyzer = AutofixAnalyzer::new(
+            &analysis,
+            &config,
+            &mut environment,
+            &path,
+            FixContext {
+                external: None,
+                external_libraries: None,
+                project_files: &[],
+                cancelled: &|| false,
+            },
+        );
+        analyzer.parser_failure_path = Some(companion.clone());
+        assert!(analyzer.analyze(source).is_empty());
+        let failure = analyzer.source_failure.take().unwrap();
+        assert_eq!(failure.path, companion);
+        assert!(
+            failure
+                .source
+                .to_string()
+                .contains("autofix companion parser regression")
+        );
+        assert!(analyzer.companions.is_empty());
+        assert!(analyzer.overlay.is_none());
+        assert!(analyzer.indexes.is_none());
+        analyzer.parser_failure_path = None;
+        std::fs::write(&companion, "part of 'main.dart'; class Current {}").unwrap();
+        analyzer.analyze(source);
+        assert!(analyzer.source_failure.is_none());
+        assert!(analyzer.overlay.is_some());
+        assert_eq!(analyzer.companions.len(), 1);
+        assert!(analyzer.companions[0].source().contains("class Current"));
+    }
     #[test]
     fn successive_edits_reuse_external_indexes_and_report_fresh_syntax() {
         let config = FalconConfig::default();

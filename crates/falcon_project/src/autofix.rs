@@ -453,7 +453,7 @@ mod tests {
                 panic!("expected a source failure");
             };
             assert!(message.contains("companion.dart"), "{message}");
-            assert!(message.contains("failed to read file"), "{message}");
+            assert!(message.contains("failed to analyze file"), "{message}");
             std::fs::write(&companion, "part of 'main.dart';").unwrap();
             let readable = fix_file(&analysis, &config, &mut environment, &main, original, false);
             assert_eq!(readable.source, original.replace("new ", ""));

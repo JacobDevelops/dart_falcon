@@ -172,7 +172,10 @@ pub fn walk_project(
         match acquire_source(&path) {
             SourceAcquisition::Acquired(source) => output.files.push((path, source)),
             SourceAcquisition::Oversized(error) | SourceAcquisition::Failed(error) => {
-                return Err(format!("failed to read file {}: {error}", path.display()));
+                return Err(format!(
+                    "failed to analyze file {}: {error}",
+                    path.display()
+                ));
             }
         }
     }

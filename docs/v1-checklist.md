@@ -117,8 +117,10 @@ These entries describe implemented foundation, not acceptance of the open items.
     Manifest snapshots, package configuration, analysis-options includes, localization
     inputs, native-plugin/resource/build-tool facts and barrel-export inputs retain
     unknown outcomes: their dependent checks skip or conservatively exempt, never
-    infer absence from an acquisition/parse failure. An invalid package configuration,
-    including partially invalid entries, cannot establish an unused dependency.
+    infer absence from an acquisition/parse failure. Package configuration distinguishes
+    missing, unknown and valid inputs: invalid/partially invalid entries cannot establish
+    conditional-URI or dependency absence. Valid entries in a partial configuration
+    retain positive package roots, language versions and resolved import/test facts.
     Independent rules remain eligible; optional failures do not publish
     `incomplete-analysis` or turn the CLI exit nonzero.
   - Caught parser/rule/semantic-index/cross-file worker failures are never optional:
@@ -126,7 +128,13 @@ These entries describe implemented foundation, not acceptance of the open items.
     Failure diagnostics name the source and worker failure; the LSP adds
     `incomplete-analysis`, suppresses cross-file rules, and replaces stale manifest
     publications too. Successful retries rebuild failed semantic/external facts and
-    publish current diagnostics. Parser injection is `cfg(test)` only.
+    publish current diagnostics even when only one of several documents changes.
+    External worker failures follow current import/part reachability: removing the
+    failing dependency clears qualification without a dependency-file edit; restoring
+    its directive retries it. Separate failures retain their own source fingerprints.
+    Current worker state is separate from previously published diagnostics. Parser
+    injection is unit-test-only, or gated by `test-support` and debug assertions for
+    frontend subprocess regressions; neither seam is present in release builds.
   - Fatal controller-thread panics and native stack-overflow aborts terminate the
     process nonzero, rather than leaving a live server with stale publications.
     Cargo profiles retain unwinding; the relay propagates the controller join error
@@ -147,9 +155,17 @@ These entries describe implemented foundation, not acceptance of the open items.
   External parser panic/disappearance tests require fresh recovered declarations.
   CLI completion tests and LSP file-rule, cross-file-rule, project-parser and semantic
   panic tests independently assert nonzero/qualification, cross-file suppression and
-  current-source recovery. Broken package-config tests assert warning/exit/publication
-  behavior and an independently expected new unused-dependency finding after repair;
-  future-version tests assert warning-once behavior and no incomplete signal.
+  current-source recovery, including `change → analyze_affected_many → cross_file_pass`
+  with two documents. External parser subprocess/autofix and both LSP semantic-view
+  tests assert file-specific failure, suppression and current-source recovery.
+  Broken package-config tests assert warning/exit/publication behavior, unknown
+  conditional URIs, and independently expected normal/dev unused-dependency findings
+  after repair; future-version tests assert warning-once behavior and no incomplete signal.
+  Partial-entry tests independently assert Dart 2.19 break behavior, positive package
+  roots/language versions and safe LSP index reuse; focused rule tests distinguish
+  unavailable configuration from complete absence. Warm-cache semantic failures
+  prove external-layer reset, and separate autofix tests exercise companion reparse
+  failure and the nonsemantic CLI fix-companion path before any writes.
 - Acceptance: unreadable, disappearing, invalid-UTF-8 and oversized sources plus
   worker failure cannot yield an unqualified clean complete-project result;
   recovery yields current diagnostics, not stale results. Assert exit/publication

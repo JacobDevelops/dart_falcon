@@ -61,6 +61,7 @@ fn diagnostics(output: &Output) -> Result<Vec<DiagnosticJson>> {
     }
     if [
         "failed to read file",
+        "failed to analyze file",
         "failed to access input",
         "failed to walk directory",
     ]
@@ -365,7 +366,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn crash_exit_and_panic_stderr_cannot_be_snapshotted() {
+    fn crash_exit_panic_and_skipped_input_stderr_cannot_be_snapshotted() {
         use std::os::unix::process::ExitStatusExt;
         let mut output = Output {
             status: std::process::ExitStatus::from_raw(0),
@@ -380,8 +381,20 @@ mod tests {
         output.status = std::process::ExitStatus::from_raw(0);
         output.stderr = b"thread 'worker' panicked at source.rs:12".to_vec();
         assert!(diagnostics(&output).is_err());
-        output.stderr = b"WARN failed to read file path=invalid.dart".to_vec();
-        assert!(diagnostics(&output).is_err());
+        for message in [
+            "failed to read file invalid.dart: Permission denied",
+            "failed to analyze file invalid.dart: stream did not contain valid UTF-8",
+            "failed to analyze file invalid.dart: parser worker failed: parser worker panicked",
+        ] {
+            output.stderr = message.as_bytes().to_vec();
+            assert!(
+                diagnostics(&output)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("falcon skipped corpus inputs"),
+                "{message}"
+            );
+        }
         output.stderr.clear();
         output.stdout = b"not JSON".to_vec();
         assert!(diagnostics(&output).is_err());

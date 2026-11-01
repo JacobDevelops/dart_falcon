@@ -18,6 +18,7 @@ tracing.workspace    = true
 walkdir.workspace    = true
 
 [dev-dependencies]
+falcon_analyze               = { path = "../falcon_analyze", features = [ "test-support" ] }
 falcon_syntax                = { path = "../falcon_syntax" }
 tempfile.workspace           = true
 tracing-subscriber.workspace = true

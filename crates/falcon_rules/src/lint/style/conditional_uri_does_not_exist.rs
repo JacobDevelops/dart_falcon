@@ -9,8 +9,8 @@
 //!   `package:` URI inside a package's `lib/` directory, so climbing out of
 //!   `lib/` names another package, else its `file:` URI.
 //! - A `package:` URI resolves through the package configuration. Without one,
-//!   every `package:` URI is reported. A query is ignored; a fragment, an
-//!   unknown package, or a missing path segment is reported.
+//!   every `package:` URI is reported; malformed configuration leaves it unknown.
+//!   A query is ignored; a fragment, an unknown package, or a missing path is reported.
 //! - A `file:` URI needs an absolute path; its authority is ignored. A query or
 //!   fragment (including on a relative URI resolved to `file:`) names no file.
 //! - A `dart:` URI must name a library of the SDK (with its embedder); without
@@ -25,7 +25,7 @@
 
 use std::path::{Path, PathBuf};
 
-use falcon_analyze::{AnalyzeContext, PackageConfig, Rule, RulePreparation, percent_decode};
+use falcon_analyze::{AnalyzeContext, PackageConfigInput, Rule, RulePreparation, percent_decode};
 use falcon_syntax::cst::{ExportDirective, ImportDirective, Program};
 
 use crate::lint::support::uri::uri_scheme;
@@ -51,9 +51,9 @@ impl Rule for ConditionalUriDoesNotExist {
         if configurations.peek().is_none() {
             return RulePreparation::Diagnostics(Vec::new());
         }
-        let config = ctx
-            .environment()
-            .and_then(|environment| environment.package_config(ctx.file_path()));
+        let config = ctx.environment().map_or(PackageConfigInput::Missing, |environment| {
+            environment.package_config(ctx.file_path())
+        });
         let resolver = Resolver {
             environment: ctx.filesystem_environment(),
             file: ctx.file_path(),
@@ -83,7 +83,7 @@ impl Rule for ConditionalUriDoesNotExist {
 struct Resolver<'a> {
     environment: &'a falcon_analyze::AnalysisEnvironment,
     file: &'a Path,
-    config: Option<&'a PackageConfig>,
+    config: PackageConfigInput<'a>,
     /// Whether the SDK defines a `dart:` library; `None` without an SDK.
     sdk_library: &'a dyn Fn(&str) -> Option<bool>,
 }
@@ -128,6 +128,9 @@ impl Resolver<'_> {
                 if uri.is_empty() {
                     // The containing library itself.
                     return Some(true);
+                }
+                if matches!(self.config, PackageConfigInput::Unknown { .. }) {
+                    return None;
                 }
                 if let Some(base) = self.base() {
                     let path = merge(&base, rest);
@@ -175,7 +178,7 @@ impl Resolver<'_> {
     /// when it lies in a package's `lib/` directory.
     fn base(&self) -> Option<String> {
         let file = self.environment.canonical_or_lexical_path(self.file);
-        let package = self.config?.package_library_containing_canonical(&file)?;
+        let package = self.config.available()?.package_library_containing_canonical(&file)?;
         let (name, lib_root) = (package.name.as_str(), package.lib_root.as_path());
         let relative = file.strip_prefix(lib_root).ok()?;
         let mut path = name.to_string();
@@ -188,8 +191,10 @@ impl Resolver<'_> {
 
     /// Whether `package:<path>` names an existing file.
     fn package_exists(&self, path: &str, fragment: bool) -> Option<bool> {
-        let Some(config) = self.config else {
-            return Some(false);
+        let config = match self.config {
+            PackageConfigInput::Present(config) => config,
+            PackageConfigInput::Missing => return Some(false),
+            PackageConfigInput::Unknown { .. } => return None,
         };
         let (_, rest) = path.split_once('/').unwrap_or((path, ""));
         if fragment || rest.is_empty() {
@@ -244,7 +249,7 @@ fn remove_dot_segments(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConditionalUriDoesNotExist, Resolver, merge, remove_dot_segments};
+    use super::{ConditionalUriDoesNotExist, PackageConfigInput, Resolver, merge, remove_dot_segments};
     use falcon_analyze::RuleAnalysis;
 
     #[test]
@@ -267,7 +272,7 @@ mod tests {
         let resolver = Resolver {
             environment: &falcon_analyze::AnalysisEnvironment::default(),
             file: &file,
-            config: Some(&config),
+            config: PackageConfigInput::Present(&config),
             sdk_library: &|_| None,
         };
         assert_eq!(resolver.exists("package:other/missing.dart"), Some(false));
@@ -300,11 +305,25 @@ mod tests {
         let resolver = Resolver {
             environment: &falcon_analyze::AnalysisEnvironment::default(),
             file: std::path::Path::new("lib/main.dart"),
-            config: None,
+            config: PackageConfigInput::Missing,
             sdk_library: &|_| None,
         };
         assert_eq!(resolver.exists("package:app/src/present.dart"), Some(false));
         assert_eq!(resolver.exists("package:other/missing.dart"), Some(false));
+    }
+
+    #[test]
+    fn unknown_configuration_cannot_prove_relative_or_package_uris_missing() {
+        let environment = falcon_analyze::AnalysisEnvironment::default();
+        let resolver = Resolver {
+            environment: &environment,
+            file: std::path::Path::new("lib/main.dart"),
+            config: PackageConfigInput::Unknown { config: None, reason: "invalid JSON" },
+            sdk_library: &|_| None,
+        };
+        assert_eq!(resolver.exists("missing.dart"), None);
+        assert_eq!(resolver.exists("package:other/missing.dart"), None);
+        assert_eq!(resolver.exists(""), Some(true));
     }
 
     #[test]
@@ -365,7 +384,7 @@ mod tests {
         let resolver = Resolver {
             environment: &falcon_analyze::AnalysisEnvironment::default(),
             file: &file,
-            config: Some(&config),
+            config: PackageConfigInput::Present(&config),
             sdk_library: &|_| None,
         };
         assert_eq!(resolver.base().as_deref(), Some("app/new.dart"));

@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use falcon_analyze::{
-    AnalysisEnvironment, CrossFileRule, PackageIdentity, ProjectFile, SemanticIndexes,
+    AnalysisEnvironment, CrossFileRule, PackageConfigInput, PackageIdentity, ProjectFile, SemanticIndexes,
 };
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
@@ -53,6 +53,10 @@ impl CrossFileRule for NoDeepPackageImports {
         let mut diagnostics = Vec::new();
         for (file, own_package) in files.iter().zip(&file_packages) {
             let configured = environment.package_config(file.path());
+            if matches!(configured, PackageConfigInput::Unknown { config: None, .. }) {
+                continue;
+            }
+            let configured = configured.available();
             let dependencies = dependencies
                 .entry(configured.map(|config| config.path.as_path()))
                 .or_default();
@@ -258,6 +262,43 @@ mod tests {
         assert_eq!(analyze(&files).len(), 6);
         files.push(project_file(root.join("packages/other/lib/other.dart"), ""));
         assert!(analyze(&files).is_empty());
+    }
+
+    #[test]
+    fn unknown_configuration_does_not_fall_back_to_discovered_packages() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = falcon_analyze::canonical_package_path(directory.path());
+        std::fs::create_dir_all(root.join(".dart_tool")).unwrap();
+        std::fs::create_dir_all(root.join("dep/lib")).unwrap();
+        std::fs::write(root.join("pubspec.yaml"), "name: app\n").unwrap();
+        std::fs::write(root.join("dep/pubspec.yaml"), "name: dep\n").unwrap();
+        std::fs::write(root.join("dep/lib/dep.dart"), "export 'value.dart';").unwrap();
+        std::fs::write(root.join("dep/lib/value.dart"), "class Value {}").unwrap();
+        let configuration = root.join(".dart_tool/package_config.json");
+        let project_file = |path, source: &str| {
+            ProjectFile::new(path, Arc::new(falcon_analyze::ParsedFile::parse(source))).unwrap()
+        };
+        let files = [
+            project_file(root.join("main.dart"), "import 'package:dep/value.dart';"),
+            project_file(root.join("dep/lib/value.dart"), "class Value {}"),
+        ];
+        for (contents, expected) in [
+            ("{", 0),
+            (r#"{"configVersion":2,"packages":[{"name":"dep","rootUri":"../dep/","packageUri":"lib/"},{"name":"broken"}]}"#, 1),
+            (r#"{"configVersion":2,"packages":[{"name":"dep","rootUri":"../dep/","packageUri":"lib/"}]}"#, 1),
+        ] {
+            std::fs::write(&configuration, contents).unwrap();
+            let environment = AnalysisEnvironment::discover_with_sdk_locator(
+                files.iter().map(ProjectFile::path), |_| None,
+            );
+            let diagnostics = NoDeepPackageImports.prepare_project(
+                &environment, &files, &FalconConfig::default(), None,
+            );
+            assert_eq!(diagnostics.len(), expected, "{contents}: {diagnostics:?}");
+            if expected == 1 {
+                assert_eq!(diagnostics[0].file_path, files[0].path().to_string_lossy());
+            }
+        }
     }
 
     #[test]

@@ -22,7 +22,7 @@ impl std::fmt::Display for SourceFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             formatter,
-            "failed to read file {}: {}",
+            "failed to analyze file {}: {}",
             self.path.display(),
             self.source
         )

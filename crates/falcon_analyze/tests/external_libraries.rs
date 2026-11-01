@@ -799,24 +799,51 @@ fn external_source_read_and_parse_failures_warn_once() {
 #[test]
 fn package_entry_failures_keep_valid_packages_and_report_details() {
     let root = tempfile::tempdir().unwrap();
-    let app = write(root.path(), "lib/main.dart", "void main() {}");
+    let source = "import 'package:app/current.dart'; void main() {}";
+    let app = write(root.path(), "lib/main.dart", source);
+    let target = write(root.path(), "lib/current.dart", "class Current {}");
     write(
         root.path(),
         ".dart_tool/package_config.json",
         r#"{
         "configVersion":2,"packages":[
-            {"name":"app","rootUri":"../","packageUri":"lib/"},
+            {"name":"app","rootUri":"../","packageUri":"lib/","languageVersion":"2.19"},
             {"name":"broken"},
             {"name":"versioned","rootUri":"../versioned","languageVersion":"invalid"}
         ]}"#,
     );
     let environment = AnalysisEnvironment::discover_with_sdk_locator([app.as_path()], |_| None);
-    assert!(
-        environment
-            .package_config(&app)
-            .unwrap()
-            .package("app")
-            .is_some()
+    assert!(matches!(
+        environment.package_config(&app),
+        falcon_analyze::PackageConfigInput::Unknown {
+            config: Some(_),
+            reason: "package configuration could not be completely loaded"
+        }
+    ));
+    let config = environment.package_config(&app).available().unwrap();
+    assert!(environment.package_config(&app).known().is_none());
+    assert_eq!(
+        config.package("app").unwrap().lib_root,
+        canonical_or_lexical(&root.path().join("lib"))
+    );
+    assert_eq!(
+        environment.language_version(&app, source),
+        falcon_analyze::LanguageVersion::new(2, 19)
+    );
+    assert_eq!(
+        environment.package_language_version(&app),
+        Some(falcon_analyze::LanguageVersion::new(2, 19))
+    );
+    let parsed = parsed_fixture(source);
+    let libraries = ExternalLibraries::load(
+        &environment,
+        &[(app.as_path(), parsed.program(), source)],
+        |path| path == app,
+    );
+    assert_eq!(libraries.libraries().len(), 1);
+    assert_eq!(
+        libraries.libraries()[0].files[0].path,
+        canonical_or_lexical(&target)
     );
     let warnings = environment.take_warnings();
     assert_eq!(warnings.len(), 2, "{warnings:?}");
@@ -2235,6 +2262,7 @@ fn configuration_stamps_detect_retargeted_package_roots_without_config_changes()
     assert_eq!(
         environment
             .package_config(&app)
+            .known()
             .unwrap()
             .resolve_package_uri("package:dep/dep.dart"),
         Some(canonical_or_lexical(&first))
@@ -2248,6 +2276,7 @@ fn configuration_stamps_detect_retargeted_package_roots_without_config_changes()
     assert_eq!(
         environment
             .package_config(&app)
+            .known()
             .unwrap()
             .resolve_package_uri("package:dep/dep.dart"),
         Some(canonical_or_lexical(&second))

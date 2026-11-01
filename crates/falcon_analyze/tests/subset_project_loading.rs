@@ -388,7 +388,7 @@ fn unreadable_project_companions_abort_both_resolving_engines() {
                 .unwrap();
                 assert_eq!(error.path, companion);
                 assert_eq!(error.source.kind(), std::io::ErrorKind::InvalidData);
-                assert!(error.to_string().contains("failed to read file"));
+                assert!(error.to_string().contains("failed to analyze file"));
                 if failure == "oversized" {
                     assert!(error.to_string().contains("maximum supported source size"));
                 }

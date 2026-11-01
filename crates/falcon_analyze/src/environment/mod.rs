@@ -229,6 +229,40 @@ enum DefaultSdk {
     Loaded(Option<DartSdk>),
 }
 
+/// Whether package resolution facts are absent, unusable, or available.
+#[derive(Debug, Clone, Copy)]
+pub enum PackageConfigInput<'a> {
+    Missing,
+    Unknown {
+        config: Option<&'a PackageConfig>,
+        reason: &'static str,
+    },
+    Present(&'a PackageConfig),
+}
+
+impl<'a> PackageConfigInput<'a> {
+    /// Complete facts suitable for proving a configured package is absent.
+    #[must_use]
+    pub fn known(self) -> Option<&'a PackageConfig> {
+        match self {
+            Self::Present(config) => Some(config),
+            Self::Missing | Self::Unknown { .. } => None,
+        }
+    }
+
+    /// Valid positive entries, even when other configuration entries are unknown.
+    #[must_use]
+    pub fn available(self) -> Option<&'a PackageConfig> {
+        match self {
+            Self::Present(config)
+            | Self::Unknown {
+                config: Some(config),
+                ..
+            } => Some(config),
+            Self::Missing | Self::Unknown { config: None, .. } => None,
+        }
+    }
+}
 type RootPackageConfig = Arc<std::sync::OnceLock<DependencyInput<Arc<PackageConfig>>>>;
 
 /// Package configurations, SDKs and language versions for a set of files.
@@ -242,6 +276,7 @@ pub struct AnalysisEnvironment {
     contexts: Vec<Context>,
     /// The context owning each analyzed directory (`None`: no configuration).
     directories: HashMap<PathBuf, Option<usize>>,
+    unknown_config_directories: std::collections::HashSet<PathBuf>,
     package_root_contexts: Arc<Mutex<HashMap<PathBuf, RootPackageConfig>>>,
     probe_mutable_roots: Arc<Mutex<std::collections::BTreeSet<PathBuf>>>,
     /// The SDK for files outside any package configuration, once located.
@@ -304,6 +339,7 @@ impl AnalysisEnvironment {
         Self {
             contexts: Vec::new(),
             directories: HashMap::new(),
+            unknown_config_directories: std::collections::HashSet::new(),
             package_root_contexts: Arc::default(),
             probe_mutable_roots: Arc::default(),
             default_sdk: DefaultSdk::NotLoaded,
@@ -466,8 +502,17 @@ impl AnalysisEnvironment {
                 self.config_candidates
                     .insert(ancestor.join("pubspec_overrides.yaml"));
             }
-            let context = PackageConfig::discover(&directory)
-                .and_then(|config_path| self.discover_context(&config_path));
+            let config_path = PackageConfig::discover(&directory);
+            let context = config_path
+                .as_ref()
+                .and_then(|config_path| self.discover_context(config_path));
+            if config_path.is_some()
+                && self
+                    .config_in(context)
+                    .is_none_or(|config| !config.is_complete())
+            {
+                self.unknown_config_directories.insert(directory.clone());
+            }
             if context.is_none() && matches!(self.default_sdk, DefaultSdk::NotLoaded) {
                 self.default_sdk = DefaultSdk::Loaded(self.locate_sdk(None));
                 if let DefaultSdk::Loaded(Some(sdk)) = &self.default_sdk {
@@ -906,10 +951,19 @@ impl AnalysisEnvironment {
             .clone()
     }
 
-    /// The package configuration governing `path`, if any.
+    /// Package resolution facts governing `path`; malformed configurations are unknown.
     #[must_use]
-    pub fn package_config(&self, path: &Path) -> Option<&PackageConfig> {
-        self.config_in(self.context_index(path))
+    pub fn package_config(&self, path: &Path) -> PackageConfigInput<'_> {
+        let directory = package_config::absolute(path.parent().unwrap_or(Path::new("")));
+        if self.unknown_config_directories.contains(&directory) {
+            PackageConfigInput::Unknown {
+                config: self.config_in(self.context_index(path)),
+                reason: "package configuration could not be completely loaded",
+            }
+        } else {
+            self.config_in(self.context_index(path))
+                .map_or(PackageConfigInput::Missing, PackageConfigInput::Present)
+        }
     }
 
     /// Resolved configuration captured lazily at the package root for enabled probes.
@@ -1023,7 +1077,11 @@ impl AnalysisEnvironment {
     #[must_use]
     pub fn language_version(&self, path: &Path, source: &str) -> LanguageVersion {
         LanguageVersion::file_override(source)
-            .or_else(|| self.package_config(path)?.language_version(path))
+            .or_else(|| {
+                self.package_config(path)
+                    .available()?
+                    .language_version(path)
+            })
             .unwrap_or(LanguageVersion::CURRENT)
     }
 
@@ -1038,7 +1096,9 @@ impl AnalysisEnvironment {
     /// package configuration covers it (see [`crate::AnalyzeContext`]).
     #[must_use]
     pub fn package_language_version(&self, path: &Path) -> Option<LanguageVersion> {
-        self.package_config(path)?.language_version(path)
+        self.package_config(path)
+            .available()?
+            .language_version(path)
     }
 }
 

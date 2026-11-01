@@ -94,7 +94,7 @@ fn unreadable_project_companions_abort_checks_and_writes() {
                 ..Default::default()
             };
             let error = collect_check(&options).unwrap_err();
-            assert!(error.contains("failed to read file"), "{error}");
+            assert!(error.contains("failed to analyze file"), "{error}");
             assert!(error.contains("companion.dart"), "{error}");
             let reason = match failure {
                 "oversized" => "maximum supported source size",

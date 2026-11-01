@@ -3335,6 +3335,7 @@ fn uri_missing(environment: &AnalysisEnvironment, from: &Path, uri: &str) -> boo
         let package = rest.split('/').next().unwrap_or(rest);
         return environment
             .package_config(from)
+            .known()
             .is_some_and(|config| config.package(package).is_none());
     }
     if uri.starts_with("dart:") {
@@ -3790,6 +3791,37 @@ fn package_member(package: &str, name: &str) -> Option<DeclarationIdentity> {
 mod tests {
     use super::*;
     use crate::ParsedFile;
+
+    #[test]
+    fn package_uri_missing_requires_complete_configuration() {
+        let directory = tempfile::tempdir().unwrap();
+        let from = directory.path().join("main.dart");
+        std::fs::create_dir(directory.path().join(".dart_tool")).unwrap();
+        let configuration = directory.path().join(".dart_tool/package_config.json");
+        let missing = AnalysisEnvironment::discover_with_sdk_locator([from.as_path()], |_| None);
+        assert!(!uri_missing(&missing, &from, "package:other/other.dart"));
+        for (contents, expected) in [
+            ("{", false),
+            (
+                r#"{"configVersion":2,"packages":[{"name":"app","rootUri":"../"},{"name":"broken"}]}"#,
+                false,
+            ),
+            (
+                r#"{"configVersion":2,"packages":[{"name":"app","rootUri":"../"}]}"#,
+                true,
+            ),
+        ] {
+            std::fs::write(&configuration, contents).unwrap();
+            let environment =
+                AnalysisEnvironment::discover_with_sdk_locator([from.as_path()], |_| None);
+            assert_eq!(
+                uri_missing(&environment, &from, "package:other/other.dart"),
+                expected,
+                "{contents}"
+            );
+            assert!(!uri_missing(&environment, &from, "package:app/main.dart"));
+        }
+    }
 
     #[test]
     fn rejected_body_refresh_preserves_previous_facts() {

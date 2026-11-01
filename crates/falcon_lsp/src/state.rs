@@ -66,6 +66,7 @@ pub struct DocumentState {
     /// Parse and worker diagnostics from the last parse, kept so `analyze` can
     /// publish them alongside lints without re-parsing (parity with the CLI).
     syntax_diagnostics: Vec<Diagnostic>,
+    rule_worker_error: Option<String>,
     /// Most recent published output (byte spans) — read by hover. May include
     /// cross-file diagnostics after a cross-file pass; never an input to analysis.
     pub last_diagnostics: Vec<Diagnostic>,
@@ -1632,6 +1633,7 @@ impl LspState {
                 version,
                 language_version,
                 syntax_diagnostics,
+                rule_worker_error: None,
                 last_diagnostics: Vec::new(),
                 diagnostics_parse_count: 0,
                 had_cross_file_diags: false,
@@ -1846,6 +1848,7 @@ impl LspState {
         if !self.admits_project_dart(&self.documents[uri].path) {
             let doc = self.documents.get_mut(uri).expect("open document");
             doc.analyze_count += 1;
+            doc.rule_worker_error = None;
             doc.last_diagnostics.clear();
             return Vec::new();
         }
@@ -1885,6 +1888,12 @@ impl LspState {
                 .with_library(&library);
         }
         let mut diagnostics = analyze_document(rules, config, &ctx, doc.syntax_diagnostics.clone());
+        doc.rule_worker_error = diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.rule == falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
+            })
+            .map(|diagnostic| diagnostic.message.clone());
         if let Some(error) = &self.semantic_snapshot_error {
             diagnostics.push(falcon_analyze::rules_thread_diagnostic(&doc.path, error));
         }
@@ -2293,15 +2302,10 @@ impl LspState {
                 .or_insert_with(|| ("cross-file analysis worker failed".to_owned(), true));
         }
         for doc in self.documents.values() {
-            if let Some(diagnostic) = doc.last_diagnostics.iter().find(|diagnostic| {
-                diagnostic.rule == falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
-            }) {
+            if let Some(error) = &doc.rule_worker_error {
                 failures.insert(
                     doc.path.clone(),
-                    (
-                        format!("{}: {}", doc.path.display(), diagnostic.message),
-                        false,
-                    ),
+                    (format!("{}: {error}", doc.path.display()), false),
                 );
             }
         }
@@ -2470,12 +2474,10 @@ impl LspState {
         // Rejected references are unknown, not absent: a partial workspace must
         // not produce unused-file/declaration diagnostics for otherwise valid files.
         if !self.cross_file_rules_enabled()
-            || self.documents.values().any(|doc| {
-                doc.parsed.is_rejected()
-                    || doc.last_diagnostics.iter().any(|diagnostic| {
-                        diagnostic.rule == falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
-                    })
-            })
+            || self
+                .documents
+                .values()
+                .any(|doc| doc.parsed.is_rejected() || doc.rule_worker_error.is_some())
         {
             return HashMap::new();
         }
@@ -2496,7 +2498,7 @@ impl LspState {
             .in_scope(|| self.refresh_localization_paths());
         // Semantic views include unsaved buffers; cross-file views include manifests.
         // Reuse facts only when Dart revisions and package identities agree exactly.
-        let indexes = self.semantic_snapshot.as_ref().and_then(|snapshot| {
+        let reuse_snapshot = self.semantic_snapshot.as_ref().is_some_and(|snapshot| {
             let mut dart_files = files.iter().filter(|file| is_dart_file(file.path()));
             let same_files = dart_files.clone().count() == snapshot.files.len()
                 && dart_files.all(|file| {
@@ -2505,13 +2507,12 @@ impl LspState {
                         .get(file.path())
                         .is_some_and(|&index| same_revision(&snapshot.files[index], file))
                 });
-            if !same_files {
-                return None;
-            }
-            let packages = package_identities(files.iter().map(ProjectFile::path));
-            same_packages(&packages, &snapshot.packages).then_some(&snapshot.indexes)
+            same_files
+                && same_packages(
+                    &package_identities(files.iter().map(ProjectFile::path)),
+                    &snapshot.packages,
+                )
         });
-        let reuse_snapshot = indexes.is_some();
         if !self.prepare_cross_file_indexes(&files, reuse_snapshot) {
             self.cross_file_worker_failed = self.semantic_snapshot_error.is_some();
             return HashMap::new();
@@ -2681,6 +2682,7 @@ impl LspState {
                                 || self
                                     .environment
                                     .package_config(retained.path())
+                                    .available()
                                     .is_some_and(|config| {
                                         config.packages.iter().any(|package| {
                                             file.path().starts_with(&package.lib_root)

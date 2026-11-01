@@ -78,11 +78,17 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
 
 /// The indexed library of `package:test_api/src/frontend/expect.dart`.
 fn expect_library(ctx: &AnalyzeContext<'_>) -> Option<LibraryId> {
-    let configured = ctx
-        .environment()
-        .and_then(|environment| environment.package_config(ctx.file_path()))
+    let configuration = ctx.environment().map_or(
+        falcon_analyze::PackageConfigInput::Missing,
+        |environment| environment.package_config(ctx.file_path()),
+    );
+    let configured = configuration
+        .available()
         .and_then(|config| config.resolve_package_uri("package:test_api/src/frontend/expect.dart"));
     let path = configured.or_else(|| {
+        if matches!(configuration, falcon_analyze::PackageConfigInput::Unknown { .. }) {
+            return None;
+        }
         let package = ctx.package()?;
         (package.name == "test_api").then(|| package.lib_root.join("src/frontend/expect.dart"))
     })?;
@@ -126,4 +132,41 @@ fn is_test_fail<'a>(
     state.model.resolve_value(name).is_some_and(|identity| {
         identity.name() == "fail" && identities.declaration_library(&identity) == Some(library)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_analyze::{AnalysisEnvironment, IdentitySource, ParsedFile};
+
+    #[test]
+    fn unknown_configuration_does_not_invent_test_api_but_keeps_valid_entries() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = falcon_analyze::canonical_or_lexical(directory.path());
+        std::fs::create_dir_all(root.join(".dart_tool")).unwrap();
+        std::fs::create_dir_all(root.join("lib/src/frontend")).unwrap();
+        std::fs::write(root.join("pubspec.yaml"), "name: test_api\n").unwrap();
+        let path = root.join("lib/src/frontend/expect.dart");
+        let source = "void fail(String message) {}";
+        std::fs::write(&path, source).unwrap();
+        let parsed = std::sync::Arc::new(ParsedFile::parse(source));
+        let identities = IdentityIndex::build(
+            &[IdentitySource { path: &path, parsed: &parsed, has_parse_errors: false }], &[source], &[], None,
+        );
+        let expected = identities.library(identities.file(&path).unwrap());
+        let config = falcon_config::FalconConfig::default();
+        for (contents, library) in [
+            ("{", None),
+            (r#"{"configVersion":2,"packages":[{"name":"broken"}]}"#, None),
+            (r#"{"configVersion":2,"packages":[{"name":"test_api","rootUri":"../","packageUri":"lib/"},{"name":"broken"}]}"#, Some(expected)),
+            (r#"{"configVersion":2,"packages":[{"name":"test_api","rootUri":"../","packageUri":"lib/"}]}"#, Some(expected)),
+        ] {
+            std::fs::write(root.join(".dart_tool/package_config.json"), contents).unwrap();
+            let environment = AnalysisEnvironment::discover_with_sdk_locator([path.as_path()], |_| None);
+            let context = AnalyzeContext::new(&path, &config, &parsed)
+                .with_environment(Some(&environment)).with_identities(&identities);
+            assert_eq!(context.package().unwrap().name, "test_api");
+            assert_eq!(expect_library(&context), library, "{contents}");
+        }
+    }
 }

@@ -5,6 +5,9 @@ version.workspace = true
 edition.workspace = true
 description       = "Rule visitor infrastructure and analysis engine for falcon"
 
+[features]
+test-support = [  ]
+
 [dependencies]
 falcon_syntax        = { path = "../falcon_syntax" }
 falcon_diagnostics   = { path = "../falcon_diagnostics" }
