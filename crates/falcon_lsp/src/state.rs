@@ -1035,6 +1035,12 @@ impl LspState {
             })
             && !paths.iter().any(|path| {
                 self.watched_project_source(path)
+                    || self.project_paths.as_ref().is_some_and(|files| {
+                        let index = files.partition_point(|(source, _)| source < path);
+                        files
+                            .get(index)
+                            .is_some_and(|(source, _)| source.starts_with(path))
+                    })
                     || self
                         .watched_local_paths
                         .iter()

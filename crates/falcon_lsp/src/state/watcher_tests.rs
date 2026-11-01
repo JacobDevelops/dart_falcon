@@ -82,6 +82,60 @@ fn directory_deletion_event_removes_all_closed_sources() {
 }
 
 #[test]
+fn closed_source_deletion_without_semantic_snapshot_refreshes_cross_file_results() {
+    let (directory, mut state, _) = workspace(true);
+    std::fs::write(
+        directory.path().join("falcon.json"),
+        r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#,
+    )
+    .unwrap();
+    std::fs::write(directory.path().join("pubspec.yaml"), "name: watcher\n").unwrap();
+    std::fs::create_dir_all(directory.path().join("lib/src")).unwrap();
+    std::fs::write(directory.path().join("lib/main.dart"), "void main() {}\n").unwrap();
+    let closed = directory.path().join("lib/bridge.dart");
+    std::fs::write(&closed, "import 'src/orphan.dart'; void main() {}\n").unwrap();
+    let orphan = directory.path().join("lib/src/orphan.dart");
+    std::fs::write(&orphan, "class Orphan {}\n").unwrap();
+    state.reload_config();
+    let uri = format!("file://{}", orphan.display());
+    state.open(&uri, "class Orphan {}\n".into(), Some(1));
+    state.cross_file_pass();
+    assert!(state.semantic_snapshot.is_none());
+    assert!(
+        state
+            .project_paths
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|(path, _)| path == &closed)
+    );
+    assert!(
+        state
+            .cross_file_diagnostics()
+            .values()
+            .flatten()
+            .all(|diagnostic| diagnostic.rule != "unused-files")
+    );
+
+    std::fs::remove_file(&closed).unwrap();
+    let mut updates = state.watched_files_changed(&[closed]);
+    updates.extend(state.cross_file_pass());
+    assert!(
+        updates
+            .iter()
+            .flat_map(|(_, diagnostics)| diagnostics)
+            .all(|diagnostic| diagnostic.rule != "incomplete-analysis")
+    );
+    assert!(updates.iter().any(|(updated, diagnostics)| {
+        updated == &uri
+            && diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.rule == "unused-files")
+    }));
+    assert!(state.semantic_snapshot.is_none());
+}
+
+#[test]
 fn fallback_boundary_refreshes_closed_edits_deletions_and_new_directories() {
     let (directory, mut state, uri) = workspace(false);
     let closed = directory.path().join("closed.dart");

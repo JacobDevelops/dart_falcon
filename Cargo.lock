@@ -388,6 +388,7 @@ dependencies = [
  "falcon_rules",
  "falcon_syntax",
  "insta",
+ "lsp-server",
  "serde",
  "serde_json",
  "serde_yaml",

@@ -1100,3 +1100,401 @@ fn localization_bom_preserves_cli_byte_spans_and_report_fingerprints() {
         assert_eq!(actual, &expected);
     }
 }
+
+// State-level equality cannot catch transport severity or UTF-16 conversion.
+struct ParityClient {
+    connection: lsp_server::Connection,
+    server: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ParityClient {
+    fn start(config: &std::path::Path) -> Self {
+        Self::start_project(
+            Some(config),
+            config.parent().unwrap(),
+            std::time::Duration::ZERO,
+        )
+    }
+
+    fn start_project(
+        config: Option<&std::path::Path>,
+        root: &std::path::Path,
+        debounce: std::time::Duration,
+    ) -> Self {
+        let (server, connection) = lsp_server::Connection::memory();
+        let options = falcon_lsp::ServerOptions {
+            config_path: config.map(std::path::Path::to_owned),
+            debounce,
+        };
+        let server = std::thread::spawn(move || {
+            falcon_lsp::run_with_connection(&server, &options).unwrap();
+        });
+        let client = Self {
+            connection,
+            server: Some(server),
+        };
+        client
+            .connection
+            .sender
+            .send(
+                lsp_server::Request::new(
+                    1.into(),
+                    "initialize".into(),
+                    serde_json::json!({
+                        "capabilities": {"workspace": {"didChangeWatchedFiles": {"dynamicRegistration": true}}},
+                        "workspaceFolders": [{"uri": format!("file://{}", root.display()), "name": "parity"}]
+                    }),
+                )
+                .into(),
+            )
+            .unwrap();
+        loop {
+            if let lsp_server::Message::Response(response) = client.recv("initialization response")
+            {
+                assert!(response.error.is_none(), "{response:?}");
+                assert_eq!(
+                    response.result.unwrap()["capabilities"]["positionEncoding"],
+                    "utf-16"
+                );
+                break;
+            }
+        }
+        client.notify("initialized", serde_json::json!({}));
+        client
+    }
+
+    fn notify(&self, method: &str, params: serde_json::Value) {
+        self.connection
+            .sender
+            .send(lsp_server::Notification::new(method.into(), params).into())
+            .unwrap();
+    }
+
+    fn recv(&self, context: &str) -> lsp_server::Message {
+        self.connection
+            .receiver
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap_or_else(|error| {
+                panic!("LSP did not respond within 10s while awaiting {context}: {error}")
+            })
+    }
+
+    fn open(&self, uri: &str, source: &str) {
+        self.notify("textDocument/didOpen", serde_json::json!({"textDocument": {"uri": uri, "languageId": "dart", "version": 1, "text": source}}));
+    }
+
+    fn drain(&self) -> Vec<lsp_server::Notification> {
+        // Unsupported requests still order the worker after preceding notifications.
+        self.connection
+            .sender
+            .send(lsp_server::Request::new(99.into(), "falcon/testBarrier".into(), ()).into())
+            .unwrap();
+        let mut publications = Vec::new();
+        loop {
+            match self.recv("publication drain and ordering barrier") {
+                lsp_server::Message::Response(response) if response.id == 99.into() => {
+                    assert_eq!(
+                        response.error.as_ref().map(|error| error.code),
+                        Some(-32601),
+                        "unexpected ordering-barrier response: {response:?}"
+                    );
+                    return publications;
+                }
+                lsp_server::Message::Request(request) => {
+                    self.connection
+                        .sender
+                        .send(lsp_server::Response::new_ok(request.id, ()).into())
+                        .unwrap();
+                }
+                lsp_server::Message::Notification(notification)
+                    if notification.method == "textDocument/publishDiagnostics" =>
+                {
+                    publications.push(notification);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn publication(&self, uri: &str) -> Vec<serde_json::Value> {
+        let publications = self.drain();
+        let matching: Vec<_> = publications
+            .iter()
+            .filter(|notification| notification.params["uri"] == uri)
+            .collect();
+        assert_eq!(
+            matching.len(),
+            1,
+            "expected exactly one publication for {uri}, received {publications:?}"
+        );
+        let diagnostics = matching[0].params["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|diagnostic| {
+                serde_json::json!({
+                    "rule": diagnostic["code"], "message": diagnostic["message"],
+                    "severity": diagnostic["severity"], "range": diagnostic["range"]
+                })
+            })
+            .collect();
+        assert_eq!(
+            self.drain().len(),
+            0,
+            "unexpected stale or duplicate publication after barrier for {uri}"
+        );
+        diagnostics
+    }
+}
+
+impl Drop for ParityClient {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            return;
+        }
+        self.connection
+            .sender
+            .send(lsp_server::Request::new(2.into(), "shutdown".into(), ()).into())
+            .unwrap();
+        loop {
+            if let lsp_server::Message::Response(response) = self.recv("shutdown response")
+                && response.id == 2.into()
+            {
+                assert!(response.error.is_none());
+                break;
+            }
+        }
+        self.notify("exit", serde_json::Value::Null);
+        self.server.take().unwrap().join().unwrap();
+    }
+}
+
+fn cli_wire_diagnostics(
+    options: &CheckOptions,
+    path: &std::path::Path,
+    source: &str,
+) -> Vec<serde_json::Value> {
+    let output = falcon_cli::collect_check_with_sdk_locator(options, |_| None).unwrap();
+    let json: serde_json::Value =
+        serde_json::from_str(&falcon_cli::output::format_json(&output.diagnostics)).unwrap();
+    let position = |offset: usize| {
+        let prefix = &source[..offset];
+        let line = prefix.bytes().filter(|byte| *byte == b'\n').count();
+        let column = prefix.rsplit('\n').next().unwrap().encode_utf16().count();
+        serde_json::json!({"line": line, "character": column})
+    };
+    json.as_array().unwrap().iter().filter(|diagnostic| diagnostic["file_path"] == path.to_str().unwrap()).map(|diagnostic| serde_json::json!({
+        "rule": diagnostic["rule"], "message": diagnostic["message"],
+        "severity": match diagnostic["severity"].as_str().unwrap() { "error" => 1, "warning" => 2, "info" => 3, other => panic!("unexpected severity {other}") },
+        "range": {"start": position(usize::try_from(diagnostic["span"]["start"].as_u64().unwrap()).unwrap()), "end": position(usize::try_from(diagnostic["span"]["end"].as_u64().unwrap()).unwrap())}
+    })).collect()
+}
+
+fn parity_config(level: &str) -> String {
+    serde_json::json!({"linter": {"rules": {"recommended": false, "suspicious": {"avoid-dynamic": level}}}, "cross-file": {"enabled": false}}).to_string()
+}
+
+#[test]
+fn protocol_identity_unicode_suppressions_and_config_severity_match_cli_json() {
+    for (source, level, count) in [
+        ("final label = 'é😀'; dynamic value = 1;\n", "warn", 1),
+        (
+            "dynamic first = 1; // falcon-ignore lint/suspicious/avoid-dynamic: legacy\ndynamic second = 2;\n",
+            "warn",
+            1,
+        ),
+    ] {
+        let temp = tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        let config = root.join("falcon.json");
+        let path = root.join("main.dart");
+        fs::write(&config, parity_config(level)).unwrap();
+        fs::write(&path, source).unwrap();
+        let options = CheckOptions {
+            paths: vec![root],
+            config_path: Some(config.clone()),
+            quiet: true,
+            ..Default::default()
+        };
+        let expected = cli_wire_diagnostics(&options, &path, source);
+        assert_eq!(expected.len(), count, "{source}: {expected:?}");
+        if let Some(diagnostic) = expected.first() {
+            assert_eq!(diagnostic["rule"], "avoid-dynamic");
+            assert_eq!(diagnostic["message"], "Avoid using the `dynamic` type.");
+            if source.starts_with("final label") {
+                assert_eq!(
+                    diagnostic["range"],
+                    serde_json::json!({"start": {"line": 0, "character": 21}, "end": {"line": 0, "character": 28}})
+                );
+            }
+        }
+        let client = ParityClient::start(&config);
+        let uri = format!("file://{}", path.display());
+        client.open(&uri, source);
+        assert_eq!(client.publication(&uri), expected, "{source}: {level}");
+    }
+}
+
+#[test]
+fn protocol_config_reload_matches_each_fresh_cli_run() {
+    for explicit in [true, false] {
+        let temp = tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        let config = root.join("falcon.json");
+        let path = root.join("main.dart");
+        let source = "dynamic value = 1;\n";
+        fs::write(&path, source).unwrap();
+        fs::write(&config, parity_config("warn")).unwrap();
+        let options = CheckOptions {
+            paths: vec![root.clone()],
+            config_path: Some(config.clone()),
+            quiet: true,
+            ..Default::default()
+        };
+        let client = ParityClient::start_project(
+            explicit.then_some(config.as_path()),
+            &root,
+            std::time::Duration::ZERO,
+        );
+        let uri = format!("file://{}", path.display());
+        client.open(&uri, source);
+        assert_eq!(
+            client.publication(&uri),
+            cli_wire_diagnostics(&options, &path, source)
+        );
+        for (level, count) in [("error", 1), ("off", 0), ("info", 1)] {
+            fs::write(&config, parity_config(level)).unwrap();
+            client.notify("workspace/didChangeWatchedFiles", serde_json::json!({"changes": [{"uri": format!("file://{}", config.display()), "type": 2}]}));
+            let expected = cli_wire_diagnostics(&options, &path, source);
+            assert_eq!(expected.len(), count);
+            assert_eq!(client.publication(&uri), expected, "{level}");
+        }
+    }
+}
+
+#[test]
+fn protocol_saved_cross_file_edits_and_incomplete_recovery_match_cli() {
+    let temp = tempdir().unwrap();
+    let root = fs::canonicalize(temp.path()).unwrap();
+    fs::create_dir_all(root.join("lib/src")).unwrap();
+    fs::write(root.join("pubspec.yaml"), "name: parity\n").unwrap();
+    let config = root.join("falcon.json");
+    fs::write(&config, r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#).unwrap();
+    let main = root.join("lib/main.dart");
+    let orphan = root.join("lib/src/orphan.dart");
+    let orphan_source = "class Orphan {}\n";
+    let reachable = "import 'src/orphan.dart';\nvoid main() {}\n";
+    let unreachable = "void main() {}\n";
+    fs::write(&main, reachable).unwrap();
+    fs::write(&orphan, orphan_source).unwrap();
+    let options = CheckOptions {
+        paths: vec![root.clone()],
+        config_path: Some(config.clone()),
+        quiet: true,
+        ..Default::default()
+    };
+    let client =
+        ParityClient::start_project(Some(&config), &root, std::time::Duration::from_secs(30));
+    let uri = format!("file://{}", orphan.display());
+    let main_uri = format!("file://{}", main.display());
+    client.open(&uri, orphan_source);
+    assert_eq!(client.publication(&uri), Vec::<serde_json::Value>::new());
+    client.open(&main_uri, reachable);
+    client.publication(&main_uri);
+    for (version, source, count) in [(2, unreachable, 1), (3, reachable, 0), (4, unreachable, 1)] {
+        fs::write(&main, source).unwrap();
+        client.notify("textDocument/didChange", serde_json::json!({"textDocument": {"uri": main_uri, "version": version}, "contentChanges": [{"text": source}]}));
+        assert_eq!(
+            client.drain().len(),
+            0,
+            "didChange must wait for save, not run the cross-file pass"
+        );
+        client.notify(
+            "textDocument/didSave",
+            serde_json::json!({"textDocument": {"uri": main_uri}}),
+        );
+        let expected = cli_wire_diagnostics(&options, &orphan, orphan_source);
+        assert_eq!(expected.len(), count);
+        assert_eq!(client.publication(&uri), expected);
+    }
+    drop(client);
+    let client = ParityClient::start(&config);
+    client.open(&uri, orphan_source);
+    assert_eq!(
+        client.publication(&uri),
+        cli_wire_diagnostics(&options, &orphan, orphan_source)
+    );
+    let importer = main.with_file_name("bridge.dart");
+    for (event, count) in [(1, 0), (3, 1)] {
+        if event == 1 {
+            fs::write(&importer, reachable).unwrap();
+        } else {
+            fs::remove_file(&importer).unwrap();
+        }
+        client.notify("workspace/didChangeWatchedFiles", serde_json::json!({"changes": [{"uri": format!("file://{}", importer.display()), "type": event}]}));
+        let expected = cli_wire_diagnostics(&options, &orphan, orphan_source);
+        assert_eq!(expected.len(), count);
+        assert_eq!(
+            client.publication(&uri),
+            expected,
+            "valid importer event {event}"
+        );
+    }
+    let bridge = main.with_file_name("broken.dart");
+    fs::write(&bridge, [0xff]).unwrap();
+    client.notify("workspace/didChangeWatchedFiles", serde_json::json!({"changes": [{"uri": format!("file://{}", bridge.display()), "type": 1}]}));
+    let error = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap_err();
+    assert!(
+        error.contains("UTF-8") && error.contains("broken.dart"),
+        "{error}"
+    );
+    assert_ne!(
+        falcon_cli::run_check_with_sdk_locator(&options, |_| None),
+        0
+    );
+    let incomplete = client.publication(&uri);
+    assert_eq!(incomplete.len(), 1, "{incomplete:?}");
+    assert_eq!(incomplete[0]["rule"], "incomplete-analysis");
+    assert_eq!(incomplete[0]["severity"], 2);
+    assert_eq!(
+        incomplete[0]["message"],
+        format!("{error}; cross-file results are suppressed.")
+    );
+    assert_eq!(
+        incomplete[0]["range"],
+        serde_json::json!({"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}})
+    );
+    fs::remove_file(&bridge).unwrap();
+    client.notify("workspace/didChangeWatchedFiles", serde_json::json!({"changes": [{"uri": format!("file://{}", bridge.display()), "type": 3}]}));
+    assert_eq!(
+        client.publication(&uri),
+        cli_wire_diagnostics(&options, &orphan, orphan_source)
+    );
+}
+
+#[test]
+fn protocol_cross_file_suppression_matches_cli_project_sources() {
+    let source =
+        "// falcon-ignore-all cross-file/correctness/unused-files: legacy\nclass Orphan {}\n";
+    let temp = tempdir().unwrap();
+    let root = fs::canonicalize(temp.path()).unwrap();
+    fs::create_dir_all(root.join("lib/src")).unwrap();
+    fs::write(root.join("pubspec.yaml"), "name: parity\n").unwrap();
+    fs::write(root.join("lib/main.dart"), "void main() {}\n").unwrap();
+    let path = root.join("lib/src/orphan.dart");
+    fs::write(&path, source).unwrap();
+    let config = root.join("falcon.json");
+    fs::write(&config, r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#).unwrap();
+    let options = CheckOptions {
+        paths: vec![root],
+        config_path: Some(config.clone()),
+        quiet: true,
+        ..Default::default()
+    };
+    let expected = cli_wire_diagnostics(&options, &path, source);
+    assert_eq!(expected, Vec::<serde_json::Value>::new());
+    let client = ParityClient::start(&config);
+    let uri = format!("file://{}", path.display());
+    client.open(&uri, source);
+    assert_eq!(client.publication(&uri), expected);
+}

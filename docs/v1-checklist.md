@@ -317,10 +317,29 @@ These entries describe implemented foundation, not acceptance of the open items.
   after sharing extraction (unused-assets: 8 expectations; missing-assets: 6).
   The broader frontend parity box remains open; dependency metadata probes remain
   excluded from V1-3e's localization capture above.
-- [ ] Expand `crates/falcon_cli/tests/project_parity_tests.rs` around actual risk:
-  diagnostics identity/range/severity/message, suppression, config changes,
-  incomplete analysis and cross-file invalidation. Shared stages already live in
-  `falcon_project`; close specific divergence rather than invent another pipeline.
+- [x] Expand `crates/falcon_cli/tests/project_parity_tests.rs` around actual risk (V1-3h).
+  Real in-memory LSP transport publications match CLI collection plus JSON formatting
+  for rule IDs, exact messages, all three severities and byte-to-UTF-16 ranges,
+  including accented and astral characters before a diagnostic. Table cases pin
+  inline suppression and cross-file file suppression; existing full-project cases
+  retain path overrides, exclusions and merged file/project findings.
+  Dynamically registered watchers reload explicit and workspace-discovered Falcon
+  configuration through warning → error → disabled → info, matching a fresh CLI
+  evaluation with the fixture config explicitly selected at every step.
+  Ordering barriers drain publications and reject missing/duplicate target results.
+  Saved open-file import edits use a long debounce to distinguish save from change;
+  valid closed importer creation/deletion changes another document's reachability.
+  Invalid UTF-8 in a newly discovered required source aborts the CLI nonzero and
+  replaces stale cross-file warnings with the exact incomplete-analysis signal;
+  deletion restores fresh CLI parity. Existing companion/traversal and manifest
+  fixtures retain acquisition-specific recovery coverage.
+  Comparison selects each file and drops non-identity metadata (fixes, LSP source
+  and document version), normalizing URI/path, severity encoding and byte/UTF-16
+  positions. It does not exercise the CLI package-aware output renderer.
+  Valid source deletion exposed a watcher fast-path divergence: cached project
+  paths were treated as dependency metadata when no semantic snapshot existed.
+  The LSP now retains those paths in project invalidation, restoring reachability
+  findings instead of a stale missing-source incomplete-analysis signal.
 - Acceptance: a project evaluation uses coherent facts, known intentional analyzer
   differences are recorded with fixtures, and no adapter duplicates rule policy.
 
