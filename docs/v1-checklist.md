@@ -682,6 +682,85 @@ These entries describe implemented foundation, not acceptance of the open items.
   OSS corpus (fast and full), applicable website/typecheck/build, Dart launcher and
   editor/package/install smoke checks. The full local Rust gate alone does not
   execute these separate surfaces or establish analyzer parity.
+  - Rehearsal (2026-11-01, Linux x86_64, falcon 0.4.6; **not RC certification**):
+    OSS, website, Dart, Zed and native install checks ran on main `7c4d4480927a`;
+    VSIX checks ran on main plus this candidate's packaging/README fixes.
+    Standalone Rust checks and the fast gate ran on main plus the candidate.
+    Heavy commands below ran through `numen run --`; Cargo used
+    `MBX_CACHE_LINKS=false`. No snapshots were changed.
+    - `cargo xtask e2e --fast` and `cargo xtask e2e` passed all pinned
+      per-rule snapshots. Diagnostic totals: immich 334, appflowy 3,358,
+      flutter-packages 42,593, flame 405, localsend 11,730, bloc 459,
+      riverpod 6,128, wonderous 514, flutter-samples 17,465,
+      dart-sdk-language 170,207, very-good-analysis 3. Fast covered
+      localsend/bloc/wonderous. No internal errors; the SDK's 16,995 intentional
+      negative-fixture syntax errors matched the baseline, with zero elsewhere.
+    - Website: `bun install --frozen-lockfile`, `bun run typecheck` passed;
+      its `pretypecheck` ran the production client/SSR build and generated docs
+      synchronization. Bun 1.4.4; no source or generated-content changes needed.
+    - Dart launcher (`packages/falcon`): `dart pub get`,
+      `dart analyze --fatal-infos`, `dart test` passed (15 tests, Dart 3.13.6).
+    - VS Code: `npm ci`, `npx --yes @vscode/vsce package --out <scratch>.vsix`
+      passed after adding missing repository metadata (relative README links
+      previously aborted packaging), replacing relative links with absolute URLs
+      (vsce ignores the monorepo repository directory), and documenting a fixed
+      `falcon-vscode.vsix` filename for packaging/installing.
+      Packaged 0.4.6 VSIX passed CRC, entrypoint/dependency presence and Node syntax
+      checks; all three links in `extension/readme.md` were inspected and fetched.
+      Packaging warns about missing LICENSE and bundling opportunities;
+      these are not fatal. No extension build/test script exists.
+    - Zed: `cargo build --locked --manifest-path extensions/falcon-zed/Cargo.toml
+      --target wasm32-wasip2 --release` passed; copied artifact's WASM header
+      validated (222,364 bytes). No separate package/test script exists.
+    - Install smoke: the release binary built by the OSS runner passed
+      `--version` and `check crates/falcon_rules/tests/corpus/avoid-dynamic/good.dart`
+      (warnings expected; exit 0). SHA256
+      `3535e1a6b6ff1caf066c57969a39a1ce9352a17cb2d9da6bd716dc372d9e007f`.
+      The documented tarball install has no offline installer; no releases were
+      downloaded/published and no global installation was changed.
+    - Skip inventory: the only `#[ignore]` tests are
+      `falcon_analyze::semantic_indexes::declaration_index_update_baseline`
+      (release timing benchmark) and
+      `falcon_analyze::resolve::semantic::fixpoint_bench::inference_index_baseline`
+      (manual release inference baseline). Both are justified performance probes,
+      not omitted correctness coverage. `.config/nextest.toml` has no skip filters.
+      Permission-bypass guards conditionally omit assertions in
+      `dependency_permission_failures_are_unknown_when_enforced`,
+      `unreadable_asset_directory_warns_once_per_episode_and_is_exempt`,
+      `unreadable_directory_blocks_cli_and_editor_results_and_recovers`,
+      `unreadable_directories_fail_only_when_included_descendants_are_possible`
+      and `unreadable_directories_fail_unless_excluded`: a user bypassing Unix
+      mode bits cannot exercise EACCES. Windows-only
+      `windows_prefix_spellings_preserve_internal_links_without_filesystem_probes`
+      and `canonical_windows_root_matches_non_verbatim_document_parents`
+      cannot execute on this host. Unix/64-bit gates are applicable here;
+      `controller_panic_exits_nonzero_without_waiting_for_client_shutdown`
+      requires debug assertions (the fast gate's test profile enables them).
+      Subprocess-helper early returns and Dart corpus `skip: true` examples are
+      harness/fixture mechanics, not skipped assertions. No unjustified skip found.
+      `no_new_hand_rolled_syntax_walkers` replaces assertions only when explicitly
+      updating its baseline with `UPDATE_BESPOKE_WALKER_BASELINE` (not set here).
+      `test_find_config_none_when_no_local_or_git_config` omits its no-config
+      assertion when `$HOME/.falcon.json` exists because home fallback is valid.
+      Release-only behavior in `context_rejects_invalid_rule_fixes` (discarding
+      invalid fixes instead of debug panic) and the 100ms ceiling in
+      `incremental_reanalyze_meets_latency_gate` (400ms in debug) was not exercised
+      by the debug fast gate; the actual RC must cover these release branches.
+    - Standalone workspace Clippy (`--locked --workspace --all-targets -- -D warnings`),
+      `cargo fmt --all --check` and `cargo xtask docgen --check` passed.
+      The initial `makers verify-fast` passed: 3,673 tests, two ignored timing
+      probes, 18 doctests; intermediate-tree source fingerprint
+      `sha256:bb266d82c16e23a5e0a3534b14ee176778a94c65b79740dd5e37ab4ef411c3e7`.
+      That run preceded independent-review README/evidence corrections. One
+      controller-authorized replacement fast gate covers the corrected candidate;
+      its fingerprint is recorded in the handoff rather than inserted into its
+      own fingerprinted input.
+    - Actual RC still needs its exact final `makers verify-full` and independent
+      review, native macOS/arm64 and Linux arm64 install checks, published artifact
+      provenance/signature/launcher checks, and interactive VS Code/Zed diagnostic
+      and configuration smoke. VS Code is absent here; Zed compilation/artifact
+      checks do not establish editor-host behavior. This rehearsal does not claim
+      analyzer parity or replace those checks.
 - [x] Review malformed-input/recovery coverage, parser depth/source limits, all
   new metadata consumers and CLI/LSP failure contracts against V1-1 through V1-4.
   Certification: JJ change `voysnztnpzoostkrtvztyvzttlztnlxl` (failure-contract fix).

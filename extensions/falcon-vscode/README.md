@@ -1,20 +1,20 @@
 # Falcon Dart Linter — VS Code Extension
 
-Minimal language client for the [falcon](../../) Dart linter.
+Minimal language client for the [falcon](https://github.com/JacobDevelops/dart_falcon) Dart linter.
 Launches `falcon lsp` over stdio and shows falcon diagnostics inline for
 `.dart` files. Hovering a flagged range shows the rule id and message.
 
 ## Requirements
 
-- The `falcon` binary on your `PATH` (see [installation](../../docs/installation.md)), or set `falcon.binaryPath`.
+- The `falcon` binary on your `PATH` (see [installation](https://github.com/JacobDevelops/dart_falcon/blob/main/docs/installation.md)), or set `falcon.binaryPath`.
 
 ## Install locally
 
 ```sh
 cd extensions/falcon-vscode
 npm install          # pulls vscode-languageclient
-npx @vscode/vsce package
-code --install-extension falcon-vscode-0.1.0.vsix
+npx @vscode/vsce package --out falcon-vscode.vsix
+code --install-extension falcon-vscode.vsix
 ```
 
 Alternative for development: symlink this directory into
