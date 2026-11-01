@@ -14,8 +14,16 @@ const MAX_RSS_KB: u32 = 8 * 1024 * 1024;
 const EXCLUDED: &[&str] = &["**/.dart_tool/**", "**/build/**", "**/.?*/**", "**/.?*"];
 type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
 
+mod full_analysis;
+
 #[derive(Args)]
 pub struct Options {
+    /// Measure portable, SDK-free full Falcon analysis from the pinned OSS corpus.
+    #[arg(long, requires = "output", conflicts_with_all = ["corpus", "preflight", "dart", "dcm", "dcl", "cold_runs"])]
+    full_analysis: bool,
+    /// Update the portable lane's reviewed expected work, never timing thresholds.
+    #[arg(long, requires = "full_analysis")]
+    bless: bool,
     #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u32).range(2..))]
     runs: u32,
     #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(2..))]
@@ -1175,19 +1183,15 @@ impl Invocation<'_, '_> {
         }
         let capture_path = cache.join(format!("{}-{scenario}-{id}-preflight", corpus.id));
         let rss_path = capture_path.with_extension("rss");
-        let mut capture = Command::new("/usr/bin/time");
+        let mut capture = rss_command(&rss_path, &tool.executable);
         capture
-            .args(["-q", "-f", "%M", "-o"])
-            .arg(&rss_path)
-            .arg(&tool.executable)
             .args(&tool.prefix)
             .args(&tool.args)
             .current_dir(project)
             .env("ANALYZER_STATE_LOCATION_OVERRIDE", state);
         tool.environment(&mut capture, sdk);
         let captured = guarded_output(&mut capture, &capture_path, u64::from(MAX_RSS_KB))?;
-        let peak_rss_mb =
-            fs::read_to_string(&rss_path)?.trim().parse::<f64>()? * 1024.0 / 1_000_000.0;
+        let peak_rss_mb = peak_rss_mb(&rss_path)?;
         if !matches!(captured.status.code(), Some(code) if tool.allowed_exit.contains(&code)) {
             return Err(format!(
                 "{id} failed ({}): {}\n{}",
@@ -1487,7 +1491,40 @@ fn provenance(path: &Path) -> Result<Value> {
     }))
 }
 
+fn rss_command(path: &Path, executable: &Path) -> Command {
+    let mut command = Command::new("/usr/bin/time");
+    command
+        .args(["-q", "-f", "%M", "-o"])
+        .arg(path)
+        .arg(executable);
+    command
+}
+
+fn peak_rss_mb(path: &Path) -> Result<f64> {
+    Ok(fs::read_to_string(path)?.trim().parse::<f64>()? * 1024.0 / 1_000_000.0)
+}
+
+fn hyperfine_executable(options: &Options) -> Result<PathBuf> {
+    match &options.hyperfine {
+        Some(path) => Ok(fs::canonicalize(path)?),
+        None => Ok(PathBuf::from(text(
+            Command::new("mise").args(["which", "hyperfine"]),
+        )?)),
+    }
+}
+
+fn falcon_executable(options: &Options) -> Result<PathBuf> {
+    if options.skip_build {
+        crate::support::falcon_binary(true)
+    } else {
+        Ok(crate::support::build_falcon(true))
+    }
+}
+
 pub fn run(options: &Options) -> Result<()> {
+    if options.full_analysis {
+        return full_analysis::run(options);
+    }
     for id in &options.corpus {
         if !CORPORA.iter().any(|corpus| corpus.id == id) {
             return Err(format!("unknown corpus id: {id}").into());
@@ -1506,15 +1543,9 @@ pub fn run(options: &Options) -> Result<()> {
         .nth(5)
         .ok_or("expected Flutter Dart SDK layout")?
         .join("bin/flutter");
-    let hyperfine = match &options.hyperfine {
-        Some(path) => fs::canonicalize(path)?,
-        None => PathBuf::from(text(Command::new("mise").args(["which", "hyperfine"]))?),
-    };
+    let hyperfine = hyperfine_executable(options)?;
     let (dcl, dcm) = competitor_tools(options)?;
-    if !options.skip_build {
-        output(Command::new("cargo").args(["build", "--locked", "--release", "--bin", "falcon"]))?;
-    }
-    let falcon = root.join("target/release/falcon");
+    let falcon = falcon_executable(options)?;
     let sdk = dart.parent().and_then(Path::parent).ok_or("SDK path")?;
     let tools = tool_descriptors(&falcon, &dart, &dcl, &dcm, sdk);
     let tool_metadata = tools

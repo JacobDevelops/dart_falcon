@@ -567,9 +567,36 @@ These entries describe implemented foundation, not acceptance of the open items.
   - Prior settled gate command: `numen run -- makers verify-fast`; its handoff
     records the result and whole-tree fingerprint before the shared-worker panic
     guard was added. The smoke command above was rerun with that guard.
-- [ ] Add portable representative full-analysis cases using the existing pinned
+- [x] Add portable representative full-analysis cases using the existing pinned
   public corpus/bench-compare machinery, with recorded configurations, failures,
   toolchain and corpus revisions. Verify the work performed, not just duration.
+  - Reproduce: `cargo xtask bench-compare --full-analysis --runs 3 --output
+    target/full-analysis.json`. The [portable lane contract](verification.md#portable-full-analysis-measurements)
+    describes the checks and limitations; `xtask/full-analysis-cases.json` selects
+    existing e2e pins. `xtask/full-analysis-expected.json` asserts host-independent
+    work counters and per-rule findings; `--bless` updates reviewed expectations.
+  - LocalSend app at `cfd699125f2aa4c69f48fd274cf4bb1876a5e08d`:
+    294 files / 146,823 diagnostics; bloc pure-Dart `packages/bloc` and
+    multi-package `packages` at `b9be1e252ee24ffbe9f2fb629edc7624b2cfbf05`:
+    43 / 2,323 and 209 / 15,207 respectively. Every case verified 525 file rules,
+    21 completed cross-file rules, resolution, the expected single semantic index
+    build, and completed analysis/preparation for every expected file before and
+    after timing. Explicit all-rule warning configuration, four threads, SDK absent,
+    no pub get, zero external libraries and a clean checkout are enforced.
+  - 2026-11-02, Linux 7.0.0-38-generic x86_64, Ryzen 7 9800X3D,
+    rustc `1.101.0-nightly (16d1ffac1 2026-10-26)`, cargo
+    `1.101.0-nightly (cad07cf8e 2026-10-23)`: one warmup, three fresh-process
+    uninstrumented samples; median/range ms were LocalSend 1,991.655 /
+    1,989.941–2,022.495, bloc 100.899 / 98.339–106.448, workspace
+    422.088 / 418.342–422.126. Instrumented preflight peak RSS (decimal MB):
+    843.969 / 41.394 / 85.254. Uncached analysis, retained OS page cache; failures
+    empty. Evidence belongs to jj change `muponswvrzux` (measured source commit
+    `603c2f69ef90426c65ca55e76799d6512840fa87`);
+    binary SHA-256 `349b263582c085fbbfb0a64ca352bda02a8db3071bbe35f12195ae931e54a9aa`.
+    Complete JSON rendering is deliberately included in end-to-end timings:
+    a review probe capped at one emitted finding reduced LocalSend wall time
+    about 15%, so these are not analysis-only numbers. Machine-readable host
+    timings are output artifacts, not committed baselines or an accepted margin.
 - [x] Audit stage/span attribution in `falcon_analyze/src/registry.rs`,
   `parallel.rs` and `semantic_indexes.rs`. Existing tracing is useful; distinguish
   preparation from shared traversal/index cost and keep detailed instrumentation
@@ -645,6 +672,8 @@ These entries describe implemented foundation, not acceptance of the open items.
   NOT deferred as a v1 release blocker. Keep uncached Falcon measurements, and define
   comparative acceptance against the Dart analyzer separately from regression
   against Falcon's own baseline.
+  Dependency-resolved Flutter/SDK full-analysis cases do not yet exist in this
+  representative suite; the portable SDK-free cases do not close that gap.
 
 ### V1-6 — Certify the release candidate, not just rule count
 

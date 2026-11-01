@@ -1,0 +1,5 @@
+[
+  {"id":"localsend-app","corpus":"localsend","subpath":"app","files":294},
+  {"id":"bloc-dart","corpus":"bloc","subpath":"packages/bloc","files":43},
+  {"id":"bloc-workspace","corpus":"bloc","subpath":"packages","files":209}
+]

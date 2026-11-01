@@ -222,6 +222,54 @@ production path. External closure parsing and LSP source acquisition remain
 explicit inclusive stages rather than pretending their I/O and parse costs
 are separately measured.
 
+## Portable full-analysis measurements
+
+`cargo xtask bench-compare --full-analysis --runs 3 --output target/full-analysis.json`
+uses `xtask/full-analysis-cases.json` and the existing `xtask/e2e-corpus.json`
+pins/checkouts, without requiring Dart, Flutter, DCM or DCL. Linux `/proc`,
+Hyperfine 2 (the mise pin), jj, Git, GNU time and GNU coreutils are required. The cases cover
+LocalSend's Flutter app, the pure-Dart bloc package, and bloc's multi-package
+workspace. These are full Falcon checks, not a Dart analyzer comparison.
+
+Every declared file/cross-file rule is explicitly enabled at warning severity;
+the complete generated configuration is in each JSON result. Resolution and
+cross-file execution are required. Dependencies are deliberately not downloaded:
+SDK discovery is disabled, every case must load zero external libraries, and
+`git status --porcelain --ignored` must be empty for each pinned checkout.
+This portable SDK-free lane does not claim resolved Flutter/package API coverage;
+dependency-resolved full-analysis cases remain absent from the representative suite.
+
+Untimed JSON tracing before and after each timing batch must prove the pinned
+file count, enabled registries, every file's completed analysis/preparation,
+semantic index construction and every cross-file rule's completed execution.
+Work counters and per-rule finding counts must also match the host-independent
+`xtask/full-analysis-expected.json`; a no-op cross-file dispatcher or lost
+resolution findings cannot pass by emitting the same spans. Failures include
+actual/expected counters and per-rule deltas in the error and report's
+`workDifferences`, so review them before using `--bless`. Re-bless after rule
+changes when you next run the lane, only after reviewing intentional work changes;
+removed cases are pruned from the expectations.
+Warnings, parser/internal/configuration failures, missing targets, dirty checkouts,
+nonzero exits, missing spans and changed findings fail with case-named errors.
+Every case is attempted; failures are written to the report and return nonzero.
+
+Hyperfine measures fresh, uninstrumented processes with uncached analysis and
+retained OS page cache. JSON records all samples, median/range, toolchain, host,
+binary hash/source revision and working-change emptiness (`@` in jj, or Git HEAD
+and working-tree status outside a jj repo), pins, configuration, SDK state,
+four analysis threads, instrumented preflight peak RSS (GNU time, decimal MB)
+and failures.
+Timed runs include full JSON finding rendering, not just analysis: large finding
+sets make rendering a material share of this end-to-end measurement.
+The existing 8 GiB process-tree RSS, no-process-swap and 15-minute batch guards
+apply. `--skip-build` reuses the release binary in Cargo metadata's target directory; `--hyperfine` selects
+its executable. Other comparative-only flags are rejected, not silently ignored.
+Host-specific timings are written only to `--output`, never a checked-in baseline.
+These measurements are not a numerical acceptance margin. Performance remains a
+v1 blocker; comparative acceptance against Dart and regression against Falcon
+remain separate decisions.
+
+
 ## Architecture and readiness
 
 `makers architecture` checks the declared local production/build dependency graph

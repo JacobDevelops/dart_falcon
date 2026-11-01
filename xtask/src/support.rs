@@ -347,18 +347,27 @@ pub(crate) fn build_falcon(release: bool) -> PathBuf {
         );
         std::process::exit(1);
     }
+    falcon_binary(release).unwrap_or_else(|error| {
+        eprintln!("error: {error}");
+        std::process::exit(1);
+    })
+}
+
+pub(crate) fn falcon_binary(release: bool) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let cargo = std::env::var_os("CARGO_CMD").unwrap_or_else(|| "cargo".into());
     let output = Command::new(&cargo)
         .args(["metadata", "--format-version", "1", "--no-deps", "--locked"])
-        .current_dir(&workspace)
-        .output()
-        .expect("failed to spawn cargo metadata");
-    assert!(
-        output.status.success(),
-        "cargo metadata failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let metadata: Value = serde_json::from_slice(&output.stdout).expect("valid cargo metadata");
-    binary_path(&metadata, release).expect("cargo metadata target_directory")
+        .current_dir(workspace_root())
+        .output()?;
+    if !output.status.success() {
+        return Err(format!(
+            "cargo metadata failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .into());
+    }
+    let metadata: Value = serde_json::from_slice(&output.stdout)?;
+    Ok(binary_path(&metadata, release)?)
 }
 
 fn binary_path(metadata: &Value, release: bool) -> Result<PathBuf, String> {
