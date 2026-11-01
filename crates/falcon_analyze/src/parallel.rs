@@ -312,7 +312,16 @@ fn load_indexed_externals<'a>(
                 .collect();
             let libraries =
                 ExternalLibraries::load(environment, &roots, |path| project_paths.contains(path));
-            info!(libraries = libraries.libraries().len(), "external libraries loaded");
+            info!(
+                libraries = libraries.libraries().len(),
+                parse_error_files = libraries
+                    .libraries()
+                    .iter()
+                    .flat_map(|library| library.files.iter())
+                    .filter(|file| file.has_parse_errors)
+                    .count(),
+                "external libraries loaded"
+            );
             for library in libraries.libraries() {
                 for file in library.files.iter().filter(|file| file.has_parse_errors) {
                     info!(file = %file.path.display(), "external file has parse errors; its library stays unresolved");

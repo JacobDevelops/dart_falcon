@@ -662,6 +662,115 @@ These entries describe implemented foundation, not acceptance of the open items.
     (`16d1ffac1`, LLVM 23.1.4); no affinity pinning. These are attribution-audit
     observations, not analyzer parity or release performance acceptance.
     The remaining V1-5 decisions below are unchanged.
+- Dependency-resolved benchmark evidence (2026-11-02; **not performance acceptance**):
+  - The default `--full-analysis` lane still selects the three portable cases.
+    `--setup-resolved` prepares pinned Bloc and Wonderous workloads; `--resolved`
+    selects them explicitly. See [setup/cache contracts](verification.md#resolved-workloads-and-analyzer-comparison).
+    Mise pins Dart 3.13.6 and Flutter 3.47.7-stable (Dart 3.13.5); SDK acquisition,
+    corpus checkout and enforced dependency resolution are outside timed runs.
+    Bloc resolves 56 package-config entries and 268 external libraries over 43
+    inputs; Wonderous resolves 134 entries and 2,291 external libraries over 192
+    inputs after fresh setup. Exact per-rule findings and completed-work counts are
+    blessed in `xtask/full-analysis-expected.json` (2,995 and 26,320 findings).
+    Missing/changed setup, unexpected ignored content, missing package roots,
+    zero/changed external-library work, missing/nonzero structured external
+    parse-error counts, warning/error logs and `incomplete-analysis` diagnostics
+    fail the lane. Setup uses Flutter's bundled Dart with `FLUTTER_ROOT`, avoiding
+    Flutter CLI migrations/generated inputs; `.dart_tool/**` is excluded.
+  - Host: Ryzen 7 9800X3D, 8 cores/16 threads, 49.569 GB RAM, Linux
+    7.0.0-38-generic x86_64; rustc 1.101.0-nightly (`16d1ffac1`, LLVM 23.1.4),
+    Hyperfine 2.0.0, release Falcon SHA-256
+    `0088ae7b38228916d8a9975b89f99fd44935e66066aab67fe02d5ebb5d0f7bb7`.
+    Falcon used four Rayon threads; no CPU affinity or governor lock.
+    All five Falcon rows were timed with the pre-R2 binary (`0088ae7b` SHA-256
+    prefix), before the R2 `max-lines-for-function` optimization (`ecaee7c3`).
+    The controller confirmed that the rebased binary (`0c08a00a` SHA-256 prefix)
+    still passes the resolved lane, so the blessed work holds; the table is not
+    a timing measurement of that rebased binary.
+    LocalSendProfile confirmed its verification gate had finished before timing
+    and held heavy work until `resume heavy`. All four corrected N=10 suites were
+    rerun after fresh resolved setup and warm-cache convergence enforcement.
+    Earlier contaminated/generated-input and unstable-warm batches are superseded.
+    No other heavy work was reported; unrelated desktop load was not isolated.
+    Process swap is rejected by the measurement guard.
+  - Commands: after explicit setup, run
+    `cargo xtask bench-compare --full-analysis --skip-build --runs 10 --output <report>`
+    for portable Falcon, add `--resolved` to check the separately blessed expected
+    work for the resolved cases (no blessing during this replacement batch);
+    separately use `--full-analysis --analyzer-comparison --runs 10 --output <report>`
+    with and without `--resolved`. Execution used the copied xtask binary through
+    `numen run --`; all four commands passed. Every
+    row below has **N=10**. Falcon has one discarded warmup, then fresh cacheless
+    processes with warmed OS page cache; Falcon warm is **not applicable**.
+    Analyzer cold clears private persistent state before every sample and discards
+    none; warm retains populated `.analysis-driver` state only after untimed
+    population converges to a stable nonempty file count, also in fresh processes.
+    Both tools render full JSON; their rule sets and file-selection semantics
+    are not equivalent. Native analyzer findings were stable across each case:
+    12,155 / 1,828 / 10,160 for the unresolved portable cases, zero for resolved
+    Bloc, and 105 ordinary warnings/info findings for Wonderous (no missing-import
+    or unresolved-package diagnostics).
+
+    | Case | Tool/cache | Median ms | MAD ms | IQR ms | CV |
+    | --- | --- | ---: | ---: | ---: | ---: |
+    | localsend-app | Falcon cold | 1956.575 | 2.581 | 10.344 | 0.57% |
+    | bloc-dart | Falcon cold | 103.718 | 1.572 | 3.427 | 2.71% |
+    | bloc-workspace | Falcon cold | 388.751 | 5.257 | 9.499 | 1.58% |
+    | bloc-dart-resolved | Falcon cold | 183.291 | 3.308 | 5.511 | 2.32% |
+    | wonderous-flutter-resolved | Falcon cold | 1632.351 | 15.666 | 26.664 | 1.00% |
+    | localsend-app | Analyzer cold | 926.040 | 6.916 | 21.919 | 1.51% |
+    | localsend-app | Analyzer warm | 265.025 | 3.918 | 6.890 | 2.05% |
+    | bloc-dart | Analyzer cold | 319.091 | 6.399 | 12.122 | 3.82% |
+    | bloc-dart | Analyzer warm | 76.553 | 1.508 | 2.910 | 6.47% |
+    | bloc-workspace | Analyzer cold | 885.258 | 5.269 | 8.652 | 1.41% |
+    | bloc-workspace | Analyzer warm | 277.255 | 2.976 | 4.918 | 1.33% |
+    | bloc-dart-resolved | Analyzer cold | 480.821 | 4.229 | 7.221 | 2.57% |
+    | bloc-dart-resolved | Analyzer warm | 83.481 | 2.680 | 4.687 | 3.63% |
+    | wonderous-flutter-resolved | Analyzer cold | 6882.933 | 82.804 | 126.681 | 1.51% |
+    | wonderous-flutter-resolved | Analyzer warm | 832.363 | 3.842 | 8.809 | 0.68% |
+
+  - Statistics use the ordinary median, unscaled median absolute deviation,
+    linearly interpolated quartiles and sample-standard-deviation/mean CV.
+    Warm population required two untimed invocations for LocalSend, portable Bloc,
+    Bloc workspace and resolved Bloc; their counts settled at 1,460 / 343 / 1,352 /
+    984 files. Wonderous required five invocations: 4,099 → 5,332 → 5,997 → 6,037 →
+    6,037. All ten measured warm samples for every case retained the settled count
+    before and after execution. The harness fails if population does not settle
+    by `max(1, --warmups) + 10` invocations or any measured warm count drifts.
+    Count stability is not proof of unchanged bytes or complete persistence.
+    Cold cache writes still varied (resolved Bloc 310–702 files, Wonderous
+    1,604–2,203); cold samples intentionally start empty and are not discarded.
+  - **Candidate self-regression tolerances, not selected policy:** per-case
+    `3 × MAD / median` gives LocalSend 0.40% (7.742 ms), portable Bloc 4.55%
+    (4.715 ms), Bloc workspace 4.06% (15.771 ms), resolved Bloc 5.41% (9.925 ms),
+    resolved Wonderous 2.88% (46.997 ms). The alternative `3 × IQR / median`
+    gives 1.59%, 9.91%, 7.33%, 9.02%, 4.90%, respectively. These are
+    observed single-host noise scales, not confidence bounds or approved margins;
+    an assumed universal 5% allowance is unsupported by this batch. Self-regression
+    and analyzer comparison remain separate acceptance criteria. No comparative
+    speed target is chosen here; cold Falcon beating warm Dart is still the stretch
+    goal, not an informational replacement for an agreed release target.
+
+    Raw wall samples in seconds, in observation order:
+
+    ```text
+    Falcon cold localsend-app: 1.955049339 1.967905949 1.953130803 1.957282864 1.954858057 1.948181573 1.983915367 1.956297977 1.956852089 1.974973640
+    Falcon cold bloc-dart: 0.107671578 0.106210559 0.105128809 0.104508603 0.109318891 0.102379577 0.100060612 0.101985331 0.102912377 0.102926534
+    Falcon cold bloc-workspace: 0.390919507 0.386454753 0.382652216 0.382389929 0.387836774 0.396554810 0.384335948 0.389665211 0.400233204 0.395513337
+    Falcon cold bloc-dart-resolved: 0.181844702 0.182132949 0.188768447 0.175216338 0.184201089 0.188138262 0.179974107 0.182379997 0.187706193 0.186590540
+    Falcon cold wonderous-flutter-resolved: 1.628818292 1.620850525 1.658497486 1.634000577 1.613910430 1.645241808 1.630701973 1.612273175 1.650927376 1.652174899
+    Analyzer cold localsend-app: 0.908077301 0.897092479 0.900636723 0.910694120 0.928154489 0.923925736 0.931915640 0.933997394 0.931403989 0.928389875
+    Analyzer warm localsend-app: 0.273473923 0.274268424 0.264949689 0.261237344 0.257312084 0.260893139 0.263207067 0.269073032 0.265099787 0.267259563
+    Analyzer cold bloc-dart: 0.323585853 0.314596959 0.314580118 0.306634580 0.312145940 0.301519626 0.324672161 0.327850333 0.344186227 0.324944179
+    Analyzer warm bloc-dart: 0.077632122 0.072797783 0.077928796 0.090501838 0.075938099 0.077883011 0.077167541 0.074913774 0.073256467 0.074908465
+    Analyzer cold bloc-workspace: 0.874854961 0.868417774 0.891916970 0.884502279 0.900578402 0.887412229 0.884419233 0.881378228 0.886013330 0.912560806
+    Analyzer warm bloc-workspace: 0.273975133 0.273581403 0.277043467 0.279503777 0.281175136 0.274581413 0.283004466 0.277465696 0.271026070 0.277666925
+    Analyzer cold bloc-dart-resolved: 0.501496085 0.475976083 0.476744516 0.482082944 0.481868685 0.478575458 0.479772494 0.512078172 0.485202756 0.472308866
+    Analyzer warm bloc-dart-resolved: 0.089359074 0.080019468 0.080614755 0.081634652 0.083567620 0.083394415 0.086769539 0.086682275 0.085974865 0.082369781
+    Analyzer cold wonderous-flutter-resolved: 6.801503824 6.718097598 6.765001900 6.881620140 6.876062620 7.031245795 6.967111042 6.885964977 7.027680144 6.884246163
+    Analyzer warm wonderous-flutter-resolved: 0.825985668 0.831228044 0.829487180 0.839078881 0.840990545 0.828929911 0.834277374 0.833497500 0.828112610 0.842086584
+    ```
+
 - [ ] Settle representative suite, cache conditions, repeatability/resource limits
   and acceptable regression/speed margin with the maintainer. Performance is a
   release blocker, but cold Falcon beating warm analyzer remains an aspiration
@@ -672,8 +781,9 @@ These entries describe implemented foundation, not acceptance of the open items.
   NOT deferred as a v1 release blocker. Keep uncached Falcon measurements, and define
   comparative acceptance against the Dart analyzer separately from regression
   against Falcon's own baseline.
-  Dependency-resolved Flutter/SDK full-analysis cases do not yet exist in this
-  representative suite; the portable SDK-free cases do not close that gap.
+  Resolved Dart/Flutter workloads and the above repeatability evidence now exist;
+  the representative-suite decision, regression margin and explicit comparative
+  release target still require maintainer agreement.
 
 ### V1-6 — Certify the release candidate, not just rule count
 

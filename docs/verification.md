@@ -240,8 +240,8 @@ the complete generated configuration is in each JSON result. Resolution and
 cross-file execution are required. Dependencies are deliberately not downloaded:
 SDK discovery is disabled, every case must load zero external libraries, and
 `git status --porcelain --ignored` must be empty for each pinned checkout.
-This portable SDK-free lane does not claim resolved Flutter/package API coverage;
-dependency-resolved full-analysis cases remain absent from the representative suite.
+The default portable lane does not claim resolved Flutter/package API coverage.
+The dependency-resolved lane is selected separately below.
 
 Untimed JSON tracing before and after each timing batch must prove the pinned
 file count, enabled registries, every file's completed analysis/preparation,
@@ -251,8 +251,8 @@ Work counters and per-rule finding counts must also match the host-independent
 resolution findings cannot pass by emitting the same spans. Failures include
 actual/expected counters and per-rule deltas in the error and report's
 `workDifferences`, so review them before using `--bless`. Re-bless after rule
-changes when you next run the lane, only after reviewing intentional work changes;
-removed cases are pruned from the expectations.
+changes when you next run the lane, only after reviewing intentional work changes.
+Blessing one suite preserves the other suite's expectations.
 Warnings, parser/internal/configuration failures, missing targets, dirty checkouts,
 nonzero exits, missing spans and changed findings fail with case-named errors.
 Every case is attempted; failures are written to the report and return nonzero.
@@ -272,6 +272,77 @@ Host-specific timings are written only to `--output`, never a checked-in baselin
 These measurements are not a numerical acceptance margin. Performance remains a
 v1 blocker; comparative acceptance against Dart and regression against Falcon
 remain separate decisions.
+
+### Resolved workloads and analyzer comparison
+
+The three portable cases remain the fast self-regression suite. Use
+`cargo xtask bench-compare --setup-resolved` once to prepare the separately
+selected dependency-resolved suite, then run
+`cargo xtask bench-compare --full-analysis --resolved --runs 10 --output target/resolved.json`.
+Setup acquires pinned SDKs and corpus revisions and resolves locked dependencies;
+none of that setup belongs to the timed region. Missing package configuration,
+changed locks, zero external libraries, incomplete-analysis warnings and changed
+expected work fail the resolved lane. `--bless` updates per-rule findings and work
+counters in the same expected-work file, not performance thresholds.
+
+Setup uses mise's versioned SDK cache outside this repository: Dart `3.13.6`
+and Flutter `3.47.7-stable` (bundled Dart `3.13.5`). The setup command installs
+those exact tool versions rather than relying on the workspace's floating Dart
+alias. Corpus revisions remain pinned in `xtask/e2e-corpus.json`. The resolved
+cases are Bloc's `packages/bloc` (43 Dart files, 56 configured packages) and
+Wonderous (192 Dart files after setup, 134 configured packages). Dependency snapshots are
+committed under `xtask/bench-locks/`: Bloc reuses the published benchmark lock;
+Wonderous's upstream lock was normalized with the pinned Flutter SDK. Setup
+runs the pinned SDK's `dart pub get --enforce-lockfile`, with `FLUTTER_ROOT` set
+for Flutter so package resolution does not migrate the pinned project's sources,
+then stamps the package configuration and SDK identity. Measurement requires
+the exact embedded lock bytes, package names/counts and existing package roots,
+plus blessed nonzero resolved-library counts; it never repairs missing setup.
+Setup rejects modified tracked, untracked and unexpected ignored checkout contents
+except its pinned lock override and required pub-generated metadata. The resolved
+Falcon config excludes generated/hidden inputs using the shared benchmark exclusions,
+including `.dart_tool/**`; later Dart/YAML source changes also fail validation.
+
+Falcon **cold** means a fresh process with no persistent analysis/result cache.
+The instrumented preflight and discarded warmup populate the OS page cache; this
+is not a cold-filesystem measurement. Falcon has no persistent warm-analysis mode,
+so a separate Falcon warm number would measure the same process/cache contract.
+All samples include rendering the complete JSON findings.
+
+The analyzer is a separate acceptance criterion and an explicit measurement mode:
+`cargo xtask bench-compare --full-analysis --analyzer-comparison --runs 10 --output target/analyzer-portable.json`,
+or add `--resolved` for the dependency-resolved cases. It does not establish
+identical rules or work between the tools. The Falcon self-regression lane never
+invokes Dart. Analyzer **cold** starts `dart analyze` in a fresh process with an
+empty private `ANALYZER_STATE_LOCATION_OVERRIDE`; it discards no timed samples.
+Analyzer **warm** starts the same command in another fresh process after untimed
+analyses have populated and stabilized that private analysis-server cache's file
+count. SDK/package setup and cache deletion/prepopulation are outside timing;
+OS page cache is retained in both modes. Reports record the
+exact commands, versions, raw samples, median, MAD, IQR and coefficient of
+variation (CV, a ratio rather than a percentage).
+
+Each analyzer invocation is exactly
+`ANALYZER_STATE_LOCATION_OVERRIDE=<private-state> <pinned-sdk>/bin/dart --suppress-analytics analyze --format=json .`
+from the selected project directory. Before each cold sample the runner removes
+only its own private state directory. Before warm samples it runs that command
+at least `max(1, --warmups)` times untimed, stopping only after two consecutive
+nonempty cache-file counts agree. The cap is that minimum plus ten invocations;
+failure to settle fails the mode. Every warm sample must retain that count before
+and after execution; count drift fails, rather than publishing unstable timings.
+Reports expose the population history, actual warmup count and settled baseline.
+Stable counts do not prove unchanged bytes or a fully populated byte store.
+This is a persistent-cache comparison, not a long-lived in-memory analysis server.
+Resolved analyzer cases reject ERROR diagnostics, not just crashes; portable
+SDK-free cases intentionally retain their unresolved findings. See the pinned SDK's
+[state-root implementation](https://github.com/dart-lang/sdk/blob/3.13.6/pkg/analyzer/lib/file_system/physical_file_system.dart)
+and [analysis-server byte store](https://github.com/dart-lang/sdk/blob/3.13.6/pkg/analysis_server/lib/src/analysis_server.dart).
+Hyperfine 2 measures child wall time separately from resource-guard polling and
+validates every analyzer sample's exit status and structured findings.
+
+Neither a regression tolerance nor the comparative release target is selected by
+these commands. Both require an explicit maintainer decision after reviewing
+repeatability. Uncached Falcon beating warm Dart remains the stretch goal.
 
 
 ## Architecture and readiness

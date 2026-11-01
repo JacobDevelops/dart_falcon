@@ -119,6 +119,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn benchmark_modes_keep_setup_and_acceptance_criteria_separate() {
+        for flags in [
+            vec!["--setup-resolved"],
+            vec!["--full-analysis", "--output", "report.json"],
+            vec!["--full-analysis", "--resolved", "--output", "report.json"],
+            vec![
+                "--full-analysis",
+                "--analyzer-comparison",
+                "--output",
+                "report.json",
+            ],
+        ] {
+            assert!(
+                Cli::try_parse_from(["xtask", "bench-compare"].into_iter().chain(flags)).is_ok()
+            );
+        }
+        for flags in [
+            vec!["--resolved"],
+            vec!["--analyzer-comparison"],
+            vec![
+                "--setup-resolved",
+                "--full-analysis",
+                "--output",
+                "report.json",
+            ],
+            vec![
+                "--full-analysis",
+                "--analyzer-comparison",
+                "--bless",
+                "--output",
+                "report.json",
+            ],
+        ] {
+            assert!(
+                Cli::try_parse_from(["xtask", "bench-compare"].into_iter().chain(flags)).is_err()
+            );
+        }
+    }
+
+    #[test]
     fn homebrew_cli_requires_release_inputs() {
         let args = [
             "xtask",

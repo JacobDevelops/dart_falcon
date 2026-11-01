@@ -14,14 +14,79 @@ const MAX_RSS_KB: u32 = 8 * 1024 * 1024;
 const EXCLUDED: &[&str] = &["**/.dart_tool/**", "**/build/**", "**/.?*/**", "**/.?*"];
 type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
 
+mod analyzer;
 mod full_analysis;
+mod resolved;
+
+fn statistics(samples: &[f64]) -> Result<Value> {
+    if samples.len() < 2
+        || samples
+            .iter()
+            .any(|value| !value.is_finite() || *value <= 0.0)
+    {
+        return Err("statistics require at least two finite positive samples".into());
+    }
+    let count = u32::try_from(samples.len())?;
+    let mut sorted = samples.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let quantile = |values: &[f64], numerator: usize, denominator: usize| -> Result<f64> {
+        let position = (values.len() - 1)
+            .checked_mul(numerator)
+            .ok_or("quantile index overflow")?;
+        let lower = position / denominator;
+        let upper = position.div_ceil(denominator);
+        let fraction = f64::from(u32::try_from(position % denominator)?)
+            / f64::from(u32::try_from(denominator)?);
+        Ok(values[lower] + (values[upper] - values[lower]) * fraction)
+    };
+    let median = quantile(&sorted, 1, 2)?;
+    let mut deviations = samples
+        .iter()
+        .map(|value| (value - median).abs())
+        .collect::<Vec<_>>();
+    deviations.sort_by(f64::total_cmp);
+    let mean = samples
+        .iter()
+        .map(|value| value / f64::from(count))
+        .sum::<f64>();
+    // Normalize before squaring to avoid overflowing squared seconds.
+    let cv = (samples
+        .iter()
+        .map(|value| (value / mean - 1.0).powi(2))
+        .sum::<f64>()
+        / f64::from(count - 1))
+    .sqrt();
+    if !cv.is_finite() {
+        return Err("non-finite timing dispersion".into());
+    }
+    Ok(json!({
+        "samples":samples, "median":median, "min":sorted[0],
+        "max":sorted[sorted.len()-1], "mad":quantile(&deviations,1,2)?,
+        "iqr":quantile(&sorted,3,4)?-quantile(&sorted,1,4)?, "cv":cv
+    }))
+}
 
 #[derive(Args)]
-pub struct Options {
+struct FullAnalysisOptions {
     /// Measure portable, SDK-free full Falcon analysis from the pinned OSS corpus.
     #[arg(long, requires = "output", conflicts_with_all = ["corpus", "preflight", "dart", "dcm", "dcl", "cold_runs"])]
     full_analysis: bool,
-    /// Update the portable lane's reviewed expected work, never timing thresholds.
+    /// Select dependency-resolved Dart and Flutter cases after --setup-resolved.
+    #[arg(long, requires = "full_analysis")]
+    resolved: bool,
+    /// Measure Dart analyzer cold/warm separately from Falcon self-regression.
+    #[arg(long, requires = "full_analysis", conflicts_with = "bless")]
+    analyzer_comparison: bool,
+}
+
+#[derive(Args)]
+pub struct Options {
+    #[command(flatten)]
+    analysis: FullAnalysisOptions,
+    /// Prepare pinned SDKs, checkouts and dependencies outside measurement.
+    #[arg(long, conflicts_with_all = ["full_analysis", "analyzer_comparison", "bless"])]
+    setup_resolved: bool,
+    /// Update the selected lane's reviewed expected work, never timing thresholds.
     #[arg(long, requires = "full_analysis")]
     bless: bool,
     #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u32).range(2..))]
@@ -1522,7 +1587,13 @@ fn falcon_executable(options: &Options) -> Result<PathBuf> {
 }
 
 pub fn run(options: &Options) -> Result<()> {
-    if options.full_analysis {
+    if options.setup_resolved {
+        return resolved::setup(&crate::workspace_root());
+    }
+    if options.analysis.analyzer_comparison {
+        return analyzer::run(options);
+    }
+    if options.analysis.full_analysis {
         return full_analysis::run(options);
     }
     for id in &options.corpus {
@@ -1607,6 +1678,37 @@ pub fn run(options: &Options) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn statistics_preserve_samples_and_define_dispersion() {
+        let result = statistics(&[4.0, 1.0, 3.0, 2.0]).unwrap();
+        assert_eq!(result["samples"], json!([4.0, 1.0, 3.0, 2.0]));
+        for (key, value) in [
+            ("median", 2.5),
+            ("min", 1.0),
+            ("max", 4.0),
+            ("mad", 1.0),
+            ("iqr", 1.5),
+        ] {
+            assert_eq!(result[key], json!(value));
+        }
+        assert!((result["cv"].as_f64().unwrap() - (5.0_f64 / 3.0).sqrt() / 2.5).abs() < 1e-12);
+        assert_eq!(statistics(&[2.0, 2.0]).unwrap()["cv"], json!(0.0));
+    }
+
+    #[test]
+    fn statistics_reject_invalid_samples() {
+        for samples in [
+            vec![],
+            vec![1.0],
+            vec![0.0, 1.0],
+            vec![-1.0, 1.0],
+            vec![f64::NAN, 1.0],
+            vec![f64::INFINITY, 1.0],
+        ] {
+            assert!(statistics(&samples).is_err());
+        }
+    }
+
     fn diagnostics(tool: &str, bytes: &[u8]) -> Result<(usize, BTreeMap<String, usize>)> {
         let path = Path::new("tool");
         let tools = tool_descriptors(path, path, path, path, path);

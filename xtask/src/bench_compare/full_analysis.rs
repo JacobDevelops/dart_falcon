@@ -3,20 +3,25 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Case {
-    id: String,
-    corpus: String,
-    subpath: String,
-    files: u64,
+pub(super) struct Case {
+    pub(super) id: String,
+    pub(super) corpus: String,
+    pub(super) subpath: String,
+    pub(super) files: u64,
 }
 
-fn cases(source: &str, pins: &Value) -> Result<Vec<Case>> {
+pub(super) fn cases(source: &str, pins: &Value) -> Result<Vec<Case>> {
     let cases: Vec<Case> = serde_json::from_str(source)?;
+    validate_cases(&cases, pins)?;
+    Ok(cases)
+}
+
+fn validate_cases(cases: &[Case], pins: &Value) -> Result<()> {
     let mut ids = BTreeSet::new();
     if cases.is_empty() {
         return Err("empty full-analysis case table".into());
     }
-    for case in &cases {
+    for case in cases {
         if case.files == 0
             || !ids.insert(&case.id)
             || case.id.is_empty()
@@ -35,10 +40,25 @@ fn cases(source: &str, pins: &Value) -> Result<Vec<Case>> {
             return Err(format!("invalid full-analysis case: {case:?}").into());
         }
     }
-    Ok(cases)
+    Ok(())
 }
 
-fn verify(captured: &Output, files: u64, rules: u64, cross_file: u64) -> Result<Value> {
+pub(super) fn selected_cases(resolved: bool, pins: &Value) -> Result<Vec<Case>> {
+    let mut portable = cases(include_str!("../../full-analysis-cases.json"), pins)?;
+    let portable_count = portable.len();
+    portable.extend(super::resolved::cases());
+    validate_cases(&portable, pins)?;
+    let resolved_cases = portable.split_off(portable_count);
+    Ok(if resolved { resolved_cases } else { portable })
+}
+
+fn verify(
+    captured: &Output,
+    files: u64,
+    rules: u64,
+    cross_file: u64,
+    resolved: bool,
+) -> Result<Value> {
     let stderr = std::str::from_utf8(&captured.stderr)?;
     if !captured.status.success() {
         return Err(format!("process exit check failed: {}", captured.status).into());
@@ -54,6 +74,7 @@ fn verify(captured: &Output, files: u64, rules: u64, cross_file: u64) -> Result<
                     | "rules-thread-error"
                     | "config"
                     | "unmatched-path"
+                    | "incomplete-analysis"
             )
         ) {
             return Err(format!("full-analysis failure diagnostic: {diagnostic}").into());
@@ -81,7 +102,12 @@ fn verify(captured: &Output, files: u64, rules: u64, cross_file: u64) -> Result<
                     return Err("multiple analysis summaries".into());
                 }
             }
-            Some("external libraries loaded") => external = fields["libraries"].as_u64(),
+            Some("external libraries loaded") => {
+                if fields["parse_error_files"].as_u64() != Some(0) {
+                    return Err("missing or nonzero external parse_error_files".into());
+                }
+                external = fields["libraries"].as_u64();
+            }
             Some("file analysis complete") => completed += 1,
             Some("close") if record["span"]["name"] == "registry_preparation" => preparations += 1,
             Some("close") if record["span"]["name"] == "cross_file_rule" => {
@@ -100,7 +126,7 @@ fn verify(captured: &Output, files: u64, rules: u64, cross_file: u64) -> Result<
         || summary["resolve"] != true
         || completed != files
         || preparations != files
-        || external != Some(0)
+        || external.is_none_or(|libraries| (libraries == 0) == resolved)
         || cross_file_completed != cross_file
         || semantic_indexes == 0
     {
@@ -175,7 +201,7 @@ fn expectations(source: &[u8]) -> Result<Value> {
     Ok(expected)
 }
 
-fn source_revision(root: &Path) -> Result<Value> {
+pub(super) fn source_revision(root: &Path) -> Result<Value> {
     let revision = Command::new("jj")
         .current_dir(root)
         .args([
@@ -206,7 +232,7 @@ fn source_revision(root: &Path) -> Result<Value> {
     }))
 }
 
-fn verify_clean_checkout(status: &str) -> Result<()> {
+pub(super) fn verify_clean_checkout(status: &str) -> Result<()> {
     if !status.trim().is_empty() {
         return Err(
             "clean corpus check failed: modified, untracked or ignored files present".into(),
@@ -218,7 +244,7 @@ fn verify_clean_checkout(status: &str) -> Result<()> {
 pub(super) fn run(options: &Options) -> Result<()> {
     let root = crate::workspace_root();
     let pins: Value = serde_json::from_str(include_str!("../../e2e-corpus.json"))?;
-    let cases = cases(include_str!("../../full-analysis-cases.json"), &pins)?;
+    let cases = selected_cases(options.analysis.resolved, &pins)?;
     let destination = options
         .output
         .as_ref()
@@ -245,10 +271,15 @@ pub(super) fn run(options: &Options) -> Result<()> {
     let expected_path = root.join("xtask/full-analysis-expected.json");
     let mut expected = expectations(&fs::read(&expected_path)?)?;
     if options.bless {
+        let ids = selected_cases(false, &pins)?
+            .into_iter()
+            .chain(selected_cases(true, &pins)?)
+            .map(|case| case.id)
+            .collect::<BTreeSet<_>>();
         expected
             .as_object_mut()
             .ok_or("invalid expected-work object")?
-            .retain(|id, _| cases.iter().any(|case| case.id == *id));
+            .retain(|id, _| ids.contains(id));
     }
     let mut report = json!({
         "schemaVersion":1, "lane":"uncached-full-analysis",
@@ -261,7 +292,7 @@ pub(super) fn run(options: &Options) -> Result<()> {
         "falconSourceRevision":source_revision(&root)?,
         "rendering":"full JSON findings rendered in timed runs; no rendering cap; rendering cost included",
         "configuration":config, "threads":4,
-        "sdk":"absent: PATH, DART_SDK and FLUTTER_ROOT removed; no pub get",
+        "sdk":if options.analysis.resolved { "pinned SDK and package configuration; validated before and after timing" } else { "absent: PATH, DART_SDK and FLUTTER_ROOT removed; no pub get" },
         "cache":"fresh process, uncached analysis; OS page cache retained; no persistent analyzer state",
         "runs":options.runs, "warmups":options.warmups,
         "limits":{"processTreeRssKiB":MAX_RSS_KB,"batchSeconds":900,"rejectProcessSwap":true},
@@ -321,21 +352,43 @@ struct Lane<'a> {
 }
 
 impl Lane<'_> {
+    fn checkout(&self, case: &Case, pin: &Value) -> Result<(PathBuf, Option<PathBuf>)> {
+        if self.options.analysis.resolved {
+            let (target, sdk) = resolved::validate(&crate::workspace_root(), &case.id)?;
+            let checkout = self
+                .cache
+                .parent()
+                .ok_or("missing cache parent")?
+                .join("resolved")
+                .join(&case.corpus);
+            if target != checkout.join(&case.subpath) {
+                return Err("resolved target differs from case manifest".into());
+            }
+            Ok((checkout, Some(sdk)))
+        } else {
+            let checkout = self.cache.join(&case.corpus);
+            prepare_checkout(
+                &checkout,
+                pin["url"].as_str().ok_or("missing URL")?,
+                pin["revision"].as_str().ok_or("missing revision")?,
+            )?;
+            let status = text(Command::new("git").current_dir(&checkout).args([
+                "status",
+                "--porcelain",
+                "--ignored",
+            ]))?;
+            verify_clean_checkout(&status)?;
+            Ok((checkout, None))
+        }
+    }
+
     fn measure_case(&self, case: &Case, pin: &Value, expected: &mut Value) -> Result<Value> {
-        let checkout = self.cache.join(&case.corpus);
-        prepare_checkout(
-            &checkout,
-            pin["url"].as_str().ok_or("missing URL")?,
-            pin["revision"].as_str().ok_or("missing revision")?,
-        )?;
-        let status = text(Command::new("git").current_dir(&checkout).args([
-            "status",
-            "--porcelain",
-            "--ignored",
-        ]))?;
-        verify_clean_checkout(&status)?;
+        let (checkout, sdk) = self.checkout(case, pin)?;
         let mut config = self.config.clone();
         let mut includes = vec![json!("**")];
+        if self.options.analysis.resolved {
+            includes.extend(EXCLUDED.iter().map(|pattern| json!(format!("!{pattern}"))));
+        }
         if let Some(excludes) = pin["excludes"].as_array() {
             for exclude in excludes {
                 includes.push(json!(format!(
@@ -358,6 +411,9 @@ impl Lane<'_> {
                 .env_remove("PATH").env_remove("DART_SDK").env_remove("FLUTTER_ROOT")
                 .env("RAYON_NUM_THREADS","4")
                 .env("RUST_LOG", if instrumented { "warn,falcon::stages=debug,falcon::detail=debug,falcon_project=info,falcon_analyze::parallel=info" } else { "warn" });
+            if let Some(sdk) = &sdk {
+                command.env("DART_SDK", sdk);
+            }
             command
         };
         let preflight_command = command(true);
@@ -379,7 +435,13 @@ impl Lane<'_> {
             u64::from(MAX_RSS_KB),
         )?;
         let peak_rss_mb = peak_rss_mb(&rss_path)?;
-        let work = verify(&preflight, case.files, self.rules, self.cross_file)?;
+        let work = verify(
+            &preflight,
+            case.files,
+            self.rules,
+            self.cross_file,
+            self.options.analysis.resolved,
+        )?;
         if self.options.bless {
             expected[&case.id] = work.clone();
         } else {
@@ -391,13 +453,25 @@ impl Lane<'_> {
             &self.scratch.join("postflight"),
             u64::from(MAX_RSS_KB),
         )?;
-        let after = verify(&postflight, case.files, self.rules, self.cross_file)?;
+        let after = verify(
+            &postflight,
+            case.files,
+            self.rules,
+            self.cross_file,
+            self.options.analysis.resolved,
+        )?;
         verify_expected(&after, &expected[&case.id])?;
         if postflight.stdout != preflight.stdout {
             return Err("findings changed during timing".into());
         }
+        let setup = if self.options.analysis.resolved {
+            resolved::validate(&crate::workspace_root(), &case.id)?;
+            resolved::metadata(&crate::workspace_root(), &case.id)?
+        } else {
+            Value::Null
+        };
         Ok(
-            json!({"id":case.id,"corpus":pin,"subpath":case.subpath,"configuration":config,"work":work,"peakRssMb":peak_rss_mb,"seconds":seconds}),
+            json!({"id":case.id,"corpus":pin,"subpath":case.subpath,"configuration":config,"work":work,"setup":setup,"peakRssMb":peak_rss_mb,"seconds":seconds}),
         )
     }
 
@@ -450,7 +524,7 @@ impl Lane<'_> {
         {
             return Err("missing or failed timed samples".into());
         }
-        let mut samples = measurements
+        let samples = measurements
             .iter()
             .map(|sample| {
                 sample["time_wall_clock"]["value"]
@@ -458,14 +532,7 @@ impl Lane<'_> {
                     .ok_or("invalid wall time")
             })
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        samples.sort_by(f64::total_cmp);
-        let middle = samples.len() / 2;
-        let median = if samples.len() % 2 == 0 {
-            samples[middle - 1].midpoint(samples[middle])
-        } else {
-            samples[middle]
-        };
-        Ok(json!({"samples":samples,"median":median,"min":samples.first(),"max":samples.last()}))
+        statistics(&samples)
     }
 }
 
@@ -490,16 +557,25 @@ mod tests {
         ] {
             assert!(cases(source, &pins).is_err());
         }
+        let mut combined = cases(
+            r#"[{"id":"x","corpus":"bloc","subpath":".","files":1}]"#,
+            &pins,
+        )
+        .unwrap();
+        combined.extend(
+            cases(
+                r#"[{"id":"x","corpus":"bloc","subpath":"packages/bloc","files":43}]"#,
+                &pins,
+            )
+            .unwrap(),
+        );
+        assert!(validate_cases(&combined, &pins).is_err());
     }
     #[test]
     fn real_cases_resolve_against_pinned_public_corpus() {
         let pins = serde_json::from_str(include_str!("../../e2e-corpus.json")).unwrap();
-        assert_eq!(
-            cases(include_str!("../../full-analysis-cases.json"), &pins)
-                .unwrap()
-                .len(),
-            3
-        );
+        assert_eq!(selected_cases(false, &pins).unwrap().len(), 3);
+        assert_eq!(selected_cases(true, &pins).unwrap().len(), 2);
     }
     fn captured(stderr: &str) -> Output {
         Output {
@@ -511,7 +587,7 @@ mod tests {
     fn records() -> Vec<Value> {
         vec![
             json!({"fields":{"message":"starting check","file_count":1,"rule_count":2,"cross_file_rule_count":1,"resolve":true}}),
-            json!({"fields":{"message":"external libraries loaded","libraries":0}}),
+            json!({"fields":{"message":"external libraries loaded","libraries":0,"parse_error_files":0}}),
             json!({"fields":{"message":"file analysis complete"}}),
             json!({"fields":{"message":"close"},"span":{"name":"registry_preparation"}}),
             json!({"fields":{"message":"close"},"span":{"name":"cross_file_rule"}}),
@@ -522,7 +598,7 @@ mod tests {
     fn verifies_complete_work_and_rejects_each_missing_stage() {
         let records = records();
         let lines = records.iter().map(Value::to_string).collect::<Vec<_>>();
-        assert!(verify(&captured(&lines.join("\n")), 1, 2, 1).is_ok());
+        assert!(verify(&captured(&lines.join("\n")), 1, 2, 1, false).is_ok());
         for (omitted, _) in lines.iter().enumerate() {
             let partial = lines
                 .iter()
@@ -532,13 +608,33 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n");
             assert!(
-                verify(&captured(&partial), 1, 2, 1).is_err(),
+                verify(&captured(&partial), 1, 2, 1, false).is_err(),
                 "omitted {omitted}"
             );
         }
         for (files, rules, cross) in [(2, 2, 1), (1, 3, 1), (1, 2, 2)] {
-            assert!(verify(&captured(&lines.join("\n")), files, rules, cross).is_err());
+            assert!(verify(&captured(&lines.join("\n")), files, rules, cross, false).is_err());
         }
+    }
+    #[test]
+    fn resolved_work_requires_external_libraries_and_exact_expectations() {
+        let mut records = records();
+        let output = |records: &[Value]| {
+            captured(
+                &records
+                    .iter()
+                    .map(Value::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+        };
+        assert!(verify(&output(&records), 1, 2, 1, true).is_err());
+        records[1]["fields"]["libraries"] = json!(7);
+        let expected = verify(&output(&records), 1, 2, 1, true).unwrap();
+        records[1]["fields"]["libraries"] = json!(6);
+        let actual = verify(&output(&records), 1, 2, 1, true).unwrap();
+        assert!(verify_expected(&actual, &expected).is_err());
+        assert!(verify(&output(&records), 1, 2, 1, false).is_err());
     }
     #[test]
     fn rejects_missing_work_skipped_inputs_and_failures() {
@@ -547,11 +643,11 @@ mod tests {
             .map(Value::to_string)
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(verify(&captured(&lines), 1, 2, 1).is_ok());
+        assert!(verify(&captured(&lines), 1, 2, 1, false).is_ok());
         let mut failed_exit = captured(&lines);
         failed_exit.status = Command::new("false").status().unwrap();
         assert!(
-            verify(&failed_exit, 1, 2, 1)
+            verify(&failed_exit, 1, 2, 1, false)
                 .unwrap_err()
                 .to_string()
                 .contains("process exit")
@@ -562,11 +658,12 @@ mod tests {
             "rules-thread-error",
             "config",
             "unmatched-path",
+            "incomplete-analysis",
         ] {
             let mut output = captured(&lines);
             output.stdout = serde_json::to_vec(&json!([{"rule":rule}])).unwrap();
             assert!(
-                verify(&output, 1, 2, 1)
+                verify(&output, 1, 2, 1, false)
                     .unwrap_err()
                     .to_string()
                     .contains("failure diagnostic")
@@ -578,11 +675,23 @@ mod tests {
                 json!({"level":level,"fields":{"message":"failed to read input"}})
             ));
             assert!(
-                verify(&output, 1, 2, 1)
+                verify(&output, 1, 2, 1, false)
                     .unwrap_err()
                     .to_string()
                     .contains("warning/failure")
             );
+        }
+        for count in [Value::Null, json!(1)] {
+            let mut degraded = records();
+            degraded[1]["fields"]["parse_error_files"] = count;
+            let output = captured(
+                &degraded
+                    .iter()
+                    .map(Value::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
+            assert!(verify(&output, 1, 2, 1, false).is_err());
         }
         let mut external = records();
         external[1]["fields"]["libraries"] = json!(1);
@@ -594,13 +703,13 @@ mod tests {
                 .join("\n"),
         );
         assert!(
-            verify(&output, 1, 2, 1)
+            verify(&output, 1, 2, 1, false)
                 .unwrap_err()
                 .to_string()
                 .contains("work mismatch")
         );
         assert!(
-            verify(&captured(&lines), 2, 2, 1)
+            verify(&captured(&lines), 2, 2, 1, false)
                 .unwrap_err()
                 .to_string()
                 .contains("work mismatch")
@@ -615,11 +724,11 @@ mod tests {
             .join("\n");
         let mut output = captured(&lines);
         output.stdout = br#"[{"rule":"cross-rule"},{"rule":"resolved-rule"}]"#.to_vec();
-        let expected = verify(&output, 1, 2, 1).unwrap();
+        let expected = verify(&output, 1, 2, 1, false).unwrap();
         assert!(verify_expected(&expected, &expected).is_ok());
         for finding in ["cross-rule", "resolved-rule"] {
             output.stdout = serde_json::to_vec(&json!([{"rule":finding}])).unwrap();
-            let actual = verify(&output, 1, 2, 1).unwrap();
+            let actual = verify(&output, 1, 2, 1, false).unwrap();
             assert!(verify_expected(&actual, &expected).is_err());
         }
     }
