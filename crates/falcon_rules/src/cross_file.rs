@@ -44,8 +44,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::lint::support::package_manifests::manifest_sections;
+use falcon_analyze::canonical_package_path;
 use falcon_analyze::{PackageConfig, PackageIdentity, ProjectFile, canonical_or_lexical};
-use falcon_analyze::{canonical_package_path, enclosing_pubspec};
 use falcon_diagnostics::{Diagnostic, Severity, Span as DiagSpan};
 use falcon_syntax::cst::Program;
 use marked_yaml::{

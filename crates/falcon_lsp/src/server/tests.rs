@@ -691,6 +691,33 @@ mod file_watching_tests {
         client.finish();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn localization_publications_use_the_symlinked_client_workspace_uri() {
+        let client = Client::start_prepared(
+            true,
+            true,
+            &json!({}),
+            r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-l10n":"warn"}}}}"#,
+            |workspace, directory| {
+                std::fs::write(workspace.join("pubspec.yaml"), "name: app\n").unwrap();
+                std::fs::create_dir_all(workspace.join("lib/l10n")).unwrap();
+                std::fs::write(workspace.join("lib/main.dart"), "void main() {}").unwrap();
+                std::fs::write(workspace.join("lib/l10n/app_en.arb"), r#"{"unused":"x"}"#).unwrap();
+                let linked = directory.join("linked workspace #");
+                std::os::unix::fs::symlink(workspace, &linked).unwrap();
+                linked
+            },
+        );
+        let expected = file_uri(&client.workspace.join("lib/l10n/app_en.arb")).unwrap();
+        let published = publications(&client.drain());
+        assert_eq!(published.len(), 1, "{published:?}");
+        assert_eq!(published[0].uri, expected);
+        assert_eq!(published[0].diagnostics.len(), 1);
+        assert!(has_rule(&published[0], "unused-l10n"));
+        client.finish();
+    }
+
     #[test]
     fn manifest_buffers_keep_disk_diagnostics_through_open_change_close_and_save() {
         let config = r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"security":{"secure-pubspec-urls":"warn"}}}}"#;
@@ -1838,5 +1865,101 @@ fn publish_maps_all_diagnostic_ranges_to_utf16() {
                 lsp_types::Position::new(1, 7)
             ),
         ]
+    );
+}
+
+#[test]
+fn localization_publication_normalizes_paths_and_bom_utf16_ranges() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(directory.path()).unwrap();
+    let config = root.join("falcon.json");
+    std::fs::write(&config,
+        r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-l10n":"warn"}}}}"#).unwrap();
+    std::fs::write(root.join("pubspec.yaml"), "name: app\n").unwrap();
+    std::fs::write(root.join("main.dart"), "void main() {}").unwrap();
+    std::fs::create_dir(root.join("messages")).unwrap();
+    std::fs::write(root.join("l10n.yaml"), "arb-dir: ./messages/../messages\n").unwrap();
+    let template = root.join("messages/app_en.arb");
+    std::fs::write(
+        &template,
+        "\u{feff}{\"😀first\":\"value\",\r\n \"second\":\"value\"}\r\n",
+    )
+    .unwrap();
+    let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
+    let uri = file_uri(&template).unwrap();
+    let publications = state.cross_file_pass();
+    let diagnostics = &publications
+        .iter()
+        .find(|(path, _)| path == uri.as_str())
+        .unwrap()
+        .1;
+    let (server, client) = Connection::memory();
+    publish(&server, &state, uri.as_str(), diagnostics).unwrap();
+    let Message::Notification(notification) = client.receiver.try_recv().unwrap() else {
+        panic!("expected diagnostic publication");
+    };
+    let params: PublishDiagnosticsParams = serde_json::from_value(notification.params).unwrap();
+    assert_eq!(params.uri, uri);
+    assert_eq!(params.version, None);
+    let ranges: Vec<_> = params
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.range)
+        .collect();
+    assert_eq!(
+        ranges,
+        [
+            lsp_types::Range::new(
+                lsp_types::Position::new(0, 1),
+                lsp_types::Position::new(0, 10)
+            ),
+            lsp_types::Range::new(
+                lsp_types::Position::new(1, 1),
+                lsp_types::Position::new(1, 9)
+            ),
+        ]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn localization_symlink_directory_publishes_under_client_path() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(directory.path()).unwrap();
+    let external = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(external.path(), root.join("messages")).unwrap();
+    let config = root.join("falcon.json");
+    std::fs::write(&config,
+        r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-l10n":"warn"}}}}"#).unwrap();
+    std::fs::write(root.join("pubspec.yaml"), "name: app\n").unwrap();
+    std::fs::write(root.join("main.dart"), "void main() {}").unwrap();
+    std::fs::write(root.join("l10n.yaml"), "arb-dir: ./messages\n").unwrap();
+    let template = root.join("messages/app_en.arb");
+    std::fs::write(&template, "{\"unused\":\"message\"}").unwrap();
+    let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
+    let uri = file_uri(&template).unwrap();
+    let publications = state.cross_file_pass();
+    let diagnostics = &publications
+        .iter()
+        .find(|(path, _)| path == uri.as_str())
+        .unwrap()
+        .1;
+    assert_eq!(diagnostics.len(), 1);
+    let (server, client) = Connection::memory();
+    publish(&server, &state, uri.as_str(), diagnostics).unwrap();
+    let Message::Notification(notification) = client.receiver.try_recv().unwrap() else {
+        panic!("expected diagnostic publication");
+    };
+    let params: PublishDiagnosticsParams = serde_json::from_value(notification.params).unwrap();
+    assert_eq!(params.uri, uri);
+    assert_eq!(params.diagnostics.len(), 1);
+    std::fs::write(&template, "{\"changed\":\"message\"}").unwrap();
+    let publications = state.watched_files_changed(std::slice::from_ref(&template));
+    assert!(
+        publications
+            .iter()
+            .any(|(path, diagnostics)| path == uri.as_str()
+                && diagnostics.len() == 1
+                && diagnostics[0].message.contains("changed"))
     );
 }

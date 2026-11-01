@@ -217,12 +217,31 @@ These entries describe implemented foundation, not acceptance of the open items.
   failure warns again without an environment reset. CLI subprocess tests cover the
   warning channel; the LSP test covers break → fix (diagnostic returns) → break,
   including one new warning in the second episode.
-  **Remaining exclusions:** unused-dependency resource/build-tool exemptions still
-  inspect resolved dependency manifests alongside package-config discovery, plugin
-  registration, analysis options, build files and executable directories.
-  `unused_l10n` also retains rule-side enclosing-pubspec discovery and reads of
-  `l10n.yaml` and ARB files. These non-snapshot acquisitions need their own
-  project-facts slices; this checkbox remains open.
+  V1-3e captures localization settings, template text and sibling ARB locales in the
+  analysis environment only when unused-l10n is enabled, using the shared bounded
+  loader; malformed or inaccessible inputs warn once per failure episode and skip
+  unused-l10n for that package. Missing inputs, including non-directory ancestors,
+  are silent. Cached declared l10n.yaml/ARB create, change and delete events refresh
+  only affected packages and republish tracked diagnostics without rebuilding
+  semantics or walking the workspace; directory events still refresh Dart membership.
+  Changing configured roots updates external watcher registration. Unrelated ARBs
+  and disabled rules do not admit localization events or parse localization files.
+  Unsaved metadata buffers remain excluded from facts. Deleted-after-capture,
+  warning/recovery, CLI/LSP parity and BOM/CRLF/supplementary UTF-16 range tests
+  cover this boundary. Scratch before/after comparison preserves the 10 existing
+  localization corpus findings; BOM-prefixed templates intentionally gain findings
+  that main previously skipped. Original bytes, including the BOM, anchor CLI spans
+  and report fingerprints; only editor positions exclude the BOM. Template paths
+  are lexically normalized, retaining symlink client paths. Parent-directory
+  deletion clears captured template sources and diagnostics.
+  Remaining exclusions: resolved-dependency resource/build-tool probes in
+  unused_dependencies / unused_dev_dependencies still acquire dependency manifests,
+  plugin registration, analysis options, build files and executable directories.
+  Other rule-side filesystem facts also remain: no_deep_package_imports reads
+  dependency files; avoid_missing_test_files and conditional_uri_does_not_exist
+  probe file existence; unused_assets retains the directory IO noted in V1-3c;
+  path-canonicalization helpers still access the filesystem. The metadata box and
+  broader frontend parity box remain open.
 - [x] Close LSP manifest-diagnostic publication and declared-asset watcher parity (V1-3d).
   Initialization schedules the same cross-file pass through the existing debounce
   and outbox, publishing closed manifest findings before any Dart document opens.
@@ -247,8 +266,8 @@ These entries describe implemented foundation, not acceptance of the open items.
   forms, disabled rules and directory events. Worker-failure and unchanged-result
   tests pin retention and deduplication. Both asset CLI corpora match before and
   after sharing extraction (unused-assets: 8 expectations; missing-assets: 6).
-  The other V1-3 boxes remain open: build-tool/resource probes, `unused_l10n`, and
-  broader parity cases still need their own evidence.
+  The broader frontend parity box remains open; dependency metadata probes remain
+  excluded from V1-3e's localization capture above.
 - [ ] Expand `crates/falcon_cli/tests/project_parity_tests.rs` around actual risk:
   diagnostics identity/range/severity/message, suppression, config changes,
   incomplete analysis and cross-file invalidation. Shared stages already live in

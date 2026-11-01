@@ -817,10 +817,14 @@ fn cross_file_corpus_matches_expectations() {
             let packages = falcon_analyze::package_identities(
                 fixture_sources.iter().map(|(path, _)| path.as_path()),
             );
-            let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+            let mut environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
                 fixture_sources.iter().map(|(path, _)| path.as_path()),
                 |_| None,
             );
+            if rule_name == "unused-l10n" {
+                environment
+                    .capture_localization(fixture_sources.iter().map(|(path, _)| path.as_path()));
+            }
             let (_, mut files, indexes) = falcon_analyze::analyze_sequential_collecting_resolving(
                 &falcon_analyze::RuleRegistry::new(),
                 &dart_sources,

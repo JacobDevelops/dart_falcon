@@ -367,6 +367,7 @@ dependencies = [
  "falcon_syntax",
  "rayon",
  "rustc-hash",
+ "serde",
  "serde_json",
  "serde_yaml",
  "tempfile",

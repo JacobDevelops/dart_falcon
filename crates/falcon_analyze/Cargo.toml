@@ -12,6 +12,7 @@ falcon_config        = { path = "../falcon_config" }
 falcon_dart_parser   = { path = "../falcon_dart_parser" }
 rayon.workspace      = true
 rustc-hash.workspace = true
+serde.workspace      = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 tracing.workspace    = true

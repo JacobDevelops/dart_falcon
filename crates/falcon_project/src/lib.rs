@@ -355,6 +355,19 @@ pub fn analyze_sources(
             .chain(manifests)
             .map(|(path, _)| path.as_path()),
     );
+    if analysis
+        .cross_file_registry
+        .rules()
+        .iter()
+        .any(|(name, _)| *name == "unused-l10n")
+    {
+        environment.capture_localization(
+            files
+                .iter()
+                .chain(manifests)
+                .map(|(path, _)| path.as_path()),
+        );
+    }
     tracing::info!(
         file_count = files.len(),
         rule_count = analysis.registry.rules().len(),

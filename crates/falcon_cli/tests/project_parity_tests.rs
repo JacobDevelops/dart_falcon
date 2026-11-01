@@ -948,3 +948,155 @@ fn closed_manifest_publication_matches_cli_and_clears_on_disable_and_delete() {
             .any(|(uri, diagnostics)| uri == &manifest_uri && diagnostics.is_empty())
     );
 }
+
+#[test]
+fn unused_localization_cli_lsp_parity_tracks_disk_facts_and_warning_recovery() {
+    if let Some(root) = std::env::var_os("FALCON_LOCALIZATION_WARNING_PROBE") {
+        let root = std::path::PathBuf::from(root);
+        let output = falcon_cli::collect_check_with_sdk_locator(
+            &CheckOptions {
+                paths: vec![root.clone()],
+                config_path: Some(root.join("falcon.json")),
+                quiet: true,
+                ..Default::default()
+            },
+            |_| None,
+        )
+        .unwrap();
+        assert!(output.diagnostics.is_empty());
+        return;
+    }
+    let temp = tempdir().unwrap();
+    let root = fs::canonicalize(temp.path()).unwrap();
+    let config = root.join("falcon.json");
+    fs::write(&config, r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-l10n":"warn"}}}}"#).unwrap();
+    fs::write(root.join("pubspec.yaml"), "name: app\n").unwrap();
+    let settings = root.join("l10n.yaml");
+    fs::write(&settings, "\u{feff}arb-dir: messages\n").unwrap();
+    fs::create_dir(root.join("messages")).unwrap();
+    let template = root.join("messages/app_en.arb");
+    let source = "\u{feff}{\"used\":\"yes\", \"unused😀\":\"no\"}\n";
+    fs::write(&template, source).unwrap();
+    let dart = root.join("main.dart");
+    let dart_source = "void main() { print(used); }\n";
+    fs::write(&dart, dart_source).unwrap();
+    let options = CheckOptions {
+        paths: vec![root],
+        config_path: Some(config.clone()),
+        quiet: true,
+        ..Default::default()
+    };
+    let mut lsp = LspState::new_with_sdk_locator(Some(config), |_| None);
+    let mut published: BTreeMap<_, _> = lsp.cross_file_pass().into_iter().collect();
+    lsp.open(
+        &format!("file://{}", dart.display()),
+        dart_source.into(),
+        Some(1),
+    );
+    let mut previously_broken = false;
+    for broken in [
+        None,
+        Some(b"[".as_slice()),
+        Some(b"[".as_slice()),
+        None,
+        Some([0xff].as_slice()),
+        Some([0xff].as_slice()),
+        None,
+    ] {
+        fs::write(&template, broken.unwrap_or(source.as_bytes())).unwrap();
+        let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+        published.extend(lsp.watched_files_changed(std::slice::from_ref(&template)));
+        published.extend(lsp.cross_file_pass());
+        let diagnostics: Vec<_> = published.values().flatten().collect();
+        assert_eq!(
+            serde_json::to_value(diagnostics).unwrap(),
+            serde_json::to_value(&cli.diagnostics).unwrap()
+        );
+        if broken.is_some() {
+            assert!(cli.diagnostics.is_empty());
+        } else {
+            assert_eq!(cli.diagnostics.len(), 1);
+            assert_eq!(cli.diagnostics[0].rule, "unused-l10n");
+            assert_eq!(cli.diagnostics[0].severity, Severity::Warning);
+            assert!(cli.diagnostics[0].message.contains("unused😀"));
+        }
+        let warnings = lsp.take_config_messages();
+        let expected = usize::from(broken.is_some() && !previously_broken);
+        assert_eq!(warnings.len(), expected, "{warnings:?}");
+        if let Some(warning) = warnings.first() {
+            assert!(warning.message.contains(template.to_str().unwrap()));
+        }
+        if broken.is_some() {
+            let child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "project_parity_tests::unused_localization_cli_lsp_parity_tracks_disk_facts_and_warning_recovery", "--nocapture"])
+                .env("FALCON_LOCALIZATION_WARNING_PROBE", template.parent().unwrap().parent().unwrap())
+                .output().unwrap();
+            assert!(child.status.success(), "{child:?}");
+            let stderr = String::from_utf8(child.stderr).unwrap();
+            assert_eq!(
+                stderr
+                    .lines()
+                    .filter(|line| line.starts_with("warning:")
+                        && line.contains(template.to_str().unwrap()))
+                    .count(),
+                1,
+                "{stderr}"
+            );
+        }
+        previously_broken = broken.is_some();
+    }
+}
+
+#[test]
+fn localization_bom_preserves_cli_byte_spans_and_report_fingerprints() {
+    let temp = tempdir().unwrap();
+    let root = fs::canonicalize(temp.path()).unwrap();
+    let config = root.join("falcon.json");
+    fs::write(&config, r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-l10n":"warn"}}}}"#).unwrap();
+    fs::write(root.join("pubspec.yaml"), "name: app\n").unwrap();
+    fs::write(root.join("main.dart"), "void main() { print(used); }").unwrap();
+    fs::write(root.join("l10n.yaml"), "arb-dir: messages\n").unwrap();
+    fs::create_dir(root.join("messages")).unwrap();
+    let template = root.join("messages/app_en.arb");
+    let source = "\u{feff}{\"used\":\"x\",\"unused\":\"y\"}";
+    fs::write(&template, source).unwrap();
+    let output = falcon_cli::collect_check_with_sdk_locator(
+        &CheckOptions {
+            paths: vec![root.clone()],
+            config_path: Some(config),
+            quiet: true,
+            ..Default::default()
+        },
+        |_| None,
+    )
+    .unwrap();
+    assert_eq!(output.diagnostics.len(), 1);
+    let diagnostic = &output.diagnostics[0];
+    assert_eq!(diagnostic.span.start, 15);
+    assert_eq!(diagnostic.span.end, 23);
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "\"unused\""
+    );
+    let mut snippet = diagnostic.clone();
+    snippet.span = falcon_diagnostics::Span { start: 0, end: 8 };
+    let expected = falcon_cli::baseline::fingerprint(&snippet, "\"unused\"", &root);
+    for format in [
+        falcon_cli::OutputFormat::Sarif,
+        falcon_cli::OutputFormat::Gitlab,
+    ] {
+        let report: serde_json::Value = serde_json::from_str(&falcon_cli::report::render(
+            format,
+            &output.diagnostics,
+            &root,
+        ))
+        .unwrap();
+        let actual = match format {
+            falcon_cli::OutputFormat::Sarif => {
+                &report["runs"][0]["results"][0]["partialFingerprints"]["falcon/v1"]
+            }
+            _ => &report[0]["fingerprint"],
+        };
+        assert_eq!(actual, &expected);
+    }
+}

@@ -3,6 +3,7 @@
 //! dependency) libraries they import.
 
 mod external;
+mod localization;
 mod package_config;
 pub mod packages;
 mod sdk;
@@ -15,6 +16,7 @@ use packages::{FilePackage, PackageMetadata};
 
 pub use external::{ExternalLibraries, ExternalOrigin, ExternalTarget};
 pub use falcon_syntax::language_version::{Feature, LanguageVersion};
+pub use localization::LocalizationTemplate;
 pub use package_config::{ConfiguredPackage, PackageConfig, percent_decode, percent_encode};
 pub use sdk::{DartSdk, Embedder};
 
@@ -245,6 +247,8 @@ pub struct AnalysisEnvironment {
     observation_time: Option<std::time::SystemTime>,
     warnings: Arc<Mutex<EnvironmentWarnings>>,
     project_roots: Vec<PathBuf>,
+    localization: HashMap<PathBuf, localization::LocalizationSnapshot>,
+    normalized_paths: HashMap<PathBuf, PathBuf>,
 }
 
 impl Default for AnalysisEnvironment {
@@ -299,6 +303,8 @@ impl AnalysisEnvironment {
             observation_time: None,
             warnings: Arc::default(),
             project_roots: Vec::new(),
+            localization: HashMap::new(),
+            normalized_paths: HashMap::new(),
         }
     }
 
@@ -411,6 +417,8 @@ impl AnalysisEnvironment {
     pub fn extend<'a>(&mut self, paths: impl IntoIterator<Item = &'a Path>) {
         for path in paths {
             let normalized = crate::canonical_or_lexical(&package_config::absolute(path));
+            self.normalized_paths
+                .insert(package_config::absolute(path), normalized.clone());
             let package = self.package_metadata(&normalized);
             let package_directory = normalized.parent().unwrap_or(Path::new(""));
             if !self.directory_packages.contains_key(package_directory) {
@@ -717,10 +725,89 @@ impl AnalysisEnvironment {
         self.mutable_roots.iter().map(PathBuf::as_path)
     }
 
+    /// Normalized source location captured during discovery, without filesystem I/O.
+    #[must_use]
+    pub fn normalized_path(&self, path: &Path) -> Option<&Path> {
+        self.normalized_paths
+            .get(&package_config::absolute(path))
+            .map(PathBuf::as_path)
+    }
+
+    /// Capture localization inputs only for files whose frontend enables the consumer.
+    pub fn capture_localization<'a>(&mut self, paths: impl IntoIterator<Item = &'a Path>) {
+        for path in paths {
+            if let Some(package) = self.package(path)
+                && !self.localization.contains_key(&package.manifest)
+            {
+                let manifest = package.manifest.clone();
+                let snapshot = localization::LocalizationSnapshot::load(&package.root);
+                self.localization.insert(manifest, snapshot);
+            }
+        }
+    }
+
+    /// Exact declared settings and template inputs for frontend watcher caches.
+    pub fn localization_watch_files(&self) -> impl Iterator<Item = &Path> {
+        self.localization.values().flat_map(|snapshot| {
+            std::iter::once(snapshot.settings()).chain(snapshot.template_path())
+        })
+    }
+
+    /// Discard localization captures when the frontend changes enabled consumers.
+    pub fn clear_localization(&mut self) {
+        self.localization.clear();
+    }
+
+    /// Captured ARB source used for disk-based editor coordinates.
+    #[must_use]
+    pub fn localization_source(&self, path: &Path) -> Option<&str> {
+        self.localization
+            .values()
+            .find_map(|snapshot| snapshot.source(path))
+    }
+
+    /// Captured localization facts; malformed or inaccessible inputs warn and skip.
+    #[must_use]
+    pub fn localization(&self, manifest: &Path) -> Option<&LocalizationTemplate> {
+        self.localization.get(manifest)?.template(self)
+    }
+
+    /// Declared localization roots watched for newly created locale files.
+    pub fn localization_watch_roots(&self) -> impl Iterator<Item = &Path> {
+        self.localization
+            .values()
+            .flat_map(localization::LocalizationSnapshot::watch_roots)
+    }
+
+    /// Refresh only disk localization facts, retaining semantic source snapshots.
+    ///
+    /// # Panics
+    /// Panics if the environment warning mutex is poisoned.
+    pub fn refresh_localization(&mut self, paths: &[PathBuf]) {
+        for (manifest, snapshot) in &mut self.localization {
+            if paths.iter().any(|path| snapshot.affected_by(path))
+                && let Some(root) = manifest.parent()
+            {
+                let fresh = localization::LocalizationSnapshot::load(root);
+                let recovered: Vec<_> = snapshot
+                    .failures()
+                    .filter(|path| !fresh.failures().any(|failed| failed == *path))
+                    .cloned()
+                    .collect();
+                let mut warnings = self.warnings.lock().unwrap();
+                for path in recovered {
+                    warnings.optional_metadata_seen.remove(&path);
+                }
+                *snapshot = fresh;
+            }
+        }
+    }
+
     /// Package metadata captured during discovery, without rule-time manifest I/O.
     #[must_use]
     pub fn package(&self, path: &Path) -> Option<&PackageMetadata> {
-        let path = crate::canonical_or_lexical(&package_config::absolute(path));
+        let absolute = package_config::absolute(path);
+        let path = self.normalized_paths.get(&absolute).unwrap_or(&absolute);
         let directory = path.parent().unwrap_or(Path::new(""));
         self.directory_packages.get(directory)?.as_deref()
     }

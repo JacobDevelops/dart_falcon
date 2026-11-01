@@ -353,18 +353,20 @@ fn relative_watcher(base: &Path, pattern: String) -> Result<FileSystemWatcher, S
 
 fn is_environment_document(uri: &Uri) -> bool {
     let path = uri.path().as_estr().decode().into_string_lossy();
-    matches!(
-        path.rsplit('/').next(),
-        Some(
-            "falcon.json"
-                | ".falcon.json"
-                | "package_config.json"
-                | "pubspec.yaml"
-                | "pubspec.lock"
-                | "pubspec_overrides.yaml"
-                | "melos.yaml"
+    path.ends_with(".arb")
+        || matches!(
+            path.rsplit('/').next(),
+            Some(
+                "falcon.json"
+                    | ".falcon.json"
+                    | "package_config.json"
+                    | "pubspec.yaml"
+                    | "pubspec.lock"
+                    | "pubspec_overrides.yaml"
+                    | "melos.yaml"
+                    | "l10n.yaml"
+            )
         )
-    )
 }
 
 fn watched_files_and_publish(
@@ -1263,7 +1265,17 @@ fn publish(
         (
             diagnostics
                 .iter()
-                .map(|diagnostic| diagnostic.format_lsp_in(&lines))
+                .map(|diagnostic| {
+                    let mut diagnostic = diagnostic.format_lsp_in(&lines);
+                    if source.starts_with('\u{feff}') {
+                        for position in [&mut diagnostic.range.start, &mut diagnostic.range.end] {
+                            if position.line == 0 {
+                                position.character = position.character.saturating_sub(1);
+                            }
+                        }
+                    }
+                    diagnostic
+                })
                 .collect(),
             None,
         )

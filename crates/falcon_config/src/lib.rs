@@ -8,7 +8,7 @@
 //! (see [`CrossFileConfig::resolve_rule`]).
 
 mod metadata;
-pub use metadata::{MAX_METADATA_BYTES, read_metadata_bytes, read_metadata_text};
+pub use metadata::{MAX_METADATA_BYTES, metadata_content, read_metadata_bytes, read_metadata_text};
 
 use glob::Pattern;
 use serde::de::{self, DeserializeOwned, MapAccess, Visitor};

@@ -39,7 +39,7 @@ impl PackageMetadata {
         let source = acquired
             .as_deref()
             .ok()
-            .map(|source| source.strip_prefix('\u{feff}').unwrap_or(source));
+            .map(falcon_config::metadata_content);
         let parsed = source.map(serde_yaml::from_str::<serde_yaml::Value>);
         let yaml = parsed.as_ref().and_then(|result| result.as_ref().ok());
         let name = yaml

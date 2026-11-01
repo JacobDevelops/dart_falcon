@@ -47,6 +47,12 @@ pub fn read_metadata_text(path: &Path) -> io::Result<String> {
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
+/// Parser view of metadata; retained source bytes still include the BOM for ranges.
+#[must_use]
+pub fn metadata_content(source: &str) -> &str {
+    source.strip_prefix('\u{feff}').unwrap_or(source)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -12,116 +12,55 @@
 //! Receiver types and the configured output class are deliberately not required,
 //! since extension accessors can hide them. References in other analyzed packages
 //! count too, supporting shared localization packages and example applications.
-//! Malformed configuration and missing or malformed templates are skipped.
+//! Missing inputs are silent; malformed or inaccessible localization metadata warns
+//! once per failure episode and skips unused-localization analysis for that package.
 
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use falcon_analyze::{CrossFileRule, ProjectFile, SemanticIndexes};
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity, Span};
 
-use super::{canonical_package_path, enclosing_pubspec};
-
 #[derive(Default)]
 pub struct UnusedL10n;
-
-#[derive(serde::Deserialize)]
-#[serde(default, rename_all = "kebab-case")]
-struct LocalizationConfig {
-    arb_dir: PathBuf,
-    template_arb_file: PathBuf,
-    output_localization_file: PathBuf,
-    output_dir: Option<PathBuf>,
-}
-
-struct LocalizationTemplate {
-    path: PathBuf,
-    source: String,
-    output_file: PathBuf,
-    locales: HashSet<String>,
-}
-
-impl Default for LocalizationConfig {
-    fn default() -> Self {
-        Self {
-            arb_dir: PathBuf::from("lib/l10n"),
-            template_arb_file: PathBuf::from("app_en.arb"),
-            output_localization_file: PathBuf::from("app_localizations.dart"),
-            output_dir: None,
-        }
-    }
-}
 
 impl CrossFileRule for UnusedL10n {
     fn prepare_project(
         &self,
-        _environment: &falcon_analyze::AnalysisEnvironment,
+        environment: &falcon_analyze::AnalysisEnvironment,
         files: &[ProjectFile],
         _config: &FalconConfig,
         _indexes: Option<&SemanticIndexes>,
     ) -> Vec<Diagnostic> {
         let packages: BTreeSet<_> = files
             .iter()
-            .filter_map(|file| enclosing_pubspec(file.path()))
+            .filter_map(|file| environment.package(file.path()))
+            .map(|package| &package.manifest)
             .collect();
-        let mut templates = Vec::with_capacity(packages.len());
-        for pubspec in packages {
-            let Some(root) = pubspec.parent() else {
-                continue;
-            };
-            let settings_path = root.join("l10n.yaml");
-            let settings = if settings_path.exists() {
-                let Some(settings) = falcon_config::read_metadata_text(&settings_path)
-                    .ok()
-                    .and_then(|source| serde_yaml::from_str::<LocalizationConfig>(&source).ok())
-                else {
-                    continue;
-                };
-                settings
-            } else {
-                LocalizationConfig::default()
-            };
-            let template = root
-                .join(&settings.arb_dir)
-                .join(&settings.template_arb_file);
-            let Ok(source) = falcon_config::read_metadata_text(&template) else {
-                continue;
-            };
-            let Some(messages) = serde_json::from_str::<serde_json::Value>(&source)
-                .ok()
-                .filter(serde_json::Value::is_object)
-            else {
-                continue;
-            };
-            let locales = localization_locales(&root.join(&settings.arb_dir), &template, &messages);
-            let output_dir = canonical_package_path(
-                &root.join(settings.output_dir.as_ref().unwrap_or(&settings.arb_dir)),
-            );
-            let output_file = output_dir.join(&settings.output_localization_file);
-            templates.push(LocalizationTemplate {
-                path: template,
-                source,
-                output_file,
-                locales,
-            });
-        }
+        let templates: Vec<_> = packages
+            .iter()
+            .filter_map(|manifest| environment.localization(manifest))
+            .collect();
         if templates.is_empty() {
             return Vec::new();
         }
         let mut used = HashSet::new();
         for file in files {
-            if file.path()
+            if file
+                .path()
                 .extension()
                 .is_none_or(|extension| extension != "dart")
             {
                 continue;
             }
-            let path = canonical_package_path(file.path());
+            let path = environment
+                .normalized_path(file.path())
+                .unwrap_or(file.path());
             if templates
                 .iter()
-                .any(|template| is_generated(&path, &template.output_file, &template.locales))
+                .any(|template| is_generated(path, &template.output_file, &template.locales))
             {
                 continue;
             }
@@ -170,40 +109,6 @@ fn is_generated(path: &Path, output: &Path, locales: &HashSet<String>) -> bool {
         .is_some_and(|locale| locales.contains(locale))
 }
 
-fn localization_locales(
-    arb_dir: &Path,
-    template: &Path,
-    messages: &serde_json::Value,
-) -> HashSet<String> {
-    let mut locales = HashSet::new();
-    if let Some(locale) = messages.get("@@locale").and_then(serde_json::Value::as_str) {
-        locales.insert(locale.to_owned());
-    }
-    let Ok(entries) = std::fs::read_dir(arb_dir) else {
-        return locales;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().is_none_or(|extension| extension != "arb") {
-            continue;
-        }
-        if let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) {
-            for (offset, _) in stem.match_indices('_') {
-                locales.insert(stem[offset + 1..].to_owned());
-            }
-        }
-        if path != template
-            && let Some(locale) = falcon_config::read_metadata_text(&path)
-                .ok()
-                .and_then(|source| serde_json::from_str::<serde_json::Value>(&source).ok())
-                .and_then(|messages| messages.get("@@locale")?.as_str().map(ToOwned::to_owned))
-        {
-            locales.insert(locale);
-        }
-    }
-    locales
-}
-
 fn template_keys(source: &str) -> impl Iterator<Item = (Cow<'_, str>, Span)> {
     let bytes = source.as_bytes();
     let mut depth = 0;
@@ -244,4 +149,221 @@ fn template_keys(source: &str) -> impl Iterator<Item = (Cow<'_, str>, Span)> {
         }
         None
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use falcon_analyze::AnalysisEnvironment;
+    use std::sync::Arc;
+
+    fn files(root: &Path) -> Vec<ProjectFile> {
+        [
+            ("main.dart", "void main() { print(used); }"),
+            (
+                "generated/localizations_fr.dart",
+                "String get unused => '';",
+            ),
+        ]
+        .into_iter()
+        .map(|(path, source)| {
+            ProjectFile::new(
+                root.join(path),
+                Arc::new(falcon_analyze::ParsedFile::parse(source)),
+            )
+            .unwrap()
+        })
+        .collect()
+    }
+
+    fn fixture(root: &Path) {
+        std::fs::create_dir_all(root.join("messages")).unwrap();
+        std::fs::write(root.join("pubspec.yaml"), "name: app\n").unwrap();
+        std::fs::write(root.join("l10n.yaml"), "arb-dir: messages\noutput-dir: generated\noutput-localization-file: localizations.dart\n").unwrap();
+        std::fs::write(
+            root.join("messages/app_en.arb"),
+            "{\"used\":\"yes\",\"unused\":\"no\"}",
+        )
+        .unwrap();
+        std::fs::write(root.join("messages/app_fr.arb"), "{\"@@locale\":\"fr\"}").unwrap();
+    }
+
+    fn capture(files: &[ProjectFile]) -> AnalysisEnvironment {
+        let mut environment = AnalysisEnvironment::discover_with_sdk_locator(
+            files.iter().map(ProjectFile::path),
+            |_| None,
+        );
+        environment.capture_localization(files.iter().map(ProjectFile::path));
+        environment
+    }
+
+    #[test]
+    fn localization_consumes_captured_facts_after_all_metadata_is_deleted() {
+        let root = tempfile::tempdir().unwrap();
+        fixture(root.path());
+        let files = files(root.path());
+        let environment = capture(&files);
+        let config = FalconConfig::default();
+        let before = UnusedL10n.prepare_project(&environment, &files, &config, None);
+        assert_eq!(before.len(), 1);
+        assert!(before[0].message.contains("`unused`"));
+        std::fs::remove_file(root.path().join("pubspec.yaml")).unwrap();
+        std::fs::remove_file(root.path().join("l10n.yaml")).unwrap();
+        std::fs::remove_dir_all(root.path().join("messages")).unwrap();
+        assert_eq!(
+            serde_json::to_value(UnusedL10n.prepare_project(&environment, &files, &config, None))
+                .unwrap(),
+            serde_json::to_value(before).unwrap(),
+        );
+    }
+
+    #[test]
+    fn malformed_and_inaccessible_localization_inputs_warn_once_and_skip() {
+        for relative in ["l10n.yaml", "messages/app_en.arb", "messages/app_fr.arb"] {
+            for bytes in [b"[".as_slice(), &[0xff]] {
+                let root = tempfile::tempdir().unwrap();
+                fixture(root.path());
+                let path = root.path().join(relative);
+                std::fs::write(&path, bytes).unwrap();
+                let files = files(root.path());
+                let environment = capture(&files);
+                for _ in 0..2 {
+                    assert!(
+                        UnusedL10n
+                            .prepare_project(&environment, &files, &FalconConfig::default(), None)
+                            .is_empty()
+                    );
+                }
+                let warnings = environment.take_warnings();
+                assert_eq!(warnings.len(), 1, "{relative}: {warnings:?}");
+                assert!(warnings[0].contains(path.to_str().unwrap()));
+                assert_eq!(environment.take_warnings(), Vec::<String>::new());
+            }
+        }
+    }
+
+    #[test]
+    fn unreadable_localization_inputs_warn_with_the_failed_path() {
+        for relative in ["l10n.yaml", "messages/app_en.arb", "messages/app_fr.arb"] {
+            let root = tempfile::tempdir().unwrap();
+            fixture(root.path());
+            let path = root.path().join(relative);
+            std::fs::remove_file(&path).unwrap();
+            std::fs::create_dir(&path).unwrap();
+            let files = files(root.path());
+            let environment = capture(&files);
+            assert!(
+                UnusedL10n
+                    .prepare_project(&environment, &files, &FalconConfig::default(), None)
+                    .is_empty()
+            );
+            let warnings = environment.take_warnings();
+            assert_eq!(warnings.len(), 1);
+            assert!(warnings[0].contains(path.to_str().unwrap()));
+        }
+    }
+
+    #[test]
+    fn oversized_localization_inputs_are_bounded_and_recovery_rearms_warning() {
+        let root = tempfile::tempdir().unwrap();
+        fixture(root.path());
+        let files = files(root.path());
+        let path = root.path().join("messages/app_fr.arb");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(falcon_config::MAX_METADATA_BYTES + 1).unwrap();
+        let mut environment = capture(&files);
+        assert!(
+            UnusedL10n
+                .prepare_project(&environment, &files, &FalconConfig::default(), None)
+                .is_empty()
+        );
+        assert_eq!(environment.take_warnings().len(), 1);
+        environment.refresh_localization(std::slice::from_ref(&path));
+        assert!(
+            UnusedL10n
+                .prepare_project(&environment, &files, &FalconConfig::default(), None)
+                .is_empty()
+        );
+        assert_eq!(environment.take_warnings(), Vec::<String>::new());
+        std::fs::write(&path, "{}").unwrap();
+        environment.refresh_localization(std::slice::from_ref(&path));
+        assert_eq!(
+            UnusedL10n
+                .prepare_project(&environment, &files, &FalconConfig::default(), None)
+                .len(),
+            1
+        );
+        std::fs::write(&path, [0xff]).unwrap();
+        environment.refresh_localization(std::slice::from_ref(&path));
+        assert!(
+            UnusedL10n
+                .prepare_project(&environment, &files, &FalconConfig::default(), None)
+                .is_empty()
+        );
+        assert_eq!(environment.take_warnings().len(), 1);
+    }
+
+    #[test]
+    fn absent_localization_paths_and_non_directory_ancestors_are_silent() {
+        for settings in [
+            "arb-dir: missing\n",
+            "arb-dir: main.dart/child\n",
+            "arb-dir: messages\ntemplate-arb-file: app_en.arb/child\n",
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            fixture(root.path());
+            std::fs::write(root.path().join("main.dart"), "").unwrap();
+            std::fs::write(root.path().join("l10n.yaml"), settings).unwrap();
+            let files = files(root.path());
+            let environment = capture(&files);
+            assert!(
+                UnusedL10n
+                    .prepare_project(&environment, &files, &FalconConfig::default(), None)
+                    .is_empty()
+            );
+            assert_eq!(environment.take_warnings(), Vec::<String>::new());
+        }
+    }
+
+    #[test]
+    fn discovery_does_not_capture_disabled_localization_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        fixture(root.path());
+        std::fs::write(root.path().join("l10n.yaml"), "[").unwrap();
+        let files = files(root.path());
+        let environment = AnalysisEnvironment::discover_with_sdk_locator(
+            files.iter().map(ProjectFile::path),
+            |_| None,
+        );
+        assert!(environment.localization_watch_files().next().is_none());
+        assert_eq!(environment.take_warnings(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn localization_refresh_keeps_unaffected_package_facts() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        fixture(first.path());
+        fixture(second.path());
+        let first_files = files(first.path());
+        let second_files = files(second.path());
+        let mut environment = capture(&first_files);
+        environment.extend(second_files.iter().map(ProjectFile::path));
+        environment.capture_localization(second_files.iter().map(ProjectFile::path));
+        let config = FalconConfig::default();
+        let before = UnusedL10n.prepare_project(&environment, &second_files, &config, None);
+        std::fs::write(second.path().join("messages/app_en.arb"), "[").unwrap();
+        environment.refresh_localization(&[first.path().join("messages/app_en.arb")]);
+        assert_eq!(
+            serde_json::to_value(UnusedL10n.prepare_project(
+                &environment,
+                &second_files,
+                &config,
+                None
+            ))
+            .unwrap(),
+            serde_json::to_value(before).unwrap(),
+        );
+        assert_eq!(environment.take_warnings(), Vec::<String>::new());
+    }
 }

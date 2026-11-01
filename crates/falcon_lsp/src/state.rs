@@ -447,6 +447,7 @@ pub struct LspState {
     /// Resolution inputs captured on discovery or watched configuration events,
     /// never polled on ordinary project edits.
     environment_stamps: Option<falcon_analyze::EnvironmentCacheKey>,
+    localization_paths: Option<(HashSet<PathBuf>, HashSet<PathBuf>)>,
     /// Versioned hosted/SDK facts are immutable; mutable roots use client events.
     external_libraries: ExternalLibraries,
     /// Instrumentation for incremental tests: number of external-library resets.
@@ -580,6 +581,7 @@ impl LspState {
             semantic_topology_build_count: 0,
             environment,
             environment_stamps: None,
+            localization_paths: None,
             external_libraries: ExternalLibraries::default(),
             external_reset_count: 0,
             external_indexes: None,
@@ -754,18 +756,27 @@ impl LspState {
         })
     }
 
-    /// Mutable package roots for native LSP watching. Versioned hosted packages
-    /// and SDK sources are intentionally absent.
+    /// Mutable package roots and declared localization input directories.
     pub fn watched_dependency_roots(&self) -> Vec<PathBuf> {
-        self.environment
+        let mut roots: Vec<_> = self
+            .environment
             .watched_dependency_roots()
             .map(Path::to_path_buf)
-            .collect()
+            .collect();
+        roots.extend(
+            self.environment
+                .localization_watch_roots()
+                .filter(|root| self.localization_event_relevant(root))
+                .map(Path::to_path_buf),
+        );
+        roots.sort_unstable();
+        roots.dedup();
+        roots
     }
 
     /// Loaded local files use exact relative patterns, never recursive parent watches.
-    pub fn watched_dependency_files(&self) -> &[PathBuf] {
-        &self.watched_local_paths
+    pub fn watched_dependency_files(&self) -> Vec<PathBuf> {
+        self.watched_local_paths.clone()
     }
 
     pub(crate) fn ancestor_manifests(&self) -> impl Iterator<Item = PathBuf> + '_ {
@@ -962,6 +973,28 @@ impl LspState {
         Vec::new()
     }
 
+    fn refresh_metadata_only_batch(&mut self, paths: &[PathBuf], inputs_changed: bool) -> bool {
+        if paths
+            .iter()
+            .any(|path| self.localization_event_relevant(path))
+        {
+            self.environment.refresh_localization(paths);
+            self.cache_localization_paths();
+        }
+        !inputs_changed
+            && paths.iter().all(|path| {
+                (self.localization_event_relevant(path)
+                    && !path.is_dir()
+                    && !is_dart_file(path)
+                    && !self.project_paths.as_ref().is_some_and(|files| {
+                        files
+                            .iter()
+                            .any(|(cached, is_dart)| *is_dart && cached.starts_with(path))
+                    }))
+                    || self.asset_file_event(path)
+            })
+    }
+
     /// Process one client watcher batch. Project-only saves retain the shared
     /// external indexes; mutable dependencies or changed resolution inputs drop
     /// the external graph once, then all open documents share the rebuilt view.
@@ -971,6 +1004,7 @@ impl LspState {
         }
         self.refresh_unresolved_paths();
         self.refresh_asset_paths();
+        self.refresh_localization_paths();
         // Discovery can capture new disk bytes while retaining a known context.
         // Check original link locations before watcher normalization follows them.
         let inputs_changed = paths.iter().any(|path| {
@@ -981,13 +1015,13 @@ impl LspState {
         // without traversing directories; deleted directories match cached children.
         let paths: Vec<_> = paths
             .iter()
-            .map(|path| watched_path(path))
+            .map(|path| self.normalize_watched_path(path))
             .filter(|path| self.relevant_watched_path(path, inputs_changed))
             .collect();
         if paths.is_empty() {
             return Vec::new();
         }
-        if !inputs_changed && paths.iter().all(|path| self.asset_file_event(path)) {
+        if self.refresh_metadata_only_batch(&paths, inputs_changed) {
             return self.cross_file_pass();
         }
         if paths.iter().any(|path| {
@@ -1136,6 +1170,77 @@ impl LspState {
                     .watched_dependency_roots()
                     .any(|root| path.starts_with(root)))
             || self.asset_event_relevant(path)
+            || self.localization_event_relevant(path)
+    }
+
+    fn normalize_watched_path(&self, path: &Path) -> PathBuf {
+        let lexical = falcon_analyze::lexical_normalize(path);
+        if self.localization_event_relevant(&lexical) {
+            lexical
+        } else {
+            watched_path(path)
+        }
+    }
+
+    fn localization_event_relevant(&self, path: &Path) -> bool {
+        self.localization_paths
+            .as_ref()
+            .is_some_and(|(files, directories)| {
+                files.iter().any(|file| file.starts_with(path))
+                    || directories
+                        .iter()
+                        .any(|directory| directory.starts_with(path))
+                    || path
+                        .parent()
+                        .is_some_and(|parent| directories.contains(parent))
+                        && path.extension().is_some_and(|extension| extension == "arb")
+            })
+    }
+
+    fn refresh_localization_paths(&mut self) {
+        if self.localization_paths.is_some() || self.project_paths.is_none() {
+            return;
+        }
+        let paths: Vec<_> = self
+            .project_paths
+            .iter()
+            .flatten()
+            .filter_map(|(file, _)| {
+                let index = self.root_index(file);
+                let rules = if index == 0 {
+                    &self.cross_file_rules
+                } else {
+                    self.additional_root_configs[index - 1]
+                        .analysis
+                        .cross_file_registry()
+                };
+                rules
+                    .rules()
+                    .iter()
+                    .any(|(name, _)| *name == "unused-l10n")
+                    .then_some(file.clone())
+            })
+            .collect();
+        self.environment
+            .capture_localization(paths.iter().map(PathBuf::as_path));
+        self.cache_localization_paths();
+    }
+
+    fn cache_localization_paths(&mut self) {
+        let paths = (
+            self.environment
+                .localization_watch_files()
+                .map(Path::to_path_buf)
+                .collect(),
+            self.environment
+                .localization_watch_roots()
+                .map(Path::to_path_buf)
+                .collect(),
+        );
+        if self.localization_paths.as_ref() != Some(&paths) {
+            self.watched_dependency_generation += 1;
+        }
+        self.localization_paths = Some(paths);
     }
 
     fn asset_event_relevant(&self, path: &Path) -> bool {
@@ -1228,6 +1333,7 @@ impl LspState {
 
     fn reset_external_environment(&mut self) {
         self.asset_paths = None;
+        self.localization_paths = None;
         self.environment.reset();
         self.environment_stamps = None;
         self.reset_external_layer();
@@ -1255,6 +1361,7 @@ impl LspState {
             self.environment
                 .extend(self.documents.values().map(|doc| doc.path.as_path()));
             self.environment.extend(paths);
+            self.localization_paths = None;
             let current = self.environment.config_stamps();
             if let Some(previous) = &mut self.environment_stamps {
                 previous.extend_discovery(current);
@@ -1359,7 +1466,11 @@ impl LspState {
                 diagnostics: vec![diagnostic],
             };
         }
-        if path.file_name().is_some_and(|name| name == "pubspec.yaml") {
+        if path
+            .file_name()
+            .is_some_and(|name| name == "pubspec.yaml" || name == "l10n.yaml")
+            || path.extension().is_some_and(|extension| extension == "arb")
+        {
             return DocumentParse {
                 parsed: ParsedFile::lexical(source),
                 diagnostics: Vec::new(),
@@ -1805,6 +1916,8 @@ impl LspState {
             .iter()
             .any(|entry| entry.analysis.cross_file_resolve());
         self.asset_paths = None;
+        self.localization_paths = None;
+        self.environment.clear_localization();
         if !matches!(self.cross_file_schedule, CrossFileSchedule::Immediate) {
             self.cross_file_schedule = CrossFileSchedule::Pending;
         }
@@ -1846,7 +1959,14 @@ impl LspState {
     }
 
     pub(crate) fn disk_manifest_source(&self, uri: &str) -> Option<&str> {
-        let path = watched_path(&uri_to_path(uri));
+        let path = falcon_analyze::lexical_normalize(&uri_to_path(uri));
+        if path.extension().is_some_and(|extension| extension == "arb") {
+            return self
+                .environment
+                .localization_source(&path)
+                .or_else(|| self.environment.localization_source(&watched_path(&path)));
+        }
+        let path = watched_path(&path);
         if path.file_name().is_none_or(|name| name != "pubspec.yaml") {
             return None;
         }
@@ -1875,7 +1995,9 @@ impl LspState {
 
     pub(crate) fn watched_content_change_relevant(&mut self, path: &Path) -> bool {
         self.refresh_asset_paths();
-        !self.asset_file_event(&watched_path(path))
+        self.refresh_localization_paths();
+        self.localization_event_relevant(&falcon_analyze::lexical_normalize(path))
+            || !self.asset_file_event(&watched_path(path))
     }
 
     /// Run the cross-file rules over the whole workspace and republish the
@@ -1915,8 +2037,12 @@ impl LspState {
         for uri in self.open_uris() {
             if self.documents[&uri]
                 .path
-                .file_name()
-                .is_some_and(|name| name == "pubspec.yaml")
+                .extension()
+                .is_some_and(|extension| extension == "arb")
+                || self.documents[&uri]
+                    .path
+                    .file_name()
+                    .is_some_and(|name| name == "pubspec.yaml")
             {
                 continue;
             }
@@ -1972,9 +2098,12 @@ impl LspState {
             if diagnostics.is_empty() {
                 continue;
             }
-            if Path::new(&path)
-                .file_name()
-                .is_some_and(|name| name == "pubspec.yaml")
+            if (Path::new(&path)
+                .extension()
+                .is_some_and(|extension| extension == "arb")
+                || Path::new(&path)
+                    .file_name()
+                    .is_some_and(|name| name == "pubspec.yaml"))
                 && let Some(uri) = self.manifest_uri(Path::new(&path))
             {
                 manifests.insert(uri, diagnostics);
@@ -2194,6 +2323,7 @@ impl LspState {
         if !complete {
             return HashMap::new();
         }
+        self.refresh_localization_paths();
         // Semantic views include unsaved buffers; cross-file views include manifests.
         // Reuse facts only when Dart revisions and package identities agree exactly.
         let indexes = self.semantic_snapshot.as_ref().and_then(|snapshot| {

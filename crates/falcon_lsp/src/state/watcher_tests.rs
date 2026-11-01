@@ -239,6 +239,158 @@ fn unrelated_asset_events_leave_project_caches_intact() {
 }
 
 #[test]
+fn localization_arb_create_change_delete_republishes_without_semantic_rebuild() {
+    let (directory, mut state, uri) = workspace(true);
+    std::fs::write(directory.path().join("falcon.json"),
+        r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-l10n":"warn"}}}}"#).unwrap();
+    std::fs::write(directory.path().join("pubspec.yaml"), "name: app\n").unwrap();
+    let messages = directory.path().join("lib/l10n");
+    std::fs::create_dir_all(&messages).unwrap();
+    state.reload_config();
+    state.open(&uri, "void main() {}".into(), Some(1));
+    state.resolve_semantics = true;
+    state.analyze(&uri);
+    state.cross_file_pass();
+    let builds = state.semantic_snapshot_build_count;
+    let walks = state.workspace_walk_count;
+    assert!(builds > 0);
+    let template = messages.join("app_en.arb");
+    let template_uri = crate::server::file_uri(&template).unwrap().to_string();
+    for key in ["first", "second"] {
+        std::fs::write(&template, format!("{{\"{key}\":\"message\"}}")).unwrap();
+        assert!(state.watched_content_change_relevant(&template));
+        let publications = state.watched_files_changed(std::slice::from_ref(&template));
+        let diagnostics = &publications
+            .iter()
+            .find(|(uri, _)| uri == &template_uri)
+            .unwrap()
+            .1;
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule, "unused-l10n");
+        assert!(diagnostics[0].message.contains(key));
+    }
+    let sibling = messages.join("app_fr.arb");
+    std::fs::write(&sibling, "[").unwrap();
+    let cleared = state.watched_files_changed(std::slice::from_ref(&sibling));
+    assert!(
+        cleared
+            .iter()
+            .any(|(uri, diagnostics)| uri == &template_uri && diagnostics.is_empty())
+    );
+    assert_eq!(state.take_config_messages().len(), 1);
+    std::fs::remove_file(sibling).unwrap();
+    let recovered = state.watched_files_changed(&[messages.join("app_fr.arb")]);
+    assert!(
+        recovered
+            .iter()
+            .any(|(uri, diagnostics)| uri == &template_uri && diagnostics.len() == 1)
+    );
+    std::fs::remove_file(&template).unwrap();
+    let cleared = state.watched_files_changed(&[template]);
+    assert!(
+        cleared
+            .iter()
+            .any(|(uri, diagnostics)| uri == &template_uri && diagnostics.is_empty())
+    );
+    assert_eq!(state.semantic_snapshot_build_count, builds);
+    assert_eq!(state.workspace_walk_count, walks);
+    for unrelated in [
+        directory.path().join("other.arb"),
+        messages.join("nested/other.arb"),
+    ] {
+        assert!(!state.localization_event_relevant(&unrelated));
+        assert!(state.watched_files_changed(&[unrelated]).is_empty());
+    }
+    std::fs::write(
+        directory.path().join("falcon.json"),
+        r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false}}}"#,
+    )
+    .unwrap();
+    state.reload_config();
+    assert!(!state.localization_event_relevant(&messages.join("app_en.arb")));
+}
+
+#[test]
+fn localization_parent_directory_deletion_clears_captured_source() {
+    let (directory, mut state, uri) = workspace(true);
+    std::fs::write(directory.path().join("falcon.json"),
+        r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-l10n":"warn"}}}}"#).unwrap();
+    std::fs::write(directory.path().join("pubspec.yaml"), "name: app\n").unwrap();
+    std::fs::write(directory.path().join("l10n.yaml"), "arb-dir: assets/l10n\n").unwrap();
+    let assets = directory.path().join("assets");
+    let messages = assets.join("l10n");
+    std::fs::create_dir_all(&messages).unwrap();
+    let template = messages.join("app_en.arb");
+    std::fs::write(&template, "{\"unused\":\"message\"}").unwrap();
+    let template_uri = crate::server::file_uri(&template).unwrap().to_string();
+    state.reload_config();
+    state.open(&uri, "void main() {}".into(), Some(1));
+    let initial = state.cross_file_pass();
+    assert!(
+        initial
+            .iter()
+            .any(|(uri, diagnostics)| uri == &template_uri && diagnostics.len() == 1)
+    );
+    assert!(state.disk_manifest_source(&template_uri).is_some());
+    std::fs::remove_dir_all(&assets).unwrap();
+    assert!(state.watched_content_change_relevant(&assets));
+    let cleared = state.watched_files_changed(std::slice::from_ref(&assets));
+    assert!(
+        cleared
+            .iter()
+            .any(|(uri, diagnostics)| uri == &template_uri && diagnostics.is_empty())
+    );
+    assert!(state.disk_manifest_source(&template_uri).is_none());
+    std::fs::create_dir_all(&messages).unwrap();
+    std::fs::write(&template, "{\"returned\":\"message\"}").unwrap();
+    let mut recovered = state.watched_files_changed(&[assets]);
+    recovered.extend(state.cross_file_pass());
+    assert!(
+        recovered
+            .iter()
+            .any(|(uri, diagnostics)| uri == &template_uri && diagnostics.len() == 1)
+    );
+    assert!(state.disk_manifest_source(&template_uri).is_some());
+}
+
+#[test]
+fn localization_settings_refresh_external_watch_roots_without_semantic_rebuild() {
+    let (directory, mut state, uri) = workspace(true);
+    let external = tempfile::tempdir().unwrap();
+    let external = std::fs::canonicalize(external.path()).unwrap();
+    std::fs::write(directory.path().join("falcon.json"),
+        r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-l10n":"warn"}}}}"#).unwrap();
+    std::fs::write(directory.path().join("pubspec.yaml"), "name: app\n").unwrap();
+    state.reload_config();
+    state.open(&uri, "void main() {}".into(), Some(1));
+    state.resolve_semantics = true;
+    state.analyze(&uri);
+    state.cross_file_pass();
+    let builds = state.semantic_snapshot_build_count;
+    let walks = state.workspace_walk_count;
+    let generation = state.watched_dependency_generation;
+    let settings = directory.path().join("l10n.yaml");
+    std::fs::write(&settings, format!("arb-dir: {}/./\n", external.display())).unwrap();
+    state.watched_files_changed(&[settings]);
+    assert!(state.watched_dependency_generation > generation);
+    assert!(state.watched_dependency_roots().contains(&external));
+    let generation = state.watched_dependency_generation;
+    let template = external.join("app_en.arb");
+    std::fs::write(&template, "{\"fresh\":\"message\"}").unwrap();
+    assert!(state.watched_content_change_relevant(&template));
+    let publications = state.watched_files_changed(std::slice::from_ref(&template));
+    let uri = crate::server::file_uri(&template).unwrap().to_string();
+    assert!(
+        publications
+            .iter()
+            .any(|(path, diagnostics)| path == &uri && diagnostics.len() == 1)
+    );
+    assert_eq!(state.watched_dependency_generation, generation);
+    assert_eq!(state.semantic_snapshot_build_count, builds);
+    assert_eq!(state.workspace_walk_count, walks);
+}
+
+#[test]
 fn asset_events_publish_and_clear_manifest_without_rebuilding_semantics() {
     let (directory, mut state, _) = workspace(true);
     std::fs::write(directory.path().join("falcon.json"),
