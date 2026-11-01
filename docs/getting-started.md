@@ -2,6 +2,16 @@
 
 falcon is a standalone linter for Dart and Flutter, written in Rust. It doesn't run the Dart analyzer or analysis server. Install the Dart SDK and resolve your dependencies for rules that need SDK or package types.
 
+The parser currently models Dart language features through **3.13**. It uses
+the owning package's `languageVersion` from `.dart_tool/package_config.json`
+and leading `// @dart=X.Y` file overrides; without a package version it uses
+3.13. A newer package language version produces a warning and is analyzed as
+3.13, not as verified support for that newer language. Resolve dependencies
+with `dart pub get` or `flutter pub get` so package language versions and
+Flutter's SDK/embedder libraries are available. Falcon does not replace the
+Dart analyzer's type checking or enforce `pubspec.yaml` SDK constraints as a
+package solver. The Dart pub launcher separately requires Dart **3.x** (`^3.0.0`).
+
 ## Installation
 
 falcon ships as a single binary. [installation.md](./installation.md) covers all platforms and channels.
@@ -61,7 +71,7 @@ There is no `init` command; create the file yourself:
 }
 ```
 
-> Point `$schema` at the published schema for rule-name autocomplete and validation. Rule ids and structural config keys use kebab-case (`max-lines-for-file`, `cross-file`, `max-errors`); names inside rule `options` use snake_case.
+> Point `$schema` at the published schema for rule-name autocomplete and validation. Rule ids, structural config keys and names inside rule `options` use kebab-case (`max-lines-for-file`, `cross-file`, `max-errors`, `max-lines`), except the domain key `flutter_hooks`.
 
 Rules live under groups (`a11y`, `complexity`, `correctness`, `performance`,
 `security`, `style`, `suspicious`); each entry is a level string (`off`/`on`/`info`/`warn`/`error`) or
@@ -123,7 +133,7 @@ Diagnostics may include a `fix` object with a `title` (the quick-fix label) and 
 falcon discovers `falcon.json` automatically: the current directory, then the
 nearest Git or Jujutsu repository root (`.git` or `.jj`), then `~/.falcon.json`.
 
-**Exit codes:** `falcon check` exits `0` when there are no errors, including warning-only and info-only runs. Errors exit `1`; `--error-on-warnings` (or config `error-on-warnings: true`) also fails warning-only runs. Info never fails a run. `--exit-code` (also accepted as `--error-exit-code`) changes the findings exit code. Configuration and analysis pipeline failures exit `1` regardless of that flag. A missing or explicitly filtered path, or a run that selects neither Dart files nor package manifests, reports an error; use `--no-errors-on-unmatched` for tools such as lint-staged that can pass unmatched paths. A manifest counts when named explicitly or found within an input directory, not merely discovered in an ancestor directory. Omitting paths checks the current directory. Unreadable or non-UTF-8 files are skipped with a warning. `--max-errors` limits printing only, not the exit code:
+**Exit codes:** `falcon check` exits `0` when there are no errors, including warning-only and info-only runs. Errors exit `1`; `--error-on-warnings` (or config `error-on-warnings: true`) also fails warning-only runs. Info never fails a run. `--exit-code` (also accepted as `--error-exit-code`) changes the findings exit code. Configuration and analysis pipeline failures, including unreadable or non-UTF-8 files, exit `1` regardless of that flag; these files are not skipped. Invalid command-line usage exits `2`. A missing or explicitly filtered path, or a run that selects neither Dart files nor package manifests, reports an error; use `--no-errors-on-unmatched` for tools such as lint-staged that can pass unmatched paths. A manifest counts when named explicitly or found within an input directory, not merely discovered in an ancestor directory. Omitting paths checks the current directory. `--max-errors` limits printing only, not the exit code:
 
 ```sh
 falcon check . --exit-code 2    # use exit code 2 on findings
@@ -144,12 +154,15 @@ falcon check . --baseline debt.json --error-on-warnings
 The baseline stores counted content fingerprints, not line numbers or messages.
 Inserting lines above a finding does not make it new, while adding another
 identical occurrence still reports that extra finding. Changes to the flagged
-source text can make a finding new. Syntax and operational errors cannot be
-baselined. Suppressed and fixed (stale) counts are printed on stderr. Counts
-describe the selected input paths: use the same full-project inputs for capture
-and CI rather than treating findings outside a partial run as fixed. Regenerating
-replaces the whole baseline with current findings; syntax and operational errors
-prevent writing it. Baseline matching happens before output limits and exit-code
+source text can make a finding new. Syntax, malformed-suppression and operational
+diagnostics cannot be baselined. Suppressed and fixed (stale) counts are printed
+on stderr. Counts describe the selected input paths: use the same full-project
+inputs for capture and CI rather than treating findings outside a partial run as
+fixed. Regenerating replaces the whole baseline with current lint findings,
+even when syntax errors are present. Files with syntax errors contribute no lint
+findings, so fixing their syntax can expose debt not recorded in that baseline.
+Operational failures prevent writing it.
+Baseline matching happens before output limits and exit-code
 selection. CLI baseline paths resolve from the current directory; a configured
 `baseline` path resolves from the configuration root.
 

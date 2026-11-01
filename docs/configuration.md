@@ -482,19 +482,29 @@ Cross-file rules are grouped under their category (`correctness`, `style`, `secu
 
 Configuring a cross-file rule under `linter.rules` (or a file rule under `cross-file.rules`) is an error. The message identifies the full key path and the correct section and group, and the configuration does not load.
 
-| Rule                     | Group        | Recommended | Replaces (dart_code_linter)   |
-|--------------------------|--------------|-------------|-------------------------------|
-| `unused-files`           | correctness  | no          | `check-unused-files`          |
-| `unused-code`            | correctness  | no          | `check-unused-code`           |
-| `unnecessary-nullable`   | correctness  | no          | `check-unnecessary-nullable`  |
+| Rule | Group | Recommended | Replaces (dart_code_linter) |
+|------|-------|-------------|----------------------------|
+| `architecture-layer-boundaries` | correctness | no | |
+| `avoid-missing-test-files` | correctness | no | |
+| `banned-imports` | correctness | no | |
 | `depend-on-referenced-packages` | correctness | yes | |
-| `package-names`          | style        | yes         |                              |
-| `secure-pubspec-urls`    | security     | yes         |                              |
-| `sort-pub-dependencies`  | correctness  | no          |                              |
-| `unused-dependencies`    | correctness  | no          |                              |
-| `undeclared-dependencies` | correctness | no          |                              |
-| `no-import-cycles`       | correctness  | no          |                              |
-| `banned-imports`         | correctness  | no          |                              |
+| `no-deep-package-imports` | correctness | no | |
+| `no-import-cycles` | correctness | no | |
+| `sort-pub-dependencies` | correctness | no | |
+| `undeclared-dependencies` | correctness | no | |
+| `unnecessary-nullable` | correctness | no | `check-unnecessary-nullable` |
+| `unused-assets` | correctness | no | |
+| `unused-code` | correctness | no | `check-unused-code` |
+| `unused-dependencies` | correctness | no | |
+| `unused-dev-dependencies` | correctness | no | |
+| `unused-files` | correctness | no | `check-unused-files` |
+| `unused-l10n` | correctness | no | |
+| `secure-pubspec-urls` | security | yes | |
+| `package-names` | style | yes | |
+| `unexported-public-api` | style | no | |
+| `avoid-importing-entrypoint-exports` | suspicious | no | |
+| `duplicate-barrel-exports` | suspicious | no | |
+| `missing-assets` | suspicious | no | |
 
 Notes:
 

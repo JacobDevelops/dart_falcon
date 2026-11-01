@@ -688,6 +688,43 @@ These entries describe implemented foundation, not acceptance of the open items.
   and suppression semantics, migration notes and release artifact/version checks.
   Review platform CI and provenance evidence; do not publish or change credentials
   as part of cleanup. Release approval remains a separate action.
+  Contract audit at `334dcfbe0066c667f4eb4d85cba0c9e1dabcaa0c`: inventoried
+  `docs/*.md`, README/changelog/changeset policy, generated website data,
+  launcher/editor manifests and all six release/CI workflows. Schema and docgen
+  checks agree with 546 rules, 215 recommended rules and 21 cross-file rules.
+  Config/CLI/LSP/syntax/analyze/xtask suites passed (1,534 tests; two skipped),
+  including version-pin, migration, SDK/Flutter resolution and suppression tests.
+  Linux binary probes exercised help, migration, severity/exit overrides, canonical
+  line/file suppressions, inert Dart ignores, malformed and unused directives.
+  Corrective probes confirmed invalid UTF-8 exits 1 despite `--exit-code 5`,
+  invalid usage exits 2, and syntax-error files contribute no lint baseline entries:
+  repairing syntax exposed the previously uncaptured `avoid-print` finding.
+  LSP incomplete-manifest replacement/recovery is covered by existing
+  `server/tests.rs` and `state/tests.rs` tests, not a worker-failure binary probe.
+  Review also exercised invalid-UTF-8 LSP recovery and separate workspace configs.
+  Corrected config casing (including `flutter_hooks`), baseline/failure wording,
+  per-workspace/member config selection and all incomplete-analysis manifest
+  replacement; completed the cross-file table and compared all 21 entries,
+  groups and recommended flags with registry metadata. Docgen currently owns
+  only the configuration rule-options table, not this cross-file inventory.
+  Documented Dart 3.13 modeling and the launcher's separate Dart 3.x requirement.
+  Checks used rustc `1.101.0-nightly` (`16d1ffac1`) on x86_64 Linux.
+  After corrective review, docgen/schema checks and the authorized replacement
+  `numen run -- makers verify-fast` passed: 3,667 workspace tests (two manual
+  timing benchmarks skipped), 18 doctests, tooling/architecture, workspace/Zed
+  formatting, TOML and strict Clippy; source fingerprint
+  `sha256:27ca4d11591603db5797a9f3af3377c7b224a4613c9d394f883bee0197e8aaf6`.
+  Read-only published `v0.4.6` evidence: all three documented targets and both
+  archive-name forms exist, with Minisign sidecars and `SHA256SUMS`; the x86_64
+  archive checksum matched and its sole entry is `falcon`; `gh attestation verify`
+  succeeded. Workflow source cross-builds Linux x86_64/arm64 and macOS arm64 on
+  Ubuntu, gates macOS packaging on notarisation, signs archives/checksums and
+  creates provenance attestations. This is not native platform execution evidence.
+  Open maintainer/release decisions: select the exact candidate and supply native
+  macOS/arm64 install/runtime evidence (or explicitly reduce that scope), then
+  review that candidate's signatures/notarisation/provenance and approve release.
+  Existing published artifacts do not certify this changed candidate; no release,
+  workflow dispatch, credential change or publication was performed.
 - Acceptance: every required item has source-bound evidence or an explicit
   maintainer decision reducing scope; unresolved blockers are not silently waived.
 

@@ -96,9 +96,12 @@ Cross-file rules are suppressed the same way, with the `cross-file` section:
 ```
 
 Suppression comments only apply to Dart files. Diagnostics reported in
-`pubspec.yaml` (`package-names`, `secure-pubspec-urls`,
-`sort-pub-dependencies` and `unused-dependencies`) can't be suppressed this way;
+`pubspec.yaml`, such as `package-names`, `secure-pubspec-urls`,
+`sort-pub-dependencies` and `unused-dependencies`, can't be suppressed this way;
 turn the rule off in `falcon.json` instead.
+
+Valid directives that match no finding are not reported: falcon does not
+currently emit unused-suppression diagnostics.
 
 ## The reason is required
 
