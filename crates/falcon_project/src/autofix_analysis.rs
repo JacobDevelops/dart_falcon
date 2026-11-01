@@ -128,7 +128,7 @@ impl<'a> AutofixAnalyzer<'a> {
     }
 
     pub(crate) fn analyze(&mut self, source: &str) -> Vec<Diagnostic> {
-        let mut diagnostics = falcon_dart_parser::with_stack(|| self.analyze_inner(source))
+        let mut diagnostics = falcon_analyze::with_rules_stack(|| self.analyze_inner(source))
             .unwrap_or_else(|error| vec![rules_thread_diagnostic(self.path, &error)]);
         diagnostics.retain(|diagnostic| diagnostic.file_path == self.path.to_string_lossy());
         diagnostics
@@ -328,6 +328,79 @@ impl<'a> AutofixAnalyzer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn autofix_analysis_preserves_the_parent_and_subscriber() {
+        const NAME: &str =
+            "autofix_analysis::tests::autofix_analysis_preserves_the_parent_and_subscriber";
+        use std::sync::Mutex;
+        use tracing::{Subscriber, span::Attributes};
+        use tracing_subscriber::{
+            EnvFilter, Layer, layer::Context, prelude::*, registry::LookupSpan,
+        };
+
+        type Record = (&'static str, Option<&'static str>, std::thread::ThreadId);
+        struct Capture(Arc<Mutex<Vec<Record>>>);
+        impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for Capture {
+            fn on_new_span(&self, attrs: &Attributes<'_>, id: &tracing::Id, ctx: Context<'_, S>) {
+                let span = ctx.span(id).unwrap();
+                self.0.lock().unwrap().push((
+                    attrs.metadata().name(),
+                    span.parent().map(|parent| parent.name()),
+                    std::thread::current().id(),
+                ));
+            }
+        }
+        if std::env::var_os("FALCON_TRACING_TEST_CHILD").as_deref()
+            != Some(std::ffi::OsStr::new(NAME))
+        {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", NAME, "--nocapture"])
+                .env("FALCON_TRACING_TEST_CHILD", NAME)
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.lines().any(|line| line == "running 1 test"),
+                "{NAME} must run exactly once successfully:\n{stdout}\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        let records = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::registry()
+            .with(EnvFilter::new("off,falcon::stages=debug"))
+            .with(Capture(records.clone()));
+        let origin = std::thread::current().id();
+        tracing::subscriber::with_default(subscriber, || {
+            let _analysis = tracing::debug_span!(target: "falcon::stages", "analysis").entered();
+            let config = FalconConfig::default();
+            let analysis = ProjectAnalysis::new(&config);
+            let outcome = crate::fix_file(
+                &analysis,
+                &config,
+                &mut AnalysisEnvironment::default(),
+                Path::new("main.dart"),
+                "void main() {}",
+                false,
+            );
+            assert!(outcome.stop.is_none());
+        });
+        let records = records.lock().unwrap();
+        for name in [
+            "semantic_index_build",
+            "registry_preparation",
+            "registry_reporting",
+        ] {
+            let stages: Vec<_> = records.iter().filter(|record| record.0 == name).collect();
+            assert!(!stages.is_empty(), "missing {name}");
+            assert!(
+                stages
+                    .iter()
+                    .all(|record| record.1 == Some("analysis") && record.2 != origin)
+            );
+        }
+    }
 
     #[test]
     fn body_fix_passes_do_not_reindex_companions() {

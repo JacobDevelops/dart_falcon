@@ -27,6 +27,7 @@ pub fn build_semantic_indexes(
     external: Option<ExternalSources<'_>>,
     cache: Option<ExternalIndexParts<'_>>,
 ) -> (SemanticIndexes, LibraryGrouping) {
+    let _stage = tracing::debug_span!(target: "falcon::stages", "semantic_index_build").entered();
     let grouping_files: Vec<_> = files
         .iter()
         .map(|file| (file.path.to_path_buf(), file.parsed.program()))
@@ -111,6 +112,7 @@ pub fn update_semantic_indexes(
     external: Option<ExternalSources<'_>>,
     cache: Option<ExternalIndexParts<'_>>,
 ) -> (LibraryGrouping, usize) {
+    let _stage = tracing::debug_span!(target: "falcon::stages", "semantic_index_update").entered();
     let grouping_files: Vec<_> = files
         .iter()
         .map(|file| (file.path.to_path_buf(), file.parsed.program()))

@@ -192,6 +192,10 @@ struct ExternalIndexCache {
 
 impl ExternalIndexCache {
     fn build(external: ExternalSources<'_>) -> Self {
+        let _stage = tracing::debug_span!(
+            target: "falcon::stages", "semantic_index_build", layer = "external"
+        )
+        .entered();
         let identities = Arc::new(IdentityIndex::build_external(external));
         let mut types = TypeIndex::from_resolved_files(std::iter::empty(), &identities);
         types.add_external(external.libraries, &identities);
@@ -2077,6 +2081,8 @@ impl LspState {
     ///
     /// Manifest results belong to disk facts, including when their buffers are closed.
     pub fn cross_file_pass(&mut self) -> Vec<(String, Vec<Diagnostic>)> {
+        let _stage =
+            tracing::debug_span!(target: "falcon::stages", "lsp_cross_file_pass").entered();
         if !matches!(self.cross_file_schedule, CrossFileSchedule::Immediate) {
             self.cross_file_schedule = CrossFileSchedule::Pending;
             return Vec::new();
@@ -2349,7 +2355,7 @@ impl LspState {
         if !reuse_snapshot && self.cross_file_resolve_semantics {
             // Dependency waves would otherwise parse on Rayon's global small-stack workers.
             if let Err(error) =
-                falcon_dart_parser::with_stack(|| self.ensure_cross_file_indexes(files))
+                falcon_analyze::with_rules_stack(|| self.ensure_cross_file_indexes(files))
             {
                 warn!("cross-file index worker failed: {error}");
                 // Per-file publication carries the failure until inputs change, without reloading.
@@ -2389,11 +2395,14 @@ impl LspState {
             self.cross_file_worker_failed = true;
             return HashMap::new();
         }
-        let (files, complete) = self.collect_project_files(ProjectView::CrossFile);
+        let (files, complete) =
+            tracing::debug_span!(target: "falcon::stages", "source_snapshot_capture")
+                .in_scope(|| self.collect_project_files(ProjectView::CrossFile));
         if !complete {
             return HashMap::new();
         }
-        self.refresh_localization_paths();
+        tracing::debug_span!(target: "falcon::stages", "environment_capture")
+            .in_scope(|| self.refresh_localization_paths());
         // Semantic views include unsaved buffers; cross-file views include manifests.
         // Reuse facts only when Dart revisions and package identities agree exactly.
         let indexes = self.semantic_snapshot.as_ref().and_then(|snapshot| {
@@ -2673,6 +2682,8 @@ impl LspState {
         paths: &HashSet<&Path>,
         graph_roots: Vec<(PathBuf, Vec<String>)>,
     ) {
+        let capture =
+            tracing::debug_span!(target: "falcon::stages", "environment_capture").entered();
         self.capture_fallback_dependency_watches();
         let roots: Vec<_> = files
             .iter()
@@ -2713,6 +2724,7 @@ impl LspState {
             .chain(libraries.project_companions())
             .map(watched_path)
             .collect();
+        drop(capture);
         if let Some(cache) = self.cross_file_external_cache.as_mut().filter(|cache| {
             !depends_on_project
                 && cache.indexes.is_some()
@@ -2961,7 +2973,7 @@ impl LspState {
         self.semantic_snapshot = None;
         self.body_only_changes.clear();
         // Dependency waves and recursive index builds need the large-stack workers.
-        if let Err(error) = falcon_dart_parser::with_stack(|| self.build_semantic_snapshot()) {
+        if let Err(error) = falcon_analyze::with_rules_stack(|| self.build_semantic_snapshot()) {
             // Keep the environment so its dependency roots stay watched for recovery.
             self.reset_external_layer();
             self.previous_semantic_snapshot = None;
@@ -2972,6 +2984,8 @@ impl LspState {
     fn build_semantic_snapshot(&mut self) {
         #[cfg(test)]
         assert!(!self.build_panic, "semantic build regression");
+        let capture =
+            tracing::debug_span!(target: "falcon::stages", "source_snapshot_capture").entered();
         let (mut files, _) = self.collect_project_files(ProjectView::Semantic);
         if self.semantic_snapshot_error.is_some() {
             return;
@@ -2985,6 +2999,7 @@ impl LspState {
         // Open buffers and promoted companions can arrive in graph traversal
         // order. Declaration edits must not renumber unchanged project files.
         files.sort_unstable_by(|left, right| left.path().cmp(right.path()));
+        drop(capture);
         // A dependency importing a project file depends on mutable buffer facts.
         // Keep the ordinary combined build for that graph instead of freezing
         // unresolved/project references into the immutable external layer.

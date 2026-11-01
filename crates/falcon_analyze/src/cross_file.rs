@@ -26,6 +26,8 @@ impl SemanticIndexes {
     /// # Panics
     /// Panics if the snapshot is rejected or the file is not an indexed project file.
     pub fn refresh_file_body(&mut self, file: crate::resolve::FileId, parsed: &Arc<ParsedFile>) {
+        let _stage =
+            tracing::debug_span!(target: "falcon::stages", "semantic_index_body_refresh").entered();
         self.identities.refresh_file_body(file, parsed);
         self.signatures.refresh_file_body(file, parsed);
     }
@@ -494,9 +496,15 @@ impl CrossFileRuleRegistry {
         indexes: Option<&SemanticIndexes>,
     ) -> std::io::Result<Vec<Diagnostic>> {
         crate::registry::with_rules_stack(|| {
+            let _stage =
+                tracing::debug_span!(target: "falcon::stages", "cross_file_rules").entered();
             self.rules
                 .iter()
                 .flat_map(|(name, rule)| {
+                    let _rule = tracing::debug_span!(
+                        target: "falcon::detail", "cross_file_rule", rule = name
+                    )
+                    .entered();
                     rule.analyze_project(name, environment, files, config, indexes)
                 })
                 .collect()

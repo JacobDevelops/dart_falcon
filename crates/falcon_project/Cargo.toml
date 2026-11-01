@@ -18,8 +18,9 @@ tracing.workspace    = true
 walkdir.workspace    = true
 
 [dev-dependencies]
-falcon_syntax      = { path = "../falcon_syntax" }
-tempfile.workspace = true
+falcon_syntax                = { path = "../falcon_syntax" }
+tempfile.workspace           = true
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true

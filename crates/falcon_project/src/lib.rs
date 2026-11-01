@@ -339,6 +339,7 @@ pub fn analyze_sources(
     config: &FalconConfig,
     environment: &mut AnalysisEnvironment,
 ) -> Result<SourceAnalysis, falcon_analyze::SourceFailure> {
+    let capture = tracing::debug_span!(target: "falcon::stages", "environment_capture").entered();
     let packages = if analysis.resolve {
         package_identities(
             files
@@ -368,6 +369,7 @@ pub fn analyze_sources(
                 .map(|(path, _)| path.as_path()),
         );
     }
+    drop(capture);
     tracing::info!(
         file_count = files.len(),
         rule_count = analysis.registry.rules().len(),
@@ -451,6 +453,7 @@ pub fn finalize_diagnostics<'a>(
     filter: &PathFilter,
     sources: impl IntoIterator<Item = (&'a Path, &'a str)>,
 ) {
+    let _stage = tracing::debug_span!(target: "falcon::stages", "reporting").entered();
     diagnostics.retain(|diagnostic| {
         diagnostic.rule == UNMATCHED_PATH_DIAGNOSTIC_ID
             || diagnostic.rule == RULES_THREAD_ERROR_DIAGNOSTIC_ID

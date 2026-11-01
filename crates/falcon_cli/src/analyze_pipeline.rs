@@ -150,6 +150,7 @@ fn collect_check_impl(
     options: &CheckOptions,
     sdk_locator: Option<SdkLocator>,
 ) -> Result<CheckOutput, String> {
+    let _analysis = tracing::debug_span!(target: "falcon::stages", "analysis").entered();
     if (options.unsafe_fixes || options.dry_run) && !options.write {
         return Err("--unsafe and --dry-run require --write".to_owned());
     }
@@ -259,7 +260,8 @@ fn collect_selected_check(
     let filter = cli_filter.as_ref().unwrap_or(&config.files.includes);
     let max_errors = options.max_errors.or(config.max_errors);
     let mut analysis = ProjectAnalysis::new(config);
-    let walked = walk_project(paths, filter, true)?;
+    let walked = tracing::debug_span!(target: "falcon::stages", "discovery")
+        .in_scope(|| walk_project(paths, filter, true))?;
     let mut files = walked.files;
     let mut manifests = walked.manifests;
     let mut packages = workspace.as_ref().map_or_else(Vec::new, |workspace| {
@@ -277,14 +279,7 @@ fn collect_selected_check(
         &walked.missing_paths,
         &walked.filtered_paths,
     );
-    let mut environment = match sdk_locator {
-        Some(locator) => AnalysisEnvironment::with_sdk_locator(locator),
-        None => AnalysisEnvironment::default(),
-    };
-    environment.extend(walked.manifest_paths.iter().map(PathBuf::as_path));
-    for warning in environment.take_warnings() {
-        eprintln!("warning: {warning}");
-    }
+    let mut environment = capture_environment(sdk_locator, &walked.manifest_paths);
     if files.is_empty() && manifests.is_empty() {
         crate::adoption::apply_baseline(options, config, &root, &mut unmatched, &HashMap::new())?;
         crate::report::count_package_diagnostics(&mut packages, &unmatched);
@@ -358,6 +353,22 @@ fn collect_selected_check(
         packages,
         diff,
     })
+}
+
+fn capture_environment(
+    sdk_locator: Option<SdkLocator>,
+    manifest_paths: &[PathBuf],
+) -> AnalysisEnvironment {
+    let _capture = tracing::debug_span!(target: "falcon::stages", "environment_capture").entered();
+    let mut environment = match sdk_locator {
+        Some(locator) => AnalysisEnvironment::with_sdk_locator(locator),
+        None => AnalysisEnvironment::default(),
+    };
+    environment.extend(manifest_paths.iter().map(PathBuf::as_path));
+    for warning in environment.take_warnings() {
+        eprintln!("warning: {warning}");
+    }
+    environment
 }
 
 fn check_path_filter(

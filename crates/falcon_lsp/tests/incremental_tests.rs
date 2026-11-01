@@ -25,6 +25,90 @@ fn state_with_config(json: &str) -> (LspState, TempDir) {
     (LspState::new_with_sdk_locator(Some(path), |_| None), dir)
 }
 
+#[test]
+fn cross_file_stage_parents_survive_lsp_worker_transfers() {
+    const NAME: &str = "incremental_tests::cross_file_stage_parents_survive_lsp_worker_transfers";
+    use std::sync::{Arc, Mutex};
+    use tracing::{Subscriber, span::Attributes};
+    use tracing_subscriber::{EnvFilter, Layer, layer::Context, prelude::*, registry::LookupSpan};
+
+    type Record = (&'static str, Option<&'static str>, std::thread::ThreadId);
+    struct Capture(Arc<Mutex<Vec<Record>>>);
+    impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for Capture {
+        fn on_new_span(&self, attrs: &Attributes<'_>, id: &tracing::Id, ctx: Context<'_, S>) {
+            let span = ctx.span(id).unwrap();
+            self.0.lock().unwrap().push((
+                attrs.metadata().name(),
+                span.parent().map(|parent| parent.name()),
+                std::thread::current().id(),
+            ));
+        }
+    }
+    if std::env::var_os("FALCON_TRACING_TEST_CHILD").as_deref() != Some(std::ffi::OsStr::new(NAME))
+    {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", NAME, "--nocapture"])
+            .env("FALCON_TRACING_TEST_CHILD", NAME)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.lines().any(|line| line == "running 1 test"),
+            "{NAME} must run exactly once successfully:\n{stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let records = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::registry()
+        .with(EnvFilter::new("off,falcon::stages=debug"))
+        .with(Capture(records.clone()));
+    let origin = std::thread::current().id();
+    tracing::subscriber::with_default(subscriber, || {
+        let _session = tracing::debug_span!(target: "falcon::stages", "session").entered();
+        let (mut state, dir) = state_with_config(
+            r#"{
+                "linter": {"rules": {"recommended": false}},
+                "cross-file": {"rules": {
+                    "recommended": false,
+                    "correctness": {"unnecessary-nullable": "warn"}
+                }}
+            }"#,
+        );
+        fs::write(dir.path().join("pubspec.yaml"), "name: span_test\n").unwrap();
+        let path = dir.path().join("main.dart");
+        let source = "void _take(int? x) {}\nvoid main() { _take(1); }\n";
+        fs::write(&path, source).unwrap();
+        state.cross_file_pass();
+        state.open(
+            &format!("file://{}", path.display()),
+            source.to_owned(),
+            Some(1),
+        );
+        state.cross_file_pass();
+    });
+    let records = records.lock().unwrap();
+    assert!(
+        records.iter().any(|&(name, parent, _)| {
+            name == "lsp_cross_file_pass" && parent == Some("session")
+        })
+    );
+    assert!(records.iter().any(|&(name, parent, thread)| {
+        name == "cross_file_rules" && parent == Some("lsp_cross_file_pass") && thread != origin
+    }));
+    assert!(records.iter().any(|&(name, parent, thread)| {
+        name == "semantic_index_build" && parent == Some("session") && thread != origin
+    }));
+    assert!(records.iter().any(|&(name, parent, thread)| {
+        name == "semantic_index_build" && parent == Some("lsp_cross_file_pass") && thread != origin
+    }));
+    assert!(
+        !records
+            .iter()
+            .any(|&(name, _, _)| name == "cross_file_rule")
+    );
+}
+
 fn counts(state: &LspState, uri: &str) -> (u64, u64) {
     let doc = state.document(uri).expect("document open");
     (doc.parse_count, doc.analyze_count)

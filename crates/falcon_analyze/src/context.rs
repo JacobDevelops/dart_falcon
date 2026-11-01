@@ -217,28 +217,41 @@ impl<'a> AnalyzeContext<'a> {
 
     /// Function ownership and try boundaries collected once for this file.
     pub fn function_bodies(&self, program: Program<'a>) -> &FunctionBodies<'a> {
-        self.cache
-            .function_bodies
-            .get_or_init(|| FunctionBodies::new(program))
+        self.cache.function_bodies.get_or_init(|| {
+            let _index =
+                tracing::debug_span!(target: "falcon::stages", "lazy_file_index", fact = "function_bodies")
+                    .entered();
+            FunctionBodies::new(program)
+        })
     }
 
     /// Dart constant contexts collected once for this file.
     pub fn const_contexts(&self, program: Program<'a>) -> &ConstContexts {
-        self.cache
-            .const_contexts
-            .get_or_init(|| ConstContexts::new(program))
+        self.cache.const_contexts.get_or_init(|| {
+            let _index =
+                tracing::debug_span!(target: "falcon::stages", "lazy_file_index", fact = "const_contexts")
+                    .entered();
+            ConstContexts::new(program)
+        })
     }
 
     /// Lexical identifier bindings collected once for this file.
     pub fn local_declarations(&self, program: Program<'a>) -> &HashMap<usize, NodeId> {
-        self.cache
-            .local_declarations
-            .get_or_init(|| local_declarations(program))
+        self.cache.local_declarations.get_or_init(|| {
+            let _index = tracing::debug_span!(
+                target: "falcon::stages", "lazy_file_index", fact = "local_declarations"
+            )
+            .entered();
+            local_declarations(program)
+        })
     }
 
     /// Lexical writes collected once for this file's parsed program.
     pub fn flow_writes(&self, program: Program<'a>) -> &FlowWrites {
         self.cache.flow_writes.get_or_init(|| {
+            let _index =
+                tracing::debug_span!(target: "falcon::stages", "lazy_file_index", fact = "flow_writes")
+                    .entered();
             self.identities
                 .and_then(|identities| identities.file(self.file_path))
                 .and_then(|file| self.signatures?.flow_writes(file))
@@ -257,6 +270,9 @@ impl<'a> AnalyzeContext<'a> {
 
     fn lexical_writes(&self, program: Program<'a>) -> &LocalWrites {
         self.cache.local_writes.get_or_init(|| {
+            let _index =
+                tracing::debug_span!(target: "falcon::stages", "lazy_file_index", fact = "local_writes")
+                    .entered();
             let writes = local_writes(program);
             let mutated = writes.iter().map(|write| write.declaration).collect();
             LocalWrites { writes, mutated }
@@ -266,6 +282,9 @@ impl<'a> AnalyzeContext<'a> {
     /// Top-level variable and setter types shared by semantic rule visitors.
     pub fn globals(&self, program: Program<'a>) -> &HashMap<&'a str, ResolvedType> {
         self.cache.globals.get_or_init(|| {
+            let _index =
+                tracing::debug_span!(target: "falcon::stages", "lazy_file_index", fact = "globals")
+                    .entered();
             let mut globals = HashMap::new();
             let Some(identities) = self.identities else {
                 return globals;

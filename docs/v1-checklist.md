@@ -456,10 +456,71 @@ These entries describe implemented foundation, not acceptance of the open items.
 - [ ] Add portable representative full-analysis cases using the existing pinned
   public corpus/bench-compare machinery, with recorded configurations, failures,
   toolchain and corpus revisions. Verify the work performed, not just duration.
-- [ ] Audit stage/span attribution in `falcon_analyze/src/registry.rs`,
+- [x] Audit stage/span attribution in `falcon_analyze/src/registry.rs`,
   `parallel.rs` and `semantic_indexes.rs`. Existing tracing is useful; distinguish
   preparation from shared traversal/index cost and keep detailed instrumentation
   opt-in. No unconditional per-node instrumentation solely to get timing numbers.
+  - The [stage attribution inventory and capture recipe](verification.md#attributing-analysis-time)
+    covers CLI, project, registry, parallel workers, shared indexes and the LSP
+    cross-file pass. Preparation, shared walks, semantic state/index construction
+    and reporting have separate boundaries. First-use per-file index spans
+    identify shared facts initialized inside preparation, semantic state or
+    callbacks; body-only semantic refreshes are attributed separately.
+    File/rule detail is
+    DEBUG-only on `falcon::detail`; DEBUG-level `falcon::stages` is opt-in, even
+    under ordinary INFO logging. No per-node spans or timers were added.
+    Inactive profiling skips dispatcher installation; scoped-subscriber
+    embedders must observe the caveat in the capture recipe.
+  - Test subscribers assert exact per-file stage counts over 64-file sequential,
+    Rayon resolving/non-resolving and large-stack execution, including work
+    stealing, the real LSP cross-file index/rule transfers and project autofix
+    reanalysis. They assert
+    preparation/traversal siblings, first-use cache spans (no repeat on cache
+    hits), body refreshes, subscriber-only capture without an entered parent,
+    and the real CLI default filters. Ordinary INFO emits no stages/detail.
+    No durations are asserted. Removing all three Rayon context restorations
+    loses parse spans; removing just indexed rule-worker restoration loses
+    preparation spans, and the strengthened tests reject both mutations.
+    Reverting the LSP cross-file index transfer to a bare parser stack also
+    fails the LSP test.
+    Analyze stage-capture tests, project autofix capture and LSP cross-file capture
+    re-execute themselves in isolated child processes, preserving production's
+    inactive fast path while excluding unrelated libtest jobs from the subscriber.
+    Each child must succeed and report exactly one test; no stage-count assertions
+    were relaxed.
+    The full `falcon_analyze --test it` suite passed 20 consecutive default-thread
+    libtest runs, with 110 tests per run.
+    `falcon_project --lib` (62 tests) and `falcon_lsp --test it incremental_tests`
+    (21 tests) each passed 10 consecutive default-thread libtest runs.
+    CLI JSON stage-close smoke emitted 4,419 records across 15 stage names,
+    including lazy indexes, with busy/idle values and no detail.
+  - Default-path comparison used release builds of `bebbf66c` and this slice,
+    with the same locked dependencies, in
+    separate scratch target directories outside the source tree. Corpus:
+    LocalSend `cfd699125f2aa4c69f48fd274cf4bb1876a5e08d`, `app/`;
+    `falcon check --quiet <app>`, `RUST_LOG` unset, `RAYON_NUM_THREADS=4`,
+    stdout/stderr discarded. This performed 294 files, 385 rules, 17 cross-file
+    rules and resolution enabled, with 11 external libraries. Separate JSON
+    runs produced identical findings (canonical JSON SHA-256
+    `9c9aa17d3d150476e430a4b4c00829e3ca4be58968c3fcafe24e6d6cd22df941`;
+    36,788,212 bytes after sorting JSON keys with compact separators; paths
+    retain the shared scratch corpus prefix).
+  - Fifteen alternating before/after pairs on the final revised binaries,
+    after one warmup per executable, gave wall medians
+    **1,282.649 ms before / 1,298.601 ms after (+1.24%)**; child CPU medians
+    **2,690.739 / 2,707.843 ms (+0.64%)**. Wall ranges were
+    1,274.834–1,337.184 / 1,294.281–1,315.131 ms. Other heavy workspace work
+    was paused for this batch. Earlier conditional-capture attribution batches
+    gave +0.52%, +1.44% and -0.18% wall over fifteen pairs, and +4.11% over
+    seven pairs. An unconditional dispatcher-restoration candidate measured
+    +4.08% wall / +4.23% CPU and was rejected. These observations are not a new
+    numerical regression allowance or universal overhead bound.
+    Every sample was a fresh uncached Falcon process, with warm OS page cache,
+    not a cold filesystem or persistent analysis cache. Host: Linux
+    7.0.0-38-generic, Ryzen 7 9800X3D, rustc 1.101.0-nightly
+    (`16d1ffac1`, LLVM 23.1.4); no affinity pinning. These are attribution-audit
+    observations, not analyzer parity or release performance acceptance.
+    The remaining V1-5 decisions below are unchanged.
 - [ ] Settle representative suite, cache conditions, repeatability/resource limits
   and acceptable regression/speed margin with the maintainer. Performance is a
   release blocker, but cold Falcon beating warm analyzer remains an aspiration

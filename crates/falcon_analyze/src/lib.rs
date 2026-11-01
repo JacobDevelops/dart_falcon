@@ -48,8 +48,7 @@ pub use parallel::{
     Workspace, analyze_parallel_collecting_resolving, analyze_sequential_collecting_resolving,
     source_size_diagnostic, syntax_error_diagnostics,
 };
-pub(crate) use registry::with_rules_stack;
-pub use registry::{RuleRegistry, rules_thread_diagnostic};
+pub use registry::{RuleRegistry, rules_thread_diagnostic, with_rules_stack};
 pub use resolve::flow::FlowContext;
 pub use resolve::lexical_usage::{
     LocalWrite, LocalWriteKind, locally_bound_identifiers, used_constructor_parameters,

@@ -372,6 +372,7 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -446,6 +447,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -463,6 +465,7 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "tracing",
+ "tracing-subscriber",
  "walkdir",
 ]
 

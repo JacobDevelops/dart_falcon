@@ -6,7 +6,7 @@ use falcon_syntax::cst::{
     ArgList, Block, CascadeOp, ConstructorDecl, ConstructorRef, Expr, Pattern, Program, Span, Stmt,
 };
 use std::collections::HashMap;
-use tracing::{debug, debug_span};
+use tracing::debug_span;
 
 /// Without metadata, suppression paths validate as unknown rules.
 fn no_lookup(_name: &str) -> Option<(&'static str, &'static str, bool)> {
@@ -14,7 +14,41 @@ fn no_lookup(_name: &str) -> Option<(&'static str, &'static str, bool)> {
 }
 
 /// Run rules on the same large-stack workers used by parsing and parallel analysis.
-pub use falcon_dart_parser::with_stack as with_rules_stack;
+///
+/// Preserves active tracing parents and opt-in analysis subscribers across workers.
+///
+/// # Errors
+///
+/// Returns an error if workers cannot start or the operation panics.
+pub fn with_rules_stack<T: Send>(operation: impl FnOnce() -> T + Send) -> std::io::Result<T> {
+    let context = TraceContext::capture();
+    falcon_dart_parser::with_stack(|| context.in_scope(operation))
+}
+
+pub(crate) struct TraceContext {
+    parent: Option<(tracing::Dispatch, tracing::Span)>,
+}
+
+impl TraceContext {
+    pub(crate) fn capture() -> Self {
+        let span = tracing::Span::current();
+        let enabled = !span.is_disabled()
+            || tracing::enabled!(target: "falcon::stages", tracing::Level::DEBUG)
+            || tracing::enabled!(target: "falcon::detail", tracing::Level::DEBUG);
+        Self {
+            parent: enabled.then(|| (tracing::dispatcher::get_default(Clone::clone), span)),
+        }
+    }
+
+    pub(crate) fn in_scope<T>(&self, operation: impl FnOnce() -> T) -> T {
+        match &self.parent {
+            Some((dispatch, span)) => {
+                tracing::dispatcher::with_default(dispatch, || span.in_scope(operation))
+            }
+            None => operation(),
+        }
+    }
+}
 
 #[must_use]
 pub fn rules_thread_diagnostic(path: &std::path::Path, error: &std::io::Error) -> Diagnostic {
@@ -95,10 +129,10 @@ impl RuleRegistry {
         let mut visitors = SemanticVisitors(Vec::with_capacity(self.rules.len()));
         let mut structural_visitors = Vec::with_capacity(self.rules.len());
         let mut structural_indices = Vec::with_capacity(self.rules.len());
+        let preparation = debug_span!(target: "falcon::stages", "registry_preparation").entered();
         for (index, (name, rule)) in self.rules.iter().enumerate() {
-            let span = debug_span!("run_rule", rule = name);
+            let span = debug_span!(target: "falcon::detail", "prepare_rule", rule = name);
             let _enter = span.enter();
-            debug!(rule = name, "running rule");
             match rule.prepare(program, ctx) {
                 RulePreparation::Diagnostics(diagnostics) => diagnostics_by_rule.push(diagnostics),
                 RulePreparation::Semantic(visitor) => {
@@ -112,6 +146,9 @@ impl RuleRegistry {
                 }
             }
         }
+        drop(preparation);
+        let traversal =
+            debug_span!(target: "falcon::stages", "shared_structural_traversal").entered();
         for (index, diagnostics) in
             structural_indices
                 .into_iter()
@@ -122,14 +159,22 @@ impl RuleRegistry {
         {
             diagnostics_by_rule[index].extend(diagnostics);
         }
+        drop(traversal);
         if !visitors.0.is_empty() {
-            if let Some(state) = SemanticState::new(program, ctx) {
+            let initialization = debug_span!(target: "falcon::stages", "semantic_state").entered();
+            let state = SemanticState::new(program, ctx);
+            drop(initialization);
+            if let Some(state) = state {
+                let _traversal =
+                    debug_span!(target: "falcon::stages", "shared_semantic_traversal").entered();
                 visit_program(&mut visitors, program, state);
             }
+            let _finish = debug_span!(target: "falcon::stages", "registry_finish").entered();
             for (index, visitor) in visitors.0 {
                 diagnostics_by_rule[index].extend(visitor.finish());
             }
         }
+        let _reporting = debug_span!(target: "falcon::stages", "registry_reporting").entered();
         let diagnostics: Vec<Diagnostic> = self
             .rules
             .iter()

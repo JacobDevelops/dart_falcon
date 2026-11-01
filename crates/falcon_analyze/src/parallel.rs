@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rayon::prelude::*;
-use tracing::{info, info_span};
+use tracing::{debug, debug_span, info};
 
 use falcon_config::FalconConfig;
 use falcon_dart_parser::parser::ParseError;
@@ -34,7 +34,7 @@ fn analyze_file(
     collect_programs: bool,
     workspace: Workspace<'_>,
 ) -> (Vec<Diagnostic>, Option<ProjectFile>) {
-    let span = info_span!("analyze_file", file = %path.display());
+    let span = debug_span!(target: "falcon::detail", "analyze_file", file = %path.display());
     let _enter = span.enter();
     let package_version = workspace.package_language_version(path);
     let SourceParse {
@@ -49,7 +49,7 @@ fn analyze_file(
         .with_package_environment(workspace.environment, package_version);
     let mut diagnostics = syntax_error_diagnostics(path, &parse_errors);
     diagnostics.extend(registry.run_all(parsed.program(), &ctx));
-    info!(file = %path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");
+    debug!(target: "falcon::detail", file = %path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");
     let retained = collect_programs.then(|| {
         ProjectFile::new(path.to_path_buf(), parsed)
             .expect("successful parser result must be accepted by the project")
@@ -108,6 +108,7 @@ fn parse_one(
     source: impl AsRef<str> + Into<Box<str>>,
     package_version: Option<LanguageVersion>,
 ) -> Result<SourceParse<'_>, Box<Diagnostic>> {
+    let _parse = debug_span!(target: "falcon::stages", "parse").entered();
     if let Some(diagnostic) = source_size_diagnostic(path, source.as_ref().len() as u64) {
         return Err(Box::new(diagnostic));
     }
@@ -143,10 +144,10 @@ fn analyze_indexed(
     parallel: bool,
     workspace: Workspace<'_>,
 ) -> Result<(Vec<Diagnostic>, SemanticIndexes), crate::SourceFailure> {
-    // Partition files into libraries, then build the type index (each type
-    // inheriting its library's unresolved-part flag) and per-file library units.
+    let acquisition = debug_span!(target: "falcon::stages", "environment_capture").entered();
     let externals = load_indexed_externals(parsed, workspace);
     let mut companion_sources = read_companion_sources(parsed, workspace, externals.as_ref())?;
+    drop(acquisition);
     let mut companion_diagnostics = Vec::new();
     let companions: Vec<SourceParse<'_>> = companion_sources
         .iter_mut()
@@ -198,19 +199,28 @@ fn analyze_indexed(
         .map(|i| library_unit(&grouping, &parsed_files, i))
         .collect();
 
+    let context = crate::registry::TraceContext::capture();
     let run_one = |(i, p): (usize, &SourceParse<'_>)| {
-        let span = info_span!("analyze_file", file = %p.path.display());
-        let _enter = span.enter();
-        let ctx = AnalyzeContext::new(p.path, config, &p.parsed)
-            .with_types(&type_index)
-            .with_identities(&identities)
-            .with_signatures(&signatures)
-            .with_library(&library_units[i])
-            .with_environment(workspace.environment);
-        let mut diagnostics = syntax_error_diagnostics(p.path, &p.parse_errors);
-        diagnostics.extend(registry.run_all(p.parsed.program(), &ctx));
-        info!(file = %p.path.display(), diagnostic_count = diagnostics.len(), "file analysis complete");
-        diagnostics
+        context.in_scope(|| {
+            let span =
+                debug_span!(target: "falcon::detail", "analyze_file", file = %p.path.display());
+            let _enter = span.enter();
+            let ctx = AnalyzeContext::new(p.path, config, &p.parsed)
+                .with_types(&type_index)
+                .with_identities(&identities)
+                .with_signatures(&signatures)
+                .with_library(&library_units[i])
+                .with_environment(workspace.environment);
+            let mut diagnostics = syntax_error_diagnostics(p.path, &p.parse_errors);
+            diagnostics.extend(registry.run_all(p.parsed.program(), &ctx));
+            debug!(
+                target: "falcon::detail",
+                file = %p.path.display(),
+                diagnostic_count = diagnostics.len(),
+                "file analysis complete"
+            );
+            diagnostics
+        })
     };
     let mut diagnostics: Vec<Diagnostic> = if parallel {
         parsed.par_iter().enumerate().flat_map(run_one).collect()
@@ -285,7 +295,7 @@ fn load_indexed_externals<'a>(
     workspace
         .environment
         .map(|environment| {
-            let span = info_span!("load_external_libraries");
+            let span = debug_span!(target: "falcon::stages", "load_external_libraries");
             let _enter = span.enter();
             let project_paths: HashSet<PathBuf> = parsed
                 .iter()
@@ -370,10 +380,13 @@ fn analyze_parallel_inner(
     workspace: Workspace<'_>,
 ) -> Result<AnalysisOutput, crate::SourceFailure> {
     if !resolve {
+        let context = crate::registry::TraceContext::capture();
         let (diagnostics, retained): (Vec<Vec<Diagnostic>>, Vec<Option<ProjectFile>>) = files
             .par_iter()
             .map(|(path, source)| {
-                analyze_file(registry, path, source, config, collect_programs, workspace)
+                context.in_scope(|| {
+                    analyze_file(registry, path, source, config, collect_programs, workspace)
+                })
             })
             .unzip();
         return Ok((
@@ -383,14 +396,17 @@ fn analyze_parallel_inner(
         ));
     }
     let mut diagnostics = Vec::new();
+    let context = crate::registry::TraceContext::capture();
     let parsed: Vec<Result<SourceParse<'_>, Box<Diagnostic>>> = files
         .par_iter()
         .map(|(path, source)| {
-            parse_one(
-                path,
-                source.as_str(),
-                workspace.package_language_version(path),
-            )
+            context.in_scope(|| {
+                parse_one(
+                    path,
+                    source.as_str(),
+                    workspace.package_language_version(path),
+                )
+            })
         })
         .collect();
     // Preserve size errors before worker failures without a supported-input allocation.
