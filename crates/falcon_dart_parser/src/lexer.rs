@@ -163,13 +163,17 @@ impl<'src> Lexer<'src> {
             self.advance();
             self.advance();
         }
+        let mut valid = true;
         loop {
             match self.cur() {
                 None => return self.make(TokenKind::Error, start),
                 Some('\n' | '\r') if !triple => return self.make(TokenKind::Error, start),
                 Some('\\') if !raw => {
                     self.advance();
-                    self.advance();
+                    if !triple && matches!(self.cur(), Some('\n' | '\r')) {
+                        return self.make(TokenKind::Error, start);
+                    }
+                    valid &= self.lex_escape();
                 }
                 Some('$') if !raw => {
                     if !self.lex_interpolation(quote, triple) {
@@ -183,7 +187,14 @@ impl<'src> Lexer<'src> {
                             self.advance();
                             self.advance();
                         }
-                        return self.make(TokenKind::StringLit, start);
+                        return self.make(
+                            if valid {
+                                TokenKind::StringLit
+                            } else {
+                                TokenKind::Error
+                            },
+                            start,
+                        );
                     }
                     self.advance();
                 }
@@ -192,6 +203,36 @@ impl<'src> Lexer<'src> {
                 }
             }
         }
+    }
+
+    fn lex_escape(&mut self) -> bool {
+        let Some(kind) = self.cur() else {
+            return false;
+        };
+        self.advance();
+        let digits = match kind {
+            'x' => 2,
+            'u' if self.eat_if('{') => {
+                let mut value = 0_u32;
+                let mut count = 0;
+                while let Some(digit) = self.cur().and_then(|c| c.to_digit(16)) {
+                    self.advance();
+                    value = value.saturating_mul(16).saturating_add(digit);
+                    count += 1;
+                }
+                let closed = self.eat_if('}');
+                return closed && (1..=6).contains(&count) && value <= 0x10_ffff;
+            }
+            'u' => 4,
+            _ => return true,
+        };
+        for _ in 0..digits {
+            if !self.cur().is_some_and(|c| c.is_ascii_hexdigit()) {
+                return false;
+            }
+            self.advance();
+        }
+        true
     }
 
     fn lex_interpolation(&mut self, quote: char, triple: bool) -> bool {

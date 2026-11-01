@@ -682,8 +682,76 @@ These entries describe implemented foundation, not acceptance of the open items.
   OSS corpus (fast and full), applicable website/typecheck/build, Dart launcher and
   editor/package/install smoke checks. The full local Rust gate alone does not
   execute these separate surfaces or establish analyzer parity.
-- [ ] Review malformed-input/recovery coverage, parser depth/source limits, all
+- [x] Review malformed-input/recovery coverage, parser depth/source limits, all
   new metadata consumers and CLI/LSP failure contracts against V1-1 through V1-4.
+  Certification: JJ change `voysnztnpzoostkrtvztyvzttlztnlxl` (failure-contract fix).
+  Evidence matrix (CLI/editor share project and metadata owners unless a frontend
+  test is named; transport-only rows are intentionally not CLI contracts):
+  - Malformed/unterminated Dart, expressions/blocks and numeric escapes →
+    `malformed_dart_frontends_recover_to_current_diagnostics`,
+    `invalid_numeric_escapes_preserve_following_declarations`,
+    `escaped_line_breaks_reject_single_line_strings_but_preserve_triple_strings`,
+    `nested_expression_forms_skip_past_the_depth_limit`,
+    `deeply_nested_interpolations_hit_depth_limit_without_overflow`; malformed
+    numeric escapes now report syntax errors without swallowing later declarations.
+  - Source admission/UTF-8 → `oversized_sources_abort_before_partial_workspace_analysis`,
+    `rejected_buffer_diagnostic_survives_refresh_and_recovers_on_change`,
+    `oversized_required_sources_clear_cross_file_results_but_optional_manifests_do_not`,
+    `required_source_failure_blocks_partial_projects_and_recovers`. Decision: use
+    sparse oversized disk files and injected lengths through real `open`/`change`
+    admission, not allocate a multi-GiB JSON message for transport serialization.
+  - BOM/CRLF/UTF-16 → `dart_bom_crlf_and_astral_ranges_have_independent_protocol_expectations`,
+    `localization_bom_preserves_cli_byte_spans_and_report_fingerprints`; explicit
+    editor BOM is a UTF-16 code unit, unlike the disk encoding marker.
+  - Pubspec/package config → `optional_manifest_failures_recover_to_fresh_secure_url_diagnostics`,
+    `dependency_manifest_consumers_recover_exact_diagnostics_and_warning_episodes`,
+    `environment_reports_malformed_and_unreadable_package_inputs`,
+    `package_entry_failures_keep_valid_packages_and_report_details`. Decision:
+    package-entry partial success is tested in the shared environment owner, not
+    duplicated as frontend wiring assertions.
+  - Analysis options/Falcon config → `malformed_optional_settings_recover_current_frontend_findings`,
+    `dependency_documents_reject_invalid_utf8_and_oversize`,
+    `invalid_falcon_configuration_aborts_cli_but_editor_retains_and_recovers_rules`;
+    broken optional options skip their consumer; invalid explicit CLI config aborts,
+    while editors retain valid rules and recover on reload.
+  - l10n.yaml/ARB/assets → `malformed_and_inaccessible_localization_inputs_warn_once_and_skip`,
+    `oversized_localization_inputs_are_bounded_and_recovery_rearms_warning`,
+    `unused_localization_cli_lsp_parity_tracks_disk_facts_and_warning_recovery`,
+    `duplicate_key_manifests_warn_and_skip_both_asset_rules`,
+    `asset_directory_failures_reach_config_messages_once_per_episode`.
+  - Dependency facts/exports/external sources →
+    `dependency_probe_unknown_is_scoped_to_its_input_and_consumer`,
+    `dependency_manifest_warning_rearms_after_recovery`,
+    `unreadable_dependency_source_is_unknown_and_warning_rearms_after_recovery`,
+    `oversized_and_parse_error_siblings_do_not_hide_small_exports`,
+    `external_source_read_and_parse_failures_warn_once`. Decision: optional
+    unavailable external sources remain conservative unknowns, not required-source
+    fatal errors; valid siblings and warning episodes are independently asserted.
+  - Required unreadable/disappearing sources/discovery →
+    `unreadable_project_companions_abort_checks_and_writes`,
+    `failed_required_disk_reads_are_incomplete_but_optional_reads_are_not`,
+    `unreadable_directory_blocks_cli_and_editor_results_and_recovers`,
+    `failed_discovery_is_incomplete_until_roots_recover_or_disappear`,
+    `disappearing_traversal_inputs_are_absent`; genuinely absent traversal entries
+    are not failures, while required reads block incomplete cross-file results.
+  - Workers → `worker_failure_forces_nonzero_and_skips_cross_file_until_recovery`,
+    `project_parse_failures_publish_once_skip_cross_rules_and_recover_on_disk_events`,
+    `cross_rule_worker_failure_qualifies_manifest_publication_until_recovery`.
+  - Editor backpressure/cancellation →
+    `request_burst_supersedes_matching_reads_without_blocking_cancellation_or_shutdown`,
+    `cancellation_responds_while_analysis_is_blocked_and_suppresses_late_success`,
+    `lifecycle_bursts_retain_at_most_two_transitions_per_document`.
+  Throwaway smoke: 1,028 truncated prefixes from 94 corpus files, no parser
+  panic/timeout; the script and inputs were not retained as a reproducible suite.
+  Reviewed nightly corpus change: `dart-sdk-language` syntax errors 16,987 →
+  16,995, exactly eight analyzer-annotated invalid Unicode cases in
+  `tests/language/string/unicode1_test.dart` through `unicode4_test.dart` at pinned
+  SDK revision `203af6d3`. Updated only this reviewed snapshot count rather than
+  rerun the entire multi-project e2e corpus; independent review compared base and
+  candidate on this corpus and found no other rule-count changes.
+  Diagnostic precision decision: malformed escapes retain the existing whole-token
+  parser error; escape-local messages/ranges require a separate lexer diagnostic
+  channel and are not part of this recovery/admission certification.
 - [ ] Confirm documented supported Dart/Flutter/rule/config behavior, diagnostics
   and suppression semantics, migration notes and release artifact/version checks.
   Review platform CI and provenance evidence; do not publish or change credentials

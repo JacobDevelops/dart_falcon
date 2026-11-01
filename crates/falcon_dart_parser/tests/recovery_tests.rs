@@ -92,3 +92,45 @@ fn unparsed_interpolation_tokens_have_bounded_expansion() {
     assert!(parsed.tree.is_lossless(&source));
     assert!(parsed.tree.tokens(&source).count() < 1_000);
 }
+
+#[test]
+fn invalid_numeric_escapes_preserve_following_declarations() {
+    for literal in [
+        r"'\xG0'",
+        r"'\x4'",
+        r"'\u123'",
+        r"'\u{0000041}'",
+        r"'\u{41'",
+        r"'\uZZZZ'",
+        r"'\u{}'",
+        r"'\u{110000}'",
+        r"'''\u12'''",
+    ] {
+        let source = format!("var bad = {literal}; int recovered = 1;");
+        let parsed = parse(&source);
+        assert!(!parsed.errors.is_empty(), "{source}");
+        assert!(parsed.tree.is_lossless(&source));
+        assert_eq!(
+            parsed.tree.program(&source).declarations().count(),
+            2,
+            "{source}"
+        );
+    }
+    for literal in [r"'\x00'", r"'\uD800'", r"'\u{10ffff}'", r"r'\uZZZZ'"] {
+        let source = format!("var value = {literal};");
+        assert!(parse(&source).errors.is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn escaped_line_breaks_reject_single_line_strings_but_preserve_triple_strings() {
+    for newline in ["\n", "\r\n", "\r"] {
+        let source = format!("var bad = 'a\\{newline}';{newline}int recovered = 1;");
+        let parsed = parse(&source);
+        assert!(!parsed.errors.is_empty(), "{source}");
+        assert!(parsed.tree.is_lossless(&source));
+        assert_eq!(parsed.tree.program(&source).declarations().count(), 3);
+        let source = format!("var valid = '''a\\{newline}b''';");
+        assert!(parse(&source).errors.is_empty(), "{source}");
+    }
+}

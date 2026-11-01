@@ -192,7 +192,7 @@
       "prefer-void-to-null": 445,
       "provide-deprecation-message": 7,
       "slash-for-doc-comments": 17,
-      "syntax-error": 16987,
+      "syntax-error": 16995,
       "throw-in-finally": 8,
       "type-annotate-public-apis": 33454,
       "type-init-formals": 35,

@@ -1336,6 +1336,211 @@ fn protocol_identity_unicode_suppressions_and_config_severity_match_cli_json() {
 }
 
 #[test]
+fn malformed_optional_settings_recover_current_frontend_findings() {
+    for (name, valid, rule) in [
+        ("l10n.yaml", "arb-dir: messages\n", "unused-l10n"),
+        ("analysis_options.yaml", "{}\n", "unused-dev-dependencies"),
+    ] {
+        let temp = tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        let config = root.join("falcon.json");
+        fs::write(&config, format!(r#"{{"linter":{{"enabled":false}},"cross-file":{{"rules":{{"recommended":false,"correctness":{{"{rule}":"warn"}}}}}}}}"#)).unwrap();
+        fs::write(
+            root.join("pubspec.yaml"),
+            "name: app\ndev_dependencies:\n  unused: any\n",
+        )
+        .unwrap();
+        fs::create_dir(root.join(".dart_tool")).unwrap();
+        fs::create_dir_all(root.join("dependency/lib")).unwrap();
+        fs::write(root.join(".dart_tool/package_config.json"), r#"{"configVersion":2,"packages":[{"name":"unused","rootUri":"../dependency","packageUri":"lib/"}]}"#).unwrap();
+        fs::create_dir(root.join("messages")).unwrap();
+        fs::write(root.join("messages/app_en.arb"), r#"{"unused":"value"}"#).unwrap();
+        let dart = root.join("main.dart");
+        fs::write(&dart, "void main() {}\n").unwrap();
+        let settings = root.join(name);
+        fs::write(&settings, valid).unwrap();
+        let options = CheckOptions {
+            paths: vec![root],
+            config_path: Some(config.clone()),
+            quiet: true,
+            ..Default::default()
+        };
+        let mut lsp = LspState::new_with_sdk_locator(Some(config), |_| None);
+        lsp.open(
+            &format!("file://{}", dart.display()),
+            "void main() {}\n".into(),
+            Some(1),
+        );
+        let mut published: BTreeMap<_, _> = lsp.cross_file_pass().into_iter().collect();
+        for bytes in [b"[".as_slice(), valid.as_bytes(), &[0xff], valid.as_bytes()] {
+            fs::write(&settings, bytes).unwrap();
+            let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+            published.extend(lsp.watched_files_changed(std::slice::from_ref(&settings)));
+            published.extend(lsp.cross_file_pass());
+            let editor: Vec<_> = published.values().flatten().collect();
+            assert_eq!(
+                serde_json::to_value(editor).unwrap(),
+                serde_json::to_value(&cli.diagnostics).unwrap()
+            );
+            if bytes == valid.as_bytes() {
+                assert_eq!(cli.diagnostics.len(), 1, "{name}");
+                assert_eq!(cli.diagnostics[0].rule, rule);
+                assert_eq!(lsp.take_config_messages().len(), 0);
+            } else {
+                assert!(cli.diagnostics.is_empty(), "{name}");
+                let messages = lsp.take_config_messages();
+                assert_eq!(messages.len(), 1, "{messages:?}");
+                assert!(messages[0].message.contains(settings.to_str().unwrap()));
+            }
+        }
+    }
+}
+
+#[test]
+fn invalid_falcon_configuration_aborts_cli_but_editor_retains_and_recovers_rules() {
+    let temp = tempdir().unwrap();
+    let config = temp.path().join("falcon.json");
+    let path = temp.path().join("main.dart");
+    let source = "dynamic value = 1;\n";
+    fs::write(&config, parity_config("error")).unwrap();
+    fs::write(&path, source).unwrap();
+    let options = CheckOptions {
+        paths: vec![path.clone()],
+        config_path: Some(config.clone()),
+        quiet: true,
+        ..Default::default()
+    };
+    let mut lsp = LspState::new_with_sdk_locator(Some(config.clone()), |_| None);
+    let uri = format!("file://{}", path.display());
+    lsp.open(&uri, source.into(), Some(1));
+    for invalid in ["{", r#"{"linter":{"enabledd":false}}"#] {
+        fs::write(&config, invalid).unwrap();
+        let error = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap_err();
+        assert!(error.starts_with("config error:"), "{error}");
+        assert_ne!(
+            falcon_cli::run_check_with_sdk_locator(&options, |_| None),
+            0
+        );
+        lsp.reload_config();
+        let diagnostics = lsp.analyze(&uri);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule, "avoid-dynamic");
+        assert_eq!(diagnostics[0].severity, Severity::Error);
+        assert_eq!(lsp.take_config_messages().len(), 1);
+        fs::write(&config, parity_config("warn")).unwrap();
+        lsp.reload_config();
+        let cli = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+        let editor = lsp.analyze(&uri);
+        assert_eq!(
+            serde_json::to_value(&editor).unwrap(),
+            serde_json::to_value(&cli.diagnostics).unwrap()
+        );
+        assert_eq!(editor.len(), 1);
+        assert_eq!(editor[0].severity, Severity::Warning);
+        // Re-arm the last-good error severity for the next failure episode.
+        fs::write(&config, parity_config("error")).unwrap();
+        lsp.reload_config();
+    }
+}
+
+#[test]
+fn malformed_dart_frontends_recover_to_current_diagnostics() {
+    for source in [
+        "void f( {",
+        "var value = 'unterminated",
+        "var value = '\\uZZZZ';",
+        "var value = 'a\\\n';",
+        "var value = 'a\\\r\n';",
+        &format!(
+            "void f() {{ var value = {}0{}; }}",
+            "(".repeat(512),
+            ")".repeat(512)
+        ),
+        &format!("void f() {{ {} {} }}", "{".repeat(512), "}".repeat(512)),
+    ] {
+        let temp = tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        let config = root.join("falcon.json");
+        let path = root.join("main.dart");
+        fs::write(&config, parity_config("warn")).unwrap();
+        fs::write(&path, source).unwrap();
+        let options = CheckOptions {
+            paths: vec![path.clone()],
+            config_path: Some(config.clone()),
+            quiet: true,
+            ..Default::default()
+        };
+        let output = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+        assert_ne!(output.exit_code, 0, "{source}");
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.rule == "syntax-error"),
+            "{:?}",
+            output.diagnostics
+        );
+        let client = ParityClient::start(&config);
+        let uri = format!("file://{}", path.display());
+        client.open(&uri, source);
+        assert_eq!(
+            client.publication(&uri),
+            cli_wire_diagnostics(&options, &path, source),
+            "{source}"
+        );
+        let recovered = "dynamic current = 1;\r\n";
+        fs::write(&path, recovered).unwrap();
+        client.notify("textDocument/didChange", serde_json::json!({"textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": recovered}]}));
+        let expected = cli_wire_diagnostics(&options, &path, recovered);
+        assert_eq!(expected.len(), 1);
+        assert_eq!(expected[0]["rule"], "avoid-dynamic");
+        assert_eq!(expected[0]["message"], "Avoid using the `dynamic` type.");
+        assert_eq!(
+            expected[0]["range"],
+            serde_json::json!({"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 7}})
+        );
+        assert_eq!(client.publication(&uri), expected);
+    }
+}
+
+#[test]
+fn dart_bom_crlf_and_astral_ranges_have_independent_protocol_expectations() {
+    for source in [
+        "\u{feff}dynamic value = 1;\r\n",
+        "\u{feff}// 😀\r\ndynamic value = 1;\r\n",
+    ] {
+        let temp = tempdir().unwrap();
+        let config = temp.path().join("falcon.json");
+        let path = temp.path().join("main.dart");
+        fs::write(&config, parity_config("warn")).unwrap();
+        fs::write(&path, source).unwrap();
+        let options = CheckOptions {
+            paths: vec![path.clone()],
+            config_path: Some(config.clone()),
+            ..Default::default()
+        };
+        let output = falcon_cli::collect_check_with_sdk_locator(&options, |_| None).unwrap();
+        assert_eq!(output.diagnostics.len(), 1);
+        let start = source.find("dynamic").unwrap();
+        assert_eq!(output.diagnostics[0].span.start as usize, start);
+        assert_eq!(output.diagnostics[0].span.end as usize, start + 7);
+        let client = ParityClient::start(&config);
+        let uri = format!("file://{}", path.display());
+        client.open(&uri, source);
+        let diagnostics = client.publication(&uri);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0]["rule"], "avoid-dynamic");
+        let line = usize::from(source.contains("//"));
+        // An explicit BOM in didOpen text is a UTF-16 code unit, unlike a disk encoding marker.
+        let column = usize::from(line == 0);
+        assert_eq!(
+            diagnostics[0]["range"],
+            serde_json::json!({"start": {"line": line, "character": column}, "end": {"line": line, "character": column + 7}})
+        );
+    }
+}
+
+#[test]
 fn protocol_config_reload_matches_each_fresh_cli_run() {
     for explicit in [true, false] {
         let temp = tempdir().unwrap();

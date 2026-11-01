@@ -2667,20 +2667,12 @@ mod source_size_tests {
         let mut state = LspState::new(None);
         state.initialize_workspace_roots(vec![directory.path().to_path_buf()]);
         state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
-        state.open(&uri, String::new(), Some(1));
-        let path = state.documents[&uri].path.clone();
-        let parsed = LspState::parse_document(
-            &path,
-            "".into(),
-            None,
-            falcon_analyze::source_size_diagnostic(&path, u64::from(u32::MAX) + 1),
-            Some(&path),
-        );
-        assert_rejected_snapshot(&parsed.parsed, "");
-        assert_eq!(parsed.diagnostics.len(), 1);
-        let doc = state.documents.get_mut(&uri).unwrap();
-        doc.parsed = Arc::new(parsed.parsed);
-        doc.syntax_diagnostics = parsed.diagnostics;
+        state.buffer_length_override = Some(u64::from(u32::MAX) + 1);
+        let diagnostics = state.open(&uri, "void rejected() {}".into(), Some(1));
+        assert_eq!(diagnostics.len(), 1);
+        let doc = &state.documents[&uri];
+        assert_rejected_snapshot(&doc.parsed, "");
+        assert_eq!(doc.syntax_diagnostics.len(), 1);
         let parse_count = doc.parse_count;
         let diagnostics = state.analyze(&uri);
         assert!(
@@ -2703,6 +2695,7 @@ mod source_size_tests {
                 .is_empty()
         );
         assert!(state.cross_file_diagnostics().is_empty());
+        state.buffer_length_override = None;
 
         let healthy = canonical_or_lexical(&directory.path().join("healthy.dart"));
         let healthy_uri = format!("file://{}", healthy.display());
@@ -2722,13 +2715,30 @@ mod source_size_tests {
                 .iter()
                 .any(|diagnostic| diagnostic.rule == "syntax-error")
         );
+        state.buffer_length_override = Some(u64::from(u32::MAX) + 1);
+        assert!(state.change(&uri, "void rejected_again() {}".into(), Some(3)));
+        assert_rejected_snapshot(&state.documents[&uri].parsed, "");
+        let diagnostics = state.analyze(&uri);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule, "syntax-error");
+        state.buffer_length_override = None;
+        assert!(state.change(&uri, "void current() {}".into(), Some(4)));
+        assert!(!state.documents[&uri].parsed.is_rejected());
+        assert!(
+            state
+                .analyze(&uri)
+                .iter()
+                .all(|diagnostic| diagnostic.rule != "syntax-error")
+        );
     }
 
     #[test]
     fn supported_buffer_text_is_not_modified() {
         let mut text = "// 🦅\nvoid main() {}".to_string();
         let original = text.clone();
-        assert!(reject_oversized_buffer(Path::new("main.dart"), &mut text).is_none());
+        assert!(
+            reject_oversized_buffer(Path::new("main.dart"), text.len() as u64, &mut text).is_none()
+        );
         assert_eq!(text, original);
     }
 

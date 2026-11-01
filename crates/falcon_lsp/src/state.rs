@@ -395,6 +395,8 @@ pub struct LspState {
     parser_failure_path: Option<PathBuf>,
     #[cfg(test)]
     build_panic: Option<BuildPanic>,
+    #[cfg(test)]
+    buffer_length_override: Option<u64>,
     /// Dependents from the graph before an edit, retained until that edit is analyzed.
     pending_semantic_affected: HashMap<String, HashSet<String>>,
     body_only_changes: HashMap<String, usize>,
@@ -608,6 +610,8 @@ impl LspState {
             parser_failure_path: None,
             #[cfg(test)]
             build_panic: None,
+            #[cfg(test)]
+            buffer_length_override: None,
             pending_semantic_affected: HashMap::new(),
             body_only_changes: HashMap::new(),
             semantic_snapshot_build_count: 0,
@@ -1605,7 +1609,10 @@ impl LspState {
     /// `textDocument/didOpen`: cache and parse the document, then analyze it.
     pub fn open(&mut self, uri: &str, mut text: String, version: Option<i32>) -> Vec<Diagnostic> {
         let (path, unresolved_path) = document_path(uri, &self.workspace_roots);
-        let source_error = reject_oversized_buffer(&path, &mut text);
+        let length = text.len() as u64;
+        #[cfg(test)]
+        let length = self.buffer_length_override.unwrap_or(length);
+        let source_error = reject_oversized_buffer(&path, length, &mut text);
         self.pending_semantic_affected.remove(uri);
         if self.resolve_semantics() && !self.documents.is_empty() {
             self.ensure_semantic_snapshot();
@@ -1685,7 +1692,10 @@ impl LspState {
         }
 
         let path = self.documents[uri].path.clone();
-        let source_error = reject_oversized_buffer(&path, &mut text);
+        let length = text.len() as u64;
+        #[cfg(test)]
+        let length = self.buffer_length_override.unwrap_or(length);
+        let source_error = reject_oversized_buffer(&path, length, &mut text);
         self.refresh_environment(std::iter::once(path.as_path()));
         let package_version = self.environment.package_language_version(&path);
         let source = text.into_boxed_str();
@@ -3771,8 +3781,8 @@ impl LspState {
 
 /// Drop rejected editor text before any parsing, language-version scanning, or
 /// semantic retention. A subsequent valid full-sync change recovers normally.
-fn reject_oversized_buffer(path: &Path, text: &mut String) -> Option<Diagnostic> {
-    let diagnostic = falcon_analyze::source_size_diagnostic(path, text.len() as u64)?;
+fn reject_oversized_buffer(path: &Path, length: u64, text: &mut String) -> Option<Diagnostic> {
+    let diagnostic = falcon_analyze::source_size_diagnostic(path, length)?;
     *text = String::new();
     Some(diagnostic)
 }
