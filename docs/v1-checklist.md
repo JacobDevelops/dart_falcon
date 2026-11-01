@@ -886,9 +886,47 @@ These entries describe implemented foundation, not acceptance of the open items.
   maintainability debt, not by itself a proven behavioral bug. Preserve
   capability/configuration lifecycle tests.
   Evidence: explicit capability/workspace fields and retained primary `ProjectAnalysis`; primary/secondary reload and capability lifecycle coverage, independent index/parser failure recovery regressions (five mutants rejected), 630 LSP/project/CLI tests, strict workspace Clippy, formatting and docgen checks passed.
-- [ ] R2 — Remove repeated conversions/retained data only where callers and
+- [x] R2 — Remove repeated conversions/retained data only where callers and
   profiling justify them. Keep shared immutable indexes and useful caches; no
   blanket clone/Arc ban or byte-count-based redesign.
+  Evidence: LocalSend full analysis at pinned commit
+  `cfd699125f2aa4c69f48fd274cf4bb1876a5e08d`, using the portable
+  `bench-compare --full-analysis` configuration (all file/cross-file rules warn,
+  recommended off, files `**`, four Rayon threads, no SDK or external dependency
+  closure), found a repeated source-prefix scan in `max-lines-for-function`.
+  Both span endpoints called `line_of`, although only their difference was
+  needed. Counting newline bytes inside the span removes the quadratic
+  per-file work without adding an index, cache, allocation or retained data;
+  the now-unused prefix helper is removed.
+  `perf record -g --call-graph dwarf` attributed 8.56% self samples to
+  `check_function_lines` before and 0.04% after (15,383/14,134 samples,
+  no lost samples). Other leading baseline frames were `NameMemo::get`
+  (2.33%), Sip13 hashing (1.90%) and `DeclarationIdentity::hash` (1.58%).
+  Stage tracing attributed 1,029 to 703 summed worker-ms to structural
+  traversal, versus 1,588 to 1,636 worker-ms semantic traversal and 215 to
+  217 ms cross-file rules; parallel stage sums are not wall time. Generated
+  files accounted for 832 baseline structural worker-ms across 61 files,
+  not one runaway file. A rule-only synthetic file with 2k/4k/8k short
+  functions took 42.9/140.3/563.9 ms before and 4.5/7.7/14.0 ms after
+  (three-run medians), corroborating the per-file scaling cause.
+  On Linux x86_64, Ryzen 7 9800X3D (16 threads), release builds with
+  rustc 1.101.0-nightly (`16d1ffac1`), 12 fresh-process runs per binary
+  alternated their order on the same cached checkout. End-to-end time,
+  including full JSON rendering to `/dev/null`, fell from median 1,809.8 ms
+  (MAD 14.2 ms) to 1,638.4 ms (MAD 8.2 ms), a 9.47% reduction.
+  This direct alternated harness is not `bench-compare`'s hyperfine lane
+  (which produced the roughly 1,946–1,992 ms V1-5 baselines); the wall-time
+  reduction beyond evenly divided structural worker savings remains
+  unexplained.
+  Sampled host one-minute load was 2.69–3.49 for both interleaved sets.
+  Complete JSON output remained byte-identical: 146,823 diagnostics,
+  64,147,576 bytes, SHA-256
+  `ad2492f3c29619b7257f3f4a05efb7028f54b9300799e2181b4c4b30b8cf54d2`.
+  LF/CRLF threshold regressions include a long Unicode-prefixed source;
+  no e2e snapshots changed. Remaining semantic/hash costs are spread out,
+  so no speculative cache/ownership redesign is included. This closes the
+  profile-justified cleanup, not V1-5's separate Dart analyzer comparative
+  acceptance item.
 - [x] R3 — Consider tighter lint policies incrementally where they prevent a real
   defect. Existing pedantic/strict warnings remain mandatory. Do not spend the
   readiness phase on broad style-only churn.

@@ -193,12 +193,6 @@ pub(crate) fn is_provably_non_null(expr: Expr<'_>) -> bool {
     )
 }
 
-pub(crate) fn line_of(source: &str, offset: usize) -> usize {
-    source.as_bytes()[..offset.min(source.len())]
-        .split(|&byte| byte == b'\n')
-        .count()
-}
-
 pub(crate) fn scalar_text(expr: Expr<'_>) -> Option<&str> {
     match expr.unparenthesized() {
         Expr::IntLit(lit) => Some(lit.value()),

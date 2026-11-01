@@ -73,22 +73,56 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 }
 }
 
-use crate::lint::expressions::line_of;
-
 fn max_lines_option(ctx: &AnalyzeContext) -> usize {
     crate::lint::options::get::<Options>(ctx, MaxLinesForFunction::NAME).max_lines
 }
 
 fn check_function_lines(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
-    let start_line = line_of(ctx.source(), span.start);
-    let end_line = line_of(ctx.source(), span.end);
-    let lines = end_line - start_line + 1;
+    let source = ctx.source().as_bytes();
+    let lines = source[span.start.min(source.len())..span.end.min(source.len())]
+        .split(|&byte| byte == b'\n')
+        .count();
     let threshold = max_lines_option(ctx);
 
     if lines > threshold {
-        diags.push(ctx.diagnostic(format!("Function exceeds the maximum number of lines ({threshold})."), DiagSpan {
-            start: span.start,
-            end: span.start,
-        }));
+        diags.push(ctx.diagnostic(
+            format!("Function exceeds the maximum number of lines ({threshold})."),
+            DiagSpan {
+                start: span.start,
+                end: span.start,
+            },
+        ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn line_limit_counts_only_the_span_with_lf_or_crlf() {
+        for newline in ["\n", "\r\n"] {
+            for (newlines, expected) in [(99, 0), (100, 1)] {
+                let prefix = format!("// 😀{newline}").repeat(150);
+                let source = format!("{prefix}void f() {{{}}}", newline.repeat(newlines));
+                let (parsed, errors) =
+                    falcon_analyze::ParsedFile::parse_for_package(source.as_str(), None);
+                assert!(errors.is_empty(), "{errors:?}");
+                let parsed = std::sync::Arc::new(parsed);
+                let config = falcon_config::FalconConfig::default();
+                let ctx = AnalyzeContext::new(std::path::Path::new("test.dart"), &config, &parsed);
+                let span = Span {
+                    start: prefix.len(),
+                    end: source.len(),
+                };
+                let mut diagnostics = Vec::new();
+                check_function_lines(&span, &mut diagnostics, &ctx);
+                assert_eq!(diagnostics.len(), expected, "{newline:?}, {newlines}");
+                if let Some(diagnostic) = diagnostics.first() {
+                    assert_eq!(diagnostic.span.start, prefix.len());
+                    assert_eq!(diagnostic.span.end, prefix.len());
+                }
+            }
+        }
     }
 }
