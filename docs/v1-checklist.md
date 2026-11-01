@@ -889,9 +889,35 @@ These entries describe implemented foundation, not acceptance of the open items.
 - [ ] R2 — Remove repeated conversions/retained data only where callers and
   profiling justify them. Keep shared immutable indexes and useful caches; no
   blanket clone/Arc ban or byte-count-based redesign.
-- [ ] R3 — Consider tighter lint policies incrementally where they prevent a real
+- [x] R3 — Consider tighter lint policies incrementally where they prevent a real
   defect. Existing pedantic/strict warnings remain mandatory. Do not spend the
   readiness phase on broad style-only churn.
+  Evidence: `91ae9831da42` moved live rule filesystem access into captured
+  environment facts. The `clippy` lane now denies `disallowed_methods` for
+  `falcon_rules --no-deps --lib`, using `.config/clippy-rules-fs/clippy.toml` to
+  cover filesystem reads/probes and analyzer discovery helpers. Production passes;
+  temporary `std::fs::read_to_string` and `canonical_or_lexical` calls both fail.
+  Tests retain fixture I/O without suppression; existing workspace pedantic
+  warnings remain mandatory. No shipping behavior changed.
+  Other candidates were measured with `cargo clippy --locked --workspace
+  --message-format=json` plus `--lib --bins` (production, including the non-shipping
+  `xtask`) or `--all-targets`, and `-W clippy::<lint>` for each candidate below,
+  through `MBX_CACHE_LINKS=false numen run --` (2026-11-02).
+  Production/all-target distinct locations: `cast_possible_truncation` 0/0
+  (already pedantic); `indexing_slicing` 927/2,701, `unwrap_used` 237/7,383,
+  `expect_used` 185/417 and `arithmetic_side_effects` 982/1,116 (blanket bans would
+  churn guarded indexes, invariants, counters and test assertions).
+  `let_underscore_must_use` 4/31 was rejected: its production hits intentionally
+  discard a racing `OnceLock::set`, optional acknowledgement and two best-effort
+  process-cleanup results. Counts deduplicate primary diagnostic spans by lint,
+  normalized file, line and column, using `jq -s`, this file-path normalization,
+  then `unique_by(.lint,.file,.line,.column)`:
+
+  ```jq
+  split("/") | reduce .[] as $p
+    ([]; if $p == ".." then .[:-1] elif $p == "." then . else . + [$p] end)
+    | join("/")
+  ```
 
 ## Deferred unless evidence changes
 

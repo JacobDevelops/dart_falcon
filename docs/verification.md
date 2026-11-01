@@ -5,7 +5,11 @@ A rule check exercises only the selected CLI corpus. Package checks exercise
 Clippy, all package test targets and, for packages with a library target,
 doctests; they do not establish dependent package behavior. `makers verify-fast`
 checks formatting/TOML, workspace Clippy and workspace tests, without release
-builds or CLI corpus/doc generation.
+builds or CLI corpus/doc generation. The Clippy lane also checks only the
+production `falcon_rules` library with `.config/clippy-rules-fs/clippy.toml`,
+denying live filesystem access and analyzer discovery helpers: rules consume
+captured `AnalysisEnvironment` facts. This separate `--no-deps --lib` invocation
+keeps fixture I/O in tests outside that policy without lint suppression.
 
 The final coordinator runs `makers verify-full` (`makers A`) on settled source.
 It runs lint, check, tests, the shared CLI/benchmark validation build (including

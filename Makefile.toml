@@ -53,12 +53,28 @@ command = "taplo"
 args    = [ "format", "--check" ]
 
 [tasks.clippy]
-run_task = { name = [ "clippy_workspace", "zed_clippy" ], parallel = false }
+run_task = { name = [ "clippy_workspace", "clippy_rules_fs", "zed_clippy" ], parallel = false }
 
 [tasks.clippy_workspace]
 private = true
 command = "${CARGO_CMD}"
 args    = [ "clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings" ]
+
+[tasks.clippy_rules_fs]
+command = "env"
+args = [
+  "CLIPPY_CONF_DIR=${ROOT}/.config/clippy-rules-fs",
+  "${CARGO_CMD}",
+  "clippy",
+  "--locked",
+  "-p",
+  "falcon_rules",
+  "--no-deps",
+  "--lib",
+  "--",
+  "-D",
+  "clippy::disallowed_methods",
+]
 
 [tasks.lint]
 run_task = { name = [ "format_check", "toml_check", "clippy" ], parallel = false }
