@@ -1173,3 +1173,83 @@ fn incremental_reanalyze_meets_latency_gate() {
         "incremental re-analyze took {elapsed:?} (gate: <{budget:?})"
     );
 }
+
+#[test]
+fn watched_existence_facts_republish_missing_tests_and_conditional_uris() {
+    assert_existence_publications(std::path::Path::to_path_buf);
+}
+
+#[cfg(unix)]
+#[test]
+fn watched_existence_facts_normalize_symlinked_client_event_paths() {
+    let aliases = TempDir::new().unwrap();
+    assert_existence_publications(|root| {
+        let alias = aliases.path().join("workspace");
+        std::os::unix::fs::symlink(root, &alias).unwrap();
+        alias
+    });
+}
+
+fn assert_existence_publications(client_root: impl FnOnce(&std::path::Path) -> std::path::PathBuf) {
+    let config = r#"{
+        "linter": { "rules": { "recommended": false, "style": {
+            "conditional-uri-does-not-exist": "warn"
+        } } },
+        "cross-file": { "rules": { "recommended": false, "correctness": {
+            "avoid-missing-test-files": { "level": "warn", "options": { "patterns": ["^lib/"] } }
+        } } }
+    }"#;
+    let (mut state, dir) = state_with_config(config);
+    fs::create_dir(dir.path().join("lib")).unwrap();
+    fs::create_dir(dir.path().join("test")).unwrap();
+    fs::write(dir.path().join("pubspec.yaml"), "name: workspace\n").unwrap();
+    let source = "import 'value.dart' if (dart.library.io) 'platform.txt';\nclass Value {}\n";
+    let path = dir.path().join("lib/value.dart");
+    fs::write(&path, source).unwrap();
+    let client_root = client_root(dir.path());
+    let uri = format!("file://{}", client_root.join("lib/value.dart").display());
+    state.open(&uri, source.to_owned(), Some(1));
+    state.cross_file_pass();
+    let missing_test = client_root.join("test/value_test.dart");
+    let conditional = client_root.join("lib/platform.txt");
+    for (target, rule) in [
+        (missing_test, "avoid-missing-test-files"),
+        (conditional, "conditional-uri-does-not-exist"),
+    ] {
+        assert!(
+            state
+                .document(&uri)
+                .unwrap()
+                .last_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.rule == rule),
+            "initial {rule}"
+        );
+        for (present, expected) in [(true, false), (false, true)] {
+            if present {
+                fs::write(&target, "").unwrap();
+            } else {
+                fs::remove_file(&target).unwrap();
+            }
+            let updates = state.watched_files_changed(std::slice::from_ref(&target));
+            let cross_file = state.cross_file_pass();
+            assert!(
+                updates
+                    .iter()
+                    .chain(&cross_file)
+                    .any(|(published, _)| published == &uri),
+                "no publication for {rule}"
+            );
+            assert_eq!(
+                state
+                    .document(&uri)
+                    .unwrap()
+                    .last_diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.rule == rule),
+                expected,
+                "{rule}: present={present}"
+            );
+        }
+    }
+}

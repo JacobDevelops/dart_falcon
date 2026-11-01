@@ -604,11 +604,7 @@ fn asset_directory_failures_reach_config_messages_once_per_episode() {
     let messages = state.take_config_messages();
     let warnings: Vec<_> = messages
         .iter()
-        .filter(|message| {
-            message
-                .message
-                .contains("asset file name is not valid UTF-8")
-        })
+        .filter(|message| message.message.contains("file name is not valid UTF-8"))
         .collect();
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].typ, lsp_types::MessageType::WARNING);
@@ -623,6 +619,7 @@ fn asset_directory_failures_reach_config_messages_once_per_episode() {
         Vec::<ShowMessageParams>::new()
     );
     std::fs::remove_file(&invalid_name).unwrap();
+    state.watched_files_changed(std::slice::from_ref(&invalid_name));
     let recovered = state.cross_file_diagnostics();
     let manifest_key = directory.path().join("pubspec.yaml").display().to_string();
     assert_eq!(recovered[&manifest_key].len(), 1);
@@ -632,6 +629,7 @@ fn asset_directory_failures_reach_config_messages_once_per_episode() {
         Vec::<ShowMessageParams>::new()
     );
     std::fs::write(&invalid_name, "asset").unwrap();
+    state.watched_files_changed(std::slice::from_ref(&invalid_name));
     assert!(state.cross_file_diagnostics().is_empty());
     let next = state.take_config_messages();
     assert_eq!(next.len(), 1);
@@ -1558,4 +1556,266 @@ fn disabled_dependency_probes_do_not_discover_package_root_contexts() {
         state.environment.dependency_input_watch_files(),
         Vec::<PathBuf>::new()
     );
+}
+
+fn filesystem_facts_fixture() -> (tempfile::TempDir, LspState, String, PathBuf, PathBuf) {
+    let (directory, mut state, _) = workspace(true);
+    std::fs::write(directory.path().join("falcon.json"),
+        r#"{"linter":{"rules":{"recommended":false,"style":{"conditional-uri-does-not-exist":"warn"}}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-assets":"warn"}}}}"#).unwrap();
+    let manifest = directory.path().join("pubspec.yaml");
+    std::fs::write(
+        &manifest,
+        "name: app\nflutter:\n  assets:\n    - assets/icons/\n",
+    )
+    .unwrap();
+    let assets = directory.path().join("assets/icons");
+    std::fs::create_dir_all(&assets).unwrap();
+    std::fs::create_dir(directory.path().join("lib")).unwrap();
+    let source = directory.path().join("lib/main.dart");
+    let text = "import 'main.dart' if (dart.library.io) 'platform.txt';\n";
+    std::fs::write(&source, text).unwrap();
+    let uri = format!("file://{}", source.display());
+    state.reload_config();
+    state.open(&uri, text.into(), Some(1));
+    state.analyze(&uri);
+    state.cross_file_pass();
+    (directory, state, uri, manifest, assets)
+}
+
+#[test]
+fn filesystem_facts_control_asset_create_alone_schedules_cross_file() {
+    let (directory, mut state, _uri, _manifest, assets) = filesystem_facts_fixture();
+    let _ = &directory;
+    let asset = assets.join("new.png");
+    std::fs::write(&asset, "asset").unwrap();
+    state.defer_cross_file_pass();
+    let _ = state.watched_files_changed(std::slice::from_ref(&asset));
+    assert!(
+        state.resume_cross_file_pass(),
+        "control: asset create must schedule cross-file"
+    );
+}
+
+#[test]
+fn filesystem_facts_mixed_batch_existence_and_asset_create_schedules_cross_file() {
+    let (directory, mut state, uri, _manifest, assets) = filesystem_facts_fixture();
+    let asset = assets.join("new.png");
+    std::fs::write(&asset, "asset").unwrap();
+    let platform = directory.path().join("lib/platform.txt");
+    std::fs::write(&platform, "").unwrap();
+    state.defer_cross_file_pass();
+    let updates = state.watched_files_changed(&[asset, platform]);
+    assert!(
+        updates.iter().any(|(updated, diagnostics)| updated == &uri
+            && !diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.rule == "conditional-uri-does-not-exist")),
+        "per-file diagnostics were not republished: {updates:?}"
+    );
+    assert!(
+        state.resume_cross_file_pass(),
+        "mixed batch dropped the cross-file pass"
+    );
+}
+
+#[test]
+fn filesystem_facts_typed_conditional_uris_keep_watch_set_bounded() {
+    let (_directory, mut state, uri, _manifest, _assets) = filesystem_facts_fixture();
+    let before = state.environment.dependency_input_watch_files().len();
+    for i in 0..300 {
+        let text = format!("import 'main.dart' if (dart.library.io) 'p{i}.txt';\n");
+        state.change(&uri, text, Some(i + 2));
+        state.analyze(&uri);
+    }
+    let after = state.environment.dependency_input_watch_files().len();
+    assert!(after <= before, "watch files grew from {before} to {after}");
+}
+
+fn missing_test_fixture() -> (tempfile::TempDir, LspState, PathBuf) {
+    let (directory, mut state, _) = workspace(true);
+    std::fs::write(directory.path().join("falcon.json"),
+        r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"avoid-missing-test-files":{"level":"warn","options":{"patterns":["^lib/"]}}}}}}"#).unwrap();
+    std::fs::write(directory.path().join("pubspec.yaml"), "name: app\n").unwrap();
+    std::fs::create_dir(directory.path().join("lib")).unwrap();
+    let source = directory.path().join("lib/value.dart");
+    std::fs::write(&source, "class Value {}\n").unwrap();
+    let uri = format!("file://{}", source.display());
+    state.reload_config();
+    state.open(&uri, "class Value {}\n".into(), Some(1));
+    state.cross_file_pass();
+    (directory, state, source)
+}
+
+fn has_missing_test(state: &mut LspState, source: &Path) -> bool {
+    state
+        .cross_file_diagnostics()
+        .get(&source.to_string_lossy().into_owned())
+        .is_some_and(|d| d.iter().any(|d| d.rule == "avoid-missing-test-files"))
+}
+
+#[test]
+fn filesystem_facts_directory_create_event_only() {
+    let (directory, mut state, source) = missing_test_fixture();
+    assert!(has_missing_test(&mut state, &source));
+    let test = directory.path().join("test");
+    std::fs::create_dir(&test).unwrap();
+    std::fs::write(test.join("value_test.dart"), "void main() {}").unwrap();
+    state.watched_files_changed(std::slice::from_ref(&test));
+    assert!(
+        !has_missing_test(&mut state, &source),
+        "stale after directory-only create event"
+    );
+}
+
+#[test]
+fn filesystem_facts_directory_rename_event_only() {
+    let (directory, mut state, source) = missing_test_fixture();
+    let staged = directory.path().join("staged");
+    std::fs::create_dir(&staged).unwrap();
+    std::fs::write(staged.join("value_test.dart"), "void main() {}").unwrap();
+    state.watched_files_changed(std::slice::from_ref(&staged.join("value_test.dart")));
+    assert!(has_missing_test(&mut state, &source));
+    let test = directory.path().join("test");
+    std::fs::rename(&staged, &test).unwrap();
+    state.watched_files_changed(&[staged, test]);
+    assert!(
+        !has_missing_test(&mut state, &source),
+        "stale after directory rename"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn filesystem_facts_symlinked_test_directory_create() {
+    let (directory, mut state, source) = missing_test_fixture();
+    assert!(has_missing_test(&mut state, &source));
+    let elsewhere = tempfile::tempdir().unwrap();
+    std::fs::write(elsewhere.path().join("value_test.dart"), "void main() {}").unwrap();
+    let test = directory.path().join("test");
+    std::os::unix::fs::symlink(elsewhere.path(), &test).unwrap();
+    state.watched_files_changed(std::slice::from_ref(&test));
+    assert!(
+        !has_missing_test(&mut state, &source),
+        "stale after symlinked test dir create"
+    );
+}
+
+#[test]
+fn filesystem_facts_file_rename_into_place() {
+    let (directory, mut state, source) = missing_test_fixture();
+    let test = directory.path().join("test");
+    std::fs::create_dir(&test).unwrap();
+    state.watched_files_changed(std::slice::from_ref(&test));
+    assert!(has_missing_test(&mut state, &source));
+    let temp = test.join("value_test.dart.tmp");
+    std::fs::write(&temp, "void main() {}").unwrap();
+    state.watched_files_changed(std::slice::from_ref(&temp));
+    let target = test.join("value_test.dart");
+    std::fs::rename(&temp, &target).unwrap();
+    state.watched_files_changed(&[temp, target]);
+    assert!(
+        !has_missing_test(&mut state, &source),
+        "stale after atomic rename"
+    );
+}
+
+fn fallback_conditional(pubspec: bool) -> bool {
+    let (directory, mut state, _) = workspace(false);
+    std::fs::write(directory.path().join("falcon.json"),
+        r#"{"linter":{"rules":{"recommended":false,"style":{"conditional-uri-does-not-exist":"warn"}}}}"#).unwrap();
+    if pubspec {
+        std::fs::write(directory.path().join("pubspec.yaml"), "name: app\n").unwrap();
+    }
+    std::fs::create_dir(directory.path().join("lib")).unwrap();
+    let source = directory.path().join("lib/main.dart");
+    let text = "import 'main.dart' if (dart.library.io) 'platform.txt';\n";
+    std::fs::write(&source, text).unwrap();
+    let uri = format!("file://{}", source.display());
+    state.reload_config();
+    let first = state.open(&uri, text.into(), Some(1));
+    assert!(
+        first
+            .iter()
+            .any(|d| d.rule == "conditional-uri-does-not-exist"),
+        "{first:?}"
+    );
+    std::fs::write(directory.path().join("lib/platform.txt"), "").unwrap();
+    state.revalidate_disk();
+    let after = state.analyze(&uri);
+    after
+        .iter()
+        .any(|d| d.rule == "conditional-uri-does-not-exist")
+}
+
+#[test]
+fn filesystem_facts_fallback_conditional_with_pubspec() {
+    assert!(
+        !fallback_conditional(true),
+        "stale in fallback with pubspec"
+    );
+}
+
+#[test]
+fn filesystem_facts_fallback_conditional_without_pubspec() {
+    assert!(
+        !fallback_conditional(false),
+        "stale in fallback without pubspec"
+    );
+}
+
+#[test]
+fn filesystem_facts_unrelated_build_output_does_not_publish_or_schedule_analysis() {
+    let (directory, mut state, _uri, _manifest, _assets) = filesystem_facts_fixture();
+    let walks = state.workspace_walk_count;
+    let builds = state.semantic_snapshot_build_count;
+    state.defer_cross_file_pass();
+    let output = directory.path().join("build/out.txt");
+    std::fs::create_dir_all(output.parent().unwrap()).unwrap();
+    std::fs::write(&output, "build output").unwrap();
+    assert!(state.watched_files_changed(&[output]).is_empty());
+    assert!(!state.resume_cross_file_pass());
+    assert_eq!(state.workspace_walk_count, walks);
+    assert_eq!(state.semantic_snapshot_build_count, builds);
+
+    let (directory, mut state, source) = missing_test_fixture();
+    assert!(has_missing_test(&mut state, &source));
+    state.defer_cross_file_pass();
+    assert!(
+        state
+            .watched_files_changed(&[directory.path().join("build/out.txt")])
+            .is_empty()
+    );
+    assert!(!state.resume_cross_file_pass());
+}
+
+#[test]
+fn filesystem_facts_overflow_ignores_build_output_and_refreshes_evicted_tests() {
+    let (directory, mut state, source) = missing_test_fixture();
+    for index in 0..300 {
+        std::fs::write(
+            directory.path().join(format!("lib/value{index:03}.dart")),
+            format!("class Value{index} {{}}\n"),
+        )
+        .unwrap();
+    }
+    state.watched_files_changed(&[directory.path().join("lib")]);
+    state.cross_file_pass();
+    assert!(has_missing_test(&mut state, &source));
+    let evicted = directory.path().join("test/value000_test.dart");
+    let evicted_source = directory.path().join("lib/value000.dart");
+    assert!(has_missing_test(&mut state, &evicted_source));
+    let walks = state.workspace_walk_count;
+    let builds = state.semantic_snapshot_build_count;
+    state.defer_cross_file_pass();
+    let output = directory.path().join("build/out.txt");
+    std::fs::create_dir_all(output.parent().unwrap()).unwrap();
+    std::fs::write(&output, "build output").unwrap();
+    assert!(state.watched_files_changed(&[output]).is_empty());
+    assert!(!state.resume_cross_file_pass());
+    assert_eq!(state.workspace_walk_count, walks);
+    assert_eq!(state.semantic_snapshot_build_count, builds);
+    std::fs::create_dir_all(evicted.parent().unwrap()).unwrap();
+    std::fs::write(&evicted, "void main() {}\n").unwrap();
+    state.watched_files_changed(&[evicted]);
+    assert!(!has_missing_test(&mut state, &evicted_source));
 }
