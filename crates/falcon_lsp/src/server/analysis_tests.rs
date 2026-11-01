@@ -2,7 +2,7 @@
 //! channels, rather than relying on a large fixture or a timing-sensitive sleep.
 
 use super::*;
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::Sender;
 use serde_json::json;
 use std::thread::{self, JoinHandle};
 
@@ -10,7 +10,7 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 
 struct RelayClient {
     connection: Connection,
-    inputs: Receiver<WorkerMessage>,
+    inputs: WorkerReceiver,
     rounds: Sender<AnalysisRound>,
     thread: JoinHandle<()>,
 }
@@ -18,9 +18,9 @@ struct RelayClient {
 impl RelayClient {
     fn start() -> Self {
         let (server, connection) = Connection::memory();
-        let (input, inputs) = crossbeam_channel::unbounded();
+        let (input, inputs) = worker_channel();
         let (rounds, output) = crossbeam_channel::unbounded();
-        let thread = thread::spawn(move || relay(&server, input, &output).unwrap());
+        let thread = thread::spawn(move || relay(&server, &input, &output).unwrap());
         Self {
             connection,
             inputs,
@@ -62,6 +62,8 @@ impl RelayClient {
                 generation,
                 deferred: Arc::new(deferred),
                 messages,
+                incomplete_message: None,
+                acknowledgement: None,
             })
             .unwrap();
     }
@@ -423,8 +425,8 @@ fn real_worker_cancels_and_supersedes_before_an_ignored_notification() {
         config_path: Some(config),
     };
     let (server, client) = Connection::memory();
-    let (input, receiver) = crossbeam_channel::unbounded();
-    let (sender, output) = crossbeam_channel::unbounded();
+    let (input, receiver) = worker_channel();
+    let (sender, output) = crossbeam_channel::bounded(0);
     let (started, blocked) = crossbeam_channel::bounded(1);
     let (release, resume) = crossbeam_channel::bounded(1);
     let request_runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -448,7 +450,7 @@ fn real_worker_cancels_and_supersedes_before_an_ignored_notification() {
         )
         .unwrap();
     });
-    let transport = thread::spawn(move || relay(&server, input, &output).unwrap());
+    let transport = thread::spawn(move || relay(&server, &input, &output).unwrap());
     let uri = format!("file://{}", temp.path().join("changed.dart").display());
     client.sender.send(ServerNotification::new(DidOpenTextDocument::METHOD.to_string(), json!({
         "textDocument": { "uri": uri, "languageId": "dart", "version": 1, "text": "void oldName() {}" }
@@ -586,4 +588,257 @@ fn debounce_snapshots_share_storage_until_dirty_membership_changes() {
         1,
         "draining must not mutate an in-flight snapshot"
     );
+}
+
+#[test]
+fn editor_burst_measurement() {
+    for (scenario, documents, events) in [
+        ("single", 1, 4_096),
+        ("many", 64, 4_096),
+        ("watcher", 1, 4_096),
+    ] {
+        let client = RelayClient::start();
+        client.request(1);
+        for version in 1..=events {
+            let uri = format!("file:///burst-{}.dart", version % documents);
+            let notification = if scenario == "watcher" {
+                ServerNotification::new(
+                    DidChangeWatchedFiles::METHOD.to_owned(),
+                    json!({"changes": [{"uri": uri, "type": 2}]}),
+                )
+            } else {
+                ServerNotification::new(
+                    DidChangeTextDocument::METHOD.to_owned(),
+                    json!({
+                        "textDocument": {"uri": uri, "version": version},
+                        "contentChanges": [{"text": "void main() { print('latest'); }"}]
+                    }),
+                )
+            };
+            client.connection.sender.send(notification.into()).unwrap();
+        }
+        let start = Instant::now();
+        client
+            .connection
+            .sender
+            .send(ServerNotification::new("$/cancelRequest".to_owned(), json!({"id": 1})).into())
+            .unwrap();
+        let Message::Response(response) = client.recv() else {
+            panic!("expected cancellation while the worker is blocked");
+        };
+        assert_eq!(
+            response.error.unwrap().code,
+            ErrorCode::RequestCanceled as i32
+        );
+        let latency = start.elapsed();
+        let depth = client.inputs.len();
+        let bytes: usize = client
+            .inputs
+            .try_iter()
+            .map(|(_, message, _)| {
+                std::mem::size_of::<WorkerMessage>() + serde_json::to_vec(&message).unwrap().len()
+            })
+            .sum();
+        println!(
+            "burst={scenario} events={events} documents={documents} input_depth={depth} retained_wire_plus_inline_bytes={bytes} cancel_us={}",
+            latency.as_micros()
+        );
+        assert_eq!(depth, usize::try_from(documents).unwrap());
+        client.finish();
+    }
+}
+
+#[test]
+fn request_burst_supersedes_matching_reads_without_blocking_cancellation_or_shutdown() {
+    let client = RelayClient::start();
+    client.request(1);
+    for id in 2..=4_097 {
+        let method = if id % 2 == 0 {
+            HoverRequest::METHOD
+        } else {
+            "textDocument/codeAction"
+        };
+        client
+            .connection
+            .sender
+            .send(
+                Request::new(
+                    id.into(),
+                    method.to_owned(),
+                    json!({
+                        "textDocument": {"uri": "file:///changed.dart"}
+                    }),
+                )
+                .into(),
+            )
+            .unwrap();
+        client
+            .connection
+            .sender
+            .send(
+                ServerNotification::new(
+                    DidChangeTextDocument::METHOD.to_owned(),
+                    json!({
+                        "textDocument": {"uri": "file:///changed.dart", "version": id},
+                        "contentChanges": [{"text": "void latest() {}"}]
+                    }),
+                )
+                .into(),
+            )
+            .unwrap();
+    }
+    for id in 2..=4_095 {
+        let Message::Response(response) = client.recv() else {
+            panic!("expected supersession response");
+        };
+        assert_eq!(response.id, RequestId::from(id));
+        assert_eq!(
+            response.error.unwrap().code,
+            ErrorCode::ContentModified as i32
+        );
+    }
+    assert!(client.inputs.len() <= 3);
+    for id in [4_096, 4_097] {
+        client
+            .connection
+            .sender
+            .send(ServerNotification::new("$/cancelRequest".to_owned(), json!({"id": id})).into())
+            .unwrap();
+        let Message::Response(response) = client.recv() else {
+            panic!("expected cancellation");
+        };
+        assert_eq!(response.id, RequestId::from(id));
+        assert_eq!(
+            response.error.unwrap().code,
+            ErrorCode::RequestCanceled as i32
+        );
+    }
+    assert_eq!(client.inputs.len(), 1);
+    for version in 1..=4_096 {
+        client.connection.sender.send(ServerNotification::new(DidChangeTextDocument::METHOD.to_owned(), json!({
+            "textDocument": {"uri": "file:///changed.dart", "version": version}, "contentChanges": [{"text": "void latest() {}"}]
+        })).into()).unwrap();
+    }
+    client
+        .connection
+        .sender
+        .send(Request::new(5_000.into(), "shutdown".to_owned(), ()).into())
+        .unwrap();
+    let Message::Response(cancelled) = client.recv() else {
+        panic!("expected cancellation before shutdown");
+    };
+    assert_eq!(cancelled.id, RequestId::from(1));
+    assert_eq!(
+        cancelled.error.unwrap().code,
+        ErrorCode::RequestCanceled as i32
+    );
+    let Message::Response(shutdown) = client.recv() else {
+        panic!("expected shutdown response");
+    };
+    assert_eq!(shutdown.id, RequestId::from(5_000));
+    assert!(shutdown.error.is_none());
+    assert_eq!(client.inputs.len(), 1);
+    client
+        .connection
+        .sender
+        .send(ServerNotification::new("exit".to_owned(), ()).into())
+        .unwrap();
+    client.finish();
+    println!(
+        "burst=request events=4097 pending_read_methods=2 superseded=4094 pending_input_upper_bound=3"
+    );
+}
+
+#[test]
+fn resolve_and_execute_requests_are_never_superseded() {
+    let client = RelayClient::start();
+    for id in 1..=4 {
+        let method = if id % 2 == 0 {
+            "workspace/executeCommand"
+        } else {
+            "codeAction/resolve"
+        };
+        client
+            .connection
+            .sender
+            .send(
+                Request::new(
+                    id.into(),
+                    method.to_owned(),
+                    json!({
+                        "textDocument": {"uri": "file:///main.dart"}
+                    }),
+                )
+                .into(),
+            )
+            .unwrap();
+    }
+    client
+        .connection
+        .sender
+        .send(ServerNotification::new("$/cancelRequest".to_owned(), json!({"id": 4})).into())
+        .unwrap();
+    let Message::Response(response) = client.recv() else {
+        panic!("expected cancellation");
+    };
+    assert_eq!(response.id, RequestId::from(4));
+    assert_eq!(
+        response.error.unwrap().code,
+        ErrorCode::RequestCanceled as i32
+    );
+    assert_eq!(client.inputs.len(), 3);
+    let ids: Vec<_> = client
+        .inputs
+        .try_iter()
+        .map(|(_, message, _)| {
+            let Message::Request(request) = message else {
+                panic!("expected request");
+            };
+            request.id
+        })
+        .collect();
+    assert_eq!(ids, [1.into(), 2.into(), 3.into()]);
+    client.finish();
+}
+
+#[test]
+fn superseding_an_active_read_cancels_its_token_and_suppresses_late_success() {
+    let client = RelayClient::start();
+    let request = |id: i32| {
+        Request::new(
+            id.into(),
+            HoverRequest::METHOD.to_owned(),
+            json!({
+                "textDocument": {"uri": "file:///main.dart"}
+            }),
+        )
+        .into()
+    };
+    client.connection.sender.send(request(1)).unwrap();
+    let (generation, _, token) = client.inputs.recv_timeout(TIMEOUT).unwrap();
+    let token = token.unwrap();
+    client.connection.sender.send(request(2)).unwrap();
+    let Message::Response(response) = client.recv() else {
+        panic!("expected supersession");
+    };
+    assert_eq!(response.id, RequestId::from(1));
+    assert_eq!(
+        response.error.unwrap().code,
+        ErrorCode::ContentModified as i32
+    );
+    assert!(token.cancelled.load(Ordering::Relaxed));
+    client.inputs.recv_timeout(TIMEOUT).unwrap();
+    client.complete(
+        generation,
+        true,
+        vec![
+            Response::new_ok(1.into(), json!({"late":true})).into(),
+            Response::new_ok(2.into(), json!(null)).into(),
+        ],
+    );
+    let Message::Response(response) = client.recv() else {
+        panic!("expected current response");
+    };
+    assert_eq!(response.id, RequestId::from(2));
+    client.finish();
 }

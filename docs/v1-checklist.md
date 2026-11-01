@@ -289,13 +289,123 @@ These entries describe implemented foundation, not acceptance of the open items.
 
 ### V1-4 — Bound editor work and preserve cancellation
 
-- [ ] Define request admission/backpressure/supersession for the unbounded worker
+- [x] Define request admission/backpressure/supersession for the unbounded worker
   channels/outbox in `crates/falcon_lsp/src/server.rs`. Cancellation already exists;
   preserve its transport path and measure latency before adding checkpoints.
 - Acceptance: bounded retained queued work under a deterministic burst test;
   notifications required for document correctness are not dropped; cancellation,
   edit/version ordering, stale-result suppression and shutdown remain live.
   Choose capacities from measured workload evidence, not an invented guarantee.
+- Queue inventory and policy (`server.rs` and `server/queue.rs`):
+  - Relay → worker originally retained every document notification, request and
+    watcher batch in an unbounded channel. The pending mailbox now folds FULL-sync
+    changes by URI, keeping the last received text and version, not the maximum
+    numeric version. Saves participate in text ordering without changing the last
+    received version; one real `didSave` per path preserves disk refresh and path
+    resolution side effects. Incremental/malformed changes remain lossless barriers;
+    Falcon negotiates FULL sync, so incremental traffic is not covered by the bound.
+  - Open/close lifecycle transitions are not indiscriminately discarded: within an
+    epoch, open/change/close can collapse to a close transition, preserving its
+    publication; a previously-open document's close/reopen keeps both transitions.
+    At most three entries per document retain lifecycle, latest buffer and save
+    refresh effects. Watcher batches merge across edits, unioning distinct paths;
+    create/delete beats change and the latest create/delete wins ties, including
+    delete/recreate. Read-only hover/code-action requests do not split folding
+    epochs: they observe the latest buffer, or receive `ContentModified` when its
+    version differs from the version received with the request. A newer request
+    for the same method and URI cancels/supersedes the older pending request with
+    `ContentModified`; no arbitrary request count or busy rejection is used.
+    `codeAction/resolve`, `workspace/executeCommand` and other non-read requests
+    remain lossless ordering barriers. Canceling a queued request removes it and
+    recompresses its epochs. Unknown notifications remain ignored.
+  - Without outstanding mutating/user actions, retained queued work is **O(D + W)**:
+    D is distinct document URIs touched in the pending window (including required
+    close publications), W is distinct watcher paths, and supported read methods
+    per URI are a fixed protocol set (hover and code action), not a capacity.
+    Outstanding user actions U preserve their own snapshots and add an honest
+    **O(U · (D + W + 1))** residual across ordering epochs. Unsupported/malformed
+    requests also remain barriers; unsolicited protocol floods are not covered.
+    These are entry-count bounds, not bounds on text/diagnostic sizes, project
+    size or final currently-open count. A 4,097-request burst interleaved with
+    4,096 edits retains at most two queued reads plus one latest document entry;
+    4,094 superseded reads receive `ContentModified`, and cancellation/shutdown
+    still bypass the worker.
+  - Worker → relay originally used an unbounded completed-round channel. A
+    rendezvous now retains zero queued rounds; the worker waits for one boolean
+    acknowledgement before starting the next round. A one-slot wake channel records
+    only whether pending work may exist. These 0/1 capacities encode handshakes,
+    not guessed workload limits. Shutdown disconnects both waits.
+  - The worker-local `Connection` outbox remains an unbounded channel used only by
+    one synchronous round, drained into that round before the acknowledgement wait.
+    Its diagnostics, configuration warnings, responses and watcher requests cannot
+    accumulate across rounds. Relay publications remain URI-keyed latest values;
+    ready/other message vectors drain per round. Debounce dirty membership and
+    pending semantic dependents are sets, not event histories. Configuration messages
+    drain per round; reverse-dependency BFS queues visit each graph node once.
+  - Dynamic watcher registration originally accumulated unacknowledged registration
+    requests. Refresh now waits for acknowledgement: one initial registration or
+    two replacement operations (unregister/register), then the latest desired watch
+    state is recomputed. The `lsp_server` transport's own reader/writer channels are
+    outside this mailbox; this does not promise bounded process memory for an
+    unresponsive peer or unsolicited/malformed protocol traffic.
+- Measurements on local main `b23c415d` before implementation, and this change after:
+  `MBX_CACHE_LINKS=false numen run -- cargo nextest run --locked -p falcon_lsp
+  -E 'test(editor_burst_measurement) | test(server::queue_tests) |
+  test(request_burst_supersedes)' --no-capture`.
+  The baseline numbers were collected with an **uncommitted instrumentation
+  probe** of main's input channel; that baseline probe is not part of this commit.
+  The committed command reproduces the after measurements. Its controlled relay
+  harness holds a request pending without running a worker: it does not measure
+  real analysis contention. Memory is a wire-plus-inline proxy (serialized payload
+  plus inline message size), **not heap/RSS**; allocator, collection/channel
+  metadata and shared keys are excluded.
+
+  | Deterministic burst | Before: retained entries / proxy bytes | After: retained entries / proxy bytes |
+  | --- | --- | --- |
+  | 4,096 edits, one URI | measured 4,096 / 1,579,949 | measured 1 / 386 |
+  | 4,096 edits, 64 URIs | measured 4,096 / 1,583,405 | measured 64 / 24,758 |
+  | 4,096 watcher notifications, one path | measured 4,096 / 1,323,008 | measured 1 / 323 |
+
+  Additional measured after-state bounds: 8,192 lifecycle events over 64 URIs
+  retain 64 entries when initially closed, 128 when initially open; 4,100 interleaved
+  open/change/save events retain two entries and publish version 2 after version 10.
+  Seed-42 interleavings of 1,031 lifecycle/edit/save/watcher events over four URIs
+  and four watcher paths retain 10 entries (healthy/persistent failure) or nine
+  (finally closed), below the 13-entry upper bound. Seed-93 producer batches also
+  interleave enqueueing with real worker pops and acknowledgements, including
+  open/save → pop-open → close/reopen, and compare the same final publications
+  and live episodes as unfolded processing. The original after replay recorded
+  five round messages / 2,852 proxy bytes and four relay publication keys / 2,092
+  proxy bytes; these are illustrative after samples, not a main outbox baseline.
+  Completed-round depth zero, wake/ack slots one, per-method/per-URI read retention,
+  the three-entry request/edit upper bound, and watcher pending requests at most
+  two are structural bounds. The 4,096-refresh test also measures one initial
+  registration and two replacement operations.
+- Cancellation latency in the controlled relay-only harness, with a request held
+  pending indefinitely and **no worker/analysis contention**: before 24/18/15 µs
+  and after 20/18/17 µs for single/many/watcher bursts in the original recorded
+  runs; the final harness rerun measured 51/23/14 µs. Other after iterations
+  observed 14–525 µs; these scheduler-sensitive samples are not
+  real-time guarantees or a real-worker latency bound. Cancellation stays on the
+  transport path; no extra analysis checkpoints were added. Real-worker blocked-
+  analysis cancellation tests retain a five-second liveness deadline, not a
+  claimed production latency.
+- Evidence: folded/unfolded real-worker replays compare final publications and live
+  episode notifications, including transient failure (no popup), persistent failure
+  (one popup), lifecycle collapse, save ordering and delete/recreate watcher merging.
+  Dedicated tests cover received-version ordering, incremental/malformed barriers,
+  stale results/side effects, cancellation through supersession bursts, canceled-
+  request epoch reclamation and shutdown without draining a burst. Read requests
+  reject advanced versions; resolving a versioned edit still computes from its
+  own ordered snapshot. A worker-pop lifecycle regression checks the close clear,
+  disk cache and fallback-stamp refresh before reopen. The existing no-flicker
+  watcher test floods 256 watcher notifications and 256 edits in each of five
+  batches: every open-file publication retains merged cross-file diagnostics and
+  the final version is 1,281. Only stale-round **incompleteness** warnings stay
+  Pending until a current round announces them; recovery re-arms the episode.
+  One-shot configuration/environment/asset/manifest messages remain lossless,
+  including an invalid-config watcher round superseded by a document open.
+
 
 ### V1-5 — Establish representative profiling and the performance gate
 

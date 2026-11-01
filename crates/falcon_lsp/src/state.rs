@@ -758,6 +758,12 @@ impl LspState {
         })
     }
 
+    pub(crate) fn retry_incomplete_message(&mut self) {
+        if self.incomplete_episode == IncompleteEpisode::Announced {
+            self.incomplete_episode = IncompleteEpisode::Pending;
+        }
+    }
+
     /// Mutable package roots and declared localization input directories.
     pub fn watched_dependency_roots(&self) -> Vec<PathBuf> {
         let mut roots: Vec<_> = self
@@ -1470,6 +1476,15 @@ impl LspState {
 
     pub fn document(&self, uri: &str) -> Option<&DocumentState> {
         self.documents.get(uri)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_closed_disk_state(&self, path: &Path) -> bool {
+        self.fallback_stamps.get(path) == Some(&FileStamp::read(path))
+            && self.disk_files.get(path).is_some_and(|cached| {
+                falcon_analyze::read_source(path)
+                    .is_ok_and(|source| cached.parsed.source() == source)
+            })
     }
 
     pub fn open_uris(&self) -> Vec<String> {

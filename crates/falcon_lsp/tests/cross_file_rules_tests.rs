@@ -268,7 +268,18 @@ fn watched_batches_never_publish_open_files_without_their_cross_file_diagnostics
     for batch in 0..5 {
         let unrelated =
             client.write_file(&format!("unrelated_{batch}.dart"), "class Unrelated {}\n");
-        client.watch(&unrelated);
+        for _ in 0..256 {
+            client.watch(&unrelated);
+        }
+        for edit in 1..=256 {
+            client.notify(
+                lsp_types::notification::DidChangeTextDocument::METHOD,
+                serde_json::json!({
+                    "textDocument": {"uri": uri, "version": batch * 256 + edit + 1},
+                    "contentChanges": [{"text": source}]
+                }),
+            );
+        }
         assert!(
             client
                 .drain_publishes()
@@ -290,6 +301,7 @@ fn watched_batches_never_publish_open_files_without_their_cross_file_diagnostics
             serde_json::from_value(notification.params).unwrap();
         if publication.uri.as_str() == uri {
             assert!(has_rule(&publication, "no-import-cycles"));
+            assert_eq!(publication.version, Some(1_281));
             break;
         }
     }

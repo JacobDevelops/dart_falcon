@@ -57,7 +57,13 @@ impl Default for ServerOptions {
 
 type ServerError = Box<dyn Error + Send + Sync>;
 
-type WorkerMessage = (u64, Message, Option<Arc<AtomicBool>>);
+type WorkerMessage = (u64, Message, Option<Arc<RequestState>>);
+
+mod queue;
+use queue::{
+    PendingRequests, RequestState, WorkerInput, WorkerReceiver, remember_document_version,
+    worker_channel,
+};
 
 #[derive(Default)]
 struct Debounce {
@@ -173,7 +179,7 @@ impl FileWatching {
     }
 
     fn refresh(&mut self, connection: &Connection, state: &LspState) -> Result<(), ServerError> {
-        if !self.dynamic {
+        if !self.dynamic || !self.pending.is_empty() {
             return Ok(());
         }
         let dependency_generation = state.watched_dependency_generation();
@@ -494,15 +500,17 @@ fn run_with_state(
     info!("LSP server initialized");
     publish_config_messages(connection, &mut state)?;
 
-    let (input, receiver) = crossbeam_channel::unbounded();
-    let (sender, output) = crossbeam_channel::unbounded();
+    let (input, receiver) = worker_channel();
+    let (sender, output) = crossbeam_channel::bounded(0);
     let worker_options = options.clone();
     let worker = std::thread::Builder::new()
         .name("falcon-lsp-analysis".to_string())
         .spawn(move || {
             analysis_worker_with(&worker_options, state, watching, &receiver, &sender, |_| {})
         })?;
-    let result = relay(connection, input, &output);
+    let result = relay(connection, &input, &output);
+    drop(input);
+    drop(output);
     let worker_result = worker.join().map_err(|_| "LSP analysis worker panicked")?;
     worker_result.and(result)
 }
@@ -511,20 +519,19 @@ struct AnalysisRound {
     generation: u64,
     deferred: Arc<HashSet<String>>,
     messages: Vec<Message>,
+    incomplete_message: Option<lsp_types::ShowMessageParams>,
+    acknowledgement: Option<crossbeam_channel::Sender<bool>>,
 }
 
 /// The transport owns publication and cancellation; the worker alone owns state.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "the relay must own this sender so it disconnects the worker before joining it"
-)]
 fn relay(
     connection: &Connection,
-    input: crossbeam_channel::Sender<WorkerMessage>,
+    input: &WorkerInput,
     output: &crossbeam_channel::Receiver<AnalysisRound>,
 ) -> Result<(), ServerError> {
     let mut generation = 0;
-    let mut pending_requests = HashMap::<RequestId, Arc<AtomicBool>>::new();
+    let mut pending_requests = PendingRequests::default();
+    let mut document_versions = HashMap::new();
     let mut publications = HashMap::new();
     let mut other_messages = Vec::new();
     let mut publication_order = 0_u64;
@@ -535,33 +542,23 @@ fn relay(
                 let Ok(message) = message else { return Ok(()); };
                 let mut cancelled = None;
                 match &message {
-                    // Only requests need a token; notifications always execute
-                    // to preserve the worker's ordered document state.
                     Message::Request(request) => {
                         if request.method == "shutdown" {
-                            // Resolve every accepted request before acknowledging
-                            // shutdown; the worker's late responses are discarded.
-                            for (id, token) in pending_requests.drain() {
-                                token.store(true, Ordering::Relaxed);
-                                connection.sender.send(Response::new_err(
-                                    id,
-                                    ErrorCode::RequestCanceled as i32,
-                                    "server shutting down".to_string(),
-                                ).into())?;
-                            }
+                            cancel_requests_on_shutdown(connection, &mut pending_requests)?;
                             connection.handle_shutdown(request)?;
                             return Ok(());
                         }
-                        let token = Arc::new(AtomicBool::new(false));
-                        pending_requests.insert(request.id.clone(), Arc::clone(&token));
-                        cancelled = Some(token);
+                        let version = request.params["textDocument"]["uri"].as_str()
+                            .and_then(|uri| document_versions.get(uri)).copied();
+                        cancelled = Some(admit_request(connection, input, &mut pending_requests, request, version)?);
                     }
                     Message::Notification(notification) if notification.method == "$/cancelRequest" => {
                         if let Some(id) = notification.params.get("id")
                             .and_then(|id| serde_json::from_value::<RequestId>(id.clone()).ok())
                             && let Some(token) = pending_requests.remove(&id)
                         {
-                            token.store(true, Ordering::Relaxed);
+                            token.cancelled.store(true, Ordering::Relaxed);
+                            input.cancel(&id)?;
                             connection.sender.send(Response::new_err(
                                 id,
                                 ErrorCode::RequestCanceled as i32,
@@ -580,17 +577,20 @@ fn relay(
                             | DidChangeWatchedFiles::METHOD)
                         {
                             generation += 1;
+                        } else {
+                            debug!(method = notification.method, "ignoring notification");
+                            continue;
                         }
                     }
                     Message::Response(_) => {}
                 }
+                remember_document_version(&mut document_versions, &message);
                 input.send((generation, message, cancelled))?;
             }
             recv(output) -> round => {
                 let Ok(round) = round else { return Ok(()); };
                 let current = round.generation == generation;
-                // Keep unpublished unrelated files when a newer edit supersedes
-                // a round. Its affected files replace these entries before flush.
+                // Unrelated unpublished files survive supersession until their replacements flush.
                 buffer_round_messages(
                     round.messages,
                     current,
@@ -606,18 +606,70 @@ fn relay(
                         connection.sender.send(notification.into())?;
                     }
                 }
+                if current
+                    && let Some(message) = round.incomplete_message
+                {
+                    connection.sender.send(ServerNotification::new(
+                        lsp_types::notification::ShowMessage::METHOD.to_string(),
+                        message,
+                    ).into())?;
+                }
                 for message in other_messages.drain(..) {
                     connection.sender.send(message)?;
+                }
+                if let Some(acknowledgement) = round.acknowledgement {
+                    let _ = acknowledgement.try_send(current);
                 }
             }
         }
     }
 }
 
+fn admit_request(
+    connection: &Connection,
+    input: &WorkerInput,
+    pending: &mut PendingRequests,
+    request: &Request,
+    version: Option<i32>,
+) -> Result<Arc<RequestState>, ServerError> {
+    let (token, superseded) = pending.register(request, version);
+    if let Some((id, previous)) = superseded {
+        previous.cancelled.store(true, Ordering::Relaxed);
+        input.cancel(&id)?;
+        connection.sender.send(
+            Response::new_err(
+                id,
+                ErrorCode::ContentModified as i32,
+                "request superseded by a newer request for this document".to_owned(),
+            )
+            .into(),
+        )?;
+    }
+    Ok(token)
+}
+
+fn cancel_requests_on_shutdown(
+    connection: &Connection,
+    pending_requests: &mut PendingRequests,
+) -> Result<(), ServerError> {
+    for (id, token) in pending_requests.drain() {
+        token.cancelled.store(true, Ordering::Relaxed);
+        connection.sender.send(
+            Response::new_err(
+                id,
+                ErrorCode::RequestCanceled as i32,
+                "server shutting down".to_owned(),
+            )
+            .into(),
+        )?;
+    }
+    Ok(())
+}
+
 fn buffer_round_messages(
     messages: Vec<Message>,
     current: bool,
-    pending_requests: &mut HashMap<RequestId, Arc<AtomicBool>>,
+    pending_requests: &mut PendingRequests,
     publications: &mut HashMap<String, (u64, ServerNotification)>,
     other_messages: &mut Vec<Message>,
     publication_order: &mut u64,
@@ -687,7 +739,7 @@ fn analysis_worker_with(
     options: &ServerOptions,
     mut state: LspState,
     mut watching: FileWatching,
-    receiver: &crossbeam_channel::Receiver<WorkerMessage>,
+    receiver: &WorkerReceiver,
     output: &crossbeam_channel::Sender<AnalysisRound>,
     mut before_message: impl FnMut(&Message),
 ) -> Result<(), ServerError> {
@@ -709,69 +761,67 @@ fn analysis_worker_with(
     }
     let mut idle_poll_delay = Duration::from_secs(1);
     watching.refresh(&connection, &state)?;
+    let (acknowledgement, acknowledged) = crossbeam_channel::bounded(1);
 
     loop {
+        let incomplete_message = if debounce.dirty.is_empty() && !debounce.cross_file {
+            state.take_incomplete_message()
+        } else {
+            None
+        };
+        let announced_incomplete = incomplete_message.is_some();
         let messages: Vec<_> = outbox.try_iter().collect();
-        // Even an ignored notification completes its generation. Otherwise an
-        // unrelated superseding event could strand a valid buffered publication.
         if output
             .send(AnalysisRound {
                 generation,
                 deferred: Arc::clone(&debounce.dirty),
                 messages,
+                incomplete_message,
+                acknowledgement: Some(acknowledgement.clone()),
             })
             .is_err()
         {
             return Ok(());
         }
+        match receiver.acknowledge(&acknowledged) {
+            Some(false) if announced_incomplete => state.retry_incomplete_message(),
+            Some(_) => {}
+            None => return Ok(()),
+        }
         let message = match debounce.deadline {
-            Some(at) => {
-                let timeout = at.saturating_duration_since(Instant::now());
-                match receiver.recv_timeout(timeout) {
-                    Ok((next_generation, message, cancelled)) => {
-                        generation = next_generation;
-                        Some((message, cancelled))
-                    }
-                    Err(RecvTimeoutError::Timeout) => None,
-                    Err(RecvTimeoutError::Disconnected) => return Ok(()),
-                }
-            }
-            None if watching.dynamic => match receiver.recv() {
-                Ok((next_generation, message, cancelled)) => {
-                    generation = next_generation;
-                    Some((message, cancelled))
-                }
-                Err(_) => return Ok(()),
-            },
-            None => match receiver.recv_timeout(idle_poll_delay) {
-                Ok((next_generation, message, cancelled)) => {
-                    generation = next_generation;
-                    Some((message, cancelled))
-                }
-                Err(RecvTimeoutError::Timeout) => None,
-                Err(RecvTimeoutError::Disconnected) => return Ok(()),
-            },
+            Some(at) => receiver.recv_timeout(at.saturating_duration_since(Instant::now())),
+            None if watching.dynamic => receiver.recv().map_err(|_| RecvTimeoutError::Disconnected),
+            None => receiver.recv_timeout(idle_poll_delay),
         };
 
-        let Some((message, token)) = message else {
-            idle_poll_delay =
-                revalidate_and_publish(&connection, &mut state, &mut debounce, idle_poll_delay)?;
-            continue;
+        let (next_generation, message, token) = match message {
+            Ok(message) => message,
+            Err(RecvTimeoutError::Timeout) => {
+                idle_poll_delay = revalidate_and_publish(
+                    &connection,
+                    &mut state,
+                    &mut debounce,
+                    idle_poll_delay,
+                )?;
+                continue;
+            }
+            Err(RecvTimeoutError::Disconnected) => return Ok(()),
         };
+        generation = generation.max(next_generation);
         idle_poll_delay = Duration::from_secs(1);
-        let cancelled = || {
-            token
-                .as_ref()
-                .is_some_and(|token| token.load(Ordering::Relaxed))
-        };
-        if cancelled() {
+        if token
+            .as_ref()
+            .is_some_and(|token| token.cancelled.load(Ordering::Relaxed))
+        {
             continue;
         }
         before_message(&message);
 
         match message {
             Message::Request(request) => {
-                handle_request(&connection, &mut state, request, &cancelled)?;
+                if !handle_queued_request(&connection, &mut state, request, token.as_deref())? {
+                    continue;
+                }
             }
             Message::Notification(notification) => {
                 if !handle_notification(
@@ -793,6 +843,37 @@ fn analysis_worker_with(
         publish_config_messages(&connection, &mut state)?;
         watching.refresh(&connection, &state)?;
     }
+}
+
+fn handle_queued_request(
+    connection: &Connection,
+    state: &mut LspState,
+    request: Request,
+    token: Option<&RequestState>,
+) -> Result<bool, ServerError> {
+    if token
+        .and_then(|token| token.read.as_ref())
+        .is_some_and(|read| {
+            state
+                .document(read.uri.as_ref())
+                .and_then(|document| document.version)
+                != read.version
+        })
+    {
+        connection.sender.send(
+            Response::new_err(
+                request.id,
+                ErrorCode::ContentModified as i32,
+                "document version changed while the request was queued".to_owned(),
+            )
+            .into(),
+        )?;
+        return Ok(false);
+    }
+    handle_request(connection, state, request, &|| {
+        token.is_some_and(|token| token.cancelled.load(Ordering::Relaxed))
+    })?;
+    Ok(true)
 }
 
 fn revalidate_and_publish(
@@ -1205,7 +1286,7 @@ fn hover(state: &LspState, params: &HoverParams, cancelled: &dyn Fn() -> bool) -
     })
 }
 
-/// Publish changed cross-file results and incomplete-analysis warnings.
+/// Publish changed cross-file results.
 fn cross_file_pass_and_publish(
     connection: &Connection,
     state: &mut LspState,
@@ -1220,15 +1301,6 @@ fn cross_file_pass_and_publish(
     }
     for (uri, diagnostics) in state.cross_file_pass() {
         publish(connection, state, &uri, &diagnostics)?;
-    }
-    if let Some(message) = state.take_incomplete_message() {
-        connection.sender.send(
-            ServerNotification::new(
-                lsp_types::notification::ShowMessage::METHOD.to_string(),
-                message,
-            )
-            .into(),
-        )?;
     }
     Ok(())
 }
@@ -1322,3 +1394,6 @@ mod tests;
 
 #[cfg(test)]
 mod analysis_tests;
+
+#[cfg(test)]
+mod queue_tests;
