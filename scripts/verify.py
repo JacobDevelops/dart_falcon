@@ -15,9 +15,7 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = {
     "CARGO_BUILD_JOBS": "2",
-    "NEXTEST_TEST_THREADS": "4",
     "RUST_TEST_THREADS": "4",
-    "MBX_SCHEDULER_TESTS": "1",
     "MBX_CACHE_LINKS": "false",
     "PYTHONDONTWRITEBYTECODE": "1",
 }

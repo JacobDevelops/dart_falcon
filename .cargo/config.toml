@@ -1,2 +1,6 @@
 [alias]
 xtask = "run --locked --package xtask --"
+
+# Test binaries are ~30% DWARF; zlib (not zstd) keeps std backtraces' file:line.
+[target.'cfg(all(target_os = "linux", target_env = "gnu"))']
+rustflags = [ "-C", "link-arg=-Wl,--compress-debug-sections=zlib" ]

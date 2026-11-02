@@ -103,16 +103,12 @@ class VerificationTests(unittest.TestCase):
         for key, value in verify.DEFAULTS.items():
             self.assertEqual(actual[key], value)
         self.assertEqual(actual["CARGO_BUILD_JOBS"], "2")
-        self.assertEqual(actual["NEXTEST_TEST_THREADS"], "4")
         self.assertEqual(actual["RUST_TEST_THREADS"], "4")
-        self.assertEqual(actual["MBX_SCHEDULER_TESTS"], "1")
         self.assertEqual(actual["MBX_CACHE_LINKS"], "false")
-        for name in ("RAYON_NUM_THREADS", "MBX_SCHEDULER_PRIORITY"):
+        for name in ("RAYON_NUM_THREADS", "MBX_SCHEDULER_PRIORITY", "NEXTEST_TEST_THREADS", "MBX_SCHEDULER_TESTS"):
             self.assertNotIn(name, actual)
-        overrides = {"CARGO_BUILD_JOBS": "-1", "NEXTEST_TEST_THREADS": "num-cpus",
-                     "RUST_TEST_THREADS": "3", "RAYON_NUM_THREADS": "0",
-                     "MBX_SCHEDULER_PRIORITY": "low", "MBX_SCHEDULER_TESTS": "0",
-                     "MBX_CACHE_LINKS": "true"}
+        overrides = {"CARGO_BUILD_JOBS": "-1", "RUST_TEST_THREADS": "3", "RAYON_NUM_THREADS": "0",
+                     "MBX_SCHEDULER_PRIORITY": "low", "MBX_CACHE_LINKS": "true"}
         with patch.dict(os.environ, overrides, clear=True):
             for env in (verify.environment(), verify.iteration_environment(verify.environment())):
                 for name, value in overrides.items():

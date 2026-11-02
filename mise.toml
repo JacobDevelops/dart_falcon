@@ -5,6 +5,8 @@ wrappers = { cargo = { command = "mbx", env = { MBX_CARGO_SHIM_MODE = "1" } } }
 [env]
 # Linked test executables change every edit and are rarely reused; caching them doubles disk writes.
 MBX_CACHE_LINKS = "{{ get_env(name='MBX_CACHE_LINKS', default='false') }}"
+# Seeding copies another checkout's whole registry build (on ext4, real bytes); cache restores hard-link instead.
+MBX_TARGET_SEED = "{{ get_env(name='MBX_TARGET_SEED', default='false') }}"
 
 # Rust comes from rustup via rust-toolchain.toml; mise installs the other tools.
 [tools]

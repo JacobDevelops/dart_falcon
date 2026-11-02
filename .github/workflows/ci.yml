@@ -19,6 +19,8 @@ concurrency:
 # Debuginfo is most of the codegen, link and cache size; panics still report file:line without it.
 env:
   CARGO_PROFILE_DEV_DEBUG: "0"
+  # No debuginfo to compress; empty RUSTFLAGS keeps host build scripts/proc-macros mbx-cacheable.
+  RUSTFLAGS: ""
 
 # Each job restores the newest mbx compiler snapshot that main saved for it; only
 # main pushes write snapshots, so pull requests never seed what main restores.

@@ -20,34 +20,44 @@ There is no blanket waiver for a red or unexecuted final gate.
 
 ## Resource budget
 
-Verification sets these defaults only for its children; explicit environment
-values override them. Benchmarks and normal Falcon execution are unaffected,
-except for `MBX_CACHE_LINKS` as described below.
+Repository configuration applies beyond the verification wrapper, so concurrent
+jj workspaces share one budget. The `mise.toml` values need mise's environment
+(activated shell or `mise exec`); mbx scheduling excludes doctests and
+`CARGO_CMD=cargo` runs:
+
+| Setting | Where | Effect |
+| --- | --- | --- |
+| `scheduler.tests = true` | `.mbx.toml` | Every workspace's test processes join mbx's machine-wide CPU/memory pool instead of a fixed per-run thread cap |
+| `MBX_CACHE_LINKS=false` | `mise.toml` | Linked test executables change every edit and are rarely reused; caching them doubles writes |
+| `MBX_TARGET_SEED=false` | `mise.toml` | A new checkout restores registry units from the cache by hard link instead of copying another checkout's target |
+| `--compress-debug-sections=zlib` | `.cargo/config.toml` | Linux GNU links compress DWARF, cutting each test binary by ~27%; std backtraces keep file:line (zstd would not) |
+
+Explicit environment values still win (`MBX_SCHEDULER_TESTS`,
+`NEXTEST_TEST_THREADS`, `MBX_*`). On Linux GNU, an explicit `RUSTFLAGS` (CI sets
+it empty: its dev builds carry no debuginfo) replaces the link flag, and this
+target entry takes precedence over `build.rustflags`/`CARGO_BUILD_RUSTFLAGS`.
+CI's `mbx-setup` action sets `MBX_CACHE_LINKS=true` because later CI runs
+restore linked binaries from main's saved snapshots.
+
+Verification additionally sets these defaults only for its children:
 
 | Variable | Default | Controls |
 | --- | --- | --- |
 | `CARGO_BUILD_JOBS` | 2 | One Cargo build's jobs |
-| `NEXTEST_TEST_THREADS` | 4 | Concurrent nextest test processes |
 | `RUST_TEST_THREADS` | 4 | Threads inside libtest harnesses |
-| `MBX_SCHEDULER_TESTS` | 1 | mbx admission for supported test runs |
-| `MBX_CACHE_LINKS` | false | Linked test executables change every edit and are rarely reused; caching them doubles writes |
 
-`mise.toml` also defaults `MBX_CACHE_LINKS` to false in its `[env]`, so any
-command run in the repository through mise (`cargo`, `cargo bench`, `makers`)
-skips the same linked-binary cache writes; an explicit value still wins. CI's
-`mbx-setup` action sets it to true because later CI runs restore linked binaries
-from main's saved snapshots.
-
-Compilation and test defaults match the corresponding LOKE values: two compile
-jobs, four nextest tests and four libtest threads. Falcon sets them in this wrapper;
-LOKE sets compilation/libtest in cargo-make and nextest in its profile. Falcon's
-low-level tasks still bypass these wrapper defaults. The wrapper also passes this
+Compilation and libtest defaults match the corresponding LOKE values: two compile
+jobs and four libtest threads. Nextest keeps its CPU-count default: a fixed
+four-test cap doubled the suite's wall time while mbx admission already bounds
+tests across workspaces. Falcon's low-level tasks still bypass the wrapper's
+job limit; mbx's machine-wide pool admits their compilations.
+The wrapper also passes this
 environment to Blaze iteration, but nextest/mbx settings do not schedule Blaze's
 own compiler or test runner, and Cargo's job count is not a Blaze memory/CPU cap.
 
 Falcon does not set `RAYON_NUM_THREADS` or `MBX_SCHEDULER_PRIORITY`: caller values
-or the underlying tool defaults apply. All explicit overrides pass through,
-including native forms such as nextest's `num-cpus`; each tool validates its own
+or the underlying tool defaults apply. All explicit overrides pass through; each
+tool validates its own
 settings. No global machine setting is changed.
 
 These defaults are not memory limits or a promise of responsiveness. Concurrent
@@ -57,8 +67,8 @@ cache reuse, but its memory estimates are not OS-enforced caps. Account for othe
 workspaces and applications when selecting explicit overrides.
 
 Use current mbx (test scheduling is supported by 1.28.0). Plain Cargo remains an
-option with `CARGO_CMD=cargo`; per-command thread limits remain but mbx admission
-and compiler-cache sharing do not. Doctests and directly executed corpus children
+option with `CARGO_CMD=cargo`; the libtest thread limit remains but nextest has
+neither a test cap nor mbx admission, and compiler-cache sharing is lost. Doctests and directly executed corpus children
 are not individually scheduled by mbx. Libtest honors its thread setting, but
 this wrapper does not impose a general bound on child-process fan-out.
 Nextest's existing timeout includes time spent waiting for mbx admission. Inspect

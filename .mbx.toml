@@ -1,0 +1,3 @@
+# Admit every workspace's test processes to the machine-wide pool, not only verify-wrapper runs.
+[scheduler]
+tests = true
