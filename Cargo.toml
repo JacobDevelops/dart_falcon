@@ -118,6 +118,13 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 debug = false
 
+# Unoptimised CST/analysis code made deep-chain tests ~4x slower; rule edits don't rebuild these.
+[profile.dev.package.falcon_syntax]
+opt-level = 2
+
+[profile.dev.package.falcon_analyze]
+opt-level = 2
+
 [[test]]
 name = "it"
 path = "tests/it.rs"

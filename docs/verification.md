@@ -95,6 +95,16 @@ through dependency code needs a local debug-profile override. Workspace line
 tables do not provide full debugger variable/type information. Bench profiling
 still uses full debug information, and release settings are unchanged.
 
+Dev/test builds compile `falcon_syntax` and `falcon_analyze` at `opt-level = 2`,
+keeping debug assertions and overflow checks. Unoptimised CST and analysis code
+dominated the suite: the 100k-operand chain tests alone took 494 s of CPU. With
+these two crates optimised, the full suite drops from 105 s to 33 s wall and from
+1,630 s to 499 s CPU. Rule edits don't rebuild either crate; editing them adds
+about 50 s of opt-2 codegen. Generic traversal code (`walk_expr` and friends with
+a `V: Visitor` parameter) is instantiated, and optimised, in the crate that uses
+it, so rule visitors in `falcon_rules` still run at opt 0. Inlined frames in these
+crates step and attribute lines less precisely; use a local override to debug them.
+
 ## Evidence and cancellation
 
 `--dry-run` shows the exact commands and budgets without running checks:
