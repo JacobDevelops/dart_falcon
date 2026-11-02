@@ -72,14 +72,14 @@ impl TestClient {
         self.workspace.path().join(name)
     }
 
-    /// Write a file at a (possibly nested) workspace-relative path, creating
+    /// Atomically write a file at a workspace-relative path, creating
     /// parent directories. Returns its `file://` URI.
-    fn write_file(&self, rel: &str, source: &str) -> String {
+    fn write_file(&self, rel: &str, source: impl AsRef<[u8]>) -> String {
         let path = self.workspace_file(rel);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).unwrap();
         }
-        fs::write(&path, source).unwrap();
+        crate::write_file_atomically(&path, source);
         uri_for(&path)
     }
 
@@ -516,7 +516,7 @@ fn disabled_cross_file_rules_still_qualify_incomplete_semantic_analysis() {
         r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-ignoring-return-values":"warn"}}},"cross-file":{"enabled":false}}"#,
     );
     let orphan_uri = write_corpus(&client);
-    fs::write(client.workspace_file("lib/broken.dart"), [0xff]).unwrap();
+    client.write_file("lib/broken.dart", [0xff]);
 
     client.open(&orphan_uri, "class OrphanThing {}\n", 1);
     let publishes = client.drain_publishes_with_warnings(1);
@@ -531,11 +531,7 @@ fn disabled_cross_file_rules_still_qualify_incomplete_semantic_analysis() {
         &orphan_uri,
         "unused-files"
     ));
-    fs::write(
-        client.workspace_file("lib/broken.dart"),
-        "class Recovered {}\n",
-    )
-    .unwrap();
+    client.write_file("lib/broken.dart", "class Recovered {}\n");
     client.watch(&uri_for(&client.workspace_file("lib/broken.dart")));
     let recovered = client.drain_publishes();
     let last = recovered
@@ -554,8 +550,7 @@ fn incomplete_analysis_warns_once_per_episode_and_recovers_cross_file_results() 
     client.write_file("lib/main.dart", "void main() {}\n");
     let source = "// falcon-ignore cross-file/correctness/incomplete-analysis: server warnings must remain\npart 'broken.dart';\nclass OrphanThing {}\n";
     let uri = client.write_file("lib/orphan.dart", source);
-    let broken = client.workspace_file("lib/broken.dart");
-    fs::write(&broken, [0xff]).unwrap();
+    client.write_file("lib/broken.dart", [0xff]);
     client.open(&uri, source, 1);
     let first = client.drain_publishes_with_warnings(1);
     let diagnostic = first
@@ -602,7 +597,7 @@ fn incomplete_analysis_warns_once_per_episode_and_recovers_cross_file_results() 
     ));
     assert_eq!(client.warnings.len(), 1);
 
-    fs::write(&broken, "part of 'orphan.dart';\n").unwrap();
+    client.write_file("lib/broken.dart", "part of 'orphan.dart';\n");
     client.save(&uri);
     let recovered = client.drain_publishes();
     let final_publish = recovered
@@ -614,7 +609,7 @@ fn incomplete_analysis_warns_once_per_episode_and_recovers_cross_file_results() 
     assert!(has_rule(final_publish, "unused-files"), "{recovered:?}");
     assert_eq!(client.warnings.len(), 1);
 
-    fs::write(&broken, [0xff]).unwrap();
+    client.write_file("lib/broken.dart", [0xff]);
     client.save(&uri);
     let broken_again = client.drain_publishes_with_warnings(1);
     assert!(any_publish_has_rule(
@@ -632,7 +627,7 @@ fn incomplete_episode_recovers_and_rebreaks_without_open_documents() {
     let source = "part 'broken.dart';\nclass OrphanThing {}\n";
     let uri = client.write_file("lib/orphan.dart", source);
     let broken = client.workspace_file("lib/broken.dart");
-    fs::write(&broken, [0xff]).unwrap();
+    client.write_file("lib/broken.dart", [0xff]);
     client.open(&uri, source, 1);
     client.drain_publishes_with_warnings(1);
     client.close(&uri);
@@ -642,10 +637,10 @@ fn incomplete_episode_recovers_and_rebreaks_without_open_documents() {
             .iter()
             .any(|p| p.uri.as_str() == uri && p.diagnostics.is_empty())
     );
-    fs::write(&broken, "part of 'orphan.dart';\n").unwrap();
+    client.write_file("lib/broken.dart", "part of 'orphan.dart';\n");
     client.watch(&uri_for(&broken));
     assert_eq!(client.drain_publishes().len(), 0);
-    fs::write(&broken, [0xff]).unwrap();
+    client.write_file("lib/broken.dart", [0xff]);
     client.watch(&uri_for(&broken));
     assert_eq!(client.drain_publishes().len(), 0);
     client.open(&uri, source, 2);
@@ -659,11 +654,11 @@ fn disabling_cross_file_rules_keeps_incomplete_semantic_analysis_qualified() {
     let mut client = TestClient::start(ENABLE_UNUSED_FILES);
     let source = "class OrphanThing {}\n";
     let uri = client.write_file("lib/orphan.dart", source);
-    fs::write(client.workspace_file("lib/broken.dart"), [0xff]).unwrap();
+    client.write_file("lib/broken.dart", [0xff]);
     client.open(&uri, source, 1);
     client.drain_publishes_with_warnings(1);
     let config = client.workspace_file("falcon.json");
-    fs::write(&config, DISABLE_CROSS_FILE).unwrap();
+    client.write_file("falcon.json", DISABLE_CROSS_FILE);
     client.watch(&uri_for(&config));
     let qualified = client.drain_publishes_with_warnings(1);
     let last = qualified
@@ -673,11 +668,10 @@ fn disabling_cross_file_rules_keeps_incomplete_semantic_analysis_qualified() {
         .unwrap();
     assert!(has_rule(last, "incomplete-analysis"), "{qualified:?}");
     assert!(!has_rule(last, "unused-files"), "{qualified:?}");
-    fs::write(
-        &config,
+    client.write_file(
+        "falcon.json",
         r#"{"linter":{"enabled":false},"cross-file":{"enabled":false}}"#,
-    )
-    .unwrap();
+    );
     client.watch(&uri_for(&config));
     let recovered = client.drain_publishes();
     let last = recovered

@@ -397,8 +397,12 @@ mod debounce_tests {
     }
 }
 
+#[path = "../../tests/support/atomic_write.rs"]
+mod atomic_write;
+
 #[cfg(test)]
 mod file_watching_tests {
+    use super::atomic_write::write_file_atomically;
     use super::*;
     use serde_json::{Value, json};
 
@@ -490,7 +494,7 @@ mod file_watching_tests {
         }
 
         fn package_config(workspace: &Path, root: &str) {
-            std::fs::write(
+            write_file_atomically(
                 workspace.join(".dart_tool/package_config.json"),
                 json!({
                     "configVersion": 2,
@@ -500,8 +504,7 @@ mod file_watching_tests {
                     ]
                 })
                 .to_string(),
-            )
-            .unwrap();
+            );
         }
 
         fn receive(&self) -> Message {
@@ -631,7 +634,7 @@ mod file_watching_tests {
             let config = client.workspace.join("falcon.json");
             let config_uri = file_uri(&config).unwrap();
             for (text, active) in [(enabled, true), (disabled, false), (enabled, true)] {
-                std::fs::write(&config, text).unwrap();
+                write_file_atomically(&config, text);
                 if dynamic {
                     client.notify(
                         "workspace/didChangeWatchedFiles",
@@ -725,7 +728,7 @@ mod file_watching_tests {
             let client = Client::start_with_configuration(dynamic, true, &json!({}), config);
             client.drain();
             let manifest = client.workspace.join("pubspec.yaml");
-            std::fs::write(&manifest, "name: app\nhomepage: http://example.com\n").unwrap();
+            write_file_atomically(&manifest, "name: app\nhomepage: http://example.com\n");
             let uri = file_uri(&manifest).unwrap();
             client.notify(
                 "workspace/didChangeWatchedFiles",
@@ -750,7 +753,7 @@ mod file_watching_tests {
             }
             let broken = client.workspace.join("broken.dart");
             let broken_uri = file_uri(&broken).unwrap();
-            std::fs::write(&broken, [0xff]).unwrap();
+            write_file_atomically(&broken, [0xff]);
             client.notify(
                 "workspace/didChangeWatchedFiles",
                 json!({"changes":[{"uri":broken_uri,"type":1}]}),
@@ -770,7 +773,7 @@ mod file_watching_tests {
             let recovered = publications(&client.drain());
             assert!(recovered.iter().any(|publication| publication.uri == uri
                 && has_rule(publication, "secure-pubspec-urls")));
-            std::fs::write(&manifest, "name: app\nhomepage: https://example.com\n").unwrap();
+            write_file_atomically(&manifest, "name: app\nhomepage: https://example.com\n");
             if dynamic {
                 client.notify(
                     "workspace/didChangeWatchedFiles",
@@ -884,7 +887,7 @@ mod file_watching_tests {
             } else {
                 "["
             };
-            std::fs::write(&path, source).unwrap();
+            write_file_atomically(&path, source);
             client.open();
             let opened = client.drain();
             let warnings: Vec<_> = opened
@@ -997,7 +1000,7 @@ mod file_watching_tests {
             let client = Client::start(false, false);
             client.drain();
             let closed = client.workspace.join("support.dart");
-            std::fs::write(&closed, "class C {} C make() => C();").unwrap();
+            write_file_atomically(&closed, "class C {} C make() => C();");
             let source = "import 'support.dart';\nvoid f() { C x = make(); x; }\n";
             let uri = file_uri(&client.workspace.join("main.dart")).unwrap();
             client.notify(
@@ -1014,7 +1017,7 @@ mod file_watching_tests {
                         && has_rule(publication, "omit-local-variable-types")),
                 "{opened:?}"
             );
-            std::fs::write(&closed, "class C {} int make() => 42;").unwrap();
+            write_file_atomically(&closed, "class C {} int make() => 42;");
             let changed = if save {
                 client.notify(
                     "textDocument/didSave",
@@ -1049,7 +1052,7 @@ mod file_watching_tests {
         client.drain();
         let config = client.workspace.join("falcon.json");
         let manifest = client.workspace.join("pubspec.yaml");
-        std::fs::write(&manifest, "name: app\n").unwrap();
+        write_file_atomically(&manifest, "name: app\n");
         client.notify(
             "workspace/didChangeWatchedFiles",
             json!({"changes":[{"uri":file_uri(&manifest).unwrap(),"type":1}]}),
@@ -1072,8 +1075,8 @@ mod file_watching_tests {
             }),
             "{opened:?}"
         );
-        std::fs::write(&config, "{").unwrap();
-        std::fs::write(&manifest, "name: app\ndependencies:\n  dep: any\n").unwrap();
+        write_file_atomically(&config, "{");
+        write_file_atomically(&manifest, "name: app\ndependencies:\n  dep: any\n");
         client.notify(
             "workspace/didChangeWatchedFiles",
             json!({"changes":[{
@@ -1239,7 +1242,7 @@ mod file_watching_tests {
         std::fs::create_dir(&local).unwrap();
         let file = local.join("api[one].dart");
         let source = "import '../local/api[one].dart'; void f() { C x = make(); x; }";
-        std::fs::write(client.workspace.join("main.dart"), source).unwrap();
+        write_file_atomically(client.workspace.join("main.dart"), source);
         client.notify(
             "textDocument/didOpen",
             json!({"textDocument": {
@@ -1278,7 +1281,7 @@ mod file_watching_tests {
         assert!(matcher.admits("api[one].dart"));
         assert!(!matcher.admits("apio.dart"));
         assert!(!matcher.admits("api[other].dart"));
-        std::fs::write(&file, "class C {} C make() => C();").unwrap();
+        write_file_atomically(&file, "class C {} C make() => C();");
         client.notify(
             "workspace/didChangeWatchedFiles",
             json!({"changes": [{"uri": file_uri(&file).unwrap(), "type": 1}]}),
@@ -1319,18 +1322,17 @@ mod file_watching_tests {
             client.drain();
             let local = client.directory.path().join("local [files]");
             std::fs::create_dir_all(&local).unwrap();
-            std::fs::write(local.join("api.dart"), library_source).unwrap();
+            write_file_atomically(local.join("api.dart"), library_source);
             let part_of = if library_source.is_empty() {
                 "../workspace/main.dart"
             } else {
                 "api.dart"
             };
-            std::fs::write(
+            write_file_atomically(
                 local.join("impl.dart"),
                 format!("part of '{part_of}'; class C {{}} C make() => C();"),
-            )
-            .unwrap();
-            std::fs::write(client.workspace.join("main.dart"), source).unwrap();
+            );
+            write_file_atomically(client.workspace.join("main.dart"), source);
             client.notify(
                 "textDocument/didOpen",
                 json!({"textDocument": {
@@ -1366,7 +1368,7 @@ mod file_watching_tests {
             } else {
                 declarations.to_string()
             };
-            std::fs::write(&changed, replacement).unwrap();
+            write_file_atomically(&changed, replacement);
             client.notify(
                 "workspace/didChangeWatchedFiles",
                 json!({"changes": [{"uri": file_uri(&changed).unwrap(), "type": 2}]}),
@@ -1394,7 +1396,7 @@ mod file_watching_tests {
             "omit-local-variable-types"
         ));
         let dependency = client.directory.path().join("dep [one]/lib/api.dart");
-        std::fs::write(&dependency, "class C {} class D {} D make() => D();").unwrap();
+        write_file_atomically(&dependency, "class C {} class D {} D make() => D();");
         client.notify(
             "workspace/didChangeWatchedFiles",
             json!({"changes": [
@@ -1459,11 +1461,10 @@ mod file_watching_tests {
             client.open();
             client.drain();
             let config = client.workspace.join("falcon.json");
-            std::fs::write(
+            write_file_atomically(
                 &config,
                 r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"enabled":false}}"#,
-            )
-            .unwrap();
+            );
             for method in [
                 "textDocument/didOpen",
                 "textDocument/didChange",
@@ -1517,7 +1518,7 @@ mod file_watching_tests {
             "omit-local-variable-types"
         ));
         let dependency = client.directory.path().join("dep two/lib/api.dart");
-        std::fs::write(&dependency, "class C {} class D {} D make() => D();").unwrap();
+        write_file_atomically(&dependency, "class C {} class D {} D make() => D();");
         Client::package_config(&client.workspace, "../../dep%20two");
         client.notify(
             "textDocument/didSave",
@@ -1583,11 +1584,10 @@ mod file_watching_tests {
         );
         assert_eq!(publications(&opened).len(), 1);
         let config = client.workspace.join("falcon.json");
-        std::fs::write(
+        write_file_atomically(
             &config,
             r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"enabled":false}}"#,
-        )
-        .unwrap();
+        );
         client.notify(
             "textDocument/didSave",
             json!({"textDocument": {"uri": file_uri(&config).unwrap()}}),
@@ -1626,7 +1626,7 @@ mod file_watching_tests {
         let generated = client.workspace.join("generated");
         let support = generated.join("support.dart");
         std::fs::create_dir(&generated).unwrap();
-        std::fs::write(&support, "class C {} C make() => C();").unwrap();
+        write_file_atomically(&support, "class C {} C make() => C();");
         let uri = file_uri(&client.workspace.join("main.dart")).unwrap();
         client.notify(
             "textDocument/didOpen",
@@ -1653,12 +1653,12 @@ mod file_watching_tests {
                 }
             }
         };
-        std::fs::write(&support, "class C {} int make() => 42;").unwrap();
+        write_file_atomically(&support, "class C {} int make() => 42;");
         assert_idle_warning(false);
         std::fs::remove_dir_all(&generated).unwrap();
         assert_idle_warning(false);
         std::fs::create_dir(&generated).unwrap();
-        std::fs::write(&support, "class C {} C make() => C();").unwrap();
+        write_file_atomically(&support, "class C {} C make() => C();");
         assert_idle_warning(true);
         client.drain();
         client.finish();
@@ -1686,7 +1686,7 @@ mod file_watching_tests {
         assert_eq!(published.len(), 1);
         assert!(!has_rule(&published[0], "omit-local-variable-types"));
         std::fs::create_dir_all(root.join("lib")).unwrap();
-        std::fs::write(root.join("lib/api.dart"), "class C {} C make() => C();").unwrap();
+        write_file_atomically(root.join("lib/api.dart"), "class C {} C make() => C();");
         client.notify(
             "workspace/didChangeWatchedFiles",
             json!({"changes": [{

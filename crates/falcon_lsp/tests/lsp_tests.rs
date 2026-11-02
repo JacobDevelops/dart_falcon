@@ -74,6 +74,10 @@ impl TestClient {
         self.config_dir.as_ref().unwrap().path().join("falcon.json")
     }
 
+    fn write_config(&self, config_json: &str) {
+        crate::write_file_atomically(self.config_path(), config_json);
+    }
+
     fn request<P: serde::Serialize>(&mut self, method: &str, params: P) -> RequestId {
         self.next_id += 1;
         let id = RequestId::from(self.next_id);
@@ -593,11 +597,7 @@ fn config_warnings_reach_editor_on_startup_and_watched_reload_without_open_docum
     );
     client.assert_quiet(Duration::from_millis(50));
 
-    fs::write(
-        client.config_path(),
-        r#"{"linter": {"domains": {"fluter": "on"}}}"#,
-    )
-    .unwrap();
+    client.write_config(r#"{"linter": {"domains": {"fluter": "on"}}}"#);
     client.notify(
         lsp_types::notification::DidChangeWatchedFiles::METHOD,
         DidChangeWatchedFilesParams {
@@ -617,7 +617,7 @@ fn config_warnings_reach_editor_on_startup_and_watched_reload_without_open_docum
     );
     client.assert_quiet(Duration::from_millis(50));
 
-    fs::write(client.config_path(), r#"{"max_errors": 20}"#).unwrap();
+    client.write_config(r#"{"max_errors": 20}"#);
     client.notify(
         lsp_types::notification::DidSaveTextDocument::METHOD,
         DidSaveTextDocumentParams {
@@ -1231,11 +1231,8 @@ fn config_disabled_rule_not_published() {
     client.open(DOC_URI, VIOLATING_SRC, 1);
     assert!(has_rule(&client.recv_publish(), "avoid-dynamic"));
 
-    fs::write(
-        client.config_path(),
-        r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } } }"#,
-    )
-    .unwrap();
+    client
+        .write_config(r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } } }"#);
     let config_uri = format!("file://{}", client.config_path().display());
     client.notify(
         lsp_types::notification::DidChangeWatchedFiles::METHOD,
@@ -1285,11 +1282,8 @@ fn watched_files_change_reloads_config() {
     assert!(has_rule(&client.recv_publish(), "avoid-dynamic"));
 
     // Disable the rule on disk, then tell the server the file changed.
-    fs::write(
-        client.config_path(),
-        r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } } }"#,
-    )
-    .unwrap();
+    client
+        .write_config(r#"{ "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } } }"#);
     let config_uri = format!("file://{}", client.config_path().display());
     client.notify(
         lsp_types::notification::DidChangeWatchedFiles::METHOD,
