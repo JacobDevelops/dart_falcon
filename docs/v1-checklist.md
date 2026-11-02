@@ -772,18 +772,52 @@ These entries describe implemented foundation, not acceptance of the open items.
     ```
 
 - [ ] Settle representative suite, cache conditions, repeatability/resource limits
-  and acceptable regression/speed margin with the maintainer. Performance is a
-  release blocker, but cold Falcon beating warm analyzer remains an aspiration
-  until this decision. Keep uncached full analysis measurable; no optimization
-  campaign or persistent result caching is approved merely by this checklist.
-  Maintainer decision: the numerical regression margin is deferred until the
-  representative suite and measurement variability are established. Performance is
-  NOT deferred as a v1 release blocker. Keep uncached Falcon measurements, and define
-  comparative acceptance against the Dart analyzer separately from regression
-  against Falcon's own baseline.
-  Resolved Dart/Flutter workloads and the above repeatability evidence now exist;
-  the representative-suite decision, regression margin and explicit comparative
-  release target still require maintainer agreement.
+  and acceptable regression/speed margin with the maintainer, and pass both
+  resulting gates on current main.
+  - V1-5e maintainer decision (2026-11-03): portable LocalSend, bloc and bloc
+    workspace are the fast self-regression suite; resolved Bloc and Wonderous
+    are the representative dependency-resolved suite. Each self-regression case
+    permits `max(3 × baseline MAD / baseline median, 3%)` against Falcon's own
+    same-host baseline. Each resolved comparative case requires Falcon cold
+    median ≤ analyzer cold median. LocalSend has no comparative release gate;
+    Falcon cold beating analyzer warm remains an informational stretch goal.
+    The [performance policy](verification.md#performance-acceptance-policy)
+    records commands, unchanged cold/warm definitions, N=10 repeatability,
+    four-thread/resource limits and per-case preflight peak RSS.
+  - `--baseline <report.json>` recomputes the baseline statistics, rejects
+    incompatible host/work/cache/setup metadata and reports per-case medians,
+    delta and tolerance. `--analyzer-comparison --resolved` measures both
+    Falcon and Dart, records cold ratios and fails on any ratio above one.
+    Unit tests cover the 3% floor, equality/over-boundary and comparative
+    pass/fail, plus baseline compatibility and failure propagation.
+  - Re-measurement on current main including R2 is **pending a quiet host**.
+    On 2026-11-03, `proc://` reported no tool-managed jobs before timing;
+    `uptime` recorded load averages **5.47 / 6.23 / 4.90** at 07:31:47.
+    The controller subsequently identified concurrent unrelated Rust builds,
+    Android emulator/Gradle and another workspace's heavy checks (load about
+    22). Timing was stopped; the started resolved baseline was cancelled.
+    These observations do not certify repeatability or a performance regression.
+  - The completed contended portable N=10 baseline/candidate gate came from a
+    pre-commit working copy, using the same release Falcon SHA-256
+    `0c08a00a36b5329ac397a87c90f37c48d82469dad5273d9db4b139dca608f096`
+    (R2 included), Ryzen 7 9800X3D / 16 logical CPUs / 49.569 GB,
+    Linux 7.0.0-42-generic x86_64. One discarded warmup, fresh cacheless
+    processes, retained OS page cache, complete JSON rendering, four threads:
+
+    | Case | Baseline ms | Candidate ms | Delta | Tolerance | Gate |
+    | --- | ---: | ---: | ---: | ---: | --- |
+    | localsend-app | 1934.239 | 3995.911 | +106.59% | 5.81% | FAIL |
+    | bloc-dart | 144.460 | 134.553 | -6.86% | 24.80% | PASS |
+    | bloc-workspace | 525.706 | 514.384 | -2.15% | 20.20% | PASS |
+
+    Baseline preflight peak RSS was 842.949 / 40.886 / 82.661 MB.
+    Raw reports remain uncommitted at
+    `~/.tmp/v1-5-portable-{baseline,candidate}.json`.
+    These reports predate the committed compatibility checks and are not usable
+    as baselines for this commit.
+    No current-main resolved self-regression or comparative ratios are claimed.
+    The earlier pre-R2 table above remains historical evidence only. Performance
+    stays a v1 release blocker until a quiet-host N=10 rerun passes both gates.
 
 ### V1-6 — Certify the release candidate, not just rule count
 

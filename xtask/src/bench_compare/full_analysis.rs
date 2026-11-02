@@ -242,13 +242,209 @@ pub(super) fn verify_clean_checkout(status: &str) -> Result<()> {
 }
 
 pub(super) fn run(options: &Options) -> Result<()> {
+    let report = measure(options)?;
+    write_json(
+        options
+            .output
+            .as_ref()
+            .ok_or("missing report destination")?,
+        &report,
+    )?;
+    check_failures(&report)
+}
+
+pub(super) fn check_failures(report: &Value) -> Result<()> {
+    if report["failures"]
+        .as_array()
+        .is_none_or(|failures| !failures.is_empty())
+    {
+        return Err(format!("performance checks failed: {}", report["failures"]).into());
+    }
+    Ok(())
+}
+
+fn sample_statistics(seconds: &Value) -> Result<Value> {
+    let samples = seconds["samples"]
+        .as_array()
+        .ok_or("missing baseline samples")?
+        .iter()
+        .map(|sample| sample.as_f64().ok_or("invalid baseline sample"))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    statistics(&samples)
+}
+
+fn regression(baseline: &Value, candidate: &Value) -> Result<Value> {
+    let baseline = sample_statistics(baseline)?;
+    let candidate = sample_statistics(candidate)?;
+    let old = baseline["median"]
+        .as_f64()
+        .ok_or("missing baseline median")?;
+    let new = candidate["median"]
+        .as_f64()
+        .ok_or("missing candidate median")?;
+    let tolerance = (3.0 * baseline["mad"].as_f64().ok_or("missing baseline MAD")? / old).max(0.03);
+    Ok(
+        json!({"baselineMedian":old,"candidateMedian":new,"deltaPercent":100.0*(new/old-1.0),
+        "tolerancePercent":100.0*tolerance,"passed":new <= old*(1.0+tolerance)}),
+    )
+}
+
+fn case_ids(results: &Value) -> Result<BTreeSet<&str>> {
+    let mut ids = BTreeSet::new();
+    for result in results.as_array().ok_or("missing results")? {
+        let id = result["id"].as_str().ok_or("missing case id")?;
+        if !ids.insert(id) {
+            return Err(format!("{id}: duplicate case").into());
+        }
+    }
+    Ok(ids)
+}
+
+fn validate_baseline_metadata(report: &Value, baseline: &Value) -> Result<()> {
+    check_failures(baseline)?;
+    if baseline["runs"].as_u64().is_none_or(|runs| runs < 10) {
+        return Err("baseline requires at least ten runs".into());
+    }
+    for field in [
+        "lane",
+        "resolved",
+        "hostname",
+        "runs",
+        "warmups",
+        "machine",
+        "threads",
+        "configuration",
+        "sdk",
+        "cache",
+        "limits",
+    ] {
+        if baseline[field].is_null() || baseline[field] != report[field] {
+            return Err(format!("incompatible baseline {field}").into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_baseline_cases(
+    report: &Value,
+    baseline: &Value,
+    cases: &[Case],
+    pins: &Value,
+    root: &Path,
+) -> Result<()> {
+    validate_baseline_metadata(report, baseline)?;
+    if case_ids(&baseline["results"])? != cases.iter().map(|case| case.id.as_str()).collect() {
+        return Err("baseline case ids differ".into());
+    }
+    for case in cases {
+        let previous = baseline["results"]
+            .as_array()
+            .ok_or("missing results")?
+            .iter()
+            .find(|result| result["id"] == case.id)
+            .ok_or("missing case")?;
+        let pin = pins
+            .as_array()
+            .ok_or("missing pins")?
+            .iter()
+            .find(|pin| pin["id"] == case.corpus)
+            .ok_or("missing corpus pin")?;
+        let setup = if report["resolved"] == true {
+            resolved::validate(root, &case.id)?;
+            resolved::metadata(root, &case.id)?
+        } else {
+            Value::Null
+        };
+        if previous["corpus"] != *pin
+            || previous["subpath"] != case.subpath
+            || previous["setup"] != setup
+        {
+            return Err(format!("{}: incompatible baseline corpus or setup", case.id).into());
+        }
+    }
+    Ok(())
+}
+
+fn compare_baseline(report: &mut Value, baseline: &Value) -> Result<()> {
+    validate_baseline_metadata(report, baseline)?;
+    if case_ids(&baseline["results"])? != case_ids(&report["results"])? {
+        return Err("baseline case ids differ".into());
+    }
+    let old = baseline["results"]
+        .as_array()
+        .ok_or("missing baseline results")?;
+    let current = report["results"].as_array_mut().ok_or("missing results")?;
+    let mut failures = Vec::new();
+    for result in current {
+        let id = result["id"].as_str().ok_or("missing case id")?.to_owned();
+        let matches = old
+            .iter()
+            .filter(|entry| entry["id"] == id)
+            .collect::<Vec<_>>();
+        let [previous] = matches.as_slice() else {
+            return Err(format!("{id}: missing or duplicate baseline case").into());
+        };
+        for field in ["corpus", "subpath", "configuration", "work", "setup"] {
+            if previous[field] != result[field] {
+                return Err(format!("{id}: incompatible baseline {field}").into());
+            }
+        }
+        let decision = regression(&previous["seconds"], &result["seconds"])?;
+        println!(
+            "{id}: baseline {:.3} ms, candidate {:.3} ms, delta {:+.2}%, tolerance {:.2}%: {}",
+            decision["baselineMedian"]
+                .as_f64()
+                .ok_or("missing baseline median")?
+                * 1000.0,
+            decision["candidateMedian"]
+                .as_f64()
+                .ok_or("missing candidate median")?
+                * 1000.0,
+            decision["deltaPercent"].as_f64().ok_or("missing delta")?,
+            decision["tolerancePercent"]
+                .as_f64()
+                .ok_or("missing tolerance")?,
+            if decision["passed"] == true {
+                "PASS"
+            } else {
+                "FAIL"
+            }
+        );
+        if decision["passed"] != true {
+            failures.push(json!(format!("{id}: self-regression tolerance exceeded")));
+        }
+        result["selfRegression"] = decision;
+    }
+    report["failures"]
+        .as_array_mut()
+        .ok_or("missing failures")?
+        .extend(failures);
+    Ok(())
+}
+
+fn apply_baseline(report: &mut Value, baseline: Option<&Value>) -> Result<()> {
+    if let Some(baseline) = baseline
+        && check_failures(report).is_ok()
+        && let Err(error) = compare_baseline(report, baseline)
+    {
+        report["failures"]
+            .as_array_mut()
+            .ok_or("missing failures")?
+            .push(json!(error.to_string()));
+    }
+    Ok(())
+}
+
+pub(super) fn measure(options: &Options) -> Result<Value> {
     let root = crate::workspace_root();
     let pins: Value = serde_json::from_str(include_str!("../../e2e-corpus.json"))?;
     let cases = selected_cases(options.analysis.resolved, &pins)?;
-    let destination = options
-        .output
+    let baseline = options
+        .analysis
+        .baseline
         .as_ref()
-        .ok_or("full-analysis requires --output")?;
+        .map(|path| -> Result<Value> { Ok(serde_json::from_slice(&fs::read(path)?)?) })
+        .transpose()?;
     let binary = fs::canonicalize(falcon_executable(options)?)?;
     let scratch = tempfile::tempdir()?;
     fs::copy(&binary, scratch.path().join("falcon"))?;
@@ -286,6 +482,8 @@ pub(super) fn run(options: &Options) -> Result<()> {
         "rustc":text(Command::new("rustc").arg("-vV"))?,
         "cargo":text(Command::new("cargo").arg("--version"))?,
         "machine":machine_metadata()?,
+        "hostname":fs::read_to_string("/proc/sys/kernel/hostname")?.trim(),
+        "resolved":options.analysis.resolved,
         "hyperfine":text(Command::new(&hyperfine).arg("--version"))?,
         "falconVersion":text(Command::new(&binary).arg("--version"))?,
         "binarySha256":text(Command::new("sha256sum").arg(&binary))?.split_whitespace().next(),
@@ -298,6 +496,9 @@ pub(super) fn run(options: &Options) -> Result<()> {
         "limits":{"processTreeRssKiB":MAX_RSS_KB,"batchSeconds":900,"rejectProcessSwap":true},
         "failures":[], "workDifferences":{}, "results":[]
     });
+    if let Some(baseline) = baseline.as_ref() {
+        validate_baseline_cases(&report, baseline, &cases, &pins, &root)?;
+    }
     let lane = Lane {
         options,
         binary,
@@ -330,14 +531,11 @@ pub(super) fn run(options: &Options) -> Result<()> {
         }
     }
     report["failures"] = json!(failures);
-    write_json(destination, &report)?;
-    if !failures.is_empty() {
-        return Err(failures.join("; ").into());
-    }
-    if options.bless {
+    apply_baseline(&mut report, baseline.as_ref())?;
+    if options.bless && failures.is_empty() {
         write_json(&expected_path, &expected)?;
     }
-    Ok(())
+    Ok(report)
 }
 
 struct Lane<'a> {
@@ -539,6 +737,112 @@ impl Lane<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn regression_floor_and_boundary() {
+        let baseline = json!({"samples":[1.0,1.0,1.0]});
+        let equal = regression(&baseline, &json!({"samples":[1.03,1.03]})).unwrap();
+        assert_eq!(equal["tolerancePercent"], 3.0);
+        assert_eq!(equal["passed"], true);
+        assert_eq!(
+            regression(&baseline, &json!({"samples":[1.030_001,1.030_001]})).unwrap()["passed"],
+            false
+        );
+        let noisy = regression(&json!({"samples":[0.9,1.0,1.1]}), &baseline).unwrap();
+        assert!((noisy["tolerancePercent"].as_f64().unwrap() - 30.0).abs() < 1e-10);
+        assert!(regression(&json!({"samples":[0.0,0.0]}), &baseline).is_err());
+    }
+
+    fn baseline_report() -> Value {
+        json!({
+            "lane":"uncached-full-analysis","machine":{},"hostname":"test-host",
+            "resolved":false,"runs":10,"warmups":1,
+            "threads":4,"configuration":{},"sdk":"absent","cache":"fresh","limits":{},
+            "failures":[],
+            "results":[{"id":"case","corpus":{},"subpath":".","configuration":{},
+                "work":{},"setup":null,"seconds":{"samples":vec![1.0;10]}}]
+        })
+    }
+
+    #[test]
+    fn baseline_comparison_reports_regressions_and_rejects_incompatible_work() {
+        let baseline = baseline_report();
+        let mut candidate = baseline.clone();
+        candidate["results"][0]["seconds"]["samples"] = json!([1.04, 1.04]);
+        compare_baseline(&mut candidate, &baseline).unwrap();
+        assert!(check_failures(&candidate).is_err());
+        assert_eq!(candidate["results"][0]["selfRegression"]["passed"], false);
+        for field in ["machine", "threads", "cache"] {
+            let mut incompatible = baseline.clone();
+            incompatible[field] = Value::Null;
+            assert!(compare_baseline(&mut incompatible, &baseline).is_err());
+        }
+        let mut incompatible = baseline.clone();
+        incompatible["results"][0]["work"] = json!({"files":2});
+        assert!(compare_baseline(&mut incompatible, &baseline).is_err());
+        assert!(compare_baseline(&mut baseline.clone(), &baseline).is_ok());
+    }
+
+    #[test]
+    fn baseline_rejects_case_set_drift_and_duplicates_in_either_report() {
+        let baseline = baseline_report();
+        let case = baseline["results"][0].clone();
+        for results in [
+            json!([]),
+            json!([case.clone(), case.clone()]),
+            json!([{"id":"extra"}]),
+            json!([case, {"id":"extra"}]),
+        ] {
+            let mut changed = baseline.clone();
+            changed["results"] = results;
+            assert!(compare_baseline(&mut changed.clone(), &baseline).is_err());
+            assert!(compare_baseline(&mut baseline.clone(), &changed).is_err());
+        }
+    }
+
+    #[test]
+    fn baseline_requires_matching_sampling_and_records_errors() {
+        let baseline = baseline_report();
+        for (field, value) in [
+            ("runs", json!(9)),
+            ("runs", json!(11)),
+            ("warmups", json!(2)),
+            ("failures", json!(["failed"])),
+        ] {
+            let mut changed = baseline.clone();
+            changed[field] = value;
+            let mut candidate = baseline.clone();
+            apply_baseline(&mut candidate, Some(&changed)).unwrap();
+            assert!(check_failures(&candidate).is_err());
+            assert_eq!(candidate["results"], baseline["results"]);
+        }
+        let mut short = baseline.clone();
+        short["runs"] = json!(9);
+        assert!(compare_baseline(&mut short.clone(), &short).is_err());
+        assert!(apply_baseline(&mut baseline.clone(), None).is_ok());
+    }
+
+    #[test]
+    fn baseline_preflight_rejects_pin_and_subpath_mismatches() {
+        let pins = json!([{"id":"pin","revision":"expected"}]);
+        let cases = cases(
+            r#"[{"id":"case","corpus":"pin","subpath":".","files":1}]"#,
+            &pins,
+        )
+        .unwrap();
+        let mut baseline = baseline_report();
+        baseline["results"][0]["corpus"] = pins[0].clone();
+        let root = crate::workspace_root();
+        assert!(validate_baseline_cases(&baseline, &baseline, &cases, &pins, &root).is_ok());
+        for (field, value) in [
+            ("corpus", json!({"id":"pin","revision":"changed"})),
+            ("subpath", json!("lib")),
+        ] {
+            let mut changed = baseline.clone();
+            changed["results"][0][field] = value;
+            assert!(validate_baseline_cases(&baseline, &changed, &cases, &pins, &root).is_err());
+        }
+    }
+
     #[test]
     fn validates_case_table_and_pinned_ids() {
         let pins = json!([{"id":"bloc"}]);

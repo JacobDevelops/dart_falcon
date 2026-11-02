@@ -278,6 +278,44 @@ impl Measurement<'_> {
     }
 }
 
+fn comparative(falcon: f64, analyzer: f64) -> Result<Value> {
+    if !falcon.is_finite() || !analyzer.is_finite() || falcon <= 0.0 || analyzer <= 0.0 {
+        return Err("comparative medians must be finite and positive".into());
+    }
+    Ok(json!({"ratio":falcon/analyzer,"passed":falcon <= analyzer}))
+}
+
+fn compare_result(resolved: bool, id: &str, falcon: &Value, result: &mut Value) -> Result<bool> {
+    if !resolved {
+        return Ok(true);
+    }
+    let median = falcon["seconds"]["median"]
+        .as_f64()
+        .ok_or("missing Falcon median")?;
+    let decision = comparative(
+        median,
+        result["cold"]["seconds"]["median"]
+            .as_f64()
+            .ok_or("missing analyzer cold median")?,
+    )?;
+    let stretch = comparative(
+        median,
+        result["warm"]["seconds"]["median"]
+            .as_f64()
+            .ok_or("missing analyzer warm median")?,
+    )?;
+    let passed = decision["passed"] == true;
+    println!(
+        "{id}: Falcon/analyzer cold ratio {}: {}; warm ratio {} (informational stretch goal)",
+        decision["ratio"],
+        if passed { "PASS" } else { "FAIL" },
+        stretch["ratio"]
+    );
+    result["comparativeGate"] = decision;
+    result["warmStretchGoal"] = stretch;
+    Ok(passed)
+}
+
 pub(super) fn run(options: &Options) -> Result<()> {
     let root = crate::workspace_root();
     let destination = options
@@ -296,6 +334,8 @@ pub(super) fn run(options: &Options) -> Result<()> {
                 .join("bin/dart"),
         )?)
     };
+    let falcon = super::full_analysis::measure(options)?;
+    super::full_analysis::check_failures(&falcon)?;
     let mut report = json!({
         "schemaVersion":1,"lane":"dart-analyzer-comparison", "resolved":options.analysis.resolved,
         "machine":machine_metadata()?,"runs":options.runs,"warmups":options.warmups,
@@ -316,7 +356,7 @@ pub(super) fn run(options: &Options) -> Result<()> {
         "diagnosticValidation":"exit 0..3 plus versioned JSON and stable complete rendered diagnostics; reject stderr, crashes, malformed output and nonzero exits with no rendered diagnostics; Dart JSON omits priority pubspec/analysis_options diagnostics",
         "resolvedDiagnosticPolicy":"known clean resolved pins reject every ERROR, including missing packages, unresolved imports, missing generated URIs and invalid part directives; INFO and WARNING remain valid findings",
         "limits":{"processTreeRssKiB":MAX_RSS_KB,"invocationSeconds":900},
-        "results":[],"failures":[]
+        "falcon":falcon,"results":[],"failures":[]
     });
     let mut failures = Vec::with_capacity(cases.len());
     let comparison = Comparison {
@@ -333,10 +373,22 @@ pub(super) fn run(options: &Options) -> Result<()> {
             .ok_or_else(|| "missing corpus pin".into())
             .and_then(|pin| comparison.measure_case(&case, pin));
         match outcome {
-            Ok(result) => report["results"]
-                .as_array_mut()
-                .ok_or("invalid results")?
-                .push(result),
+            Ok(mut result) => {
+                let falcon = report["falcon"]["results"]
+                    .as_array()
+                    .and_then(|results| results.iter().find(|entry| entry["id"] == case.id))
+                    .ok_or("missing Falcon comparison case")?;
+                if !compare_result(options.analysis.resolved, &case.id, falcon, &mut result)? {
+                    failures.push(format!(
+                        "{}: Falcon cold median exceeds analyzer cold median",
+                        case.id
+                    ));
+                }
+                report["results"]
+                    .as_array_mut()
+                    .ok_or("invalid results")?
+                    .push(result);
+            }
             Err(error) => failures.push(format!("{}: {error}", case.id)),
         }
     }
@@ -443,10 +495,35 @@ impl Comparison<'_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn comparative_accepts_equality_and_rejects_slower_falcon() {
+        assert_eq!(comparative(1.0, 1.0).unwrap()["passed"], true);
+        assert_eq!(comparative(0.5, 1.0).unwrap()["ratio"], 0.5);
+        assert_eq!(comparative(1.01, 1.0).unwrap()["passed"], false);
+        assert!(comparative(f64::NAN, 1.0).is_err());
+    }
+
+    #[test]
+    fn comparative_gate_uses_cold_only_on_resolved_cases() {
+        let falcon = json!({"seconds":{"median":2.0}});
+        let result = json!({"cold":{"seconds":{"median":3.0}},
+            "warm":{"seconds":{"median":1.0}}});
+        let mut resolved = result.clone();
+        assert!(compare_result(true, "case", &falcon, &mut resolved).unwrap());
+        assert_eq!(resolved["comparativeGate"]["ratio"], json!(2.0 / 3.0));
+        assert_eq!(resolved["warmStretchGoal"]["passed"], false);
+        let mut slower = result.clone();
+        slower["cold"]["seconds"]["median"] = json!(1.0);
+        assert!(!compare_result(true, "case", &falcon, &mut slower).unwrap());
+        let mut portable = result.clone();
+        assert!(compare_result(false, "case", &falcon, &mut portable).unwrap());
+        assert_eq!(portable, result);
+    }
+
     use super::super::full_analysis::cases;
     use super::{
-        ANALYZER_ARGS, cache_files, check_warm_count, findings, invocation, populate_cache,
-        timed_sample, validate_findings, validate_resolved_work,
+        ANALYZER_ARGS, cache_files, check_warm_count, comparative, compare_result, findings,
+        invocation, populate_cache, timed_sample, validate_findings, validate_resolved_work,
     };
     use serde_json::{Value, json};
     use std::os::unix::process::ExitStatusExt as _;

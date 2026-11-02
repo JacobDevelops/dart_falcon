@@ -77,6 +77,9 @@ struct FullAnalysisOptions {
     /// Measure Dart analyzer cold/warm separately from Falcon self-regression.
     #[arg(long, requires = "full_analysis", conflicts_with = "bless")]
     analyzer_comparison: bool,
+    /// Compare Falcon timings against a same-host full-analysis report.
+    #[arg(long, requires = "full_analysis", conflicts_with_all = ["bless", "analyzer_comparison"])]
+    baseline: Option<PathBuf>,
 }
 
 #[derive(Args)]

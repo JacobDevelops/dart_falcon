@@ -269,9 +269,8 @@ The existing 8 GiB process-tree RSS, no-process-swap and 15-minute batch guards
 apply. `--skip-build` reuses the release binary in Cargo metadata's target directory; `--hyperfine` selects
 its executable. Other comparative-only flags are rejected, not silently ignored.
 Host-specific timings are written only to `--output`, never a checked-in baseline.
-These measurements are not a numerical acceptance margin. Performance remains a
-v1 blocker; comparative acceptance against Dart and regression against Falcon
-remain separate decisions.
+The performance policy below applies to these measurements; comparative acceptance
+against Dart and regression against Falcon remain separate gates.
 
 ### Resolved workloads and analyzer comparison
 
@@ -310,9 +309,11 @@ so a separate Falcon warm number would measure the same process/cache contract.
 All samples include rendering the complete JSON findings.
 
 The analyzer is a separate acceptance criterion and an explicit measurement mode:
-`cargo xtask bench-compare --full-analysis --analyzer-comparison --runs 10 --output target/analyzer-portable.json`,
-or add `--resolved` for the dependency-resolved cases. It does not establish
-identical rules or work between the tools. The Falcon self-regression lane never
+`cargo xtask bench-compare --full-analysis --resolved --analyzer-comparison --runs 10 --output target/analyzer-resolved.json`.
+This first measures Falcon on the same selected cases, then measures Dart and
+records both tools in the report. It does not establish identical rules or work
+between the tools. Portable analyzer comparison remains informational. The Falcon
+self-regression lane never
 invokes Dart. Analyzer **cold** starts `dart analyze` in a fresh process with an
 empty private `ANALYZER_STATE_LOCATION_OVERRIDE`; it discards no timed samples.
 Analyzer **warm** starts the same command in another fresh process after untimed
@@ -340,9 +341,43 @@ and [analysis-server byte store](https://github.com/dart-lang/sdk/blob/3.13.6/pk
 Hyperfine 2 measures child wall time separately from resource-guard polling and
 validates every analyzer sample's exit status and structured findings.
 
-Neither a regression tolerance nor the comparative release target is selected by
-these commands. Both require an explicit maintainer decision after reviewing
-repeatability. Uncached Falcon beating warm Dart remains the stretch goal.
+### Performance acceptance policy
+
+The three portable cases (LocalSend, bloc and bloc workspace) are the fast
+self-regression suite. Resolved Bloc and Wonderous are the representative
+dependency-resolved suite. For acceptance, use ten samples per case on a quiet
+host, record its load and competing heavy work, and retain all samples. The
+four-thread, 8 GiB process-tree RSS, no-process-swap and 15-minute guards above
+remain in force. Peak RSS is reported per case from the instrumented preflight,
+not as a timed-sample peak.
+
+Run each suite once to establish a Falcon baseline, then again with
+`--baseline <report.json>`. For example:
+
+```sh
+cargo xtask bench-compare --full-analysis --runs 10 --output target/portable-baseline.json
+cargo xtask bench-compare --full-analysis --runs 10 --baseline target/portable-baseline.json --output target/portable-candidate.json
+```
+
+Add `--resolved` to both commands for the resolved suite. The baseline must be a
+successful full-analysis report from the same host, with matching corpus pins,
+configuration, completed work, dependency setup, threads, runs, warmups and
+cache/resource conditions. The full-analysis report alone includes the hostname.
+Baseline metadata, exact unique case ids and resolved SDK/setup compatibility are
+checked before timing. Baselines require at least ten runs. The runner recomputes
+medians and unscaled MAD from raw samples rather than trusting stored summaries.
+Each case fails if its new median exceeds
+`baseline median × (1 + max(3 × baseline MAD / baseline median, 0.03))`.
+Equality passes. Console and JSON report the medians, delta and tolerance.
+Host-specific baseline JSON stays outside version control.
+
+On the resolved suite, `--analyzer-comparison` fails unless each Falcon cold
+median is at most its Dart analyzer cold median; it reports the Falcon/analyzer
+ratio (passing means ≤ 1). The cold/warm definitions above are unchanged.
+Uncached Falcon beating warm Dart is labelled an informational stretch goal and
+never gates release. LocalSend is self-regression only, not a comparative release
+case. The v1 checklist remains open until both gates pass on current main with
+recorded evidence; selecting this policy alone does not certify performance.
 
 
 ## Architecture and readiness
