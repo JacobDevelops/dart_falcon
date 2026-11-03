@@ -142,7 +142,7 @@ Add the GitHub release backend to your project's `mise.toml`:
 
 ```toml
 [tools]
-"github:JacobDevelops/dart_falcon" = { version = "0.4.6", matching = "falcon-" }
+"github:JacobDevelops/dart_falcon" = { version = "0.4.7", matching = "falcon-" }
 ```
 
 Install the pinned release and run it:
