@@ -1,5 +1,74 @@
 # Changelog
 
+## 0.4.7 (2026-11-03)
+
+### Features
+
+- Implement `architecture-layer-boundaries` to flag forbidden dependencies between clean-architecture layers and feature internals within a package.
+- Implement `avoid-cubits` to recommend event-driven Bloc classes instead of direct or indirect Cubit subclasses, including local inheritance when the package is unresolved.
+- Implement `avoid-empty-build-when` to require an explicit `buildWhen` argument on Bloc builders and consumers.
+- Implement `avoid-excessive-expressions` with documented diagnostics and regression fixtures.
+- Implement `avoid-importing-entrypoint-exports` to detect own-package barrel imports even outside the analyzed file set, with configurable source-directory restriction.
+- Implement `avoid-local-functions` with documented diagnostics and regression fixtures.
+- Implement `avoid-missing-test-files` to require mirrored tests for source paths selected by configurable regular expressions and name the expected test path.
+- Add `avoid-misused-test-matchers` to detect matchers incompatible with known actual types, distinguish sets from lists, and check `isIn` against collection element types.
+- Implement `avoid-non-ascii-symbols` to flag non-ASCII characters written literally in strings while accepting escapes and excluding interpolation expressions.
+- Add `avoid-not-encodable-in-to-json` to detect non-encodable return values in serialization methods, including classes from fully loaded dependency packages while leaving incomplete hierarchies alone, with configurable additional method names.
+- Implement `avoid-notifier-constructors` using resolved Riverpod identities to report constructor initialization logic across notifier, async, stream, auto-dispose, family, buildless, `AnyNotifier`, and generated variants while allowing empty constructors, legacy `StateNotifier` constructors, and unrelated same-name types.
+- Add `avoid-returning-value-from-cubit-methods` to keep public Cubit commands focused on observable state, including indirect subclasses when the package is unresolved.
+- Add `avoid-similar-names` to detect confusing declaration names within overlapping local scopes or the same member/top-level declaration level, with bounded edit-distance comparisons, configurable similarity thresholds, score display, and ignored names.
+- Implement `duplicate-barrel-exports` to flag different declarations with the same name exported by independent public barrels in the same package.
+- Implement `format-test-name` with independently configurable regular expressions for `test` and `testWidgets` descriptions, resolved framework identities, constant-string evaluation, and diagnostics naming the failed pattern.
+- Implement `handle-throwing-invocations` to require matching catch clauses or covering `@Throws` metadata from `dart_code_metrics_annotations`, including constant and generic thrown-type sets.
+- Implement `match-class-name-pattern` with package-relative path patterns and configurable class-name regular expressions.
+- Add `missing-assets` to flag literal asset paths missing from Flutter asset declarations.
+- Add `no-deep-package-imports` to flag imports of dependency libraries already exported unrestricted by their public barrel.
+- Add `pass-correct-accepted-type` to check invocation arguments against package-identified `@AcceptedTypes` metadata, including inherited fields and super formals, imported declarations, contextual shorthand construction, and constant generic type sets.
+- Implement `prefer-async-value-when` to flag manual state-dispatch chains on resolved Riverpod async values.
+- Implement `prefer-bytes-builder` to recommend efficient byte composition instead of integer-list concatenation, bulk additions, and spreads, reporting each concatenation chain once and avoiding duplicate concatenation reports inside byte spreads.
+- Add `prefer-prefixed-global-constants` to enforce `allowed-prefixes` (default `k`) on top-level constants only, listing accepted prefixes in diagnostics, with `ignore-private` (default false) to exempt private constants.
+- Add `prefer-single-declaration-per-file` to keep public top-level types, including class aliases, in separate files, with private, enum and resolved `package:meta` testing exclusions.
+- Add `prefer-single-notifier-per-file` to keep resolved Riverpod notifier subclasses in separate files, including family, buildless, `AnyNotifier`, and legacy `StateNotifier` variants.
+- Add `prefer-single-widget-per-file` to keep Flutter widget subclasses in separate files, with private and testing exclusions.
+- Implement `prefer-test-structure` for framework test callbacks, enforcing ordered arrange/act/assert comments with configurable given/when/then alternatives and section-specific diagnostics.
+- Add `prefer-text-rich` to recommend Flutter's `Text.rich` instead of `RichText`, resolving constructors by package identity without flagging unrelated or shadowed names.
+- Implement `proper-super-calls` to enforce first or last direct-statement ordering for existing Flutter `State` lifecycle superclass calls, including State-constrained mixins, without checking `didChangeDependencies` or reporting missing calls.
+- Implement `require-atomic-async-updates` to detect assignments that reuse a value read before an asynchronous suspension, excluding uncaptured local variables and parameters.
+- Implement `unexported-public-api` to flag implementation declarations used across a package but missing from its public export namespace.
+- Add `unused-assets` to flag Flutter asset declarations without references in analyzed Dart sources.
+- Implement `unused-dev-dependencies` to flag resolved pubspec dev dependencies unused by analyzed Dart sources, excluding SDK dependencies, analysis-options includes and plugins, configured tools, resolved builders, executables, and `bin/*.dart` tools.
+- Implement `unused-l10n` to flag template ARB message keys with no identifier references outside generated localization files in analyzed Dart sources.
+
+### Fixes
+
+- Attribute opt-in analysis tracing to preparation, lazy file indexes, semantic refreshes and shared traversal; preserve tracing parents across analysis and autofix workers, and keep stage, per-file and per-rule detail out of normal INFO logs.
+- Coalesce queued document edits, saves, lifecycle transitions and watcher batches without changing the latest diagnostics. Supersede outdated read-only requests while preserving user-action snapshots, keep cancellation and shutdown responsive during bursts, and announce incomplete-analysis warnings only for the current state without losing configuration errors.
+- Capture bounded package metadata for dependency-section, package-name, secure-URL and Flutter asset checks, refreshing captured disk facts after saved manifest changes. Malformed, unreadable and oversized manifests produce shared discovery warnings whichever rules are enabled, including manifest-only projects. The migrated YAML-dependent checks skip the affected package while unrelated rules continue. UTF-8 BOM-prefixed manifests now supply parsed metadata and package identity without a false malformed warning, so YAML and own-package rules can report diagnostics previously skipped, including asset checks when `flutter:` is the first key. A leading BOM also no longer hides a recoverable name in a malformed manifest. Import boundaries otherwise preserve existing fallback-identity behavior: malformed manifests with a recoverable name still support own-package path matching; unreadable manifests have no name, so only raw-URI and relative-path matching remain available. Asset directory expansion remains uncached rule-time filesystem IO; unreadable directories and non-UTF-8 asset file names exempt the affected directory and warn once per declared directory until a successful directory read or discovery reset. A later directory failure warns again after recovery without an environment reset. Dangling symlinks no longer hide a directory's unused assets. Asset-only LSP watcher invalidation and manifest diagnostic publication remain adapter limitations. Manifests over 4 GiB previously rejected project analysis; oversized manifests now warn and skip optional metadata instead.
+- Reject configuration and package/workspace metadata larger than 16 MiB before parsing or retaining analysis and editor configuration fingerprints, preventing oversized manifests from exhausting memory during CLI and editor analysis.
+- Capture unused-dependency resource and build-tool inputs once per analysis environment generation. Malformed or inaccessible inputs warn and conservatively skip only their dependent probe; missing dependency manifests retain their existing behavior. LSP metadata and executable-content changes refresh enabled probes without rebuilding semantic indexes, and hosted dependencies acquire no additional watchers.
+- `deprecated-member-use-from-same-package` now reports deprecated static members accessed through an import prefix.
+- Unreadable dependency exports now warn once per failure episode and conservatively skip only their dependent deep-import check. Inaccessible test-file and conditional-URI targets now warn and suppress the dependent missing-file diagnostic instead of being treated as absent. Invalid UTF-8 asset entry warnings now say "file name" rather than "asset file name" and include both the directory and entry paths.
+- `falcon check` now fails on unreadable required directories, input paths and Dart symlink targets it previously skipped, naming the path and I/O reason. Missing paths and dangling symlink targets remain absent. Unreadable directories outside all positive `files.includes` patterns warn and skip; with default empty includes every directory is potentially required. Exclude unwanted directories explicitly, for example `"files": {"includes": ["**", "!docker/pgdata"]}`. Editor analysis suppresses cross-file results until required discovery recovers, without repeatedly walking or rebuilding the same incomplete project.
+- Show editor warnings at the cause of incomplete required-source analysis, with one notification per failure episode and automatic clearing when cross-file analysis recovers.
+- Publish manifest diagnostics on pubspec.yaml in the editor, clear stale findings after disk or configuration changes, and refresh asset findings on declared asset-file events without rebuilding Dart semantics.
+- Recognize Riverpod family and buildless stream notifier bases consistently in `prefer-correct-notifier-file-name` while preserving `AnyNotifier` and legacy `StateNotifier` support.
+- Recognize Riverpod family and buildless stream notifier bases consistently in `prefer-riverpod-notifier-suffix` while preserving `AnyNotifier` and legacy `StateNotifier` support.
+- Restore editor cross-file diagnostics after deleting a previously discovered project source instead of reporting stale incomplete analysis.
+- Keep unavailable external library parts conservatively unknown, fail CLI analysis after parser or rule worker failures, and qualify LSP publications even for semantic-only analysis while suppressing cross-file results until successful reanalysis. Recover using current sources even when unrelated documents retain earlier failure publications, and clear external worker failures when their import or part directives are removed. Required source failures now report `failed to analyze file` with the path and underlying cause, covering read, invalid-UTF-8 and parser-worker failures without mislabeling worker failures as reads.
+- Report syntax errors for malformed hexadecimal and Unicode string escapes and escaped line breaks in single-line strings in CLI and editor analysis, while retaining following declarations and recovering after edits.
+- Capture localization metadata only for enabled unused-l10n analysis in shared bounded snapshots. Skip checks with one warning per malformed or unreadable input episode, and refresh declared ARB diagnostics without rebuilding semantic analysis. Support BOM-prefixed ARB templates (previously skipped), preserving original byte spans and report fingerprints while excluding the BOM from UTF-16 editor ranges. Normalize template paths without resolving symlinks, and clear diagnostics when a parent directory is deleted.
+- `falcon check` now fails the run (exits nonzero) on unreadable, invalid-UTF-8, or vanished Dart project sources instead of skipping them, and the editor suppresses incomplete cross-file results until sources recover.
+- The `falcon.json` JSON schema now reports `recommended` as the default for each `linter.domains` entry, matching falcon's behavior.
+- Skip lint diagnostics in the language server when the parser worker fails while reparsing a document for a changed package language version.
+- Speed up `max-lines-for-function` on files with many functions.
+- Keep absence-dependent checks conservative when package configuration is unreadable, invalid or partially invalid, without discarding valid entries' package roots, language versions and resolved import/test facts. Skip `unused-dependencies` and `unused-dev-dependencies` absence findings until complete metadata recovers; resume checking against current metadata afterward.
+- Fix local VS Code extension packaging with repository metadata and absolute README links that work in the packaged extension.
+- Warn once when a package requests a future Dart language version and analyze it using the latest supported version without treating the project as incomplete.
+
+#### Reject incomplete analysis and fixes when existing project companion sources have genuine read failures, and suppress cross-file language-server results until those sources recover or are no longer referenced while retaining per-file semantic analysis. Missing or non-file directive targets remain absent; unreadable external sources remain optional with warnings.
+
+Companion scope follows analyzed packages, discovered pub/Melos workspaces and the containing directories of loose sources, independently of the CLI current directory, config/VCS roots, or language-server workspace folders. Language-server scope includes packages without open buffers, and fix-all actions refuse incomplete semantic sources.
+
 ## 0.4.6 (2026-10-28)
 
 ### Features
