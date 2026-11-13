@@ -1161,3 +1161,140 @@ fn undiscovered_member_declarations_preserve_possible_sources() {
         );
     }
 }
+
+fn resolved_override_config() -> FalconConfig {
+    from_json(serde_json::json!({
+        "linter": { "rules": { "complexity": {
+            "test-rule": { "level": "warn", "options": { "limit": 100 } }
+        } } },
+        "overrides": [
+            {
+                "includes": ["lib/**", "!lib/excluded/**"],
+                "linter": { "rules": { "complexity": {
+                    "test-rule": { "level": "error", "options": { "limit": 20 } }
+                } } }
+            },
+            {
+                "includes": ["lib/nested/**"],
+                "linter": { "rules": { "complexity": {
+                    "test-rule": { "level": "error", "options": { "limit": 10 } }
+                } } }
+            },
+            {
+                "includes": ["lib/nested/off/**"],
+                "linter": { "rules": { "complexity": { "test-rule": "off" } } }
+            },
+            {
+                "includes": ["lib/nested/options/**"],
+                "linter": { "rules": { "complexity": {
+                    "test-rule": { "level": "error", "options": { "limit": 5 } }
+                } } }
+            },
+            {
+                "includes": ["lib/disabled/**"],
+                "linter": { "enabled": false }
+            },
+            {
+                "includes": ["lib/disabled/reenabled/**"],
+                "linter": { "rules": { "complexity": {
+                    "test-rule": { "level": "info", "options": null }
+                } } }
+            }
+        ]
+    }))
+}
+
+fn assert_resolved_overrides(config: &FalconConfig, root: &std::path::Path) {
+    for (relative, limit, severity) in [
+        ("other.dart", 100, Some(ResolvedSeverity::Warn)),
+        ("lib/main.dart", 20, Some(ResolvedSeverity::Error)),
+        ("lib/excluded/main.dart", 100, Some(ResolvedSeverity::Warn)),
+        ("lib/nested/main.dart", 10, Some(ResolvedSeverity::Error)),
+        ("lib/nested/off/main.dart", 10, None),
+        (
+            "lib/nested/options/main.dart",
+            5,
+            Some(ResolvedSeverity::Error),
+        ),
+        ("lib/disabled/main.dart", 20, None),
+        (
+            "lib/disabled/reenabled/main.dart",
+            20,
+            Some(ResolvedSeverity::Info),
+        ),
+    ] {
+        let path = root.join(relative);
+        let path = path.to_string_lossy();
+        let resolved = config.resolve_file(&path);
+        let before = config
+            .rule_options_data_for(&path, "complexity", "test-rule")
+            .unwrap();
+        let after = resolved
+            .rule_options_data("complexity", "test-rule")
+            .unwrap();
+        assert!(std::ptr::eq(before, after), "{path}");
+        assert_eq!(after.value()["limit"], limit, "{path}");
+        assert_eq!(
+            resolved.rule_options_location("complexity", "test-rule"),
+            config.rule_options_location_for(&path, "complexity", "test-rule"),
+            "{path}"
+        );
+        for recommended in [false, true] {
+            assert_eq!(
+                resolved.resolve_rule("complexity", "test-rule", recommended, &[]),
+                config.resolve_rule_for(&path, "complexity", "test-rule", recommended, &[]),
+                "{path}"
+            );
+        }
+        assert_eq!(
+            resolved.resolve_rule("complexity", "test-rule", false, &[]),
+            severity
+        );
+        assert!(
+            resolved
+                .rule_options_data("other-group", "test-rule")
+                .is_none()
+        );
+        assert!(
+            resolved
+                .rule_options_data("complexity", "missing")
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn resolved_options_preserve_override_precedence_from_parent_config() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = resolved_override_config();
+    config.resolve_paths(directory.path());
+    assert_resolved_overrides(&config, directory.path());
+    config.linter.enabled = false;
+    let path = directory.path().join("lib/main.dart");
+    assert_eq!(
+        config.resolve_file(&path.to_string_lossy()).resolve_rule(
+            "complexity",
+            "test-rule",
+            true,
+            &[]
+        ),
+        None
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn resolved_options_preserve_symlinked_roots_and_package_replacements() {
+    let directory = tempfile::tempdir().unwrap();
+    let real = directory.path().join("real");
+    std::fs::create_dir_all(real.join("lib/nested")).unwrap();
+    let alias = directory.path().join("alias");
+    std::os::unix::fs::symlink(&real, &alias).unwrap();
+    let mut package = resolved_override_config();
+    package.resolve_paths(&alias);
+    let mut workspace = FalconConfig::default();
+    workspace.resolve_paths(directory.path());
+    workspace.set_package_configs(vec![package]);
+    assert_resolved_overrides(&workspace, &alias);
+    assert_resolved_overrides(&workspace, &real);
+}

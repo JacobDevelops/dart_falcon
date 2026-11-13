@@ -1188,7 +1188,113 @@ pub enum ResolvedSeverity {
     Error,
 }
 
+/// Borrowed file-rule settings with path overrides matched once for one analysis.
+///
+/// The configuration cannot change while this view is borrowed. Construct a new
+/// view when analyzing another file or after reloading configuration.
+pub struct ResolvedFileConfig<'a> {
+    config: &'a FalconConfig,
+    overrides: Vec<(usize, &'a Override)>,
+}
+
+impl ResolvedFileConfig<'_> {
+    /// Return effective options without repeating filesystem or glob matching.
+    #[must_use]
+    pub fn rule_options_data(&self, group: &str, name: &str) -> Option<&RuleOptions> {
+        self.options_data(group, name).0
+    }
+
+    fn options_data(&self, group: &str, name: &str) -> (Option<&RuleOptions>, Option<usize>) {
+        // Last non-null options replace the whole value; level-only overrides
+        // and disabled rules still inherit earlier options.
+        for &(index, ov) in self.overrides.iter().rev() {
+            if let Some(options) = ov
+                .linter
+                .as_ref()
+                .and_then(|block| block.rules.groups.get(group))
+                .and_then(|rules| rules.get(name))
+                .and_then(RuleConfiguration::options_data)
+            {
+                return (Some(options), Some(index));
+            }
+        }
+        (
+            self.config
+                .linter
+                .rules
+                .groups
+                .get(group)
+                .and_then(|rules| rules.get(name))
+                .and_then(RuleConfiguration::options_data),
+            None,
+        )
+    }
+
+    /// Locate the same effective options used by [`Self::rule_options_data`].
+    #[must_use]
+    pub fn rule_options_location(&self, group: &str, name: &str) -> Vec<ConfigPathSegment> {
+        options_location(self.options_data(group, name).1, "linter", group, name)
+    }
+
+    /// Resolve severity using the same ordered override snapshot as options.
+    #[must_use]
+    pub fn resolve_rule(
+        &self,
+        group: &str,
+        name: &str,
+        recommended: bool,
+        domains: &[&str],
+    ) -> Option<ResolvedSeverity> {
+        self.config.resolve_overrides(
+            self.overrides.iter().map(|&(_, ov)| ov),
+            (group, name),
+            Section::Linter,
+            self.config
+                .linter
+                .resolve_rule(group, name, recommended, domains),
+        )
+    }
+}
+
+fn options_location(
+    index: Option<usize>,
+    key: &str,
+    group: &str,
+    rule_name: &str,
+) -> Vec<ConfigPathSegment> {
+    let mut location = Vec::with_capacity(if index.is_some() { 7 } else { 5 });
+    if let Some(index) = index {
+        location.push(ConfigPathSegment::Key("overrides".to_owned()));
+        location.push(ConfigPathSegment::Index(index));
+    }
+    location.extend(
+        [key, "rules", group, rule_name, "options"]
+            .map(|key| ConfigPathSegment::Key(key.to_owned())),
+    );
+    location
+}
+
 impl FalconConfig {
+    /// Select the package configuration and match its overrides once per file.
+    #[must_use]
+    pub fn resolve_file(&self, path: &str) -> ResolvedFileConfig<'_> {
+        if self.package_configs.is_empty() && self.overrides.is_empty() {
+            return ResolvedFileConfig {
+                config: self,
+                overrides: Vec::new(),
+            };
+        }
+        let path = self.files.includes.match_path(path);
+        let config = self.config_for_identity(&path);
+        let overrides = config
+            .overrides
+            .iter()
+            .enumerate()
+            .filter(|(_, ov)| ov.includes.admits_identity(&path))
+            .collect();
+        ResolvedFileConfig { config, overrides }
+    }
+
     /// Resolve a rule's severity, or `None` if it is disabled.
     /// See [`LinterConfig::resolve_rule`].
     #[must_use]
@@ -1318,16 +1424,7 @@ impl FalconConfig {
         key: &str,
     ) -> Vec<ConfigPathSegment> {
         let (_, index) = self.options_data_for(path, group, rule_name, section);
-        let mut location = Vec::with_capacity(if index.is_some() { 7 } else { 5 });
-        if let Some(index) = index {
-            location.push(ConfigPathSegment::Key("overrides".to_owned()));
-            location.push(ConfigPathSegment::Index(index));
-        }
-        location.extend(
-            [key, "rules", group, rule_name, "options"]
-                .map(|key| ConfigPathSegment::Key(key.to_owned())),
-        );
-        location
+        options_location(index, key, group, rule_name)
     }
 
     fn options_data_for(
@@ -1466,16 +1563,29 @@ impl FalconConfig {
         path: &MatchPath<'_>,
         (group, name): (&str, &str),
         section: Section,
+        result: Option<ResolvedSeverity>,
+    ) -> Option<ResolvedSeverity> {
+        self.resolve_overrides(
+            self.overrides
+                .iter()
+                .filter(|ov| ov.includes.admits_identity(path)),
+            (group, name),
+            section,
+            result,
+        )
+    }
+
+    fn resolve_overrides<'a>(
+        &self,
+        overrides: impl Iterator<Item = &'a Override>,
+        (group, name): (&str, &str),
+        section: Section,
         mut result: Option<ResolvedSeverity>,
     ) -> Option<ResolvedSeverity> {
         if !self.section_enabled(section) {
             return None;
         }
-        for ov in self
-            .overrides
-            .iter()
-            .filter(|ov| ov.includes.admits_identity(path))
-        {
+        for ov in overrides {
             let Some(block) = section.override_rules(ov) else {
                 continue;
             };

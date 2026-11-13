@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use falcon_config::FalconConfig;
+use falcon_config::{FalconConfig, ResolvedFileConfig};
 use falcon_diagnostics::{
     CONFIG_DIAGNOSTIC_ID, Diagnostic, Fix, FixKind, Severity, Span, TextEdit,
 };
@@ -48,6 +48,7 @@ pub struct AnalyzeContext<'a> {
     source: &'a str,
     parsed: &'a Arc<ParsedFile>,
     config: &'a FalconConfig,
+    file_config: ResolvedFileConfig<'a>,
     /// Cross-file type facts, when resolving analysis is enabled.
     types: Option<&'a TypeIndex>,
     /// Project-wide declaration identity index for rules that must distinguish
@@ -91,6 +92,7 @@ impl<'a> AnalyzeContext<'a> {
             source: parsed.source(),
             parsed,
             config,
+            file_config: config.resolve_file(&file_path.to_string_lossy()),
             types: None,
             identities: None,
             signatures: None,
@@ -434,14 +436,13 @@ impl<'a> AnalyzeContext<'a> {
         self
     }
 
-    /// Resolve cached rule options with this file's per-path overrides.
+    /// Read rule options from the file's resolved path-override snapshot.
     pub fn rule_options_data(
         &self,
         group: &str,
         rule_name: &str,
     ) -> Option<&falcon_config::RuleOptions> {
-        self.config
-            .rule_options_data_for(&self.file_path.to_string_lossy(), group, rule_name)
+        self.file_config.rule_options_data(group, rule_name)
     }
 
     /// Locate effective options for configuration diagnostics.
@@ -450,7 +451,45 @@ impl<'a> AnalyzeContext<'a> {
         group: &str,
         rule_name: &str,
     ) -> Vec<falcon_config::ConfigPathSegment> {
-        self.config
-            .rule_options_location_for(&self.file_path.to_string_lossy(), group, rule_name)
+        self.file_config.rule_options_location(group, rule_name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn file_rebinding_and_config_reload_resolve_fresh_options() {
+        let source = "void main() {}";
+        let parsed = Arc::new(ParsedFile::parse(source));
+        let mut config: FalconConfig = serde_json::from_value(serde_json::json!({
+            "overrides": [{
+                "includes": ["first.dart"],
+                "linter": { "rules": { "complexity": {
+                    "test-rule": { "level": "warn", "options": { "limit": 1 } }
+                } } }
+            }]
+        }))
+        .unwrap();
+        let ctx = AnalyzeContext::new(Path::new("first.dart"), &config, &parsed);
+        assert_eq!(
+            ctx.rule_options_data("complexity", "test-rule")
+                .unwrap()
+                .value()["limit"],
+            1
+        );
+        let other = ctx.for_file(Path::new("second.dart"), &parsed);
+        assert!(other.rule_options_data("complexity", "test-rule").is_none());
+        drop(other);
+        drop(ctx);
+        config.overrides.clear();
+        let reloaded = AnalyzeContext::new(Path::new("first.dart"), &config, &parsed);
+        assert!(
+            reloaded
+                .rule_options_data("complexity", "test-rule")
+                .is_none()
+        );
     }
 }
