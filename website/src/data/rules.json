@@ -5039,6 +5039,18 @@
           "content": "name: architecture_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
         },
         {
+          "path": "bad_encoded_boundary/lib/data/store.dart",
+          "content": "int store() => 1;"
+        },
+        {
+          "path": "bad_encoded_boundary/lib/domain/model.dart",
+          "content": "import '../%64ata/store.dart';\nint model() => store();"
+        },
+        {
+          "path": "bad_encoded_boundary/pubspec.yaml",
+          "content": "name: fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
+        },
+        {
           "path": "good/lib/application/allowed.dart",
           "content": "import 'package:architecture_fixture/application/target.dart';\nimport 'package:architecture_fixture/domain/target.dart';"
         },
@@ -5550,6 +5562,12 @@
         "line": 1,
         "column": 8,
         "file": "bad/lib/widgets/bad.dart"
+      },
+      {
+        "message": "The `domain` layer must not import from the `data` layer.",
+        "line": 1,
+        "column": 8,
+        "file": "bad_encoded_boundary/lib/domain/model.dart"
       }
     ]
   },
@@ -10185,8 +10203,8 @@
     },
     "sourcePath": "crates/falcon_rules/src/lint/correctness/avoid_unrelated_type_casts.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/avoid-unrelated-type-casts",
-    "description": "Flags casts between types proven unrelated by canonical type resolution.",
-    "docs": "Flags casts between types proven unrelated by canonical type resolution.\n\nChecks `as` expressions, cast patterns, and SDK collection `cast<T>()`\nelement/key/value conversions. Dynamic, unresolved, and potentially related\ntypes are not reported. Collection casts are lazy but fail when an element\nof the incompatible type is read.",
+    "description": "Flags casts between incompatible runtime types.",
+    "docs": "Flags casts between incompatible runtime types.\n\nChecks `as` expressions, cast patterns, and SDK collection `cast<T>()`\nelement/key/value conversions. Dynamic, unresolved, interface-like and\npotentially related types are not reported. Collection casts are lazy.\n\nBesides proven-disjoint types, this rule diagnoses unrelated concrete\nclasses and incompatible concrete generic arguments as a heuristic. A third\nclass implementing two concrete classes can make such a cast succeed.",
     "examples": {
       "bad": "void casts(String text, int number, List<int> numbers, Set<int> unique, Map<String, int> map) {\n  print(text as int);\n  print(number as String);\n  print(numbers as List<String>);\n  print(numbers.cast<String>());\n  print(unique.cast<String>());\n  print(map.cast<int, int>());\n  print(map.cast<String, String>());\n}\n\nclass Animal {}\nclass NotAnimal {}\nvoid unrelatedClasses(Animal animal) {\n  print(animal as NotAnimal);\n}\nvoid castPattern(String text) {\n  if (text case final number as int) print(number);\n}",
       "good": "import 'dart:async';\n\nvoid casts(Object value, dynamic unknown, List<num> numbers, Map<Object, Object> map) {\n  print(value as String);\n  print(unknown as int);\n  print(numbers as List<int>);\n  print(numbers.cast<int>());\n  print(numbers.cast<Object>());\n  print(map.cast<String, int>());\n}\nclass Custom {\n  Custom cast<T>() => this;\n}\nvoid custom(Custom item) { item.cast<String>(); }\n\nextension type Id(int value) {}\nvoid erasedAndStructural<T>(int number, Object value, Object recordValue, Function callback, T generic, FutureOr<int> futureOr) {\n  print(number as Id);\n  print(value as void Function());\n  print(callback as void Function(int));\n  print(recordValue as (int, String));\n  print((1, 2) as Object);\n  print(generic as void Function());\n  print(futureOr as int);\n  if (value case final callback as void Function()) print(callback);\n}",
@@ -10996,6 +11014,18 @@
           "content": "name: boundary_app"
         },
         {
+          "path": "bad_encoded_boundary/lib/data/store.dart",
+          "content": "int store() => 1;"
+        },
+        {
+          "path": "bad_encoded_boundary/lib/domain/model.dart",
+          "content": "import '../%64ata/store.dart';\nint model() => store();"
+        },
+        {
+          "path": "bad_encoded_boundary/pubspec.yaml",
+          "content": "name: fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
+        },
+        {
           "path": "good/lib/domain/good.dart",
           "content": "import 'dart:async';\nimport 'dart:collection';\nimport 'package:flutterish/material.dart';\nimport '../shared/repository.dart';\nimport 'package:boundary_app/shared/cache.dart';\nimport 'package:legacy/nested/client.dart';\nimport 'stub.dart' if (dart.library.io) 'safe.dart';\nexport 'package:flutter/material.dart';\nexport '../data/repository.dart';\n\nvoid main() {}"
         },
@@ -11069,6 +11099,12 @@
         "line": 11,
         "column": 28,
         "file": "bad/lib/domain/bad.dart"
+      },
+      {
+        "message": "Keep domain code independent of platform and data libraries.",
+        "line": 1,
+        "column": 8,
+        "file": "bad_encoded_boundary/lib/domain/model.dart"
       }
     ]
   },
@@ -13757,7 +13793,7 @@
     "sourcePath": "crates/falcon_rules/src/lint/correctness/library_private_types_in_public_api.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/library-private-types-in-public-api",
     "description": "Avoid using library-private types in public APIs.",
-    "docs": "Avoid using library-private types in public APIs.\n\nChecks the types a public declaration exposes: type-parameter bounds,\nsignatures, field and top-level variable types, extension `on` types, mixin\n`on` constraints, extension-type representations and function-type\naliases. Like the analyzer, supertypes (`extends`, `with`, `implements`),\nnon-function type aliases and record type annotations are not checked, and\nconstructors of enums and of sealed, `abstract final`, `abstract interface`\nor `@internal` classes are exempt. Untyped initializing and super formals\nuse their resolved semantic types, including declarations in part files.",
+    "docs": "Avoid using library-private types in public APIs.\n\nChecks the types a public declaration exposes: type-parameter bounds,\nsignatures, field and top-level variable types, extension `on` types, mixin\n`on` constraints, extension-type representations and function-type\naliases. Like the analyzer, supertypes (`extends`, `with`, `implements`),\nnon-function type aliases and record type annotations are not checked, and\nconstructors of enums and of sealed, `abstract final`, `abstract interface`\nor `@internal` classes are exempt, including primary constructors. Public\nfields introduced by declaring primary parameters are still checked, even\nwhen the constructor is exempt or private. Untyped initializing and super\nformals use their resolved semantic types, including declarations in part files.",
     "examples": {
       "bad": "class _Private {}\n\n_Private topLevel(_Private value) => value;\n\n_Private publicVariable = _Private();\n\ntypedef PublicFunction = _Private Function(_Private);\n\nclass PublicClass<T extends _Private> {\n  _Private field;\n  PublicClass(this.field);\n  _Private method(_Private value) => value;\n  _Private get getter => field;\n  set setter(_Private value) => field = value;\n}\n\nmixin PublicMixin on _Private {\n  _Private operator +(covariant _Private other) => other;\n}\n\nextension PublicExtension on _Private {}\n\nextension type PublicExtensionType(_Private value) {}\n\nclass PublicConstructors {\n  PublicConstructors(_Private value);\n}",
       "good": "class _Private {\n  _Private field;\n  _Private(this.field);\n  _Private method(_Private value) => value;\n}\n\n_Private _privateFunction(_Private value) => value;\n_Private _privateVariable = _Private(_Private(_Private(null as dynamic)));\ntypedef _PrivateAlias = _Private Function(_Private);\n\nclass PublicClass {\n  String field;\n  PublicClass(this.field);\n  String method(String value) => value;\n  _Private _privateMethod(_Private value) => value;\n}\n\ntypedef PublicAlias = ({String value, void Function(String) callback});\nextension PublicExtension on String {}\nextension on _Private {}\nextension type PublicExtensionType._(_Private _value) {}\n\nenum PublicEnum {\n  value._(null);\n  const PublicEnum._(_Private? value);\n}\n\nvoid publicNamedParameter({String? value}) {}\nvoid _privateNamedParameter({_Private? value}) {}\n\n// Supertypes are not public API to the analyzer.\nclass _Base {}\nmixin _Mixin {}\nabstract class _Marker {}\nclass PublicSubclass extends _Base with _Mixin implements _Marker {}\n\n// Non-function aliases and record types are not checked.\ntypedef PublicRecordAlias = ({_Private value, void Function(_Private) callback});\ntypedef PublicClassAlias = _Private;\n({_Private value}) publicRecord() => (value: _Private(null as dynamic));\n\n// Constructors of effectively private classes are exempt.\nsealed class PublicSealed {\n  PublicSealed(_Private value);\n}\nabstract final class PublicAbstractFinal {\n  PublicAbstractFinal(_Private value);\n}\nabstract interface class PublicAbstractInterface {\n  PublicAbstractInterface(_Private value);\n}",
@@ -14604,6 +14640,18 @@
           "content": "name: cycle_fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
         },
         {
+          "path": "bad_encoded_cycle/lib/a.dart",
+          "content": "import '%62.dart';\nint a() => b();"
+        },
+        {
+          "path": "bad_encoded_cycle/lib/b.dart",
+          "content": "import '%61.dart';\nint b() => a();"
+        },
+        {
+          "path": "bad_encoded_cycle/pubspec.yaml",
+          "content": "name: fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
+        },
+        {
           "path": "bad_pair/lib/a.dart",
           "content": "import 'b.dart';\nclass AccountRepository {}"
         },
@@ -14817,6 +14865,12 @@
         "line": 2,
         "column": 26,
         "file": "bad_conditional_import/lib/a.dart"
+      },
+      {
+        "message": "Remove a dependency to break this import/export cycle: `lib/a.dart` -> `lib/b.dart` -> `lib/a.dart`.",
+        "line": 1,
+        "column": 8,
+        "file": "bad_encoded_cycle/lib/a.dart"
       },
       {
         "message": "Remove a dependency to break this import/export cycle: `lib/a.dart` -> `lib/b.dart` -> `lib/a.dart`.",
@@ -17459,8 +17513,8 @@
     },
     "sourcePath": "crates/falcon_rules/src/lint/correctness/unnecessary_flutter_imports.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/unnecessary-flutter-imports",
-    "description": "Disallow unused Flutter framework and `dart:async` imports.",
-    "docs": "Disallow unused Flutter framework and `dart:async` imports.\n\nUsage is based on resolved symbol identity and import combinators. Unknown\nunprefixed names conservatively keep an unrestricted import, avoiding guesses\nfrom capitalization or substrings.",
+    "description": "Disallow unnecessary Flutter framework and `dart:async` imports.",
+    "docs": "Disallow unnecessary Flutter framework and `dart:async` imports.\n\nUses each import's export namespace, including re-exports and combinators.\nA used import is removable only when a retained import provides all its used\nnames and at least one additional used name, matching `unnecessary_import`.\nEqual coverage is retained, including duplicate imports. Unknown namespaces\nconservatively keep the import.\nResolved extension members keep the import providing their extension;\nunresolved member lookups keep every import, including prefixed imports.\nOrdinary instance/static members need no import beyond their receiver's type.\nDynamic dispatch cannot apply an extension and does not retain imports.",
     "examples": {
       "bad": "import 'package:flutter/material.dart';\nimport 'package:flutter/foundation.dart';\nimport 'dart:async';\nimport 'package:flutter/services.dart';\nimport 'package:flutter/widgets.dart';\nimport 'package:flutter/material.dart' as flutter show Text;\n\nvoid main() {\n  print('Hello World');\n}\n\nclass MyApp {\n  void doSomething() {\n    print('No Flutter symbols used');\n  }\n}",
       "good": "import 'package:flutter/material.dart';\nimport 'package:flutter/foundation.dart';\nimport 'dart:async';\n\nvoid main() {\n  runApp(const MyApp());\n}\n\nclass MyApp extends StatelessWidget {\n  const MyApp();\n\n  @override\n  Widget build(BuildContext context) {\n    return MaterialApp(\n      title: 'My App',\n      home: Scaffold(\n        appBar: AppBar(title: const Text('Home')),\n        body: const Center(\n          child: Text('Hello'),\n        ),\n      ),\n    );\n  }\n}\n\nFuture<void> asyncExample() async {\n  await Future.delayed(const Duration(seconds: 1));\n  debugPrint('Done');\n}\n\n// Uses Stream from dart:async\nStream<int> createStream() {\n  return Stream.fromIterable([1, 2, 3]);\n}\n\n// Uses widgets\nWidget createButton() {\n  return ElevatedButton(\n    onPressed: () {},\n    child: const Text('Click me'),\n  );\n}\n\n// Uses Color from Flutter\nvoid styleContainer() {\n  final container = Container(\n    color: Color.fromARGB(255, 100, 150, 200),\n  );\n}",
@@ -18334,7 +18388,7 @@
     "sourcePath": "crates/falcon_rules/src/cross_file/unused_code.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/unused-code",
     "description": "Report public top-level declarations that nothing references.",
-    "docs": "Report public top-level declarations that nothing references.\n\nFlags a public top-level declaration in `lib/` — a class, mixin, enum,\ntypedef, extension type, function, or variable — whose name appears nowhere\nelse in the project, neither in another file nor elsewhere in its own file.\nAn unreferenced public API is usually dead code that outlived its callers,\nbut removing something still in use is worse than missing one, so the rule is\ntuned to avoid false positives: it exempts `main`, annotated declarations,\nmembers of re-exported files, and unnamed extensions, treats any same-name\nidentifier anywhere as usage, and skips files that failed to parse. Private\n(`_`-prefixed) declarations are out of scope. This is a cross-file rule: it\nruns in the cross-file pass over the whole analyzed file set and is\nconfigured under the top-level `cross-file` section rather than `linter`.",
+    "docs": "Report public top-level declarations that nothing references.\n\nFlags a public top-level declaration in `lib/` — a class, mixin, enum,\ntypedef, extension type, function, or variable — whose name appears nowhere\nelse in the project, neither in another file nor elsewhere in its own file.\nAn unreferenced public API is usually dead code that outlived its callers,\nbut removing something still in use is worse than missing one, so the rule is\ntuned to avoid false positives: it exempts `main`, annotated declarations,\nmembers of re-exported files (including parts and nested parts in every\nconditional export branch), and unnamed extensions. These are file-level\nexemptions: local shadowing and getter/setter pairs do not narrow them.\nThe rule treats any same-name identifier anywhere as usage and skips files\nthat failed to parse. Private\n(`_`-prefixed) declarations are out of scope. This is a cross-file rule: it\nruns in the cross-file pass over the whole analyzed file set and is\nconfigured under the top-level `cross-file` section rather than `linter`.",
     "examples": {
       "bad": null,
       "good": null,
@@ -18362,6 +18416,82 @@
         {
           "path": "good/main.dart",
           "content": "import 'api.dart';\n\nvoid main() {\n  PublicApi();\n  publicFunction();\n  '${type} ${show} ${get} ${set} ${on} ${hide}'.toString();\n}"
+        },
+        {
+          "path": "good_conditional_exports/lib/api.dart",
+          "content": "export 'src/stub.dart' if (dart.library.io) 'src/io.dart' if (dart.library.html) 'src/web.dart';"
+        },
+        {
+          "path": "good_conditional_exports/lib/src/io.dart",
+          "content": "class NativeApi {}"
+        },
+        {
+          "path": "good_conditional_exports/lib/src/stub.dart",
+          "content": "class StubApi {}"
+        },
+        {
+          "path": "good_conditional_exports/lib/src/web.dart",
+          "content": "class WebApi {}"
+        },
+        {
+          "path": "good_conditional_exports/pubspec.yaml",
+          "content": "name: fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
+        },
+        {
+          "path": "good_encoded_exports/lib/api.dart",
+          "content": "export 'src/%61pi.dart';"
+        },
+        {
+          "path": "good_encoded_exports/lib/src/api.dart",
+          "content": "class Api {}"
+        },
+        {
+          "path": "good_encoded_exports/pubspec.yaml",
+          "content": "name: fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
+        },
+        {
+          "path": "good_exported_parts/lib/api.dart",
+          "content": "export 'src/api.dart';"
+        },
+        {
+          "path": "good_exported_parts/lib/src/api.dart",
+          "content": "part 'api_part.dart';\npart 'api.g.dart';"
+        },
+        {
+          "path": "good_exported_parts/lib/src/api.g.dart",
+          "content": "part of 'api.dart';\nclass GeneratedApi {}"
+        },
+        {
+          "path": "good_exported_parts/lib/src/api_part.dart",
+          "content": "part of 'api.dart';\nclass SharedApi {}"
+        },
+        {
+          "path": "good_exported_parts/pubspec.yaml",
+          "content": "name: fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
+        },
+        {
+          "path": "good_nested_parts/analysis_options.yaml",
+          "content": "analyzer:\n  enable-experiment:\n    - enhanced-parts"
+        },
+        {
+          "path": "good_nested_parts/lib/api.dart",
+          "content": "export 'src/owner.dart';"
+        },
+        {
+          "path": "good_nested_parts/lib/src/nested.dart",
+          "content": "part of 'part.dart';\nclass Nested {}"
+        },
+        {
+          "path": "good_nested_parts/lib/src/owner.dart",
+          "content": "part 'part.dart';"
+        },
+        {
+          "path": "good_nested_parts/lib/src/part.dart",
+          "content": "part of 'owner.dart';\npart 'nested.dart';"
+        },
+        {
+          "path": "good_nested_parts/pubspec.yaml",
+          "content": "name: fixture"
         }
       ]
     },
@@ -18829,7 +18959,7 @@
     "sourcePath": "crates/falcon_rules/src/cross_file/unused_files.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/unused-files",
     "description": "Report `lib/` files that no project entrypoint can reach.",
-    "docs": "Report `lib/` files that no project entrypoint can reach.\n\nModels the file set as a directed graph (file → every file its\nimports/exports/parts reference) and flags a `lib/src/**` file when no\nentrypoint reaches it. Entrypoints (\"roots\") are: any analyzed file outside\n`lib/` (bin/test/tool/example, or their own concern), any file declaring a\ntop-level `main`, and the public library surface — every `lib/` file not\nunder `lib/src/`, which external packages may import (this subsumes the\n`lib/<pkg>.dart` barrel). Reachability, not mere reference count, is the test:\na cluster of `lib/src` files that reference only each other but that nothing\nlive reaches is dead and is flagged. `part of` files belong to their owning\nlibrary and are never flagged directly. Without a pubspec the scope narrows\nto files with a `lib/` path component and the public-surface exemption is not\napplied (no `lib/` root is known). This is a cross-file rule: it runs in the\ncross-file pass and is configured under the top-level `cross-file` section.",
+    "docs": "Report `lib/` files that no project entrypoint can reach.\n\nModels the file set as a directed graph (file → every file its\nimports/exports/parts reference) and flags a `lib/src/**` file when no\nentrypoint reaches it. Entrypoints (\"roots\") are: any analyzed file outside\n`lib/` (bin/test/tool/example, or their own concern), any file declaring a\ntop-level `main`, and the public library surface — every `lib/` file not\nunder `lib/src/`, which external packages may import (this subsumes the\n`lib/<pkg>.dart` barrel). Reachability, not mere reference count, is the test:\na cluster of `lib/src` files that reference only each other but that nothing\nlive reaches is dead and is flagged. `part of` files belong to their owning\nlibrary and are never flagged directly. Without a pubspec the scope narrows\nto files with a `lib/` path component and the public-surface exemption is not\napplied (no `lib/` root is known). This is a cross-file rule: it runs in the\ncross-file pass and is configured under the top-level `cross-file` section.\nAll conditional import/export branches and transitive part references create\ngraph edges. Getter/setter pairs and local export shadowing do not alter\nfile reachability.",
     "examples": {
       "bad": null,
       "good": null,
@@ -18865,6 +18995,34 @@
         {
           "path": "good/used.dart",
           "content": "// Referenced by main.dart via `import 'used.dart'`, so it is NOT unused.\nvoid helper() {\n  print('helper');\n}"
+        },
+        {
+          "path": "good_conditional_exports/lib/api.dart",
+          "content": "export 'src/stub.dart' if (dart.library.io) 'src/io.dart';"
+        },
+        {
+          "path": "good_conditional_exports/lib/src/io.dart",
+          "content": "class NativeApi {}"
+        },
+        {
+          "path": "good_conditional_exports/lib/src/stub.dart",
+          "content": "class StubApi {}"
+        },
+        {
+          "path": "good_conditional_exports/pubspec.yaml",
+          "content": "name: fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
+        },
+        {
+          "path": "good_encoded_exports/lib/api.dart",
+          "content": "export 'src/%61pi.dart';"
+        },
+        {
+          "path": "good_encoded_exports/lib/src/api.dart",
+          "content": "class Api {}"
+        },
+        {
+          "path": "good_encoded_exports/pubspec.yaml",
+          "content": "name: fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
         }
       ]
     },
@@ -19433,7 +19591,7 @@
     "sourcePath": "crates/falcon_rules/src/lint/correctness/use_closest_build_context.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/use-closest-build-context",
     "description": "Use the nearest `BuildContext` parameter inside nested callbacks.",
-    "docs": "Use the nearest `BuildContext` parameter inside nested callbacks. Only resolved Flutter contexts are checked, avoiding unrelated variables named context.",
+    "docs": "Use the nearest `BuildContext` parameter inside nested callbacks. Only resolved Flutter contexts are checked, avoiding unrelated variables named context.\n\nA nearer context parameter named `_` still counts, including non-binding\nwildcard parameters in Dart 3.7 and later. Give it a usable name instead of\ncapturing an outer context.",
     "examples": {
       "bad": "import 'package:flutter/material.dart';\nvoid example(BuildContext outer) {\nfinal callback0 = (BuildContext inner) { use(outer); };\nfinal callback1 = (BuildContext inner) => use(outer);\nfinal callback2 = (BuildContext inner) { return Theme.of(outer); };\nvoid callback3(BuildContext inner) { use(outer); }\nfinal callback4 = (BuildContext inner) { final nested = (BuildContext closest) { use(inner); }; };\n}",
       "good": "import 'package:flutter/material.dart';\nvoid example(BuildContext outer) {\nfinal callback0 = (BuildContext inner) { use(inner); };\nfinal callback1 = (BuildContext inner) => use(inner);\nfinal callback2 = (BuildContext inner) { return Theme.of(inner); };\nvoid callback3(BuildContext inner) { use(inner); }\nfinal callback4 = (int value) { use(outer); };\n}",
@@ -21183,7 +21341,7 @@
     "sourcePath": "crates/falcon_rules/src/lint/performance/prefer_const_border_radius.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/prefer-const-border-radius",
     "description": "Flags `BorderRadius.only(...)` whose four corner radii are all equal.",
-    "docs": "Flags `BorderRadius.only(...)` whose four corner radii are all equal.\n\nWhen every corner uses the same `Radius.circular(n)`,\n`BorderRadius.circular(n)` is shorter and const-constructible, so Flutter can\ncanonicalize and reuse the value instead of rebuilding it. The rule fires\nonly when all four corners (`topLeft`, `topRight`, `bottomLeft`,\n`bottomRight`) are present and their `Radius.circular(...)` values are\ntextually equal.",
+    "docs": "Flags `BorderRadius.only(...)` whose four corner radii are all equal.\n\nWhen every corner uses the same `Radius.circular(n)`,\n`BorderRadius.all(Radius.circular(n))` preserves const construction and\navoids repeating the radius. Unlike `BorderRadius.circular`, `all` is const.\nAll four corners must be present and their circular values textually equal.",
     "examples": {
       "bad": "// Test cases for prefer-const-border-radius rule\n// Flags BorderRadius.only(...) where all radii are equal\n\nvoid testAllRadiiEqual() {\n  final border1 = BorderRadius.only(\n    topLeft: Radius.circular(8),\n    topRight: Radius.circular(8),\n    bottomLeft: Radius.circular(8),\n    bottomRight: Radius.circular(8),\n  );\n\n  final border2 = BorderRadius.only(\n    topLeft: Radius.circular(16),\n    topRight: Radius.circular(16),\n    bottomLeft: Radius.circular(16),\n    bottomRight: Radius.circular(16),\n  );\n}\n\nvoid testInlineAllRadiiEqual() {\n  final border = BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10));\n}\n\nclass MyWidget {\n  final border = BorderRadius.only(\n    topLeft: Radius.circular(12),\n    topRight: Radius.circular(12),\n    bottomLeft: Radius.circular(12),\n    bottomRight: Radius.circular(12),\n  );\n}\n\nvoid testSmallRadius() {\n  final border = BorderRadius.only(topLeft: Radius.circular(4), topRight: Radius.circular(4), bottomLeft: Radius.circular(4), bottomRight: Radius.circular(4));\n}\n\n// Regression: the violation must still be found inside Dart 3 containers\n// (pattern declaration, labeled statement, switch expression and subject,\n// collection if/spread, record field).\nvoid containersRegression(int rcount) {\n  final (ra, _) = (BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10)), 0);\n  lbl: {\n    final rb = BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10));\n    print(rb);\n  }\n  final rc = switch (rcount) {\n    0 => BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10)),\n    _ => null,\n  };\n  final rd = switch (BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10))) {\n    _ => 0,\n  };\n  final re = [if (rcount > 0) BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10))];\n  final rf = [...[BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10))]];\n  final rg = (p: BorderRadius.only(topLeft: Radius.circular(10), topRight: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10)), q: 0);\n  print([ra, rc, rd, re, rf, rg]);\n}",
       "good": "// Good examples for prefer-const-border-radius rule\n// Using BorderRadius.circular() when appropriate\n\nvoid testBorderRadiusCircular() {\n  final border1 = BorderRadius.circular(8);\n  final border2 = BorderRadius.circular(16);\n  final border3 = BorderRadius.circular(12);\n}\n\nvoid testBorderRadiusOnlyWithDifferentRadii() {\n  final border = BorderRadius.only(\n    topLeft: Radius.circular(8),\n    topRight: Radius.circular(16),\n    bottomLeft: Radius.circular(8),\n    bottomRight: Radius.circular(4),\n  );\n}\n\nvoid testBorderRadiusByAll() {\n  final border = BorderRadius.all(Radius.circular(8));\n}\n\nclass MyWidget {\n  final border1 = BorderRadius.circular(10);\n  final border2 = BorderRadius.only(\n    topLeft: Radius.circular(8),\n    topRight: Radius.circular(12),\n  );\n  final border3 = BorderRadius.all(Radius.circular(16));\n}",
@@ -21191,73 +21349,73 @@
     },
     "diagnostics": [
       {
-        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.circular()`.",
+        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.all(Radius.circular(...))`.",
         "line": 10,
         "column": 3,
         "file": null
       },
       {
-        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.circular()`.",
+        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.all(Radius.circular(...))`.",
         "line": 17,
         "column": 3,
         "file": null
       },
       {
-        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.circular()`.",
+        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.all(Radius.circular(...))`.",
         "line": 21,
         "column": 18,
         "file": null
       },
       {
-        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.circular()`.",
+        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.all(Radius.circular(...))`.",
         "line": 25,
         "column": 18,
         "file": null
       },
       {
-        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.circular()`.",
+        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.all(Radius.circular(...))`.",
         "line": 34,
         "column": 18,
         "file": null
       },
       {
-        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.circular()`.",
+        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.all(Radius.circular(...))`.",
         "line": 41,
         "column": 20,
         "file": null
       },
       {
-        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.circular()`.",
+        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.all(Radius.circular(...))`.",
         "line": 43,
         "column": 16,
         "file": null
       },
       {
-        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.circular()`.",
+        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.all(Radius.circular(...))`.",
         "line": 47,
         "column": 10,
         "file": null
       },
       {
-        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.circular()`.",
+        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.all(Radius.circular(...))`.",
         "line": 50,
         "column": 22,
         "file": null
       },
       {
-        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.circular()`.",
+        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.all(Radius.circular(...))`.",
         "line": 53,
         "column": 31,
         "file": null
       },
       {
-        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.circular()`.",
+        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.all(Radius.circular(...))`.",
         "line": 54,
         "column": 19,
         "file": null
       },
       {
-        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.circular()`.",
+        "message": "`BorderRadius.only()` with all equal radii should use `BorderRadius.all(Radius.circular(...))`.",
         "line": 55,
         "column": 18,
         "file": null
@@ -24593,7 +24751,7 @@
     "docs": "Avoid integer literals that JavaScript would round.\n\nDart compiled to JavaScript stores every `int` as a 64-bit float, so an\ninteger literal that a double cannot represent exactly silently changes\nvalue on the web:\n\n```dart\nint value = 9007199254740995; // BAD: becomes 9007199254740996 in JavaScript\nBigInt value = BigInt.parse('9007199254740995'); // GOOD\n```",
     "examples": {
       "bad": "int a = 9007199254740993;\nint b = 9007199254740995;\nint c = -9007199254740993;\nint d = 0x20000000000001;\nint e = 1234567890123456789;\n\nvoid use() {\n  print(9007199254740997);\n  final values = [1, 18014398509481983];\n  print(values);\n}",
-      "good": "int a = 9007199254740991;\nint b = 9007199254740992;\nint c = -9007199254740991;\nint d = 0x20000000000000;\nint e = 18014398509481984;\nint f = 1 << 60;\nint g = 42;\ndouble h = 9007199254740993.0;\nBigInt i = BigInt.parse('9007199254740993');",
+      "good": "int a = 9007199254740991;\nint b = 9007199254740992;\nint c = -9007199254740991;\nint d = 0x20000000000000;\nint e = 18014398509481984;\nint f = 1 << 60;\nint g = 42;\ndouble h = 9007199254740993.0;\nBigInt i = BigInt.parse('9007199254740993');\nint allBits = 0xffffffffffffffff;\nint highBit = 0x8000000000000000;\nint maxHex = 0x7fffffffffffffff;\nint maxDecimal = 9223372036854775807;\nint minDecimal = -9223372036854775808;",
       "crossFile": null
     },
     "diagnostics": [
@@ -24929,7 +25087,7 @@
     "docs": "Flags the null-assertion operator `!` except on a resolved `Map` index.",
     "examples": {
       "bad": "// Test cases for avoid-non-null-assertion rule\n// All violations are annotated inline\n\nvoid testNullAssertion() {\n  String? nullable = \"test\";\n  final x = nullable!;\n  print(x);\n}\n\nvoid printUserName(User? user) {\n  print(user!.name);\n  print(user!.email);\n}\n\nint getValue(int? value) {\n  return value! + 10;\n}\n\nList<String> getList(List<String>? items) {\n  return items!;\n}\n\nclass Widget {\n  String? _title;\n\n  String getTitle() {\n    return _title!;\n  }\n\n  void render() {\n    final context = _context!;\n    context.build();\n  }\n}\n\nMap<String, dynamic> parseResponse(Map<String, dynamic>? data) {\n  // The outer index `!` (`[...]!`) is exempt; only `data!` is flagged.\n  final nested = data!['key'];\n  return nested;\n}\n\nFuture<String> asyncOperation(Future<String>? future) {\n  return future!;\n}\n\nvoid multipleAssertions() {\n  final a = value1!;\n  final b = value2!;\n  final c = (nested!.property)!;\n}\n\n// Regression: the violation must still be found inside Dart 3 containers\n// (pattern declaration, labeled statement, switch expression and subject,\n// collection if/spread, record field).\nvoid containersRegression(int rcount, Object? maybe) {\n  final (ra, _) = (maybe!, 0);\n  lbl: {\n    final rb = maybe!;\n    print(rb);\n  }\n  final rc = switch (rcount) {\n    0 => maybe!,\n    _ => null,\n  };\n  final rd = switch (maybe!) {\n    _ => 0,\n  };\n  final re = [if (rcount > 0) maybe!];\n  final rf = [...[maybe!]];\n  final rg = (p: maybe!, q: 0);\n  print([ra, rc, rd, re, rf, rg]);\n}",
-      "good": "// Good cases for avoid-non-null-assertion rule\n// No violations expected\n\nvoid testNullCoalescing() {\n  String? nullable = \"test\";\n  final x = nullable ?? \"default\";\n  print(x);\n}\n\nvoid printUserName(User? user) {\n  if (user != null) {\n    print(user.name);\n    print(user.email);\n  }\n}\n\nint getValue(int? value) {\n  return (value ?? 0) + 10;\n}\n\nList<String> getList(List<String>? items) {\n  return items ?? [];\n}\n\nclass Widget {\n  String? _title;\n\n  String getTitle() {\n    return _title ?? '';\n  }\n\n  void render() {\n    final context = _context;\n    if (context != null) {\n      context.build();\n    }\n  }\n}\n\nMap<String, dynamic> parseResponse(Map<String, dynamic>? data) {\n  if (data == null) return {};\n  final nested = data['key'];\n  return nested is Map<String, dynamic> ? nested : {};\n}\n\nFuture<String> asyncOperation(Future<String>? future) {\n  return future ?? Future.value('');\n}\n\nvoid multipleNullChecks() {\n  final a = value1 ?? 'default1';\n  final b = value2 ?? 'default2';\n  if (nested != null && nested.property != null) {\n    final c = nested.property;\n  }\n}\n\nvoid guardClauses(String? maybeValue) {\n  if (maybeValue == null) return;\n  print(maybeValue);\n}\n\n// A null-assertion on a (map) index expression is exempt.\nint readCount(Map<String, int> counts, List<int> xs) {\n  final a = counts['key']!;\n  final b = xs[0]!;\n  return a + b;\n}\n\nclass Optional<T> {\n  final T? _value;\n\n  Optional(this._value);\n\n  T getOrElse(T defaultValue) => _value ?? defaultValue;\n\n  void ifPresent(void Function(T) callback) {\n    if (_value != null) callback(_value as T);\n  }\n}",
+      "good": "// Good cases for avoid-non-null-assertion rule\n// No violations expected\n\nvoid testNullCoalescing() {\n  String? nullable = \"test\";\n  final x = nullable ?? \"default\";\n  print(x);\n}\n\nvoid printUserName(User? user) {\n  if (user != null) {\n    print(user.name);\n    print(user.email);\n  }\n}\n\nint getValue(int? value) {\n  return (value ?? 0) + 10;\n}\n\nList<String> getList(List<String>? items) {\n  return items ?? [];\n}\n\nclass Widget {\n  String? _title;\n\n  String getTitle() {\n    return _title ?? '';\n  }\n\n  void render() {\n    final context = _context;\n    if (context != null) {\n      context.build();\n    }\n  }\n}\n\nMap<String, dynamic> parseResponse(Map<String, dynamic>? data) {\n  if (data == null) return {};\n  final nested = data['key'];\n  return nested is Map<String, dynamic> ? nested : {};\n}\n\nFuture<String> asyncOperation(Future<String>? future) {\n  return future ?? Future.value('');\n}\n\nvoid multipleNullChecks() {\n  final a = value1 ?? 'default1';\n  final b = value2 ?? 'default2';\n  if (nested != null && nested.property != null) {\n    final c = nested.property;\n  }\n}\n\nvoid guardClauses(String? maybeValue) {\n  if (maybeValue == null) return;\n  print(maybeValue);\n}\n\n// A null-assertion on a (map) index expression is exempt.\nint readCount(Map<String, int> counts) {\n  final a = counts['key']!;\n  return a;\n}\n\nclass Optional<T> {\n  final T? _value;\n\n  Optional(this._value);\n\n  T getOrElse(T defaultValue) => _value ?? defaultValue;\n\n  void ifPresent(void Function(T) callback) {\n    if (_value != null) callback(_value as T);\n  }\n}",
       "crossFile": null
     },
     "diagnostics": [
@@ -25311,84 +25469,48 @@
     },
     "sourcePath": "crates/falcon_rules/src/lint/style/avoid_positional_fields_in_records.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/avoid-positional-fields-in-records",
-    "description": "Flags positional fields in record types.",
-    "docs": "Flags positional fields in record types.\n\nPositional record fields are accessed as `$1`, `$2`, and so on, which convey\nnothing about what each field means and break silently when fields are\nreordered. Named fields (`({int x, int y})`) document intent at both the\ndeclaration and every use site. The check recurses through type arguments\nand nested record and function types, so a positional field buried inside a\ngeneric is still reported.",
+    "description": "Flags positional field accesses on records.",
+    "docs": "Flags positional field accesses on records.\n\nPositional getters such as `$1` and `$2` convey nothing about what each field\nmeans and break silently when fields are reordered. Prefer named fields so\neach access documents its intent. Record declarations and literals alone\nare not reported.\n\nUnlike `pyramid_lint`, this also reports getters on simple identifier targets,\nsuch as `record.$1`; it does not depend on the analyzer's property-access AST shape.",
     "examples": {
-      "bad": "class RecordExamples {\n  /// Positional fields in record literal\n  void example1() {\n    final record = (1, 'hello');\n    print(record);\n  }\n\n  /// Positional fields in record type return\n  (int, String) getInfo() {\n    return (42, 'answer');\n  }\n\n  /// Positional fields in record type parameter\n  void processRecord((int, String) data) {\n    print(data);\n  }\n\n  /// Positional fields in record type variable\n  void example2() {\n    (String, bool, int) tuple = ('test', true, 5);\n    print(tuple);\n  }\n\n  /// Positional fields in record literal with multiple\n  void example3() {\n    final result = (1, 2, 3, 'four');\n    print(result);\n  }\n}\n\n// Regression: a declaration nested in a labeled block or a closure body must\n// still be checked — a hand-rolled walk skipped those statement forms.\nvoid containersRegression() {\n  lbl: {\n    final inLabeled = (1, 2);\n    print(inLabeled);\n  }\n  final closure = () {\n    final inClosure = (3, 4);\n    return inClosure;\n  };\n  print(closure);\n}\n\ntypedef Pair = (int, String);\n\nvoid typePositions(Object value) {\n  final cast = value as (int, String);\n  final test = value is (int, String);\n  final callback = ((int, String) pair) => pair;\n  print([cast, test, callback]);\n}\n\nfinal callback = () {\n  final pair = (1, 2);\n  return pair;\n};",
+      "bad": "void read((int, String) record, (int, String)? nullable) {\n  print(record.$1);\n  print(record.$2);\n  print((record).$1);\n  print(nullable?.$2);\n  final inferred = (1, 2);\n  print(inferred.$1);\n  print((3, 4).$2);\n}",
       "good": "class RecordExamples {\n  /// Named fields in record literal\n  void example1() {\n    final record = (id: 1, name: 'hello');\n    print(record);\n  }\n\n  /// Named fields in record type return\n  ({int id, String name}) getInfo() {\n    return (id: 42, name: 'answer');\n  }\n\n  /// Named fields in record type parameter\n  void processRecord(({int id, String name}) data) {\n    print(data);\n  }\n\n  /// Named fields in record type variable\n  void example2() {\n    ({String name, bool active, int count}) tuple = (name: 'test', active: true, count: 5);\n    print(tuple);\n  }\n\n  /// Named fields in record literal with multiple\n  void example3() {\n    final result = (a: 1, b: 2, c: 3, d: 'four');\n    print(result);\n  }\n\n  /// Record with mixed named fields\n  void example4() {\n    final data = (userId: 100, isActive: true);\n    print(data.userId);\n    print(data.isActive);\n  }\n}",
       "crossFile": null
     },
     "diagnostics": [
       {
         "message": "Avoid positional fields in records. Use named fields instead.",
+        "line": 2,
+        "column": 9,
+        "file": null
+      },
+      {
+        "message": "Avoid positional fields in records. Use named fields instead.",
+        "line": 3,
+        "column": 9,
+        "file": null
+      },
+      {
+        "message": "Avoid positional fields in records. Use named fields instead.",
         "line": 4,
-        "column": 20,
+        "column": 9,
         "file": null
       },
       {
         "message": "Avoid positional fields in records. Use named fields instead.",
-        "line": 9,
-        "column": 3,
+        "line": 5,
+        "column": 9,
         "file": null
       },
       {
         "message": "Avoid positional fields in records. Use named fields instead.",
-        "line": 14,
-        "column": 22,
+        "line": 7,
+        "column": 9,
         "file": null
       },
       {
         "message": "Avoid positional fields in records. Use named fields instead.",
-        "line": 20,
-        "column": 5,
-        "file": null
-      },
-      {
-        "message": "Avoid positional fields in records. Use named fields instead.",
-        "line": 26,
-        "column": 20,
-        "file": null
-      },
-      {
-        "message": "Avoid positional fields in records. Use named fields instead.",
-        "line": 35,
-        "column": 23,
-        "file": null
-      },
-      {
-        "message": "Avoid positional fields in records. Use named fields instead.",
-        "line": 39,
-        "column": 23,
-        "file": null
-      },
-      {
-        "message": "Avoid positional fields in records. Use named fields instead.",
-        "line": 45,
-        "column": 16,
-        "file": null
-      },
-      {
-        "message": "Avoid positional fields in records. Use named fields instead.",
-        "line": 48,
-        "column": 25,
-        "file": null
-      },
-      {
-        "message": "Avoid positional fields in records. Use named fields instead.",
-        "line": 49,
-        "column": 25,
-        "file": null
-      },
-      {
-        "message": "Avoid positional fields in records. Use named fields instead.",
-        "line": 50,
-        "column": 21,
-        "file": null
-      },
-      {
-        "message": "Avoid positional fields in records. Use named fields instead.",
-        "line": 55,
-        "column": 16,
+        "line": 8,
+        "column": 9,
         "file": null
       }
     ]
@@ -26444,8 +26566,8 @@
     },
     "sourcePath": "crates/falcon_rules/src/lint/style/avoid_top_level_member_access.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/avoid-top-level-member-access",
-    "description": "Flags mutable global state: non-`const`, non-`final` top-level variables and static fields, plus every read of mutable top-level variables.",
-    "docs": "Flags mutable global state: non-`const`, non-`final` top-level variables and\nstatic fields, plus every read of mutable top-level variables.\n\nMutable top-level and static members are shared, unscoped state that any\ncode can read or write, which makes data flow hard to follow and tests hard\nto isolate. Prefer `const` or `final` values, or pass state explicitly\nthrough constructors and parameters.",
+    "description": "Flags mutable top-level variables and static fields, plus references to mutable top-level variables declared in this file outside top-level initializers.",
+    "docs": "Flags mutable top-level variables and static fields, plus references to mutable\ntop-level variables declared in this file outside top-level initializers.\n\nDeclaration and reference checks use syntax and lexical bindings only; enabling\nthis rule does not request project-wide resolution. Locals and members declared\non the enclosing type shadow globals; inherited members do not.\n\nMutable top-level and static members are shared, unscoped state that any\ncode can read or write, which makes data flow hard to follow and tests hard\nto isolate. Prefer `const` or `final` values, or pass state explicitly\nthrough constructors and parameters.",
     "examples": {
       "bad": "// Test cases for avoid-top-level-member-access rule\n// All lines with violations should have an expectation annotation\n\nvar globalCounter = 0;\n\nint globalState = 5;\n\nList<String> globalList = [];\n\nMap<String, dynamic> globalMap = {};\n\nString? globalString;\n\nvoid incrementCounter() {\n  globalCounter++;\n  globalCounter += 1;\n}\n\nvoid useGlobalState() {\n  print(globalState);\n  globalState = 10;\n}\n\nvoid manipulateGlobalList() {\n  globalList.add('item');\n  globalList.clear();\n}\n\nint getGlobalValue() {\n  return globalState * 2;\n}\n\nclass Singleton {\n  static int instances = 0;\n}\n\nbool isInitialized = false;\n\nvoid checkInitialization() {\n  if (!isInitialized) {\n    isInitialized = true;\n  }\n}",
       "good": "// Good cases for avoid-top-level-member-access rule\n// No violations expected\n\nconst kTimeout = 30;\n\nconst kMaxRetries = 3;\n\nfinal kDefaultConfig = <String, dynamic>{};\n\nclass Counter {\n  int _value = 0;\n\n  void increment() {\n    _value++;\n  }\n\n  int get value => _value;\n}\n\nclass GlobalState {\n  static final _instance = GlobalState._();\n\n  factory GlobalState() => _instance;\n\n  GlobalState._();\n\n  int _state = 5;\n\n  void setState(int newValue) {\n    _state = newValue;\n  }\n}\n\nabstract class Repository {\n  void addItem(String item);\n  List<String> getItems();\n}\n\nclass InMemoryRepository implements Repository {\n  final _items = <String>[];\n\n  @override\n  void addItem(String item) {\n    _items.add(item);\n  }\n\n  @override\n  List<String> getItems() => _items;\n}\n\nclass Config {\n  static const String appName = 'MyApp';\n  static const String version = '1.0.0';\n}\n\nconst String baseUrl = 'https://api.example.com';\n\nfinal RegExp emailRegex = RegExp(r'^[^@]+@[^@]+\\.[^@]+$');\n\nclass Logger {\n  static void log(String message) {\n    print('[${DateTime.now()}] $message');\n  }\n}\n\nenum Status {\n  pending,\n  active,\n  completed,\n}",
@@ -28699,7 +28821,7 @@
     "sourcePath": "crates/falcon_rules/src/lint/style/double_literal_format.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/double-literal-format",
     "description": "Flags double literals written with redundant or missing digits.",
-    "docs": "Flags double literals written with redundant or missing digits.\n\nConsistent numeric literals are easier to scan and diff. Three formatting\nmistakes are reported: a redundant leading zero (`05.0`), a missing leading\nzero before the decimal point (`.5`, which should be `0.5`), and a redundant\ntrailing zero in the fractional part (`1.50`). A literal whose fractional\npart is exactly `0` (`24.0`) is deliberately left alone, since stripping that\ndigit would turn the `double` into an `int`.",
+    "docs": "Flags double literals written with redundant or missing digits.\n\nConsistent numeric literals are easier to scan and diff. Three formatting\nmistakes are reported: a redundant leading zero (`05.0`), a missing leading\nzero before the decimal point (`.5`, which should be `0.5`), and a redundant\ntrailing zero in the fractional part (`1.50`). A literal whose fractional\npart is exactly `0` (`24.0`) is deliberately left alone, since stripping that\ndigit would turn the `double` into an `int`. Exponent markers (`e` and `E`)\ndo not affect these mantissa checks; `0e5` has no redundant leading zero.",
     "examples": {
       "bad": "// Test cases for double-literal-format rule\n// All violations are marked inline below.\n\n// Missing leading zero: `.5` should be `0.5`.\nvoid testMissingLeadingZero() {\n  final opacity = .5;\n  final scale = .75;\n  final threshold = .001;\n  final value = .999;\n}\n\n// Redundant trailing zero: the fractional part has a non-\"0\" digit, so the\n// trailing zero is pure noise (`1.50` → `1.5`), and stripping it keeps a double.\nvoid testRedundantTrailingZero() {\n  const half = 1.50;\n  const tenth = 0.50;\n  final long = 1.230;\n  final doubled = 1.00;\n}\n\nclass Animation {\n  final double speed = .5;\n  final double curve = .25;\n  final double trailing = 2.50;\n}\n\ndouble calculateOpacity() {\n  return .8;\n}\n\nvoid processValues() {\n  final list = [.1, .2, .3];\n  final map = {\n    'x': .5,\n    'y': 1.50,\n  };\n}\n\nvoid mathOperations() {\n  final result = .5 + .25;\n  final product = 2.50 * .75;\n}\n\nbool validateRange(double value) {\n  return value > .0;\n}\n\nvoid mixedFormats() {\n  final a = .5;\n  final c = .125;\n}\n\n// Regression: a literal must be found wherever it appears, including inside\n// Dart 3 containers whose walkers were previously not visited.\nvoid testContainers(List<double> xs, int count) {\n  final (a, _) = (.5, 0);\n  double b;\n  int _u;\n  (b, _u) = (1.50, 0);\n  lbl: {\n    final c = .25;\n    print(c);\n  }\n  for (final (d, _) in [(.75, 0)]) {\n    print(d);\n  }\n  final e = switch (count) {\n    0 => .125,\n    _ => 1.230,\n  };\n  final f = switch (.5) {\n    _ => 0,\n  };\n  final g = [if (count > 0) .5];\n  final h = [...[.5]];\n  final i = (x: .5, y: 0);\n  final j = {for (final k in xs) k: .5};\n  assert(.5 > 0, \"x\");\n  final l = (.5 as Object) is double;\n  print([a, b, e, f, g, h, i, j, l]);\n}",
       "good": "// Good cases for double-literal-format rule\n// No violations expected\n\nvoid testCorrectLeadingZero() {\n  final opacity = 0.5;\n  final scale = 0.75;\n  final threshold = 0.001;\n  final value = 0.999;\n}\n\nvoid testIntegersAsIntegers() {\n  const duration = 1;\n  const timeout = 2;\n  final ratio = 10;\n  final factor = 5;\n}\n\n// dcl checks literal *formatting* only. A trailing zero whose fractional part\n// is exactly \"0\" (`1.0`, `24.0`) is NOT flagged: stripping it would turn a\n// `double` into an `int`, which is a different value, not a reformat.\nvoid testTrailingSingleZeroIsFine() {\n  const duration = 1.0;\n  const timeout = 2.0;\n  final ratio = 10.0;\n  final factor = 5.0;\n  final zero = 0.0;\n  const big = 100.0;\n}\n\nclass Animation {\n  final double speed = 0.5;\n  final double delay = 1.5;\n  final double curve = 0.25;\n  final double full = 1.0;\n}\n\ndouble calculateOpacity() {\n  return 0.8;\n}\n\nvoid processValues() {\n  final list = [0.1, 0.2, 0.3];\n  final map = {\n    'x': 0.5,\n    'y': 1.5,\n  };\n}\n\nvoid mathOperations() {\n  final result = 0.5 + 0.25;\n  final product = 2.5 * 0.75;\n}\n\nbool validateRange(double value) {\n  return value > 0.0;\n}\n\nvoid mixedFormats() {\n  final a = 0.5;\n  final b = 3.5;\n  final c = 0.125;\n  final d = 100.5;\n}\n\nvoid properFormatting() {\n  const pi = 3.14159;\n  final sqrtTwo = 1.414;\n  final goldenRatio = 1.618;\n}\n\nclass Percentage {\n  final double value = 0.5;\n\n  bool isValid() => value >= 0.0 && value <= 1;\n}\n\nvoid performanceMetrics() {\n  final cpuUsage = 0.85;\n  final memoryUsage = 0.92;\n  final diskUsage = 0.78;\n}",
@@ -35334,37 +35456,37 @@
       {
         "message": "Use the generic function type syntax in typedefs.",
         "line": 2,
-        "column": 1,
+        "column": 13,
         "file": null
       },
       {
         "message": "Use the generic function type syntax in typedefs.",
         "line": 3,
-        "column": 1,
+        "column": 14,
         "file": null
       },
       {
         "message": "Use the generic function type syntax in typedefs.",
         "line": 4,
-        "column": 1,
+        "column": 14,
         "file": null
       },
       {
         "message": "Use the generic function type syntax in typedefs.",
         "line": 5,
-        "column": 1,
+        "column": 16,
         "file": null
       },
       {
         "message": "Use the generic function type syntax in typedefs.",
         "line": 6,
-        "column": 1,
+        "column": 13,
         "file": null
       },
       {
         "message": "Use the generic function type syntax in typedefs.",
         "line": 7,
-        "column": 1,
+        "column": 14,
         "file": null
       }
     ]
@@ -35509,48 +35631,48 @@
     },
     "sourcePath": "crates/falcon_rules/src/lint/style/prefer_inlined_adds.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/prefer-inlined-adds",
-    "description": "Flags an `add` cascade on a list literal whose element could be written inline.",
-    "docs": "Flags an `add` cascade on a list literal whose element could be written inline.\n\nBuilding a list by literal-then-cascade (`[a]..add(b)`) is more verbose than\nplacing the element directly in the literal (`[a, b]`), and the inline form\nreads as a single collection rather than a construction followed by mutation.\nThe rule matches each `..add(...)` section cascaded onto a list literal that\ntakes exactly one positional argument and no named arguments; multi-argument\nor named calls, and cascades on non-list receivers, are ignored.",
+    "description": "Flags list-literal cascades whose added elements could be written inline.",
+    "docs": "Flags list-literal cascades whose added elements could be written inline.\n\nBoth `[a]..add(b)` and `[a]..addAll([b, c])` can put the added elements\ndirectly in the original literal. Calls require one positional argument\nand no named arguments. Nonliteral receivers and `addAll` arguments are\nleft alone; `prefer-spread-collections` handles nonliteral arguments.",
     "examples": {
       "bad": "void bad() {\n  var a = [1]..add(2);\n  var b = <int>[]..add(1);\n  var c = []..add(1)..add(2);\n  var d = ['a']..add('b');\n  var e = <String>['x']..add('y');\n}",
-      "good": "void good() {\n  final items = <int>[];\n  var a = [1, 2, 3];\n  items.add(4);\n  var b = items..add(5);\n  var c = [1]..addAll([2, 3]);\n  var d = [1, 2]..sort();\n}",
+      "good": "void good() {\n  final items = <int>[];\n  var a = [1, 2, 3];\n  items.add(4);\n  var b = items..add(5);\n  var d = [1, 2]..sort();\n}",
       "crossFile": null
     },
     "diagnostics": [
       {
-        "message": "Inline the added element into the collection literal instead of using `add`.",
+        "message": "Inline the added elements into the list literal.",
         "line": 2,
-        "column": 14,
-        "file": null
-      },
-      {
-        "message": "Inline the added element into the collection literal instead of using `add`.",
-        "line": 3,
-        "column": 18,
-        "file": null
-      },
-      {
-        "message": "Inline the added element into the collection literal instead of using `add`.",
-        "line": 4,
-        "column": 13,
-        "file": null
-      },
-      {
-        "message": "Inline the added element into the collection literal instead of using `add`.",
-        "line": 4,
-        "column": 21,
-        "file": null
-      },
-      {
-        "message": "Inline the added element into the collection literal instead of using `add`.",
-        "line": 5,
         "column": 16,
         "file": null
       },
       {
-        "message": "Inline the added element into the collection literal instead of using `add`.",
+        "message": "Inline the added elements into the list literal.",
+        "line": 3,
+        "column": 20,
+        "file": null
+      },
+      {
+        "message": "Inline the added elements into the list literal.",
+        "line": 4,
+        "column": 15,
+        "file": null
+      },
+      {
+        "message": "Inline the added elements into the list literal.",
+        "line": 4,
+        "column": 23,
+        "file": null
+      },
+      {
+        "message": "Inline the added elements into the list literal.",
+        "line": 5,
+        "column": 18,
+        "file": null
+      },
+      {
+        "message": "Inline the added elements into the list literal.",
         "line": 6,
-        "column": 24,
+        "column": 26,
         "file": null
       }
     ]
@@ -35851,64 +35973,64 @@
     },
     "sourcePath": "crates/falcon_rules/src/lint/style/prefer_is_empty.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/prefer-is-empty",
-    "description": "Flags `.length` comparisons equivalent to a `.isEmpty` check.",
-    "docs": "Flags `.length` comparisons equivalent to a `.isEmpty` check.\n\nCollections and strings expose an `isEmpty` getter that states intent\ndirectly and, for lazy iterables, can be cheaper than computing the full\n`length`. Comparing `length` against a constant forces the reader to decode\nthe boundary, so `list.isEmpty` should replace forms such as `length == 0`,\n`length < 1`, and `length <= 0`, together with their operand-swapped mirrors\n(`0 == length`, `1 > length`, `0 >= length`).\n\nOnly a plain `.length` property access matches against the relevant integer\nliteral. A null-aware `receiver?.length` is deliberately left alone: that\ncomparison also has to account for a `null` receiver, so `isEmpty` is not a\ndrop-in replacement.\n\nSemantic analysis requires declaration identities. Once available, an\nunknown receiver still triggers the lint. A `TypeIndex` can suppress it only\nwhen the receiver is proven to have no `isEmpty` member and not to be an\n`Iterable`, `String`, or `Map`; source-resolved members and subtypes take\nprecedence. Without a type index, those negative proofs are unavailable,\nbut source-derived receiver types are still inferred.",
+    "description": "Flags `length` comparisons that can use `isEmpty` or `isNotEmpty`.",
+    "docs": "Flags `length` comparisons that can use `isEmpty` or `isNotEmpty`.\n\nCollections and strings expose getters that state intent directly and can\navoid computing a lazy iterable's full length. This rule covers both empty\nchecks (`length == 0`, `length < 1`, `length <= 0`) and nonempty checks\n(`length != 0`, `length > 0`, `length >= 1`), including operand-swapped forms.\nComparisons `length >= 0` and `length < 0` are reported as always true or\nfalse.\n\nOnly a plain `.length` property access matches against the relevant integer\nliteral. A null-aware `receiver?.length` is deliberately left alone: that\ncomparison also has to account for a `null` receiver, so `isEmpty` is not a\ndrop-in replacement.\n\nSemantic analysis requires declaration identities. Once available, an\nunknown receiver still triggers the lint. A `TypeIndex` can suppress it only\nwhen the receiver is proven to have no `isEmpty` member and not to be an\n`Iterable`, `String`, or `Map`; source-resolved members and subtypes take\nprecedence. Without a type index, those negative proofs are unavailable,\nbut source-derived receiver types are still inferred.",
     "examples": {
       "bad": "void bad() {\n  if (list.length == 0) return;\n  if (0 == items.length) return;\n  if (str.length < 1) return;\n  if (map.length <= 0) return;\n  if (1 > set.length) return;\n  if (0 >= names.length) return;\n}\n\n// A class implementing a core collection still inherits `isEmpty` (from\n// Iterable), so the suggestion is valid and the diagnostic keeps firing.\nclass Bag implements Iterable<int> {\n  int get length => 0;\n}\n\n// A class whose supertype chain leaves the project is `Unknown`, never\n// `ProvenAbsent` — an unresolved ancestor could contribute `isEmpty` — so the\n// diagnostic keeps firing (type knowledge suppresses only on positive proof).\nclass Offsite extends Frobnicator {\n  int get length => 0;\n}\n\nvoid typedReceivers(Bag b, Offsite o) {\n  if (b.length == 0) return;\n  if (o.length == 0) return;\n}\n\n// A static method returns some other type (a Map here), not the enclosing class,\n// so `Config.load()` is Unknown, never `Config`. Typing it as `Config` (a named\n// constructor guess) would wrongly suppress; the diagnostic must keep firing.\nclass Config {\n  static Map<String, String> load() => {};\n}\n\nvoid staticCallReceiver() {\n  if (Config.load().length == 0) return;\n}",
-      "good": "void good() {\n  if (list.isEmpty) return;\n  if (items.length == 2) return;\n  if (str.length > 0) return;\n  if (map.length != 0) return;\n  if (set.length >= 1) return;\n  if (count == 0) return;\n}\n\n// A user class with only a `length` getter — no `isEmpty`, and not a core\n// collection/string. Its receiver type is positively proven, so `length == 0`\n// is SUPPRESSED: suggesting `isEmpty` would reference a member it does not have.\n// (Requires the corpus harness to attach a TypeIndex for this rule; without one\n// the receiver is Unknown and this line would fire.)\nclass Ruler {\n  int get length => 3;\n}\n\nvoid suppressed(Ruler r) {\n  if (r.length == 0) return;\n}\n\n// A named constructor `Box.zero()` still resolves to a `Box` instance (a real\n// constructor is not a declared member), and `Box` has only `length` and is no\n// collection — so this stays SUPPRESSED, unlike a static-method call.\nclass Box {\n  Box.zero();\n  int get length => 0;\n}\n\nvoid suppressedCtor() {\n  if (Box.zero().length == 0) return;\n}",
+      "good": "void good() {\n  if (list.isEmpty) return;\n  if (items.length == 2) return;\n  if (count == 0) return;\n}\n\n// A user class with only a `length` getter — no `isEmpty`, and not a core\n// collection/string. Its receiver type is positively proven, so `length == 0`\n// is SUPPRESSED: suggesting `isEmpty` would reference a member it does not have.\n// (Requires the corpus harness to attach a TypeIndex for this rule; without one\n// the receiver is Unknown and this line would fire.)\nclass Ruler {\n  int get length => 3;\n}\n\nvoid suppressed(Ruler r) {\n  if (r.length == 0) return;\n}\n\n// A named constructor `Box.zero()` still resolves to a `Box` instance (a real\n// constructor is not a declared member), and `Box` has only `length` and is no\n// collection — so this stays SUPPRESSED, unlike a static-method call.\nclass Box {\n  Box.zero();\n  int get length => 0;\n}\n\nvoid suppressedCtor() {\n  if (Box.zero().length == 0) return;\n}",
       "crossFile": null
     },
     "diagnostics": [
       {
-        "message": "Use `isEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isEmpty` instead of comparing `length`.",
         "line": 2,
         "column": 7,
         "file": null
       },
       {
-        "message": "Use `isEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isEmpty` instead of comparing `length`.",
         "line": 3,
         "column": 7,
         "file": null
       },
       {
-        "message": "Use `isEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isEmpty` instead of comparing `length`.",
         "line": 4,
         "column": 7,
         "file": null
       },
       {
-        "message": "Use `isEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isEmpty` instead of comparing `length`.",
         "line": 5,
         "column": 7,
         "file": null
       },
       {
-        "message": "Use `isEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isEmpty` instead of comparing `length`.",
         "line": 6,
         "column": 7,
         "file": null
       },
       {
-        "message": "Use `isEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isEmpty` instead of comparing `length`.",
         "line": 7,
         "column": 7,
         "file": null
       },
       {
-        "message": "Use `isEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isEmpty` instead of comparing `length`.",
         "line": 24,
         "column": 7,
         "file": null
       },
       {
-        "message": "Use `isEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isEmpty` instead of comparing `length`.",
         "line": 25,
         "column": 7,
         "file": null
       },
       {
-        "message": "Use `isEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isEmpty` instead of comparing `length`.",
         "line": 36,
         "column": 7,
         "file": null
@@ -35929,58 +36051,58 @@
     },
     "sourcePath": "crates/falcon_rules/src/lint/style/prefer_is_not_empty.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/prefer-is-not-empty",
-    "description": "Flags `.length` comparisons equivalent to a `.isNotEmpty` check.",
-    "docs": "Flags `.length` comparisons equivalent to a `.isNotEmpty` check.\n\nCollections and strings expose an `isNotEmpty` getter that reads as plain\nintent and, for lazy iterables, can avoid computing the full `length`.\nComparing `length` against a constant makes the reader infer the meaning, so\n`list.isNotEmpty` should replace forms such as `length != 0`, `length > 0`,\nand `length >= 1`, along with their operand-swapped mirrors (`0 != length`,\n`0 < length`, `1 <= length`).\n\nOnly a plain `.length` property access matches against the relevant integer\nliteral. A null-aware `receiver?.length` is deliberately left alone: that\ncomparison also has to account for a `null` receiver, so `isNotEmpty` is not\na drop-in replacement.\n\nSemantic analysis requires declaration identities. Once available, an\nunknown receiver still triggers the lint. A `TypeIndex` can suppress it only\nwhen the receiver is proven to have no `isNotEmpty` member and not to be an\n`Iterable`, `String`, or `Map`; source-resolved members and subtypes take\nprecedence. Without a type index, those negative proofs are unavailable,\nbut source-derived receiver types are still inferred.",
+    "description": "Flags negated `isEmpty` checks in favor of `isNotEmpty`.",
+    "docs": "Flags negated `isEmpty` checks in favor of `isNotEmpty`.\n\n`!items.isEmpty` and `!(items.isEmpty)` are more directly expressed as\n`items.isNotEmpty`. Null-aware accesses are left alone. Length comparisons\nbelong to `prefer-is-empty`, irrespective of the direction of comparison.\n\nUnknown receivers still trigger the lint. A type index suppresses a report\nwhen the receiver is proven not to provide `isNotEmpty` and is not an\n`Iterable`, `String`, or `Map`.",
     "examples": {
-      "bad": "void bad() {\n  if (list.length != 0) return;\n  if (0 != items.length) return;\n  if (str.length > 0) return;\n  if (0 < map.length) return;\n  if (set.length >= 1) return;\n  if (1 <= names.length) return;\n}\n\n// A class implementing a core collection still inherits `isNotEmpty` (from\n// Iterable), so the suggestion is valid and the diagnostic keeps firing.\nclass Bag implements Iterable<int> {\n  int get length => 0;\n}\n\n// A class whose supertype chain leaves the project is `Unknown`, never\n// `ProvenAbsent` — an unresolved ancestor could contribute `isNotEmpty` — so the\n// diagnostic keeps firing (type knowledge suppresses only on positive proof).\nclass Offsite extends Frobnicator {\n  int get length => 0;\n}\n\nvoid typedReceivers(Bag b, Offsite o) {\n  if (b.length != 0) return;\n  if (o.length != 0) return;\n}",
+      "bad": "void bad() {\n  if (!list.isEmpty) return;\n  if (!(items.isEmpty)) return;\n  if (!str.isEmpty) return;\n  if (!map.isEmpty) return;\n  if (!set.isEmpty) return;\n  if (!names.isEmpty) return;\n}\n\n// A class implementing a core collection still inherits `isNotEmpty` (from\n// Iterable), so the suggestion is valid and the diagnostic keeps firing.\nclass Bag implements Iterable<int> {\n  int get length => 0;\n}\n\n// A class whose supertype chain leaves the project is `Unknown`, never\n// `ProvenAbsent` — an unresolved ancestor could contribute `isNotEmpty` — so the\n// diagnostic keeps firing (type knowledge suppresses only on positive proof).\nclass Offsite extends Frobnicator {\n  bool get isEmpty => true;\n}\n\nvoid typedReceivers(Bag b, Offsite o) {\n  if (!b.isEmpty) return;\n  if (!o.isEmpty) return;\n}",
       "good": "void good() {\n  if (list.isNotEmpty) return;\n  if (items.length == 0) return;\n  if (str.length < 1) return;\n  if (map.length == 3) return;\n  if (set.length > 5) return;\n  if (count != 0) return;\n}\n\n// A user class with only a `length` getter — no `isNotEmpty`, and not a core\n// collection/string. Its receiver type is positively proven, so `length != 0`\n// is SUPPRESSED: suggesting `isNotEmpty` would reference a member it lacks.\n// (Requires the corpus harness to attach a TypeIndex for this rule; without one\n// the receiver is Unknown and this line would fire.)\nclass Ruler {\n  int get length => 3;\n}\n\nvoid suppressed(Ruler r) {\n  if (r.length != 0) return;\n}",
       "crossFile": null
     },
     "diagnostics": [
       {
-        "message": "Use `isNotEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isNotEmpty` rather than negating `isEmpty`.",
         "line": 2,
         "column": 7,
         "file": null
       },
       {
-        "message": "Use `isNotEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isNotEmpty` rather than negating `isEmpty`.",
         "line": 3,
         "column": 7,
         "file": null
       },
       {
-        "message": "Use `isNotEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isNotEmpty` rather than negating `isEmpty`.",
         "line": 4,
         "column": 7,
         "file": null
       },
       {
-        "message": "Use `isNotEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isNotEmpty` rather than negating `isEmpty`.",
         "line": 5,
         "column": 7,
         "file": null
       },
       {
-        "message": "Use `isNotEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isNotEmpty` rather than negating `isEmpty`.",
         "line": 6,
         "column": 7,
         "file": null
       },
       {
-        "message": "Use `isNotEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isNotEmpty` rather than negating `isEmpty`.",
         "line": 7,
         "column": 7,
         "file": null
       },
       {
-        "message": "Use `isNotEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isNotEmpty` rather than negating `isEmpty`.",
         "line": 24,
         "column": 7,
         "file": null
       },
       {
-        "message": "Use `isNotEmpty` instead of comparing `length` to 0.",
+        "message": "Use `isNotEmpty` rather than negating `isEmpty`.",
         "line": 25,
         "column": 7,
         "file": null
@@ -37675,10 +37797,10 @@
     },
     "sourcePath": "crates/falcon_rules/src/lint/style/prefer_spread_collections.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/prefer-spread-collections",
-    "description": "Flags an `addAll` cascade on a collection literal that a spread would express.",
-    "docs": "Flags an `addAll` cascade on a collection literal that a spread would express.\n\nThe spread operator (`[a, b, ...x]`) folds another collection's elements into\na literal in one expression, so `[a, b]..addAll(x)` is unnecessarily verbose\nand reads as a construction followed by mutation rather than a single\ncollection. The rule matches each `..addAll(...)` section cascaded onto a\nlist, set, or map literal that takes exactly one positional argument and no\nnamed arguments; other shapes and non-literal receivers are ignored.",
+    "description": "Flags an `addAll` cascade on a list literal that a spread would express.",
+    "docs": "Flags an `addAll` cascade on a list literal that a spread would express.\n\n`[a, b]..addAll(items)` is more directly written `[a, b, ...items]`.\nCalls require one positional argument and no named arguments. List-literal\narguments belong to `prefer-inlined-adds`; other receivers are left alone.",
     "examples": {
-      "bad": "void bad() {\n  var a = [1, 2]..addAll([3, 4]);\n  var b = <int>[]..addAll([5]);\n  var c = {1, 2}..addAll({3});\n  var d = <String>{}..addAll({'a'});\n  var e = []..addAll([1])..addAll([2]);\n}",
+      "bad": "void bad(List<int> items) {\n  var a = [1, 2]..addAll(items);\n  var b = <int>[]..addAll(items);\n  var e = []..addAll(items)..addAll(items);\n}",
       "good": "void good() {\n  final other = [3, 4];\n  final first = [1];\n  final second = [2];\n  final someList = <int>[];\n  var a = [1, 2, ...other];\n  var b = <int>[...first, ...second];\n  someList.addAll([3, 4]);\n  var c = someList..sort();\n  var d = someList..addAll([1]);\n}",
       "crossFile": null
     },
@@ -37686,37 +37808,25 @@
       {
         "message": "Use the spread operator `...` instead of `addAll`.",
         "line": 2,
-        "column": 17,
+        "column": 19,
         "file": null
       },
       {
         "message": "Use the spread operator `...` instead of `addAll`.",
         "line": 3,
-        "column": 18,
+        "column": 20,
         "file": null
       },
       {
         "message": "Use the spread operator `...` instead of `addAll`.",
         "line": 4,
-        "column": 17,
+        "column": 15,
         "file": null
       },
       {
         "message": "Use the spread operator `...` instead of `addAll`.",
-        "line": 5,
-        "column": 21,
-        "file": null
-      },
-      {
-        "message": "Use the spread operator `...` instead of `addAll`.",
-        "line": 6,
-        "column": 13,
-        "file": null
-      },
-      {
-        "message": "Use the spread operator `...` instead of `addAll`.",
-        "line": 6,
-        "column": 26,
+        "line": 4,
+        "column": 30,
         "file": null
       }
     ]
@@ -39081,7 +39191,7 @@
     "sourcePath": "crates/falcon_rules/src/lint/style/slash_for_doc_comments.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/slash-for-doc-comments",
     "description": "Flags `/** ...",
-    "docs": "Flags `/** ... */` block documentation comments in favor of the `///` form.\n\nDart supports two doc-comment syntaxes, but the community style guide standardizes\non the end-of-line `///` form; the `/** ... */` block form is discouraged. Using a\nsingle style keeps doc comments consistent and easy to scan. Detection scans the\nraw source with a small quote/comment state machine, not the Dart lexer, and\nexcludes the empty `/**/` comment. It does not fully model raw, multiline or\ninterpolated strings, or nested block comments.",
+    "docs": "Flags `/** ... */` block documentation comments in favor of the `///` form.\n\nBlock documentation attached to libraries, type declarations, members, and\nfunctions should use the consistent `///` form. Documentation on parameters\nand local variables is not covered, matching the analyzer lint.",
     "examples": {
       "bad": "/** A documented class. */\nclass A {}\n\n/** Documents the second class. */\nclass B {}\n\n/** Documents the third class. */\nclass C {}\n\n/** Documents the fourth class. */\nclass D {}\n\n/** Documents the fifth class. */\nclass E {}",
       "good": "/// A documented class using the end-of-line form.\nclass A {}\n\n/// Documents the second class.\nclass B {}\n\n/* An ordinary block comment, not a doc comment. */\nclass C {}\n\n/*\n * A single-star banner block, still not a doc comment.\n */\nclass D {}\n\n// A plain line comment.\nclass E {}",
@@ -39671,7 +39781,7 @@
     "sourcePath": "crates/falcon_rules/src/cross_file/unexported_public_api.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/unexported-public-api",
     "description": "Report implementation declarations used across a package but absent from its public API.",
-    "docs": "Report implementation declarations used across a package but absent from its public API.\n\nIn packages with an analyzed public barrel, checks public top-level declarations\nunder `lib/src/`. Public libraries are analyzed non-part libraries under `lib/`\noutside `lib/src/`; their own declarations and transitive same-package exports\nform the public namespace, respecting `show`/`hide` and unioning every conditional\nexport alternative. Exempts `main`, `@internal`, and `@visibleForTesting`.\nUsage is name-based in analyzed same-package files outside `lib/src/` and `test/`.\nDeclaration names, import/export directives, comments, and strings do not count.\nOther identifiers, including member selectors, are matched by spelling without\nbinding resolution, so unrelated same-named references can count as usage.\nUnknown packages are not checked. Packages containing malformed Dart files are\nskipped because their public namespace is incomplete.",
+    "docs": "Report implementation declarations used across a package but absent from its public API.\n\nIn packages with an analyzed public barrel, checks public top-level declarations\nunder `lib/src/`. Public libraries are analyzed non-part libraries under `lib/`\noutside `lib/src/`; their own declarations and transitive same-package exports\nform the public namespace, respecting `show`/`hide` and unioning every conditional\nexport alternative. Parts, including nested parts, contribute to their owner's\nnamespace. Local declarations shadow same-named exports, except that a getter\nand setter form a complementary pair. Exempts `main`, `@internal`, and\n`@visibleForTesting`.\nUsage is name-based in analyzed same-package files outside `lib/src/` and `test/`.\nDeclaration names, import/export directives, comments, and strings do not count.\nOther identifiers, including member selectors, are matched by spelling without\nbinding resolution, so unrelated same-named references can count as usage,\nincluding references to a local replacement of a hidden exported declaration.\nUnknown packages are not checked. Packages containing malformed Dart files are\nskipped because their public namespace is incomplete.",
     "examples": {
       "bad": null,
       "good": null,
@@ -39743,6 +39853,22 @@
         {
           "path": "bad_hidden/tool/use.dart",
           "content": "Hidden? value;"
+        },
+        {
+          "path": "bad_local_shadow/bin/use.dart",
+          "content": "import '../lib/src/name.dart';\nName? value;"
+        },
+        {
+          "path": "bad_local_shadow/lib/api.dart",
+          "content": "export 'src/name.dart';\nclass Name {}"
+        },
+        {
+          "path": "bad_local_shadow/lib/src/name.dart",
+          "content": "class Name {}"
+        },
+        {
+          "path": "bad_local_shadow/pubspec.yaml",
+          "content": "name: fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
         },
         {
           "path": "bad_same_name/bin/main.dart",
@@ -39905,6 +40031,22 @@
           "content": "void bind() {\n  void Function()? callback;\n  callback = () {\n    final (log, _) = (1, 2);\n  };\n}"
         },
         {
+          "path": "good_local_accessors/bin/use.dart",
+          "content": "import '../lib/api.dart';\nvoid main() { count = 1; }"
+        },
+        {
+          "path": "good_local_accessors/lib/api.dart",
+          "content": "export 'src/write.dart';\nint get count => 0;"
+        },
+        {
+          "path": "good_local_accessors/lib/src/write.dart",
+          "content": "set count(int value) {}"
+        },
+        {
+          "path": "good_local_accessors/pubspec.yaml",
+          "content": "name: fixture"
+        },
+        {
           "path": "good_no_barrel/lib/src/api.dart",
           "content": "class AppOnly {}"
         },
@@ -40002,6 +40144,12 @@
         "line": 1,
         "column": 7,
         "file": "bad_hidden/lib/src/api.dart"
+      },
+      {
+        "message": "Public `Name` is used across the package but not exported from any public library.",
+        "line": 1,
+        "column": 7,
+        "file": "bad_local_shadow/lib/src/name.dart"
       },
       {
         "message": "Public `SameName` is used across the package but not exported from any public library.",
@@ -40480,49 +40628,49 @@
       {
         "message": "Remove `late` from this already-lazy static or top-level variable.",
         "line": 2,
-        "column": 13,
+        "column": 1,
         "file": null
       },
       {
         "message": "Remove `late` from this already-lazy static or top-level variable.",
         "line": 3,
-        "column": 10,
+        "column": 1,
         "file": null
       },
       {
         "message": "Remove `late` from this already-lazy static or top-level variable.",
         "line": 7,
-        "column": 16,
+        "column": 1,
         "file": null
       },
       {
         "message": "Remove `late` from this already-lazy static or top-level variable.",
         "line": 12,
-        "column": 23,
+        "column": 10,
         "file": null
       },
       {
         "message": "Remove `late` from this already-lazy static or top-level variable.",
         "line": 13,
-        "column": 19,
+        "column": 10,
         "file": null
       },
       {
         "message": "Remove `late` from this already-lazy static or top-level variable.",
         "line": 14,
-        "column": 25,
+        "column": 10,
         "file": null
       },
       {
         "message": "Remove `late` from this already-lazy static or top-level variable.",
         "line": 19,
-        "column": 22,
+        "column": 10,
         "file": null
       },
       {
         "message": "Remove `late` from this already-lazy static or top-level variable.",
         "line": 20,
-        "column": 20,
+        "column": 10,
         "file": null
       }
     ]
@@ -41379,7 +41527,7 @@
     "docs": "Flags a redundant `this.` qualifier on member access.\n\nLexical scopes are prebound before checking instance member bodies.",
     "examples": {
       "bad": "// `this.` where no parameter or local shadows the member.\nclass A {\n  int x = 0;\n  int y = 0;\n  void m() {\n    this.x = 1;\n    print(this.y);\n  }\n  int get sum => this.x + this.y;\n}\n\nclass B {\n  int value = 0;\n  void update(int v) {\n    this.helper();\n    value = v;\n  }\n  void helper() {}\n}\n\nclass C {\n  int count = 0;\n  void inc() {\n    this.count += 1;\n  }\n}\n\nclass SourceOrdered {\n  int value = 0;\n  void run() {\n    print(this.value);\n    final value = 1;\n    print(value);\n  }\n}\n\nclass NestedScopes {\n  int value = 0;\n  void run() {\n    {\n      final value = 1;\n      print(this.value + value);\n    }\n    print(this.value);\n    (() {\n      final value = 2;\n      print(this.value + value);\n    })();\n    print(this.value);\n  }\n}\n\nclass TryScopes {\n  int value = 0;\n  void run() {\n    try {\n      final value = 1;\n      print(value);\n    } catch (_) {\n      print(this.value);\n    } finally {\n      print(this.value);\n    }\n    print(this.value);\n  }\n}\n\nclass BranchScopes {\n  int value = 0;\n  void run(bool flag, Object subject) {\n    if (flag) {\n      final value = 1;\n      print(this.value + value);\n    } else {\n      print(this.value);\n    }\n    if (subject case final value) {\n      print(this.value + value.hashCode);\n    } else {\n      print(this.value);\n    }\n    while (flag) {\n      final value = 2;\n      print(this.value + value);\n      break;\n    }\n    print(this.value);\n  }\n}\n\nbool isNull(Object? value) => value == null;\n\nclass DeclaredMember {\n  bool get isNull => false;\n  bool check() => this.isNull;\n}\n\nclass LaterNestedBlock {\n  int value = 0;\n  void run() {\n    print(this.value);\n    {\n      final value = 1;\n      print(value);\n    }\n  }\n}\n\nextension DeclaredExtension on String {\n  bool get isNull => false;\n  bool check() => this.isNull;\n}\n\nint headerValue = 0;\nint representationValue = 0;\n\n// Declaring header parameters are direct members, ahead of library names.\nclass HeaderMember(final int headerValue) {\n  int read() => this.headerValue;\n  int shadowed(int headerValue) => this.headerValue + headerValue;\n}\n\nextension type RepresentationMember(int representationValue) {\n  int read() => this.representationValue;\n  int shadowed(int representationValue) =>\n      this.representationValue + representationValue;\n}\n\nclass DoWhileScopes {\n  int value = 0;\n  void run() {\n    do {\n      final value = 1;\n      print(this.value + value);\n    } while (this.value > 0);\n    print(this.value);\n  }\n}\n\nclass CollectionForScopes {\n  int value = 0;\n  void forIn(List<int> values) {\n    final items = [\n      for (final value in values) this.value,\n    ];\n    print(this.value);\n    print(items);\n  }\n  void patternForIn(List<(int,)> values) {\n    final items = [\n      for (final (value,) in values) this.value,\n    ];\n    print(this.value);\n    print(items);\n  }\n  void variableHeader() {\n    final items = [\n      for (var value = 0; value < 1; value++) this.value,\n    ];\n    print(this.value);\n    print(items);\n  }\n}\n\nclass CollectionIfCaseScopes {\n  int value = 0;\n  void run(Object? subject) {\n    final items = [\n      if (subject case final value? when this.value > 0)\n        this.value,\n    ];\n    print(this.value);\n    if (subject case final value?) {\n      final nested = [\n        if (subject case final other?) other,\n      ];\n      print(this.value + value.hashCode);\n      print(nested);\n    }\n    print(this.value);\n    print(items);\n  }\n}\n\nclass PatternDeclarationReportOrder {\n  int value = 0;\n  (int, int) pair = (0, 0);\n  void run() {\n    // Initializer diagnostics precede pattern diagnostics.\n    var (== this.value, _) = this.pair;\n  }\n}",
-      "good": "// `this.` needed because of a shadowing parameter or local, or no `this.`.\nclass A {\n  int x = 0;\n  void m(int x) {\n    this.x = x;\n  }\n}\n\nclass B {\n  int value = 0;\n  void update() {\n    var value = 5;\n    this.value = value;\n  }\n}\n\nclass C {\n  int count = 0;\n  void inc() {\n    count += 1;\n  }\n  int get doubled => count * 2;\n}\n\nclass D {\n  int total = 0;\n  void add(int total) {\n    this.total += total;\n  }\n}\n\nclass E {\n  void run(int helper) {\n    this.helper();\n  }\n  void helper() {}\n}\n\nclass ScopedBindings {\n  int value = 0;\n\n  void catchesAndLoops() {\n    try {\n      throw 1;\n    } catch (value) {\n      print(this.value + value.hashCode);\n    }\n    for (final value in [1]) {\n      print(this.value + value);\n    }\n    if (Object() case final value) {\n      print(this.value + value.hashCode);\n    }\n  }\n\n  void closures() {\n    ((value) => print(this.value + value))(1);\n  }\n}\n\nclass InitializerScope {\n  int value = 1;\n  void ordinary() {\n    final value = this.value;\n    print(value);\n  }\n  void pattern() {\n    final (value,) = (this.value,);\n    print(value);\n  }\n  void later() {\n    print(this.value);\n    final value = 1;\n    print(value);\n  }\n  void capturedLater() {\n    void read() => print(this.value);\n    final value = 1;\n    read();\n    print(value);\n  }\n}\n\nbool isNull(Object? value) => value == null;\n\nextension NullableCheck on Object? {\n  bool get isNull => this == null;\n}\n\nclass ExtensionMember {\n  bool check() => this.isNull;\n}\n\nclass InheritedBase {\n  bool get isNull => false;\n}\n\nclass InheritedMember extends InheritedBase {\n  bool check() => this.isNull;\n}\n\nclass LoopInitializers {\n  int x = 0;\n  int y = 1;\n  List<int> values = [1];\n  void run() {\n    for (var x = this.x; x < 1; x++) {}\n    for (var x = this.y, y = 1; x < y; x++) {}\n    for (final values in this.values) {\n      print(values);\n    }\n  }\n}\n\nclass SwitchGuardBodyScope {\n  int y = 0;\n  void run(int v) {\n    switch (v) {\n      // The SDK linter's ancestor scope includes the case body's declarations.\n      case _ when this.y > 0:\n        print(this.y);\n        var y = 1;\n        print(y);\n    }\n  }\n}",
+      "good": "// `this.` needed because of a shadowing parameter or local, or no `this.`.\nclass A {\n  int x = 0;\n  void m(int x) {\n    this.x = x;\n  }\n}\n\nclass B {\n  int value = 0;\n  void update() {\n    var value = 5;\n    this.value = value;\n  }\n}\n\nclass C {\n  int count = 0;\n  void inc() {\n    count += 1;\n  }\n  int get doubled => count * 2;\n}\n\nclass D {\n  int total = 0;\n  void add(int total) {\n    this.total += total;\n  }\n}\n\nclass E {\n  void run(int helper) {\n    this.helper();\n  }\n  void helper() {}\n}\n\nclass ScopedBindings {\n  int value = 0;\n\n  void catchesAndLoops() {\n    try {\n      throw 1;\n    } catch (value) {\n      print(this.value + value.hashCode);\n    }\n    for (final value in [1]) {\n      print(this.value + value);\n    }\n    if (Object() case final value) {\n      print(this.value + value.hashCode);\n    }\n  }\n\n  void closures() {\n    ((value) => print(this.value + value))(1);\n  }\n}\n\nclass InitializerScope {\n  int value = 1;\n  void ordinary() {\n    final value = this.value;\n    print(value);\n  }\n  void pattern() {\n    final (value,) = (this.value,);\n    print(value);\n  }\n  void later() {\n    print(this.value);\n    final value = 1;\n    print(value);\n  }\n  void capturedLater() {\n    void read() => print(this.value);\n    final value = 1;\n    read();\n    print(value);\n  }\n}\n\nbool isNull(Object? value) => value == null;\n\nextension NullableCheck on Object? {\n  bool get isNull => this == null;\n}\n\nclass ExtensionMember {\n  bool check() => this.isNull;\n}\n\nclass InheritedBase {\n  bool get isNull => false;\n}\n\nclass InheritedMember extends InheritedBase {\n  bool check() => this.isNull;\n}\n\nclass LoopInitializers {\n  int x = 0;\n  int y = 1;\n  List<int> values = [1];\n  void run() {\n    for (var x = this.x; x < 1; x++) {}\n    for (var x = this.y, y = 1; x < y; x++) {}\n    for (final values in this.values) {\n      print(values);\n    }\n    for (var (x, _) = (1, 2); x < 3; x++) {\n      print(this.x);\n    }\n  }\n}\n\nclass SwitchGuardBodyScope {\n  int y = 0;\n  void run(int v) {\n    switch (v) {\n      // The SDK linter's ancestor scope includes the case body's declarations.\n      case _ when this.y > 0:\n        print(this.y);\n        var y = 1;\n        print(y);\n    }\n  }\n}",
       "crossFile": null
     },
     "diagnostics": [
@@ -42120,9 +42268,9 @@
     "sourcePath": "crates/falcon_rules/src/lint/style/use_existing_variable.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/use-existing-variable",
     "description": "Reuse a local for stable SDK arithmetic and String.length/int parity getters.",
-    "docs": "Reuse a local for stable SDK arithmetic and String.length/int parity getters.\nCalls, user getters, allocations and overloaded operators are excluded.\nWhole-scope mutation facts deliberately reject even later/closure writes.",
+    "docs": "Reuse a local for stable SDK arithmetic and String.length/int parity getters.\nCalls, user getters, allocations and overloaded operators are excluded.\nWhole-scope mutation facts deliberately reject even later/closure writes.\nPer-block token fingerprints narrow candidates; exact comparison resolves collisions.",
     "examples": {
-      "bad": "int a() {\n  final x = 2;\n  final cached = x + 1;\n  return x + 1;\n}\nint b() {\n  final x = 3;\n  final cached = x * 2;\n  return (x * 2);\n}\nint c() {\n  final x = 4;\n  final cached = x - 1;\n  final next = x - 1;\n  return next;\n}\nint d() {\n  final x = 5;\n  final cached = (x + 1) * 2;\n  return (x + 1) * 2;\n}\nint e() {\n  final cached = 2 + 3;\n  return 2 + 3;\n}\nvoid sdkGetter(String value) {\n  final cached = value.length.isOdd;\n  print(value.length.isOdd);\n}",
+      "bad": "int a() {\n  final x = 2;\n  final cached = x + 1;\n  return x + 1;\n}\nint b() {\n  final x = 3;\n  final cached = x * 2;\n  return (x * 2);\n}\nint c() {\n  final x = 4;\n  final cached = x - 1;\n  final next = x - 1;\n  return next;\n}\nint d() {\n  final x = 5;\n  final cached = (x + 1) * 2;\n  return (x + 1) * 2;\n}\nint e() {\n  final cached = 2 + 3;\n  return 2 + 3;\n}\nvoid sdkGetter(String value) {\n  final cached = value.length.isOdd;\n  print(value.length.isOdd);\n}\nint commentWhitespace() {\n  final x = 2;\n  final cached = x /* same comment */ + 1;\n  return x /*samecomment*/ + 1;\n}\nint separateScope() {\n  final x = 2;\n  final cached = x + 1;\n  {\n    final nested = x + 1;\n    print(x + 1);\n  }\n  return x + 1;\n}",
       "good": "int mutation() {\n  var x = 1;\n  final cached = x + 2;\n  x = 2;\n  return x + 2;\n}\nint captured() {\n  var x = 1;\n  final cached = x + 2;\n  void change() { x++; }\n  return x + 2;\n}\nObject allocate() {\n  final cached = Object();\n  return Object();\n}\nint calls(int Function() next) {\n  final cached = next() + 1;\n  return next() + 1;\n}\nint shadow() {\n  final x = 1;\n  final cached = x + 1;\n  { final x = 2; return x + 1; }\n}\nint branch(bool flag) {\n  final x = 1;\n  if (flag) { final cached = x + 1; }\n  return x + 1;\n}\nint division() {\n  final x = 1;\n  final cached = x ~/ 2;\n  return x ~/ 2;\n}\nclass Counter {\n  Counter operator +(int other) => Counter();\n}\nCounter overloaded() {\n  final x = Counter();\n  final cached = x + 1;\n  return x + 1;\n}\nint mutatedCache() {\n  final x = 1;\n  var cached = x + 1;\n  cached = 3;\n  return x + 1;\n}\nint constantContext() {\n  final cached = 2 + 3;\n  const next = 2 + 3;\n  return next;\n}\nint lateDependency() {\n  late final x = 1;\n  final cached = x + 1;\n  return x + 1;\n}\nclass Unstable {\n  int get length => DateTime.now().second;\n}\nbool customGetter(Unstable value) {\n  final cached = value.length.isOdd;\n  return value.length.isOdd;\n}",
       "crossFile": null
     },
@@ -42161,6 +42309,24 @@
         "message": "Reuse the existing local instead of repeating this computation.",
         "line": 28,
         "column": 9,
+        "file": null
+      },
+      {
+        "message": "Reuse the existing local instead of repeating this computation.",
+        "line": 33,
+        "column": 10,
+        "file": null
+      },
+      {
+        "message": "Reuse the existing local instead of repeating this computation.",
+        "line": 40,
+        "column": 11,
+        "file": null
+      },
+      {
+        "message": "Reuse the existing local instead of repeating this computation.",
+        "line": 42,
+        "column": 10,
         "file": null
       }
     ]
@@ -46008,7 +46174,7 @@
     "description": "Flags an `is` check proven impossible by canonical resolved types.",
     "docs": "Flags an `is` check proven impossible by canonical resolved types.",
     "examples": {
-      "bad": "// Test cases for avoid-unrelated-type-assertions rule\n// Flags 'is T' checks that are structurally impossible\n\nvoid testStringIsInt() {\n  if (\"hello\" is int) {\n    print(\"string is int\");\n  }\n}\n\nvoid testIntIsString() {\n  if (42 is String) {\n    print(\"int is string\");\n  }\n}\n\nvoid testDoubleIsBool() {\n  if (3.14 is bool) {\n    print(\"double is bool\");\n  }\n}\n\nvoid testListIsMap() {\n  if ([1, 2, 3] is Map) {\n    print(\"list is map\");\n  }\n}\n\nvoid testMultipleImpossibleAssertions() {\n  final x = \"test\";\n  final y = 42;\n  final z = true;\n\n  if (x is int) {\n    print(\"x is int\");\n  }\n\n  if (y is String) {\n    print(\"y is string\");\n  }\n\n  if (z is List) {\n    print(\"z is list\");\n  }\n}\n\nvoid testStringIsMapType() {\n  if (\"value\" is Map<String, int>) {\n    print(\"string is map\");\n  }\n}\n\nvoid testConditionalExpressionImpossible() {\n  final result = \"text\" is int ? \"yes\" : \"no\";\n}\n\nvoid testOldStyleFunctionFormal(String callback()) {\n  if (callback is String) {\n    print(\"function is string\");\n  }\n}\n\nvoid testForInBindings() {\n  for (final value in <String>['x']) {\n    if (value is int) {\n      print(\"string is int\");\n    }\n  }\n  for (String value in <String>['x']) {\n    if (value is int) {\n      print(\"string is int\");\n    }\n  }\n  for (final [value] in <List<String>>[\n    ['x'],\n  ]) {\n    if (value is int) {\n      print(\"string is int\");\n    }\n  }\n}\n\nclass ConstructorInitializerCheck {\n  final bool impossible;\n\n  ConstructorInitializerCheck()\n      : impossible = \"text\" is int;\n}\n\n// Regression: the violation must still be found inside Dart 3 containers\n// (pattern declaration, labeled statement, switch expression and subject,\n// collection if/spread, record field).\nvoid containersRegression(int rcount) {\n  final (ra, _) = (\"hello\" is int, 0);\n  lbl: {\n    final rb = \"hello\" is int;\n    print(rb);\n  }\n  final rc = switch (rcount) {\n    0 => \"hello\" is int,\n    _ => null,\n  };\n  final rd = switch (\"hello\" is int) {\n    _ => 0,\n  };\n  final re = [if (rcount > 0) \"hello\" is int];\n  final rf = [...[\"hello\" is int]];\n  final rg = (p: \"hello\" is int, q: 0);\n  print([ra, rc, rd, re, rf, rg]);\n}",
+      "bad": "// Test cases for avoid-unrelated-type-assertions rule\n// Flags 'is T' checks that are structurally impossible\n\nvoid testStringIsInt() {\n  if (\"hello\" is int) {\n    print(\"string is int\");\n  }\n}\n\nvoid testIntIsString() {\n  if (42 is String) {\n    print(\"int is string\");\n  }\n}\n\nvoid testDoubleIsBool() {\n  if (3.14 is bool) {\n    print(\"double is bool\");\n  }\n}\n\nvoid testMultipleImpossibleAssertions() {\n  final x = \"test\";\n  final y = 42;\n  final z = true;\n\n  if (x is int) {\n    print(\"x is int\");\n  }\n\n  if (y is String) {\n    print(\"y is string\");\n  }\n\n  if (z is List) {\n    print(\"z is list\");\n  }\n}\n\nvoid testStringIsMapType() {\n  if (\"value\" is Map<String, int>) {\n    print(\"string is map\");\n  }\n}\n\nvoid testConditionalExpressionImpossible() {\n  final result = \"text\" is int ? \"yes\" : \"no\";\n}\n\nvoid testOldStyleFunctionFormal(String callback()) {\n  if (callback is String) {\n    print(\"function is string\");\n  }\n}\n\nvoid testForInBindings() {\n  for (final value in <String>['x']) {\n    if (value is int) {\n      print(\"string is int\");\n    }\n  }\n  for (String value in <String>['x']) {\n    if (value is int) {\n      print(\"string is int\");\n    }\n  }\n  for (final [value] in <List<String>>[\n    ['x'],\n  ]) {\n    if (value is int) {\n      print(\"string is int\");\n    }\n  }\n}\n\nclass ConstructorInitializerCheck {\n  final bool impossible;\n\n  ConstructorInitializerCheck()\n      : impossible = \"text\" is int;\n}\n\n// Regression: the violation must still be found inside Dart 3 containers\n// (pattern declaration, labeled statement, switch expression and subject,\n// collection if/spread, record field).\nvoid containersRegression(int rcount) {\n  final (ra, _) = (\"hello\" is int, 0);\n  lbl: {\n    final rb = \"hello\" is int;\n    print(rb);\n  }\n  final rc = switch (rcount) {\n    0 => \"hello\" is int,\n    _ => null,\n  };\n  final rd = switch (\"hello\" is int) {\n    _ => 0,\n  };\n  final re = [if (rcount > 0) \"hello\" is int];\n  final rf = [...[\"hello\" is int]];\n  final rg = (p: \"hello\" is int, q: 0);\n  print([ra, rc, rd, re, rf, rg]);\n}",
       "good": "// Good examples for avoid-unrelated-type-assertions rule\n// Type checks where the assertion is possible or plausible\n\nvoid testDynamicTypeCheck() {\n  dynamic value = \"hello\";\n  if (value is String) {\n    print(\"value is string\");\n  }\n}\n\nvoid testObjectTypeCheck() {\n  Object obj = 42;\n  if (obj is int) {\n    print(\"obj is int\");\n  }\n}\n\nvoid testValidTypeCheckWithParameter() {\n  void checkType(dynamic param) {\n    if (param is String) {\n      print(\"param is string\");\n    }\n  }\n}\n\nvoid testValidListTypeCheck() {\n  dynamic data = [1, 2, 3];\n  if (data is List) {\n    print(\"data is list\");\n  }\n}\n\nvoid testValidMapTypeCheck() {\n  dynamic config = {\"key\": \"value\"};\n  if (config is Map) {\n    print(\"config is map\");\n  }\n}\n\nvoid testValidNullableTypeCheck() {\n  Object? value = \"text\";\n  if (value is String) {\n    print(\"value is string\");\n  }\n}\n\nvoid testValidUnionLikeType() {\n  Object data = 42;\n  if (data is int || data is String) {\n    print(\"data is int or string\");\n  }\n}\n\nclass T {}\n\nmixin M<T> {\n  bool unrelatedTypeParameterCheck(T value) => value is int;\n}",
       "crossFile": null
     },
@@ -46033,19 +46199,19 @@
       },
       {
         "message": "Remove this type assertion because the types are unrelated and it can never be true.",
-        "line": 23,
+        "line": 27,
         "column": 7,
         "file": null
       },
       {
         "message": "Remove this type assertion because the types are unrelated and it can never be true.",
-        "line": 33,
+        "line": 31,
         "column": 7,
         "file": null
       },
       {
         "message": "Remove this type assertion because the types are unrelated and it can never be true.",
-        "line": 37,
+        "line": 35,
         "column": 7,
         "file": null
       },
@@ -46058,84 +46224,78 @@
       {
         "message": "Remove this type assertion because the types are unrelated and it can never be true.",
         "line": 47,
-        "column": 7,
-        "file": null
-      },
-      {
-        "message": "Remove this type assertion because the types are unrelated and it can never be true.",
-        "line": 53,
         "column": 18,
         "file": null
       },
       {
         "message": "Remove this type assertion because the types are unrelated and it can never be true.",
-        "line": 57,
+        "line": 51,
         "column": 7,
         "file": null
       },
       {
         "message": "Remove this type assertion because the types are unrelated and it can never be true.",
-        "line": 64,
+        "line": 58,
         "column": 9,
         "file": null
       },
       {
         "message": "Remove this type assertion because the types are unrelated and it can never be true.",
-        "line": 69,
+        "line": 63,
         "column": 9,
         "file": null
       },
       {
         "message": "Remove this type assertion because the types are unrelated and it can never be true.",
-        "line": 76,
+        "line": 70,
         "column": 9,
         "file": null
       },
       {
         "message": "Remove this type assertion because the types are unrelated and it can never be true.",
-        "line": 86,
+        "line": 80,
         "column": 22,
         "file": null
       },
       {
         "message": "Remove this type assertion because the types are unrelated and it can never be true.",
-        "line": 93,
+        "line": 87,
         "column": 20,
         "file": null
       },
       {
         "message": "Remove this type assertion because the types are unrelated and it can never be true.",
-        "line": 95,
+        "line": 89,
         "column": 16,
         "file": null
       },
       {
         "message": "Remove this type assertion because the types are unrelated and it can never be true.",
-        "line": 99,
+        "line": 93,
         "column": 10,
         "file": null
       },
       {
         "message": "Remove this type assertion because the types are unrelated and it can never be true.",
-        "line": 102,
+        "line": 96,
         "column": 22,
         "file": null
       },
       {
         "message": "Remove this type assertion because the types are unrelated and it can never be true.",
-        "line": 105,
+        "line": 99,
         "column": 31,
         "file": null
       },
       {
         "message": "Remove this type assertion because the types are unrelated and it can never be true.",
-        "line": 106,
+        "line": 100,
         "column": 19,
         "file": null
       },
       {
         "message": "Remove this type assertion because the types are unrelated and it can never be true.",
-        "line": 107,
+        "line": 101,
         "column": 18,
         "file": null
       }
@@ -46468,7 +46628,7 @@
     "sourcePath": "crates/falcon_rules/src/cross_file/duplicate_barrel_exports.rs",
     "fixturePath": "crates/falcon_rules/tests/corpus/duplicate-barrel-exports",
     "description": "Report conflicting declarations exported through independent public barrels.",
-    "docs": "Report conflicting declarations exported through independent public barrels.\n\nPublic barrels are analyzed non-part libraries under `lib/`, outside `lib/src/`,\ncontaining an export directive. Export namespaces include public declarations\nand transitive same-package exports, respecting `show`/`hide` and the default\nconditional URI. If either barrel transitively exports the other, they are exempt, so\numbrella barrels are allowed. Reports once per export directive in the later\nbarrel by path, choosing the first matching earlier barrel and name in sorted\norder. Private names, `main`, `@internal`, and `@visibleForTesting` declarations\nare excluded. Re-exporting the same declaration through independent barrels is allowed.\nOnly analyzed, successfully parsed same-package files participate;\nno SDK or dependency namespaces are inferred.",
+    "docs": "Report conflicting declarations exported through independent public barrels.\n\nPublic barrels are analyzed non-part libraries under `lib/`, outside `lib/src/`,\ncontaining an export directive. Export namespaces include public declarations\nand transitive same-package exports, respecting `show`/`hide` and the default\nconditional URI (not the alternative branches). Parts, including nested parts,\ncontribute declarations to their owning library. Local declarations shadow\nexported declarations of the same name, but a getter and setter remain a valid\ncomplementary pair. If either barrel transitively exports the other, they are exempt, so\numbrella barrels are allowed. Reports once per export directive in the later\nbarrel by path, choosing the first matching earlier barrel and name in sorted\norder. Private names, `main`, `@internal`, and `@visibleForTesting` declarations\nare excluded. Re-exporting the same declaration through independent barrels is allowed.\nOnly analyzed, successfully parsed same-package files participate;\nno SDK or dependency namespaces are inferred.",
     "examples": {
       "bad": null,
       "good": null,
@@ -46550,6 +46710,50 @@
           "content": "name: barrel_example"
         },
         {
+          "path": "good_accessors/lib/a.dart",
+          "content": "export 'src/value.dart';"
+        },
+        {
+          "path": "good_accessors/lib/b.dart",
+          "content": "export 'src/value.dart';"
+        },
+        {
+          "path": "good_accessors/lib/src/value.dart",
+          "content": "int get count => 0;\nset count(int value) {}"
+        },
+        {
+          "path": "good_accessors/pubspec.yaml",
+          "content": "name: fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
+        },
+        {
+          "path": "good_accessors/test/use.dart",
+          "content": "import '../lib/a.dart';\nimport '../lib/b.dart';\nvoid main() { count = count + 1; }"
+        },
+        {
+          "path": "good_complementary_accessors/lib/a.dart",
+          "content": "export 'src/read.dart';"
+        },
+        {
+          "path": "good_complementary_accessors/lib/b.dart",
+          "content": "export 'src/write.dart';"
+        },
+        {
+          "path": "good_complementary_accessors/lib/src/read.dart",
+          "content": "int get count => 0;"
+        },
+        {
+          "path": "good_complementary_accessors/lib/src/write.dart",
+          "content": "set count(int value) {}"
+        },
+        {
+          "path": "good_complementary_accessors/pubspec.yaml",
+          "content": "name: fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
+        },
+        {
+          "path": "good_complementary_accessors/test/use.dart",
+          "content": "import '../lib/a.dart';\nimport '../lib/b.dart';\nvoid main() { count = count + 1; }"
+        },
+        {
           "path": "good_cross_package/lib/api.dart",
           "content": "export 'src/api.dart';"
         },
@@ -46596,6 +46800,26 @@
         {
           "path": "good_cycles/test/use.dart",
           "content": "import '../lib/a.dart';\nCyclicApi? cyclic;"
+        },
+        {
+          "path": "good_local_shadow/lib/a.dart",
+          "content": "export 'src/original.dart';\nclass Name {}"
+        },
+        {
+          "path": "good_local_shadow/lib/b.dart",
+          "content": "export 'a.dart';"
+        },
+        {
+          "path": "good_local_shadow/lib/c.dart",
+          "content": "export 'a.dart';"
+        },
+        {
+          "path": "good_local_shadow/lib/src/original.dart",
+          "content": "class Name {}"
+        },
+        {
+          "path": "good_local_shadow/pubspec.yaml",
+          "content": "name: fixture\nenvironment:\n  sdk: \">=3.0.0 <4.0.0\""
         },
         {
           "path": "good_no_barrel/lib/src/a.dart",
