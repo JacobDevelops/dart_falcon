@@ -360,16 +360,16 @@ mod tests {
                 ProjectFile::new(
                     root.join(path),
                     std::sync::Arc::new(falcon_analyze::ParsedFile::parse(*source)),
-                ).unwrap()
+                )
+                .unwrap()
             })
             .collect()
     }
 
     fn environment(files: &[ProjectFile]) -> AnalysisEnvironment {
-        AnalysisEnvironment::discover_with_sdk_locator(
-            files.iter().map(ProjectFile::path),
-            |_| None,
-        )
+        AnalysisEnvironment::discover_with_sdk_locator(files.iter().map(ProjectFile::path), |_| {
+            None
+        })
     }
 
     #[cfg(unix)]
@@ -387,17 +387,25 @@ mod tests {
             ("alias/child.dart", "part of 'owner.dart'; class Child {}"),
         ]
         .into_iter()
-        .map(|(path, source)| ProjectFile::new(
-            root.path().join(path),
-            std::sync::Arc::new(falcon_analyze::ParsedFile::parse(source)),
-        ).unwrap())
+        .map(|(path, source)| {
+            ProjectFile::new(
+                root.path().join(path),
+                std::sync::Arc::new(falcon_analyze::ParsedFile::parse(source)),
+            )
+            .unwrap()
+        })
         .collect();
         let environment = environment(&files);
         let packages: Vec<_> = files
             .iter()
             .map(|file| environment.file_package(file.path()))
             .collect();
-        let exported = exported_library_files(&environment, &files, &packages, &project_packages(&packages));
+        let exported = exported_library_files(
+            &environment,
+            &files,
+            &packages,
+            &project_packages(&packages),
+        );
         assert!(exported.contains(&environment.canonical_path(files[2].path())));
     }
 
@@ -442,17 +450,25 @@ mod tests {
             .iter()
             .map(|file| environment.file_package(file.path()))
             .collect();
-        let exported =
-            exported_library_files(&environment, &files, &file_packages, &project_packages(&file_packages));
+        let exported = exported_library_files(
+            &environment,
+            &files,
+            &file_packages,
+            &project_packages(&file_packages),
+        );
         assert!(exported.contains(&environment.canonical_path(files[1].path())));
     }
 
     #[test]
     fn encoded_scheme_separator_stays_a_relative_path() {
         let from = std::path::Path::new("/project/lib/main.dart");
-        let Some(ResolvedRef::Path(path)) =
-            resolve_directive_uri(&AnalysisEnvironment::default(), from, "package%3Afoo/a.dart", None, &[])
-        else {
+        let Some(ResolvedRef::Path(path)) = resolve_directive_uri(
+            &AnalysisEnvironment::default(),
+            from,
+            "package%3Afoo/a.dart",
+            None,
+            &[],
+        ) else {
             panic!("Encoded scheme separator must remain relative");
         };
         assert_eq!(
@@ -501,8 +517,12 @@ mod tests {
             .iter()
             .map(|file| environment.file_package(file.path()))
             .collect();
-        let exported =
-            exported_library_files(&environment, &files, &file_packages, &project_packages(&file_packages));
+        let exported = exported_library_files(
+            &environment,
+            &files,
+            &file_packages,
+            &project_packages(&file_packages),
+        );
         for file in &files[1..] {
             assert!(exported.contains(&environment.canonical_path(file.path())));
         }
@@ -530,8 +550,12 @@ mod tests {
             .iter()
             .map(|file| environment.file_package(file.path()))
             .collect();
-        let exported =
-            exported_library_files(&environment, &files, &file_packages, &project_packages(&file_packages));
+        let exported = exported_library_files(
+            &environment,
+            &files,
+            &file_packages,
+            &project_packages(&file_packages),
+        );
         for file in &files[1..] {
             assert!(exported.contains(&environment.canonical_path(file.path())));
         }
@@ -581,9 +605,13 @@ mod tests {
         let graph = build_reference_graph(&environment, &files, &paths, &file_packages, &packages);
         assert_eq!(graph[0], [1, 2, 1, 1, 2]);
         for (uri, target) in [("%61.dart", 1), ("%2561.dart", 2), ("src/../%61.dart", 1)] {
-            let Some(ResolvedRef::Path(path)) =
-                resolve_directive_uri(&environment, &paths[0], uri, file_packages[0].identity(), &packages)
-            else {
+            let Some(ResolvedRef::Path(path)) = resolve_directive_uri(
+                &environment,
+                &paths[0],
+                uri,
+                file_packages[0].identity(),
+                &packages,
+            ) else {
                 panic!("URI should resolve: {uri}");
             };
             assert_eq!(path, paths[target]);

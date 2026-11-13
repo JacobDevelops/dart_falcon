@@ -4246,6 +4246,55 @@ mod dependency_tests {
 
     #[cfg(unix)]
     #[test]
+    fn watched_file_replacement_refreshes_cross_file_identity() {
+        let dir = tempdir();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("lib/src")).unwrap();
+        let config = root.join("falcon.json");
+        std::fs::write(&config, r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"suspicious":{"duplicate-barrel-exports":"warn"}}}}"#).unwrap();
+        std::fs::write(root.join("pubspec.yaml"), "name: app\n").unwrap();
+        std::fs::write(root.join("lib/a.dart"), "export 'src/one.dart';").unwrap();
+        std::fs::write(root.join("lib/b.dart"), "export 'src/two.dart';").unwrap();
+        let one = root.join("lib/src/one.dart");
+        let two = root.join("lib/src/two.dart");
+        std::fs::write(&one, "class Shared {}").unwrap();
+        std::fs::write(&two, "class Shared {}").unwrap();
+        let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
+        let uri = format!("file://{}", two.display());
+        state.open(&uri, "class Shared {}".into(), Some(1));
+        assert!(
+            state
+                .cross_file_diagnostics()
+                .values()
+                .flatten()
+                .any(|diagnostic| diagnostic.rule == "duplicate-barrel-exports")
+        );
+        std::fs::remove_file(&two).unwrap();
+        std::os::unix::fs::symlink(&one, &two).unwrap();
+        state.watched_files_changed(std::slice::from_ref(&two));
+        assert!(
+            state
+                .cross_file_diagnostics()
+                .values()
+                .flatten()
+                .all(|diagnostic| diagnostic.rule != "duplicate-barrel-exports")
+        );
+        assert_eq!(state.environment.normalized_path(&two), Some(one.as_path()));
+        std::fs::remove_file(&two).unwrap();
+        std::fs::write(&two, "class Shared {}").unwrap();
+        state.watched_files_changed(std::slice::from_ref(&two));
+        assert!(
+            state
+                .cross_file_diagnostics()
+                .values()
+                .flatten()
+                .any(|diagnostic| diagnostic.rule == "duplicate-barrel-exports")
+        );
+        assert_eq!(state.environment.normalized_path(&two), Some(two.as_path()));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn symlinked_workspace_publishes_canonical_cross_file_diagnostics() {
         let dir = tempdir();
         let workspace = dir.path().join("workspace");

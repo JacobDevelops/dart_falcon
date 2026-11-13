@@ -590,13 +590,7 @@ pub fn build_reference_graph(
                 adj[i].push(target);
                 continue;
             }
-            match resolve_directive_uri(
-                environment,
-                &canons[i],
-                &uri,
-                own_package,
-                packages,
-            ) {
+            match resolve_directive_uri(environment, &canons[i], &uri, own_package, packages) {
                 Some(ResolvedRef::Path(p)) => {
                     if let Some(&j) = by_path.get(p.as_path()) {
                         adj[i].push(j);

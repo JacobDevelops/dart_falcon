@@ -1149,7 +1149,10 @@ impl LspState {
         // without traversing directories; deleted directories match cached children.
         let paths: Vec<_> = paths
             .iter()
-            .map(|path| self.normalize_watched_path(path))
+            .flat_map(|path| {
+                let [canonical, location] = watched_file_locations(path);
+                [self.normalize_watched_path(path), canonical, location]
+            })
             .filter(|path| self.relevant_watched_path(path, inputs_changed))
             .collect();
         if paths.is_empty() {
@@ -1175,6 +1178,7 @@ impl LspState {
         }
         self.disk_files
             .retain(|cached, _| !paths.iter().any(|path| cached.starts_with(path)));
+        self.environment.refresh_file_locations(&paths);
         let rules_changed = paths.iter().any(|path| {
             matches!(
                 path.file_name().and_then(|name| name.to_str()),
@@ -4041,6 +4045,14 @@ fn same_packages(current: &[PackageIdentity], cached: &[PackageIdentity]) -> boo
         && current.iter().zip(cached).all(|(current, cached)| {
             current.name == cached.name && current.lib_root == cached.lib_root
         })
+}
+
+fn watched_file_locations(path: &Path) -> [PathBuf; 2] {
+    let location = path.parent().zip(path.file_name()).map_or_else(
+        || path.to_path_buf(),
+        |(parent, name)| watched_path(parent).join(name),
+    );
+    [watched_path(path), location]
 }
 
 fn watched_path(path: &Path) -> PathBuf {

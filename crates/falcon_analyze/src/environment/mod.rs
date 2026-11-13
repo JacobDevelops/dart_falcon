@@ -893,14 +893,29 @@ impl AnalysisEnvironment {
         self.directory_packages.get(directory)?.as_deref()
     }
 
+    /// Recapture registered locations invalidated alongside their disk sources.
+    pub fn refresh_file_locations(&mut self, changed: &[PathBuf]) {
+        let paths: Vec<_> = self
+            .file_locations
+            .iter()
+            .filter(|(path, location)| {
+                changed.iter().any(|changed| {
+                    path.starts_with(changed) || location.normalized.as_path().starts_with(changed)
+                })
+            })
+            .map(|(path, _)| path.clone())
+            .collect();
+        self.extend(paths.iter().map(PathBuf::as_path));
+    }
+
     /// Bind cached package metadata to one file's normalized location.
     /// External directories are discovered lazily and shared across file contexts.
     #[must_use]
     pub fn file_package(&self, path: &Path) -> FilePackage {
         if let Some(location) = self.file_locations.get(path) {
             return FilePackage::new(
-                &location.normalized,
-                self.package_metadata(&location.normalized),
+                location.normalized.as_path(),
+                self.package_metadata(location.normalized.as_path()),
             );
         }
         let path = crate::canonical_or_lexical(&package_config::absolute(path));
@@ -1120,7 +1135,7 @@ impl AnalysisEnvironment {
     pub fn package_language_version(&self, path: &Path) -> Option<LanguageVersion> {
         let config = self.package_config(path).available()?;
         if let Some(location) = self.file_locations.get(path) {
-            config.language_version_canonical(&location.normalized)
+            config.language_version_canonical(location.normalized.as_path())
         } else {
             config.language_version(path)
         }
