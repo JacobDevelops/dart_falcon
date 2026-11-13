@@ -34,6 +34,7 @@ pub use queries::ResolvedInvocation;
 mod relation;
 mod unrelated;
 pub use relation::TypeRelation;
+pub use unrelated::RuntimeIntersection;
 
 #[cfg(test)]
 mod alias_tests;

@@ -8,8 +8,10 @@
 //! aliases. Like the analyzer, supertypes (`extends`, `with`, `implements`),
 //! non-function type aliases and record type annotations are not checked, and
 //! constructors of enums and of sealed, `abstract final`, `abstract interface`
-//! or `@internal` classes are exempt. Untyped initializing and super formals
-//! use their resolved semantic types, including declarations in part files.
+//! or `@internal` classes are exempt, including primary constructors. Public
+//! fields introduced by declaring primary parameters are still checked, even
+//! when the constructor is exempt or private. Untyped initializing and super
+//! formals use their resolved semantic types, including declarations in part files.
 
 use falcon_analyze::{AnalyzeContext, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
@@ -85,6 +87,7 @@ impl<'a> Collector<'a> {
                         }
                         _ => false,
                     };
+                self.primary_constructor(node.primary_constructor(), closed);
                 self.members(node.members(), closed, false);
             }
             TopLevelDecl::ClassTypeAlias(node) if is_public(node.name()) => {
@@ -97,11 +100,9 @@ impl<'a> Collector<'a> {
             }
             TopLevelDecl::MixinClass(node) if is_public(node.name()) => {
                 self.type_params(node.type_params());
-                self.members(
-                    node.members(),
-                    has_meta_annotation(node.annotations(), "internal", model),
-                    false,
-                );
+                let closed = has_meta_annotation(node.annotations(), "internal", model);
+                self.primary_constructor(node.primary_constructor(), closed);
+                self.members(node.members(), closed, false);
             }
             TopLevelDecl::Enum(node) if is_public(node.name()) => {
                 self.type_params(node.type_params());
@@ -147,6 +148,22 @@ impl<'a> Collector<'a> {
         }
     }
 
+    fn primary_constructor(&mut self, constructor: Option<PrimaryConstructor<'a>>, closed: bool) {
+        if let Some(constructor) = constructor {
+            let public = is_public_constructor(closed, constructor.constructor_name());
+            for param in constructor.params().params() {
+                let public_field = (param.is_final() || param.is_var()) && is_public(param.name());
+                if public_field
+                    || (public
+                        && (!matches!(param.kind(), ParamKind::Named { .. })
+                            || is_public(param.name())))
+                {
+                    self.param(param);
+                }
+            }
+        }
+    }
+
     /// `closed` exempts constructors (enums and effectively private
     /// classes); `extension_type` skips the invalid instance fields of
     /// extension types.
@@ -167,7 +184,7 @@ impl<'a> Collector<'a> {
                     self.optional_type(node.field_type());
                 }
                 ClassMember::Constructor(node)
-                    if !closed && node.constructor_name().is_none_or(is_public) =>
+                    if is_public_constructor(closed, node.constructor_name()) =>
                 {
                     self.public_constructors.push(node.span());
                     self.params(node.params());
@@ -214,7 +231,10 @@ impl<'a> Collector<'a> {
     }
 
     fn report(&mut self, span: Span) {
-        self.diags.push(self.ctx.diagnostic("Avoid using a private type in a public API.", span));
+        self.diags.push(
+            self.ctx
+                .diagnostic("Avoid using a private type in a public API.", span),
+        );
     }
 
     fn type_params(&mut self, params: AstChildren<'a, TypeParam<'a>>) {
@@ -283,6 +303,10 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
     }
 }
 
+fn is_public_constructor(closed: bool, name: Option<Identifier<'_>>) -> bool {
+    !closed && name.is_none_or(is_public)
+}
+
 fn is_public(identifier: Identifier<'_>) -> bool {
     !identifier.name().starts_with('_')
 }
@@ -308,5 +332,29 @@ class Real { Real(_Private value); }
             &LibraryPrivateTypesInPublicApi,
         );
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    }
+
+    #[test]
+    fn internal_primary_constructor_exemption_preserves_declaring_fields() {
+        let source = r"
+// @dart = 3.13
+import 'package:meta/meta.dart' as meta;
+const internal = 0;
+class _Private {}
+@internal
+class Fake(_Private value) {}
+@meta.internal
+class Real(_Private value) {}
+@meta.internal
+class Field(final _Private value) {}
+@meta.internal
+class HiddenField(final _Private _value) {}
+";
+        let diagnostics = crate::lint::test_support::analyze_flutter_rule(
+            "library-private-types-in-public-api",
+            source,
+            &LibraryPrivateTypesInPublicApi,
+        );
+        assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
     }
 }

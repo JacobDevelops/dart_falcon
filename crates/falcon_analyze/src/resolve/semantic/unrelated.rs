@@ -25,6 +25,15 @@ const PROTOBUF_ENUM_URI: &str = "package:protobuf/src/protobuf/protobuf_enum.dar
 
 type RelationMemo = FxHashMap<(ResolvedType, ResolvedType), Truth>;
 
+/// Runtime overlap classification, separating proof from the concrete-type heuristic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeIntersection {
+    Disjoint,
+    UnrelatedConcrete,
+    PossiblyRelated,
+    Unknown,
+}
+
 fn memoized_relation(
     left: &ResolvedType,
     right: &ResolvedType,
@@ -63,6 +72,306 @@ fn memoized_relation(
 }
 
 impl SignatureIndex {
+    /// Classifies runtime intersections separately from the equality lint's
+    /// heuristic notion of unrelated declarations.
+    #[must_use]
+    pub fn runtime_intersection(
+        &self,
+        left: &ResolvedType,
+        right: &ResolvedType,
+        model: &SemanticModel<'_>,
+    ) -> RuntimeIntersection {
+        let (Some(left), Some(right)) = (self.erase(left, model), self.erase(right, model)) else {
+            return RuntimeIntersection::Unknown;
+        };
+        self.erased_intersection(&left, &right, model)
+    }
+
+    fn erased_intersection(
+        &self,
+        left: &ResolvedType,
+        right: &ResolvedType,
+        model: &SemanticModel<'_>,
+    ) -> RuntimeIntersection {
+        use ResolvedTypeKind::{
+            Dynamic, Function, Interface, NonNullTypeParameter, Null, Record, TypeParameter, Void,
+        };
+        use RuntimeIntersection::{Disjoint, PossiblyRelated, Unknown};
+        if matches!(left.kind, ResolvedTypeKind::Unknown)
+            || matches!(right.kind, ResolvedTypeKind::Unknown)
+        {
+            return Unknown;
+        }
+        if is_bottom(left)
+            || is_bottom(right)
+            || matches!(left.kind, Dynamic | Void)
+            || matches!(right.kind, Dynamic | Void)
+        {
+            return PossiblyRelated;
+        }
+        if non_nullable(left) == Truth::No && non_nullable(right) == Truth::No {
+            return PossiblyRelated;
+        }
+        if matches!(left.kind, Null) || matches!(right.kind, Null) {
+            return if non_nullable(left) == Truth::Yes || non_nullable(right) == Truth::Yes {
+                Disjoint
+            } else {
+                Unknown
+            };
+        }
+        let left = left.non_null();
+        let right = right.non_null();
+        if self.resolved_subtype(&left, &right, model) == Truth::Yes
+            || self.resolved_subtype(&right, &left, model) == Truth::Yes
+        {
+            return PossiblyRelated;
+        }
+        match (&left.kind, &right.kind) {
+            (TypeParameter { bound, .. } | NonNullTypeParameter { bound, .. }, _) => {
+                self.erased_intersection(bound, &right, model)
+            }
+            (_, TypeParameter { bound, .. } | NonNullTypeParameter { bound, .. }) => {
+                self.erased_intersection(&left, bound, model)
+            }
+            (
+                Record {
+                    positional: a,
+                    named: an,
+                    ..
+                },
+                Record {
+                    positional: b,
+                    named: bn,
+                    ..
+                },
+            ) => {
+                if a.len() != b.len()
+                    || an.len() != bn.len()
+                    || an.iter().zip(bn.iter()).any(|((a, _), (b, _))| a != b)
+                    || a.iter()
+                        .zip(b.iter())
+                        .chain(an.iter().zip(bn.iter()).map(|((_, a), (_, b))| (a, b)))
+                        .any(|(a, b)| self.erased_intersection(a, b, model) == Disjoint)
+                {
+                    Disjoint
+                } else {
+                    PossiblyRelated
+                }
+            }
+            (Function { .. }, Function { .. }) => PossiblyRelated,
+            (Record { .. }, Function { .. }) | (Function { .. }, Record { .. }) => Disjoint,
+            (
+                Interface {
+                    identity: a,
+                    arguments: aa,
+                    ..
+                },
+                Interface {
+                    identity: b,
+                    arguments: ba,
+                    ..
+                },
+            ) if a == b => {
+                // Covariant types can overlap at Never; retain that distinction
+                // from a proof that no runtime value can inhabit both types.
+                if aa
+                    .iter()
+                    .zip(ba.iter())
+                    .any(|(a, b)| self.erased_intersection(a, b, model) == Disjoint)
+                {
+                    RuntimeIntersection::UnrelatedConcrete
+                } else {
+                    PossiblyRelated
+                }
+            }
+            (Interface { .. }, _) | (_, Interface { .. }) => {
+                self.nominal_intersection(&left, &right, model)
+            }
+            _ => Unknown,
+        }
+    }
+
+    fn nominal_intersection(
+        &self,
+        left: &ResolvedType,
+        right: &ResolvedType,
+        model: &SemanticModel<'_>,
+    ) -> RuntimeIntersection {
+        use RuntimeIntersection::{Disjoint, PossiblyRelated, Unknown, UnrelatedConcrete};
+        let forward = self.closed_intersection(left, right, model);
+        if forward == Disjoint {
+            return Disjoint;
+        }
+        let backward = self.closed_intersection(right, left, model);
+        if backward == Disjoint {
+            Disjoint
+        } else if forward == Unknown || backward == Unknown {
+            Unknown
+        } else if self.concrete_cast_type(left, model)
+            && self.concrete_cast_type(right, model)
+            && self.resolved_subtype(left, right, model) == Truth::No
+            && self.resolved_subtype(right, left, model) == Truth::No
+        {
+            UnrelatedConcrete
+        } else {
+            PossiblyRelated
+        }
+    }
+
+    fn concrete_cast_type(&self, ty: &ResolvedType, model: &SemanticModel<'_>) -> bool {
+        let ResolvedTypeKind::Interface { identity, .. } = &ty.kind else {
+            return false;
+        };
+        if matches!(
+            self.effective_restriction(identity),
+            Some(Some(super::ClassRestriction::Base))
+        ) {
+            return false;
+        }
+        matches!(model.identities().source_declaration(identity),
+            Some((_, _, super::TopLevelDecl::Class(node)))
+                if !node.modifiers().is_abstract
+                    && node.modifiers().restriction != Some(super::ClassRestriction::Interface))
+    }
+
+    fn closed_intersection(
+        &self,
+        closed: &ResolvedType,
+        other: &ResolvedType,
+        model: &SemanticModel<'_>,
+    ) -> RuntimeIntersection {
+        use RuntimeIntersection::{Disjoint, PossiblyRelated, Unknown};
+        let ResolvedTypeKind::Interface {
+            identity,
+            arguments,
+            ..
+        } = &closed.kind
+        else {
+            return PossiblyRelated;
+        };
+        // These SDK types cannot acquire new user-defined subtypes.
+        let primitive = matches!(identity, DeclarationIdentity::Sdk { library, name }
+            if library == "dart:core" && matches!(name.as_str(), "int" | "double" | "bool" | "String"));
+        if primitive || self.type_kind(identity) == Some(TypeKind::Enum) {
+            if !arguments.is_empty()
+                || self.type_facts.get(identity).is_some_and(|facts| {
+                    facts
+                        .supertypes
+                        .as_ref()
+                        .is_some_and(|(parameters, _)| !parameters.is_empty())
+                })
+            {
+                return Unknown;
+            }
+            return match self.resolved_subtype(closed, other, model) {
+                Truth::No => Disjoint,
+                Truth::Yes => PossiblyRelated,
+                Truth::Unknown => Unknown,
+            };
+        }
+        let Some(facts) = self.type_facts.get(identity) else {
+            return Unknown;
+        };
+        if !matches!(
+            facts.restriction,
+            Some(super::ClassRestriction::Final | super::ClassRestriction::Sealed)
+        ) {
+            return PossiblyRelated;
+        }
+        if !arguments.is_empty() {
+            return Unknown;
+        }
+        let identities = model.identities();
+        if identities.declaration_library(identity).is_none() {
+            return Unknown;
+        }
+        // A missing part can hide an implementer. Do not use a partial source
+        // unit as evidence that a library's subtype set is closed.
+        let Some((_, parsed, _)) = identities.source_declaration(identity) else {
+            return Unknown;
+        };
+        if parsed.program().part_directives().next().is_some()
+            || parsed.program().part_of_directive().is_some()
+        {
+            return Unknown;
+        }
+        let Some(candidates) = self
+            .closed_subtypes
+            .get(identity)
+            .and_then(Option::as_deref)
+        else {
+            return Unknown;
+        };
+        let mut unknown = false;
+        for candidate in candidates {
+            let facts = self
+                .type_facts
+                .get(candidate)
+                .expect("cached indexed subtype");
+            // A base or open descendant can be extended outside the library
+            // and that subclass can implement another interface.
+            if !matches!(
+                facts.restriction,
+                Some(super::ClassRestriction::Final | super::ClassRestriction::Sealed)
+            ) && facts.kind != Some(TypeKind::Enum)
+            {
+                return PossiblyRelated;
+            }
+            if facts
+                .supertypes
+                .as_ref()
+                .is_some_and(|(parameters, _)| !parameters.is_empty())
+            {
+                unknown = true;
+                continue;
+            }
+            match self.resolved_subtype(&model.declared_type(candidate), other, model) {
+                Truth::Yes => return PossiblyRelated,
+                Truth::Unknown => unknown = true,
+                Truth::No => {}
+            }
+        }
+        if unknown { Unknown } else { Disjoint }
+    }
+
+    pub(super) fn rebuild_closed_subtypes(&mut self, identities: &super::IdentityIndex) {
+        let mut libraries: super::FxHashMap<_, Vec<_>> = super::FxHashMap::default();
+        for (identity, facts) in self.type_facts.iter() {
+            if matches!(
+                facts.kind,
+                Some(TypeKind::Class | TypeKind::MixinClass | TypeKind::Mixin | TypeKind::Enum)
+            ) && let Some(library) = identities.declaration_library(identity)
+            {
+                libraries.entry(library).or_default().push(identity);
+            }
+        }
+        self.closed_subtypes = self
+            .type_facts
+            .iter()
+            .filter(|(_, facts)| {
+                matches!(
+                    facts.restriction,
+                    Some(super::ClassRestriction::Final | super::ClassRestriction::Sealed)
+                ) || facts.kind == Some(TypeKind::Enum)
+            })
+            .filter_map(|(identity, _)| {
+                let library = identities.declaration_library(identity)?;
+                let candidates = libraries
+                    .get(&library)?
+                    .iter()
+                    .filter_map(|candidate| {
+                        match self.supertype_matches(candidate, &|ancestor| ancestor == identity) {
+                            Truth::No => None,
+                            Truth::Unknown => Some(None),
+                            Truth::Yes => Some(Some((*candidate).clone())),
+                        }
+                    })
+                    .collect::<Option<Vec<_>>>();
+                Some((identity.clone(), candidates))
+            })
+            .collect();
+    }
+
     /// Erases extension types to their instantiated runtime representation.
     /// Unknown representations or cyclic declarations remain unknown.
     #[must_use]
@@ -1255,6 +1564,146 @@ mod tests {
     use super::*;
     use crate::resolve::{IdentityIndex, IdentitySource};
     use std::path::Path;
+
+    #[test]
+    fn runtime_intersections_keep_open_and_generic_subtypes() {
+        super::super::tests::with_model_at(
+            Path::new("/project/intersections.dart"),
+            "import 'dart:async'; \
+             abstract interface class Right {} \
+             sealed class Sealed {} \
+             final class G<T> extends Sealed implements Box<T> {} \
+             abstract interface class Box<T> {} \
+             final class Closed {} \
+             base mixin M implements Closed {} \
+             typedef IntBox = Box<int>; \
+             typedef IntOrFuture = FutureOr<int>; \
+             typedef DoubleOrFuture = FutureOr<double>;",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let ty = |name| model.resolve_type_name(&[name]).unwrap();
+                for (left, right) in [
+                    (ty("IntOrFuture"), model.core_type("num", false)),
+                    (ty("DoubleOrFuture"), model.core_type("num", false)),
+                    (model.core_type("Symbol", false), ty("Right")),
+                    (ty("Sealed"), ty("IntBox")),
+                    (ty("Closed"), ty("Right")),
+                ] {
+                    assert_ne!(
+                        signatures.runtime_intersection(&left, &right, model),
+                        RuntimeIntersection::Disjoint,
+                        "{left:?} and {right:?}"
+                    );
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn runtime_intersection_subtypes_refresh_after_project_update() {
+        let path = Path::new("/project/closed.dart");
+        let parsed = crate::resolve::parsed_fixture(
+            "final class Closed {} abstract interface class Right {}",
+        );
+        let sources = [crate::IdentitySource {
+            path,
+            parsed: &parsed,
+            has_parse_errors: false,
+        }];
+        let (mut indexes, _) = crate::build_semantic_indexes(&sources, &[], None, None);
+        let check = |indexes: &crate::SemanticIndexes,
+                     parsed: &std::sync::Arc<crate::ParsedFile>| {
+            let model = SemanticModel::new(path, parsed, &indexes.identities, Some(&indexes.types));
+            let closed = model.resolve_type_name(&["Closed"]).unwrap();
+            let right = model.resolve_type_name(&["Right"]).unwrap();
+            indexes
+                .signatures
+                .runtime_intersection(&closed, &right, &model)
+        };
+        assert_eq!(check(&indexes, &parsed), RuntimeIntersection::Disjoint);
+        let updated = crate::resolve::parsed_fixture(
+            "final class Closed {} abstract interface class Right {} \
+             final class Child extends Closed implements Right {}",
+        );
+        crate::update_semantic_indexes(
+            &mut indexes,
+            &[crate::IdentitySource {
+                path,
+                parsed: &updated,
+                has_parse_errors: false,
+            }],
+            &[],
+            None,
+            None,
+        );
+        assert_ne!(check(&indexes, &updated), RuntimeIntersection::Disjoint);
+    }
+
+    #[test]
+    fn runtime_intersections_separate_proof_from_concrete_heuristics() {
+        use RuntimeIntersection::{Disjoint, PossiblyRelated, Unknown, UnrelatedConcrete};
+        super::super::tests::with_model_at(
+            Path::new("/project/casts.dart"),
+            "abstract class Left {} abstract interface class Right {} \
+             class Both implements Left, Right {} mixin M {} \
+             class C extends Left with M {} class A {} class B {} \
+             final class Closed {} sealed class Sealed {} \
+             final class Child extends Sealed implements Right {} \
+             base class Open extends Sealed {} \
+             enum E { value } extension type Wrapped(int value) {} \
+             typedef Ints = List<int>; typedef Strings = List<String>; \
+             typedef Rec = (int, String); typedef ShortRec = (int,); \
+             typedef Fn = int Function(); typedef OtherFn = String Function();",
+            |program, model| {
+                let signatures = SignatureIndex::from_program(program, model);
+                let ty = |name| model.resolve_type_name(&[name]).unwrap();
+                for (left, right, expected) in [
+                    (ty("Left"), ty("Right"), PossiblyRelated),
+                    (ty("Left"), ty("M"), PossiblyRelated),
+                    (ty("Both"), ty("Right"), PossiblyRelated),
+                    (ty("A"), ty("B"), UnrelatedConcrete),
+                    (ty("Closed"), ty("Right"), Disjoint),
+                    (ty("Sealed"), ty("Right"), PossiblyRelated),
+                    (ty("Open"), ty("Right"), PossiblyRelated),
+                    (ty("E"), ty("A"), Disjoint),
+                    (ty("Ints"), ty("Strings"), UnrelatedConcrete),
+                    (ty("Rec"), ty("ShortRec"), Disjoint),
+                    (ty("Fn"), ty("OtherFn"), PossiblyRelated),
+                    (ty("Fn"), ty("A"), PossiblyRelated),
+                    (model.core_type("Object", false), ty("A"), PossiblyRelated),
+                    (
+                        ty("Left").with_nullable(true),
+                        ty("Right").with_nullable(true),
+                        PossiblyRelated,
+                    ),
+                    (ResolvedType::NULL, ty("Left"), Disjoint),
+                    (
+                        ResolvedType::NULL,
+                        ty("Left").with_nullable(true),
+                        PossiblyRelated,
+                    ),
+                    (ResolvedType::DYNAMIC, ty("Closed"), PossiblyRelated),
+                    (ResolvedType::UNKNOWN, ty("Closed"), Unknown),
+                    (ty("Wrapped"), model.core_type("String", false), Disjoint),
+                ] {
+                    assert_eq!(
+                        signatures.runtime_intersection(&left, &right, model),
+                        expected,
+                        "{left:?} and {right:?}"
+                    );
+                    assert_eq!(
+                        signatures.runtime_intersection(&right, &left, model),
+                        expected,
+                        "{right:?} and {left:?}"
+                    );
+                }
+                assert_eq!(
+                    signatures.runtime_unrelated(&ty("Left"), &ty("Right"), model),
+                    Truth::Yes
+                );
+            },
+        );
+    }
 
     #[test]
     fn future_or_top_subtyping_preserves_inherited_signatures() {

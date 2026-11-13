@@ -72,6 +72,7 @@ impl SignatureIndex {
         let mut index = Self::default();
         index.add_sdk_signatures();
         index.add_program(program, model);
+        index.rebuild_closed_subtypes(model.identities);
         index
     }
 
@@ -293,6 +294,7 @@ impl SignatureIndex {
         for (program, model) in &programs {
             self.add_declarations(*program, model, true);
         }
+        self.rebuild_closed_subtypes(identities);
         self.finish();
         self.infer_programs(&programs);
         self.mark_library_subclasses();
@@ -313,6 +315,7 @@ impl SignatureIndex {
         if index.external.is_none() {
             index.add_fallback_signatures();
         }
+        index.rebuild_closed_subtypes(identities);
         index.finish();
         tracing::debug!("signature tables finished");
         let programs: Vec<_> = all

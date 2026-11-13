@@ -324,6 +324,79 @@ mod semantic_walkers {
     }
 }
 
+mod flutter_import_chains {
+    use super::semantic_walkers::check_rule_source;
+    use std::time::{Duration, Instant};
+
+    fn check(body: &str) {
+        let source = format!("import 'package:flutter/widgets.dart';\n{body}");
+        let started = Instant::now();
+        let stdout = check_rule_source(
+            "correctness",
+            "unnecessary-flutter-imports",
+            &source,
+            &[
+                ("pubspec.yaml", "name: chain_test\n"),
+                (
+                    ".dart_tool/package_config.json",
+                    r#"{"configVersion":2,"packages":[{"name":"flutter","rootUri":"../flutter","packageUri":"lib/"}]}"#,
+                ),
+                (
+                    "flutter/lib/widgets.dart",
+                    include_str!(
+                        "../crates/falcon_rules/tests/corpus/unnecessary-flutter-imports/project/flutter/lib/widgets.dart"
+                    ),
+                ),
+                (
+                    "sdk/lib/libraries.json",
+                    r#"{"vm":{"libraries":{"core":{"uri":"core/core.dart"}}}}"#,
+                ),
+                (
+                    "sdk/lib/core/core.dart",
+                    include_str!("../crates/falcon_rules/tests/support/sdk/lib/core/core.dart"),
+                ),
+            ],
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(60),
+            "Flutter import chain exceeded the expression-chain budget"
+        );
+        assert!(
+            stdout.contains("unnecessary-flutter-imports"),
+            "resolved ordinary operations must not keep an unused import: {stdout}"
+        );
+    }
+
+    #[test]
+    fn number() {
+        check(&format!("int f(int a) => a{};", " + a".repeat(99_999)));
+    }
+
+    #[test]
+    fn string() {
+        check(&format!(
+            "String f(String a) => a{};",
+            " + a".repeat(99_999)
+        ));
+    }
+
+    #[test]
+    fn selector() {
+        check(&format!(
+            "class Link {{ Link get next => this; }} Link f(Link a) => a{};",
+            ".next".repeat(99_999),
+        ));
+    }
+
+    #[test]
+    fn cascade() {
+        check(&format!(
+            "class Link {{ void ping() {{}} }} void f(Link a) {{ a{}; }}",
+            "..ping()".repeat(99_999),
+        ));
+    }
+}
+
 mod guard_walkers {
     use super::semantic_walkers::check_rule_source;
     use falcon_analyze::{AnalyzeContext, ParsedFile, RuleAnalysis};

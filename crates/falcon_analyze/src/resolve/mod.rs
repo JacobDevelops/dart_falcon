@@ -21,6 +21,9 @@ pub use identity::{
     LibraryId, MemberSelector, MemberSelectorKind, NameIdentity, PackageIdentity, QualifiedName,
     SourceSelector, doc_imports, import_path, library_doc_imports,
 };
+
+#[cfg(test)]
+mod identity_import_tests;
 pub use library::{
     LibraryGrouping, LibraryUnit, canonical_or_lexical, group_libraries, is_generated_dart_file,
     lexical_normalize, library_unit, library_unit_by,
@@ -28,8 +31,8 @@ pub use library::{
 pub use semantic::{
     ConstConstructorBody, DeclarationFacts, FunctionTypeShape, InferenceContext, MemberFacts,
     ParameterContract, ParameterDefault, ParameterOwner, ResolvedInvocation, ResolvedSignature,
-    ResolvedType, ResolvedTypeView, SemanticModel, SignatureIndex, TypeEnvironment,
-    TypeParameterId, TypeParameterScope, TypeRelation,
+    ResolvedType, ResolvedTypeView, RuntimeIntersection, SemanticModel, SignatureIndex,
+    TypeEnvironment, TypeParameterId, TypeParameterScope, TypeRelation,
 };
 pub(crate) use semantic::{
     FunctionTypeAlias, ResolvedTypeKind, binary_result, null_coalesce_result,

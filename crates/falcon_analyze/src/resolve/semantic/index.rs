@@ -504,6 +504,8 @@ signature_index! {
         /// Every identity whose supertype graph reaches a cycle, once the index
         /// is complete; `None` while building, when lookups walk the graph.
         cyclic_supertypes: Option<FxHashSet<DeclarationIdentity>>,
+        /// Closed-hierarchy subtype facts, rebuilt when declarations change.
+        closed_subtypes: FxHashMap<DeclarationIdentity, Option<Vec<DeclarationIdentity>>>,
         /// Inferred top-level variables in an initializer dependency SCC.
         cyclic_values: FxHashSet<DeclarationIdentity>,
         /// The [`Self::extensions`] declaring each member name (methods, other

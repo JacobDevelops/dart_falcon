@@ -1304,6 +1304,7 @@ const WHOLE_FILE_CHECKS: &[(&str, &str)] = &[
 
 fn collector_probe_source() -> &'static str {
     r"
+import 'package:flutter/widgets.dart';
 typedef _Callback = void Function();
 int? _deferred;
 class Probe {

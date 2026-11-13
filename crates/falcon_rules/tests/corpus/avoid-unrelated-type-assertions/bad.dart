@@ -19,12 +19,6 @@ void testDoubleIsBool() {
   }
 }
 
-void testListIsMap() {
-  if ([1, 2, 3] is Map) { /* expect: avoid-unrelated-type-assertions */
-    print("list is map");
-  }
-}
-
 void testMultipleImpossibleAssertions() {
   final x = "test";
   final y = 42;

@@ -603,6 +603,18 @@ impl<'a> SemanticModel<'a> {
             .resolve_imported_member(self.library?, name.into())
     }
 
+    /// Whether a source-order import provides this name's resolved identity.
+    #[must_use]
+    pub fn import_provides(
+        &self,
+        import_index: usize,
+        name: QualifiedName<'_>,
+        identity: &DeclarationIdentity,
+    ) -> Option<bool> {
+        self.identities
+            .import_provides(self.library?, import_index, name, identity)
+    }
+
     /// Resolve imported annotations before generation when only generated parts are missing.
     pub fn resolve_annotation_before_generation<'n>(
         &self,

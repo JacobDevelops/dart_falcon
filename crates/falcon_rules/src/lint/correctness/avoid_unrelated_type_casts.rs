@@ -1,12 +1,17 @@
-//! Flags casts between types proven unrelated by canonical type resolution.
+//! Flags casts between incompatible runtime types.
 //!
 //! Checks `as` expressions, cast patterns, and SDK collection `cast<T>()`
-//! element/key/value conversions. Dynamic, unresolved, and potentially related
-//! types are not reported. Collection casts are lazy but fail when an element
-//! of the incompatible type is read.
+//! element/key/value conversions. Dynamic, unresolved, interface-like and
+//! potentially related types are not reported. Collection casts are lazy.
+//!
+//! Besides proven-disjoint types, this rule diagnoses unrelated concrete
+//! classes and incompatible concrete generic arguments as a heuristic. A third
+//! class implementing two concrete classes can make such a cast succeed.
 
+use falcon_analyze::{
+    AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, RuntimeIntersection,
+};
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
-use falcon_analyze::{AnalyzeContext, ResolvedType, ResolvedTypeView, Rule, RulePreparation, Truth, TypeRelation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -29,32 +34,37 @@ struct Collector<'a> {
 }
 
 impl Collector<'_> {
-    fn unrelated(
-        source: &ResolvedType,
-        target: &ResolvedType,
-        state: &SemanticState<'_>,
-    ) -> bool {
+    fn unrelated(source: &ResolvedType, target: &ResolvedType, state: &SemanticState<'_>) -> bool {
         // Object can hold structural values, and a type parameter may be
         // instantiated with one even when its bound is not structural.
         if source.interface("dart:core", "Object")
             || target.interface("dart:core", "Object")
-            || matches!(source.view(),
-                ResolvedTypeView::TypeParameter { .. } | ResolvedTypeView::NonNullTypeParameter { .. }
+            || matches!(
+                source.view(),
+                ResolvedTypeView::TypeParameter { .. }
+                    | ResolvedTypeView::NonNullTypeParameter { .. }
             )
-            || matches!(target.view(),
-                ResolvedTypeView::TypeParameter { .. } | ResolvedTypeView::NonNullTypeParameter { .. }
+            || matches!(
+                target.view(),
+                ResolvedTypeView::TypeParameter { .. }
+                    | ResolvedTypeView::NonNullTypeParameter { .. }
             )
         {
             return false;
         }
-        state
-            .signatures
-            .relation(source, TypeRelation::RuntimeUnrelatedTo(target), &state.model)
-            == Truth::Yes
+        matches!(
+            state
+                .signatures
+                .runtime_intersection(source, target, &state.model),
+            RuntimeIntersection::Disjoint | RuntimeIntersection::UnrelatedConcrete
+        )
     }
 
     fn report(&mut self, span: Span) {
-        self.diagnostics.push(self.ctx.diagnostic("Cast types are unrelated — use a compatible type instead.", span));
+        self.diagnostics.push(self.ctx.diagnostic(
+            "Cast types are unrelated — use a compatible type instead.",
+            span,
+        ));
     }
 }
 

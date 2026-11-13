@@ -2539,6 +2539,67 @@ impl IdentityIndex {
             })
     }
 
+    /// Whether the import at its source-order index provides a resolved name.
+    /// `None` means an incomplete target prevents a safe removal decision.
+    pub fn import_provides(
+        &self,
+        library: LibraryId,
+        import_index: usize,
+        QualifiedName { prefix, name }: QualifiedName<'_>,
+        identity: &DeclarationIdentity,
+    ) -> Option<bool> {
+        let import = self.complete(library)?.imports.get(import_index)?;
+        if import.prefix.as_deref() != prefix || !allows(&import.combinators, name) {
+            return Some(false);
+        }
+        if self.target_may_hide_declaration(&import.target, name) {
+            return None;
+        }
+        let provided = match &import.target {
+            ImportTarget::Sdk(uri) => sdk_type(uri, name).or_else(|| sdk_member(uri, name)),
+            ImportTarget::Package(_) | ImportTarget::Unknown => return None,
+            ImportTarget::Library(target) => {
+                let provided = self.exported_any(*target, name);
+                if provided
+                    .as_ref()
+                    .is_none_or(|provided| !provided.matches(identity))
+                    && let Some(extension) = self
+                        .exported_extension(*target, name, &mut HashSet::new())
+                        .ok()?
+                    && extension.matches(identity)
+                {
+                    return Some(true);
+                }
+                provided
+            }
+        };
+        Some(provided.is_some_and(|provided| {
+            if provided.matches(identity) {
+                return true;
+            }
+            let (
+                DeclarationIdentity::Library { library, name },
+                DeclarationIdentity::Package {
+                    package,
+                    name: target,
+                    copy: None,
+                },
+            ) = (&provided, identity)
+            else {
+                return false;
+            };
+            let unit = self.get(*library);
+            name == target
+                && unit.origin.is_none()
+                && unit
+                    .uri
+                    .as_deref()
+                    .and_then(|uri| uri.strip_prefix("package:"))
+                    .and_then(|uri| uri.split_once('/'))
+                    .is_some_and(|(source, _)| source == package.as_str())
+        }))
+    }
+
     /// `name` from the implicitly imported `dart:core` of `unit`: the loaded
     /// library when SDK sources are indexed, else the curated type allowlist.
     fn implicit_core(
@@ -5256,6 +5317,49 @@ mod tests {
             index.resolve_extension_declaration(shadow, "Ex".into()),
             None
         );
+    }
+
+    #[test]
+    fn imports_provide_named_extensions_through_combinators_and_reexports() {
+        let index = index(
+            &[
+                (
+                    "/project/lib/origin.dart",
+                    "extension Ex on int { int get value => this; }",
+                ),
+                ("/project/lib/barrel.dart", "export 'origin.dart' show Ex;"),
+                ("/project/lib/hidden.dart", "export 'origin.dart' hide Ex;"),
+                (
+                    "/project/lib/main.dart",
+                    "import 'origin.dart'; import 'origin.dart' hide Ex; \
+                     import 'origin.dart' show Ex; import 'barrel.dart' as p show Ex; \
+                     import 'hidden.dart' as h;",
+                ),
+            ],
+            &[],
+        );
+        let origin = library(&index, "/project/lib/origin.dart");
+        let main = library(&index, "/project/lib/main.dart");
+        let extension = index
+            .resolve_extension_declaration(origin, "Ex".into())
+            .unwrap();
+        for (ordinal, prefix, expected) in [
+            (0, None, true),
+            (1, None, false),
+            (2, None, true),
+            (3, Some("p"), true),
+            (4, Some("h"), false),
+        ] {
+            assert_eq!(
+                index.import_provides(
+                    main,
+                    ordinal,
+                    QualifiedName { prefix, name: "Ex" },
+                    &extension
+                ),
+                Some(expected),
+            );
+        }
     }
 
     #[test]
