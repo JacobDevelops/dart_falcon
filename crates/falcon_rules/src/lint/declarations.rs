@@ -302,7 +302,7 @@ mod tests {
             (
                 "avoid-positional-fields-in-records",
                 &["ExtensionType"],
-                "void f() { final record = (1, 2); }",
+                "void f() { final record = (1, 2); print(record.$1); }",
             ),
             (
                 "binary-expression-operand-order",

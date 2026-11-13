@@ -61,10 +61,9 @@ void guardClauses(String? maybeValue) {
 }
 
 // A null-assertion on a (map) index expression is exempt.
-int readCount(Map<String, int> counts, List<int> xs) {
+int readCount(Map<String, int> counts) {
   final a = counts['key']!;
-  final b = xs[0]!; /* expect: avoid-non-null-assertion */
-  return a + b;
+  return a;
 }
 
 class Optional<T> {

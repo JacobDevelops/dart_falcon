@@ -1,14 +1,15 @@
-//! Flags positional fields in record types.
+//! Flags positional field accesses on records.
 //!
-//! Positional record fields are accessed as `$1`, `$2`, and so on, which convey
-//! nothing about what each field means and break silently when fields are
-//! reordered. Named fields (`({int x, int y})`) document intent at both the
-//! declaration and every use site. The check recurses through type arguments
-//! and nested record and function types, so a positional field buried inside a
-//! generic is still reported.
+//! Positional getters such as `$1` and `$2` convey nothing about what each field
+//! means and break silently when fields are reordered. Prefer named fields so
+//! each access documents its intent. Record declarations and literals alone
+//! are not reported.
+//!
+//! Unlike `pyramid_lint`, this also reports getters on simple identifier targets,
+//! such as `record.$1`; it does not depend on the analyzer's property-access AST shape.
 
 use falcon_analyze::{
-    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
+    AnalyzeContext, ResolvedTypeView, Rule, RulePreparation, SemanticRuleVisitor, SemanticState,
 };
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
@@ -22,84 +23,37 @@ impl Rule for AvoidPositionalFieldsInRecords {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
+        crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diags)
     }
 }
 
 const MESSAGE: &str = "Avoid positional fields in records. Use named fields instead.";
-
-fn record_literal_has_positional(expr: Expr<'_>) -> bool {
-    matches!(expr.unparenthesized(), Expr::Record(record) if record.fields().any(|f| f.name().is_none()))
-}
-
-// Explicit types are checked separately; do not also report their initializer.
-fn check_declarators(
-    declarators: AstChildren<'_, VarDeclarator<'_>>,
-    has_type: bool,
-    diags: &mut Vec<Diagnostic>,
-    ctx: &AnalyzeContext,
-) {
-    for d in declarators {
-        if let Some(init) = d.initializer()
-            && !has_type
-            && record_literal_has_positional(init)
-        {
-            diags.push(ctx.diagnostic(MESSAGE, init.span()));
-        }
-    }
-}
 
 struct Collector<'a> {
     diags: Vec<Diagnostic>,
     ctx: &'a AnalyzeContext<'a>,
 }
 
-falcon_analyze::structural_visitor! {
-impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
-    fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        self.diags
+    }
 
-    fn visit_dart_type(&mut self, ty: DartType<'a>) -> StructuralTraversal {
-        if let DartType::Record(rec) = ty
-            && !rec.positional().is_empty()
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        if let Expr::Field(access) = node
+            && access
+                .field()
+                .name()
+                .strip_prefix('$')
+                .is_some_and(|index| {
+                    !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit())
+                })
+            && matches!(
+                state.infer(access.object()).view(),
+                ResolvedTypeView::Record { .. }
+            )
         {
-            self.diags.push(self.ctx.diagnostic(
-                MESSAGE,
-                rec.span(),
-            ));
+            self.diags.push(self.ctx.diagnostic(MESSAGE, access.span()));
         }
-        StructuralTraversal::Continue
     }
-
-    fn visit_top_level_decl(&mut self, decl: TopLevelDecl<'a>) -> StructuralTraversal {
-        if let TopLevelDecl::Variable(v) = decl {
-            check_declarators(
-                v.declarators(),
-                v.var_type().is_some(),
-                &mut self.diags,
-                self.ctx,
-            );
-        }
-        StructuralTraversal::Continue
-    }
-
-    fn visit_field_decl(&mut self, field: FieldDecl<'a>) -> StructuralTraversal {
-        check_declarators(
-            field.declarators(),
-            field.field_type().is_some(),
-            &mut self.diags,
-            self.ctx,
-        );
-        StructuralTraversal::Continue
-    }
-
-    fn visit_local_var(&mut self, local: LocalVarDecl<'a>) -> StructuralTraversal {
-        check_declarators(
-            local.declarators(),
-            local.var_type().is_some(),
-            &mut self.diags,
-            self.ctx,
-        );
-        StructuralTraversal::Continue
-    }
-}
 }

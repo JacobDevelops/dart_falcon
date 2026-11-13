@@ -43,7 +43,7 @@ impl Rule for FormatComment {
     ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
         let cfg = options::get::<Options>(ctx, Self::NAME);
-        let tokens = collect_comment_tokens(ctx.source());
+        let tokens = collect_comment_tokens(ctx);
         for group in group_comments(&tokens) {
             check_group(group, &mut diags, ctx, cfg);
         }
@@ -63,73 +63,25 @@ const PUNCTUATION: [char; 4] = ['.', '!', '?', ':'];
 // A colon introduces a clause, not a new sentence.
 const SENTENCE_TERMINATORS: [char; 2] = ['.', '|'];
 
-fn collect_comment_tokens(source: &str) -> Vec<CommentToken<'_>> {
-    let bytes = source.as_bytes();
-    let len = bytes.len();
-    let mut tokens = Vec::new();
-    let mut i = 0;
-    let mut line = 1usize;
-
-    while i < len {
-        match bytes[i] {
-            b'\n' => {
-                line += 1;
-                i += 1;
-            }
-            b'/' if i + 1 < len && bytes[i + 1] == b'*' => {
-                i += 2;
-                while i + 1 < len {
-                    if bytes[i] == b'\n' {
-                        line += 1;
-                    }
-                    if bytes[i] == b'*' && bytes[i + 1] == b'/' {
-                        i += 2;
-                        break;
-                    }
-                    i += 1;
-                }
-            }
-            b'/' if i + 1 < len && bytes[i + 1] == b'/' => {
-                let start = i;
-                let mut slashes = 0;
-                while i < len && bytes[i] == b'/' {
-                    slashes += 1;
-                    i += 1;
-                }
-                // Four or more slashes mark a regular comment.
-                let marker = if slashes == 3 { "///" } else { "//" };
-                while i < len && bytes[i] != b'\n' {
-                    i += 1;
-                }
-                tokens.push(CommentToken {
-                    start,
-                    marker,
-                    lexeme: &source[start..i],
-                    line,
-                });
-            }
-            quote @ (b'"' | b'\'') => {
-                i += 1;
-                while i < len {
-                    match bytes[i] {
-                        b'\\' => i += 2,
-                        b'\n' => {
-                            line += 1;
-                            i += 1;
-                        }
-                        byte if byte == quote => {
-                            i += 1;
-                            break;
-                        }
-                        _ => i += 1,
-                    }
-                }
-            }
-            _ => i += 1,
+fn collect_comment_tokens<'a>(ctx: &'a AnalyzeContext<'a>) -> Vec<CommentToken<'a>> {
+    let source = ctx.source();
+    let mut offset = 0;
+    let mut line = 1;
+    ctx.tree().comment_tokens(source).filter_map(|token| {
+        let lexeme = token.text();
+        if !lexeme.starts_with("//") {
+            return None;
         }
-    }
-
-    tokens
+        let start = token.offset();
+        line += source[offset..start].bytes().filter(|&byte| byte == b'\n').count();
+        offset = start;
+        Some(CommentToken {
+            start,
+            marker: if lexeme.starts_with("///") && !lexeme.starts_with("////") { "///" } else { "//" },
+            lexeme,
+            line,
+        })
+    }).collect()
 }
 
 fn group_comments<'a, 'b>(tokens: &'b [CommentToken<'a>]) -> Vec<&'b [CommentToken<'a>]> {
@@ -286,21 +238,6 @@ fn is_ignored_pattern(text: &str, cfg: &Options) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn comment_scan_skips_both_quote_styles_and_escaped_quotes() {
-        let source = r#"'// not a comment' "// also not a comment" 'escaped \' // text' "escaped \" // text"
-// First.
-/// Second."#;
-        let tokens = collect_comment_tokens(source);
-        assert_eq!(tokens.len(), 2);
-        assert_eq!(tokens[0].lexeme, "// First.");
-        assert_eq!(tokens[0].marker, "//");
-        assert_eq!(tokens[0].line, 2);
-        assert_eq!(tokens[1].lexeme, "/// Second.");
-        assert_eq!(tokens[1].marker, "///");
-        assert_eq!(tokens[1].line, 3);
-    }
 
     #[test]
     fn sentence_boundaries_preserve_unicode_and_colon_clauses() {

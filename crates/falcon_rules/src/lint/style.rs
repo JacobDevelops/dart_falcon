@@ -67,7 +67,7 @@ crate::declare_rules! {
     avoid_non_null_assertion::AvoidNonNullAssertion => ("avoid-non-null-assertion", resolved, None, false, RuleSource::DartCodeLinter("avoid-non-null-assertion"));
     avoid_top_level_member_access::AvoidTopLevelMemberAccess => ("avoid-top-level-member-access", file, None, false, RuleSource::Falcon);
     avoid_abbreviations_in_doc_comments::AvoidAbbreviationsInDocComments => ("avoid-abbreviations-in-doc-comments", file, None, false, RuleSource::PyramidLint("avoid_abbreviations_in_doc_comments"));
-    avoid_positional_fields_in_records::AvoidPositionalFieldsInRecords => ("avoid-positional-fields-in-records", file, None, false, RuleSource::PyramidLint("avoid_positional_fields_in_records"));
+    avoid_positional_fields_in_records::AvoidPositionalFieldsInRecords => ("avoid-positional-fields-in-records", resolved, None, false, RuleSource::PyramidLint("avoid_positional_fields_in_records"));
     binary_expression_operand_order::BinaryExpressionOperandOrder => ("binary-expression-operand-order", file, None, false, RuleSource::DartCodeLinter("binary-expression-operand-order"));
     boolean_prefixes::BooleanPrefixes => ("boolean-prefixes", resolved, None, false, RuleSource::PyramidLint("boolean_prefixes"), options = boolean_prefixes::Options);
     class_members_ordering::ClassMembersOrdering => ("class-members-ordering", file, None, false, RuleSource::PyramidLint("class_members_ordering"), options = class_members_ordering::Options);

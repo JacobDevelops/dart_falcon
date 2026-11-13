@@ -5,7 +5,8 @@
 //! zero before the decimal point (`.5`, which should be `0.5`), and a redundant
 //! trailing zero in the fractional part (`1.50`). A literal whose fractional
 //! part is exactly `0` (`24.0`) is deliberately left alone, since stripping that
-//! digit would turn the `double` into an `int`.
+//! digit would turn the `double` into an `int`. Exponent markers (`e` and `E`)
+//! do not affect these mantissa checks; `0e5` has no redundant leading zero.
 
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
@@ -21,12 +22,18 @@ impl Rule for DoubleLiteralFormat {
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags) }
+    ) -> RulePreparation<'a> {
+        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
+    }
 }
 
-/// Redundant leading zero: `05.0` / `00.5`. dcl: `startsWith('0') && lexeme[1] != '.'`.
+/// Redundant leading zero: `05.0` / `0_5.0` / `00.5`, but not `0e5`.
 fn detect_leading_zero(lexeme: &str) -> bool {
-    lexeme.starts_with('0') && lexeme.as_bytes().get(1) != Some(&b'.')
+    lexeme.starts_with('0')
+        && lexeme.as_bytes()[1..]
+            .iter()
+            .find(|&&byte| byte != b'_')
+            .is_some_and(u8::is_ascii_digit)
 }
 
 /// Redundant trailing zero in the mantissa: `1.50` → `1.5`, `0.50` → `0.5`,
@@ -34,7 +41,7 @@ fn detect_leading_zero(lexeme: &str) -> bool {
 /// part is exactly `"0"`), because stripping that zero would turn a `double`
 /// into an `int`. This is the crux of the port fix: no int-ification.
 fn detect_trailing_zero(lexeme: &str) -> bool {
-    let mantissa = lexeme.split('e').next().unwrap_or(lexeme);
+    let mantissa = lexeme.split(['e', 'E']).next().unwrap_or(lexeme);
     mantissa.contains('.') && mantissa.ends_with('0') && mantissa.rsplit('.').next() != Some("0")
 }
 

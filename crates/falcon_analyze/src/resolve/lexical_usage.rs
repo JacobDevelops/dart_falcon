@@ -279,8 +279,27 @@ impl UsageCollector {
         self.scopes.pop_scope();
     }
 
+    fn bind_local_function(&mut self, mut statement: Stmt<'_>) {
+        while let Stmt::Labeled(labeled) = statement {
+            statement = labeled.stmt();
+        }
+        if let Stmt::LocalFunc(function) = statement {
+            self.bind(function.name());
+        }
+    }
+
+    fn visit_statements<'a>(&mut self, statements: AstChildren<'a, Stmt<'a>>) {
+        for statement in statements.clone() {
+            self.bind_local_function(statement);
+        }
+        for statement in statements {
+            self.visit_stmt(statement);
+        }
+    }
+
     fn visit_scoped_stmt(&mut self, statement: Stmt<'_>) {
         self.scopes.push_scope();
+        self.bind_local_function(statement);
         self.visit_stmt(statement);
         self.scopes.pop_scope();
     }
@@ -376,18 +395,14 @@ impl UsageCollector {
                     self.visit_expr(label.expr());
                 }
             }
-            for statement in case.body() {
-                self.visit_stmt(statement);
-            }
+            self.visit_statements(case.body());
             self.scopes.pop_scope();
         }
     }
 
     fn visit_try_catch_usage(&mut self, statement: TryCatchStmt<'_>) {
         self.scopes.push_scope();
-        for statement in statement.body().stmts() {
-            self.visit_stmt(statement);
-        }
+        self.visit_statements(statement.body().stmts());
         self.scopes.pop_scope();
         for catch in statement.catches() {
             self.scopes.push_scope();
@@ -397,16 +412,12 @@ impl UsageCollector {
             if let Some(name) = catch.stack_trace_var() {
                 self.bind(name);
             }
-            for statement in catch.body().stmts() {
-                self.visit_stmt(statement);
-            }
+            self.visit_statements(catch.body().stmts());
             self.scopes.pop_scope();
         }
         if let Some(finally) = statement.finally() {
             self.scopes.push_scope();
-            for statement in finally.stmts() {
-                self.visit_stmt(statement);
-            }
+            self.visit_statements(finally.stmts());
             self.scopes.pop_scope();
         }
     }
@@ -508,15 +519,15 @@ impl<'a> Visitor<'a> for UsageCollector {
         self.scopes.pop_scope();
     }
 
+    fn visit_block(&mut self, block: Block<'a>) {
+        self.scopes.push_scope();
+        self.visit_statements(block.stmts());
+        self.scopes.pop_scope();
+    }
+
     fn visit_stmt(&mut self, node: Stmt<'a>) {
         match node {
-            Stmt::Block(block) => {
-                self.scopes.push_scope();
-                for statement in block.stmts() {
-                    self.visit_stmt(statement);
-                }
-                self.scopes.pop_scope();
-            }
+            Stmt::Block(block) => self.visit_block(block),
             Stmt::LocalVar(declaration) => self.visit_local_declaration(declaration),
             Stmt::PatternDecl(declaration) => {
                 self.visit_expr(declaration.init());
@@ -547,7 +558,6 @@ impl<'a> Visitor<'a> for UsageCollector {
             Stmt::Switch(statement) => self.visit_switch_usage(statement),
             Stmt::TryCatch(statement) => self.visit_try_catch_usage(statement),
             Stmt::LocalFunc(function) => {
-                self.bind(function.name());
                 self.visit_nested_function(function.params(), function.body());
             }
             Stmt::While(statement) => {
@@ -694,6 +704,83 @@ mod tests {
     use falcon_dart_parser::parse;
 
     use super::*;
+
+    #[test]
+    fn local_functions_bind_before_declaration_in_every_statement_list() {
+        struct Functions(Vec<(usize, NodeId)>);
+        impl<'a> Visitor<'a> for Functions {
+            fn visit_stmt(&mut self, statement: Stmt<'a>) {
+                if let Stmt::LocalFunc(function) = statement {
+                    self.0
+                        .push((function.name().span().start, function.name().syntax().id()));
+                }
+                falcon_syntax::cst::visit::walk_stmt(self, statement);
+            }
+        }
+        let source = r"
+Object shared = 0;
+void f(int value) {
+  {
+    shared();
+    void shared() {}
+    shared();
+  }
+  shared;
+  try {
+    shared();
+    void shared() {}
+    shared();
+  } catch (_) {
+    shared();
+    void shared() {}
+    shared();
+  } finally {
+    shared();
+    void shared() {}
+    shared();
+  }
+  shared;
+  switch (value) {
+    case 0:
+      shared();
+      void shared() {}
+      shared();
+      break;
+    default:
+      shared;
+  }
+  shared;
+}
+void body() {
+  shared();
+  void shared() {}
+  shared();
+}
+void labeled() {
+  shared();
+  label: void shared() {}
+  shared();
+}
+";
+        let parsed = parse(source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let program = parsed.tree.program(source);
+        let declarations = local_declarations(program);
+        let mut functions = Functions(Vec::new());
+        functions.visit_program(program);
+        assert_eq!(functions.0.len(), 7);
+        for (offset, declaration) in functions.0 {
+            let before = source[..offset].rfind("shared()").unwrap();
+            let after = offset
+                + "shared".len()
+                + source[offset + "shared".len()..].find("shared()").unwrap();
+            assert_eq!(declarations.get(&before), Some(&declaration));
+            assert_eq!(declarations.get(&after), Some(&declaration));
+        }
+        for (offset, _) in source.match_indices("shared;") {
+            assert!(!declarations.contains_key(&offset));
+        }
+    }
 
     #[test]
     fn c_style_pattern_bindings_track_uses_and_writes_without_escaping() {

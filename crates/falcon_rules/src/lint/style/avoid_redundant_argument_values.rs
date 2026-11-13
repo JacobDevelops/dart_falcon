@@ -699,15 +699,13 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 .targets
                 .call_target(call.callee(), state)
                 .map(|target| (target, call.args())),
-            cst::Expr::New(new) => match state.model.resolve_type(new.dart_type()).view() {
-                ResolvedTypeView::Interface { identity, .. } => Targets::constructor_target(
-                        identity,
-                        new.constructor_name().map_or("new", |name| name.name()),
-                        state,
-                    )
-                    .map(|target| (target, new.args())),
-                _ => None,
-            },
+            cst::Expr::New(new) => falcon_analyze::resolve_new_constructor(
+                new.dart_type(),
+                new.constructor_name(),
+                &state.model,
+            )
+            .and_then(|(identity, name)| Targets::constructor_target(&identity, name, state))
+            .map(|target| (target, new.args())),
             cst::Expr::Cascade(cascade) => {
                 let receiver = state.infer(cascade.object());
                 let caller = state.constant_owner.clone();

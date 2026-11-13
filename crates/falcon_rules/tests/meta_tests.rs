@@ -775,6 +775,12 @@ fn registry_resolution_requirement_uses_registered_names() {
         registry.register(name, make());
         assert_eq!(falcon_rules::requires_resolution(&registry), expected);
     }
+    assert!(!falcon_rules::rule_requires_resolution(
+        "avoid-top-level-member-access"
+    ));
+    assert!(falcon_rules::rule_requires_resolution(
+        "avoid-positional-fields-in-records"
+    ));
     assert!(!falcon_rules::rule_requires_resolution("unknown-rule"));
 }
 

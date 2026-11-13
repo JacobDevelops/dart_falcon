@@ -21,24 +21,24 @@ impl Rule for AvoidAbbreviationsInDocComments {
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
         let mut diags = Vec::new();
-        scan_source(ctx.source(), &mut diags, ctx);
+        scan_comments(&mut diags, ctx);
         RulePreparation::Diagnostics(diags)
     }
 }
 
-fn scan_source(source: &str, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn scan_comments(diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
     // pyramid_lint's default abbreviation set. Matching is a case-sensitive
     // substring `contains`, reporting the first occurrence of each abbreviation
     // in a doc-comment line (mirrors `commentText.contains(abbreviation)` /
     // `indexOf` in avoid_abbreviations_in_doc_comments.dart).
     let abbreviations = ["e.g.", "i.e.", "etc.", "et al."];
 
-    let mut byte_offset = 0;
-    for line in source.lines() {
-        if line.trim_start().starts_with("///") {
+    for token in ctx.tree().comment_tokens(ctx.source()) {
+        let line = token.text();
+        if line.starts_with("///") && !line.starts_with("////") {
             for &abbr in &abbreviations {
                 if let Some(index) = line.find(abbr) {
-                    let start = byte_offset + index;
+                    let start = token.offset() + index;
                     diags.push(ctx.diagnostic(format!("Avoid abbreviation `{abbr}` in doc comments."), DiagSpan {
                         start,
                         end: start + abbr.len(),
@@ -46,8 +46,5 @@ fn scan_source(source: &str, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) 
                 }
             }
         }
-
-        // Move byte_offset to the next line (+1 for the newline character).
-        byte_offset += line.len() + 1;
     }
 }

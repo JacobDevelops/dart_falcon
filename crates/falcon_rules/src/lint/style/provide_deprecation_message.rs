@@ -49,17 +49,16 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         let model = self.model;
         let flagged = if crate::lint::support::annotations::is_deprecated_constant(node, model) {
             true
-        } else if crate::lint::support::annotations::is_deprecated_constructor(node, model) {
-            match node.args() {
-                None => true,
-                Some(args) => match args.positional().first().map(Expr::unparenthesized) {
-                    None => true,
-                    Some(Expr::StringLit(s)) => s.value().trim().is_empty(),
-                    Some(_) => false,
-                },
-            }
         } else {
-            false
+            crate::lint::support::annotations::is_deprecated_constructor(node, model)
+                && match node.args() {
+                    None => true,
+                    Some(args) => match args.positional().first().map(Expr::unparenthesized) {
+                        None => true,
+                        Some(Expr::StringLit(s)) => s.value().trim().is_empty(),
+                        Some(_) => false,
+                    },
+                }
         };
         if flagged {
             self.diags.push(self.ctx.diagnostic(

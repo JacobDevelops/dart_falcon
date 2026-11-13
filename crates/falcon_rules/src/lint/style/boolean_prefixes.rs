@@ -139,6 +139,15 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         StructuralTraversal::Continue
     }
 
+    fn visit_stmt(&mut self, statement: Stmt<'a>) -> StructuralTraversal {
+        if let Stmt::LocalFunc(function) = statement
+            && is_bool_type(function.return_type())
+        {
+            check_name(function.name(), &mut self.diags, self.ctx, self.prefixes);
+        }
+        StructuralTraversal::Continue
+    }
+
     fn visit_class_member(&mut self, member: ClassMember<'a>) -> StructuralTraversal {
         let named_return = match member {
             ClassMember::Field(f) => {

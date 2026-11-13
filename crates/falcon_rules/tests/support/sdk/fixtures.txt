@@ -4,6 +4,7 @@ avoid-dynamic-calls/bad_semantic_resolution.dart
 avoid-dynamic-calls/good.dart
 avoid-dynamic-calls/good_collection_types.dart
 avoid-dynamic-calls/good_semantic_resolution.dart
+avoid-non-null-assertion/project/bad_list_index.dart
 collection-methods-unrelated-type/pending.dart
 invalid-case-patterns/bad.dart
 no-literal-bool-comparisons/bad_adversarial.dart

@@ -3,7 +3,7 @@ var shared = 0; /* expect: avoid-top-level-member-access */
 class PrimaryLocal(int value) {
   this {
     final shared = value;
-    print(shared); /* expect: avoid-top-level-member-access */
+    print(shared);
     {
       final shared = value;
       print(shared);
@@ -13,7 +13,7 @@ class PrimaryLocal(int value) {
 
 class PrimaryFunction(int value) {
   this {
-    print(shared()); /* expect: avoid-top-level-member-access */
+    print(shared());
     int shared() => value;
   }
 }

@@ -172,14 +172,13 @@ impl<'a> Collector<'a> {
         };
         let unsafe_cast = if ty.interface("dart:core", "List") {
             ty.type_argument(0).is_some_and(|element| !broad(&element))
-        } else if ty.interface("dart:core", "Map") {
-            ty.type_argument(0).is_some_and(|key| {
-                !broad(&key)
-                    && !key.interface("dart:core", "Object")
-                    && !key.interface("dart:core", "String")
-            }) || ty.type_argument(1).is_some_and(|value| !broad(&value))
         } else {
-            false
+            ty.interface("dart:core", "Map")
+                && (ty.type_argument(0).is_some_and(|key| {
+                    !broad(&key)
+                        && !key.interface("dart:core", "Object")
+                        && !key.interface("dart:core", "String")
+                }) || ty.type_argument(1).is_some_and(|value| !broad(&value)))
         };
         if unsafe_cast {
             self.diagnostics.push(self.ctx.diagnostic("Cast JSON to `List<Object?>` or `Map<String, Object?>` first, then use `cast()` to check its contents.", target.span()));
