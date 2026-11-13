@@ -42,13 +42,18 @@ impl Rule for MaxLinesForFunction {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags)
+        RulePreparation::Structural(Box::new(Collector {
+            ctx,
+            diags: Vec::new(),
+            threshold: crate::lint::options::get::<Options>(ctx, Self::NAME).max_lines,
+        }))
     }
 }
 
 struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
     diags: Vec<Diagnostic>,
+    threshold: usize,
 }
 
 falcon_analyze::structural_visitor! {
@@ -59,30 +64,30 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 
     fn visit_function_decl(&mut self, node: FunctionDecl<'a>) -> StructuralTraversal {
         if node.body().is_some() {
-            check_function_lines(&node.span(), &mut self.diags, self.ctx);
+            check_function_lines(&node.span(), &mut self.diags, self.ctx, self.threshold);
         }
         StructuralTraversal::SkipChildren
     }
 
     fn visit_class_member(&mut self, node: ClassMember<'a>) -> StructuralTraversal {
         if let Some((_, span)) = falcon_syntax::cst::visit::declared_member_body(node) {
-            check_function_lines(&span, &mut self.diags, self.ctx);
+            check_function_lines(&span, &mut self.diags, self.ctx, self.threshold);
         }
         StructuralTraversal::SkipChildren
     }
 }
 }
 
-fn max_lines_option(ctx: &AnalyzeContext) -> usize {
-    crate::lint::options::get::<Options>(ctx, MaxLinesForFunction::NAME).max_lines
-}
-
-fn check_function_lines(span: &Span, diags: &mut Vec<Diagnostic>, ctx: &AnalyzeContext) {
+fn check_function_lines(
+    span: &Span,
+    diags: &mut Vec<Diagnostic>,
+    ctx: &AnalyzeContext,
+    threshold: usize,
+) {
     let source = ctx.source().as_bytes();
     let lines = source[span.start.min(source.len())..span.end.min(source.len())]
         .split(|&byte| byte == b'\n')
         .count();
-    let threshold = max_lines_option(ctx);
 
     if lines > threshold {
         diags.push(ctx.diagnostic(
@@ -116,7 +121,7 @@ mod tests {
                     end: source.len(),
                 };
                 let mut diagnostics = Vec::new();
-                check_function_lines(&span, &mut diagnostics, &ctx);
+                check_function_lines(&span, &mut diagnostics, &ctx, 100);
                 assert_eq!(diagnostics.len(), expected, "{newline:?}, {newlines}");
                 if let Some(diagnostic) = diagnostics.first() {
                     assert_eq!(diagnostic.span.start, prefix.len());

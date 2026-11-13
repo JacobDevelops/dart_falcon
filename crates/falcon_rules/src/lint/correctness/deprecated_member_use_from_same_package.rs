@@ -827,9 +827,12 @@ impl<'ctx> Uses<'ctx> {
         let Some(package) = ctx.package() else {
             return;
         };
-        let environment = ctx.filesystem_environment();
+        let Some(identities) = ctx.identities() else {
+            return;
+        };
+        let file = identities.file(ctx.file_path());
         let uses = self;
-        for (uri, combinators, directive_span) in program
+        for (ordinal, (uri, combinators, directive_span)) in program
             .imports()
             .map(|node| (node.uri(), node.combinators(), node.span()))
             .chain(
@@ -837,30 +840,51 @@ impl<'ctx> Uses<'ctx> {
                     .exports()
                     .map(|node| (node.uri(), node.combinators(), node.span())),
             )
+            .enumerate()
         {
-            let Some(crate::cross_file::ResolvedRef::Path(path)) =
-                crate::cross_file::resolve_directive_uri(
-                    environment,
-                    ctx.file_path(),
-                    &uri.value(),
-                    Some(package),
-                    std::slice::from_ref(package),
-                )
-            else {
+            let value = uri.value();
+            let library = file
+                .filter(|_| {
+                    !value.contains('%')
+                        && value.strip_prefix("package:").is_none_or(|rest| {
+                            rest.split_once('/')
+                                .is_some_and(|(name, _)| name == package.name)
+                        })
+                })
+                .and_then(|file| identities.directive_library(file, ordinal))
+                .filter(|&library| {
+                    identities.is_project(&DeclarationIdentity::Library {
+                        library,
+                        name: "".into(),
+                    })
+                })
+                .or_else(|| {
+                    let crate::cross_file::ResolvedRef::Path(path) =
+                        crate::cross_file::resolve_directive_uri(
+                            ctx.filesystem_environment(),
+                            ctx.file_path(),
+                            &value,
+                            Some(package),
+                            std::slice::from_ref(package),
+                        )?
+                    else {
+                        return None;
+                    };
+                    Some(identities.library(identities.file(&path)?))
+                });
+            let Some(library) = library else {
                 continue;
             };
-            let Some(identities) = ctx.identities() else {
-                continue;
-            };
-            let Some(file) = identities.file(&path) else {
-                continue;
-            };
-            let library = identities.library(file);
-            if let Some((source, annotations)) = identities.library_source_annotations(&path)
-                && let Some(node) = annotations.first()
+            if let Some((source, annotations)) = identities.source_annotations(
+                &DeclarationIdentity::Library {
+                    library,
+                    name: "".into(),
+                },
+                MemberSelector::DECLARATION.into(),
+            ) && let Some(node) = annotations.first()
                 && let Some(message) = deprecation(
                     annotations.iter().map(NodeRef::cast::<Annotation>),
-                    SemanticModel::new(&path, &node.file, identities, ctx.types()),
+                    SemanticModel::new(source, &node.file, identities, ctx.types()),
                     ctx.signatures(),
                 )
             {

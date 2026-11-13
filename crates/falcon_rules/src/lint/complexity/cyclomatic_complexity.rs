@@ -55,12 +55,9 @@ impl Rule for CyclomaticComplexity {
             name: None,
             body_depth: 0,
             count: 0,
+            threshold: crate::lint::options::get::<Options>(ctx, Self::NAME).max_complexity,
         }))
     }
-}
-
-fn max_complexity_option(ctx: &AnalyzeContext) -> usize {
-    crate::lint::options::get::<Options>(ctx, CyclomaticComplexity::NAME).max_complexity
 }
 
 struct DecisionPoints<'a> {
@@ -69,6 +66,7 @@ struct DecisionPoints<'a> {
     name: Option<Span>,
     body_depth: usize,
     count: usize,
+    threshold: usize,
 }
 
 falcon_analyze::structural_visitor! {
@@ -115,7 +113,7 @@ impl<'a> StructuralRuleVisitor<'a> for DecisionPoints<'a> {
         self.body_depth -= 1;
         if self.body_depth == 0 {
             let complexity = self.count + 1;
-            let threshold = max_complexity_option(self.ctx);
+            let threshold = self.threshold;
             if complexity > threshold {
                 self.diags.push(self.ctx.diagnostic(
                     format!("Function has a cyclomatic complexity of {complexity} (max {threshold})."),

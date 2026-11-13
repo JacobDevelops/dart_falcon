@@ -173,6 +173,7 @@ struct Library {
 #[derive(Debug, Clone)]
 struct Import {
     target: ImportTarget,
+    source: (FileId, usize),
     prefix: Option<String>,
     combinators: Combinators,
 }
@@ -180,6 +181,7 @@ struct Import {
 #[derive(Debug, Clone)]
 struct Export {
     target: ImportTarget,
+    source: (FileId, usize),
     combinators: Combinators,
 }
 
@@ -926,28 +928,36 @@ impl<'a> IdentityBuild<'a> {
             external_file_offsets,
             project_library_count: external_library_start,
         };
-        for (&(path, program, _), &library) in all.iter().zip(file_library.iter()) {
+        for (file, (&(path, program, _), &library)) in
+            all.iter().zip(file_library.iter()).enumerate()
+        {
             if !rebuild(library) {
                 continue;
             }
             let external_instance = library.0.checked_sub(external_library_start);
             let mut imports = Vec::with_capacity(program.imports().len());
             let mut implicit_core = true;
-            for import in program.imports() {
+            for (ordinal, import) in program.imports().enumerate() {
                 let uri = import.uri().value();
                 if uri == "dart:core" {
                     implicit_core = false;
                 }
                 imports.push(Import {
                     target: resolver.resolve(path, external_instance, &uri),
+                    source: (FileId(file), ordinal),
                     prefix: import.as_name().map(|id| id.name().to_owned()),
                     combinators: Combinators::collect(import.combinators(), &mut interner),
                 });
             }
-            let exports = program.exports().map(|export| Export {
-                target: resolver.resolve(path, external_instance, &export.uri().value()),
-                combinators: Combinators::collect(export.combinators(), &mut interner),
-            });
+            let import_count = program.imports().len();
+            let exports = program
+                .exports()
+                .enumerate()
+                .map(|(ordinal, export)| Export {
+                    target: resolver.resolve(path, external_instance, &export.uri().value()),
+                    source: (FileId(file), import_count + ordinal),
+                    combinators: Combinators::collect(export.combinators(), &mut interner),
+                });
             let library = Arc::make_mut(&mut libraries[library.0]);
             library.implicit_core &= implicit_core;
             library.imports.extend(imports);
@@ -1752,6 +1762,35 @@ impl IdentityIndex {
             return external.library(file);
         }
         self.file_library[file.0 & !EXTERNAL_ID]
+    }
+
+    /// The retained target of a file's import/export directive, in source order
+    /// with imports preceding exports. Unresolved and virtual targets have no
+    /// library. Ordinals remain valid when only function bodies are refreshed.
+    pub fn directive_library(&self, file: FileId, ordinal: usize) -> Option<LibraryId> {
+        if file.0 & EXTERNAL_ID != 0
+            && let Some(external) = &self.external
+        {
+            return external.directive_library(file, ordinal);
+        }
+        let source = (FileId(file.0 & !EXTERNAL_ID), ordinal);
+        let library = self.get(self.library(file));
+        let target = library
+            .imports
+            .iter()
+            .find(|import| import.source == source)
+            .map(|import| &import.target)
+            .or_else(|| {
+                library
+                    .exports
+                    .iter()
+                    .find(|export| export.source == source)
+                    .map(|export| &export.target)
+            })?;
+        match target {
+            ImportTarget::Library(target) => Some(*target),
+            _ => None,
+        }
     }
     /// Retrieves the indexed source declaration behind a canonical identity.
     ///
@@ -4527,6 +4566,69 @@ mod tests {
         PackageIdentity {
             name: name.to_string(),
             lib_root: PathBuf::from(lib_root),
+        }
+    }
+
+    #[test]
+    fn directive_targets_survive_body_refresh_and_incremental_rebuild() {
+        let before = [
+            ("/project/part.dart", "part of 'main.dart';"),
+            (
+                "/project/main.dart",
+                "import 'a.dart' deferred as p show A; import 'missing.dart'; import 'dart:core'; export 'b.dart' hide B; part 'part.dart'; void f() {}",
+            ),
+            ("/project/a.dart", "class A {}"),
+            ("/project/b.dart", "class B {}"),
+        ];
+        let mut incremental = index(&before, &[]);
+        let main = incremental.file(Path::new(before[1].0)).unwrap();
+        let part = incremental.file(Path::new(before[0].0)).unwrap();
+        let a = library(&incremental, before[2].0);
+        let b = library(&incremental, before[3].0);
+        let assert_targets = |index: &IdentityIndex, first, exported| {
+            assert_eq!(index.directive_library(main, 0), Some(first));
+            assert_eq!(index.directive_library(main, 1), None);
+            assert_eq!(index.directive_library(main, 2), None);
+            assert_eq!(index.directive_library(main, 3), Some(exported));
+            assert_eq!(index.directive_library(main, 4), None);
+            assert_eq!(index.directive_library(part, 0), None);
+        };
+        assert_targets(&incremental, a, b);
+        let mut after = before;
+        after[1].1 = "import 'a.dart' deferred as p show A; import 'missing.dart'; import 'dart:core'; export 'b.dart' hide B; part 'part.dart'; void f() { var x = 1; print(x); }";
+        assert_eq!(
+            incremental.parsed_file(main).declaration_signature(),
+            index(&after, &[]).parsed_file(main).declaration_signature(),
+        );
+        for (replacement, expected) in [
+            (after[1].1, (a, b, false)),
+            (
+                "import 'b.dart' deferred as p show B; import 'missing.dart'; import 'dart:core'; export 'a.dart' hide A; part 'part.dart'; void f() {}",
+                (b, a, true),
+            ),
+        ] {
+            after[1].1 = replacement;
+            let full = index(&after, &[]);
+            let files: Vec<_> = after
+                .iter()
+                .zip(&full.parsed)
+                .map(|((path, _), parsed)| IdentitySource {
+                    path: Path::new(path),
+                    parsed,
+                    has_parse_errors: false,
+                })
+                .collect();
+            let programs: Vec<_> = files
+                .iter()
+                .map(|file| (file.path.to_path_buf(), file.parsed.program()))
+                .collect();
+            let grouping = group_libraries(&programs);
+            let dirty = incremental
+                .update_project(&files, &[], None, &grouping)
+                .unwrap();
+            assert_eq!(!dirty.is_empty(), expected.2);
+            assert_targets(&incremental, expected.0, expected.1);
+            assert_targets(&full, expected.0, expected.1);
         }
     }
 

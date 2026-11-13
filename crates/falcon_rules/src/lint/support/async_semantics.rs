@@ -657,22 +657,30 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                     self.semantics.uses.insert(key(expression), true);
                 }
                 self.arguments(args, state);
-                if let Expr::Field(field) = callee.unparenthesized()
-                    && (is_context(&receiver_type(field.object(), state, &self.globals), true)
-                        || context_kind(field.object(), state, &self.globals) == Some(true))
+                if !self.setstate
+                    && let Expr::Field(field) = callee.unparenthesized()
+                    && let Some(kind) = context_kind(field.object(), state, &self.globals)
+                    && (kind
+                        || is_context(&receiver_type(field.object(), state, &self.globals), true))
                 {
-                    self.use_context(field.object(), state);
+                    self.semantics.uses.insert(key(field.object()), kind);
                 }
-                let constructor = expression_segments(callee, true)
-                    .filter(|segments| {
-                        !state.environment.is_bound(segments[0])
-                            && !self.globals.contains_key(segments[0])
-                    })
-                    .and_then(|_| resolve_call_constructor(callee, &state.model, true));
-                if let Some((identity, name)) = constructor {
-                    self.constructor_callbacks(&identity, name, args);
+                if args
+                    .positional()
+                    .chain(args.named().map(falcon_syntax::cst::NamedArg::value))
+                    .any(|argument| matches!(argument.unparenthesized(), Expr::FuncExpr(_)))
+                {
+                    let constructor = expression_segments(callee, true)
+                        .filter(|segments| {
+                            !state.environment.is_bound(segments[0])
+                                && !self.globals.contains_key(segments[0])
+                        })
+                        .and_then(|_| resolve_call_constructor(callee, &state.model, true));
+                    if let Some((identity, name)) = constructor {
+                        self.constructor_callbacks(&identity, name, args);
+                    }
+                    self.method_callbacks(callee, args, state);
                 }
-                self.method_callbacks(callee, args, state);
             }
             Expr::Cascade(cascade) => self.cascade(cascade, state),
             Expr::New(new) => {
