@@ -69,15 +69,7 @@ fn is_exactly_representable(value: i64) -> bool {
 /// The runtime `int` value of a literal: hexadecimal literals up to 64 bits
 /// wrap into the signed range, decimal literals must already fit.
 fn literal_value(raw: &str) -> Option<i64> {
-    let value = parse_int(raw)?;
-    let is_hex = raw.starts_with("0x") || raw.starts_with("0X");
-    if let Ok(value) = i64::try_from(value) {
-        Some(value)
-    } else if is_hex {
-        u64::try_from(value).ok().map(u64::cast_signed)
-    } else {
-        None
-    }
+    i64::try_from(parse_int(raw)?).ok()
 }
 
 #[cfg(test)]

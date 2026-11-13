@@ -7,6 +7,8 @@
 //! their declaration identity and type, and enum shorthands use declared context.
 //! Integer operations use native signed-64-bit wrapping and strings count UTF-16
 //! code units; type-test conditions use the same source-proven types as casts.
+//! Double-context literals require exact representation, with signed identity
+//! retained for hexadecimal spellings that fit a native 64-bit word.
 //! Constructor type tests and casts resolve instantiated owner type parameters.
 //! Indexed initializers and constructors retain parsed sources through the signature index.
 //! Binary left spines use a worklist while preserving eager dependencies and value charges.
@@ -312,9 +314,9 @@ pub fn evaluate_pattern_constant(
             LiteralPatternValue::Null => Some(ConstantValue::Null),
             LiteralPatternValue::Bool(value) => Some(ConstantValue::Bool(value)),
             LiteralPatternValue::String(value) => decode_string(value).map(ConstantValue::String),
-            LiteralPatternValue::Int(value) => {
-                Some(ConstantValue::Number(Number::Int(parse_int(value)?)))
-            }
+            LiteralPatternValue::Int(value) => Some(ConstantValue::Number(Number::Int(
+                i128::from(i64::try_from(parse_int(value)?).ok()?),
+            ))),
             LiteralPatternValue::NegInt(value) => eval_unary(
                 UnaryOp::Minus,
                 ConstantValue::Number(Number::Int(parse_int(value)?)),
@@ -585,11 +587,14 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
     ) -> Option<ConstantValue> {
         match expression {
             Expr::Paren(paren) => self.evaluate_with_context(paren.expr(), expected),
-            Expr::IntLit(literal) => Some(contextual_number(
-                ConstantValue::Number(Number::Int(parse_int(literal.value())?)),
-                expression,
-                expected.is_some_and(|ty| ty.interface("dart:core", "double")),
-            )),
+            Expr::IntLit(literal) => {
+                let number = if expected.is_some_and(|ty| ty.interface("dart:core", "double")) {
+                    Number::from_float(parse_double_integer(literal.value())?)
+                } else {
+                    Number::Int(i128::from(i64::try_from(parse_int(literal.value())?).ok()?))
+                };
+                Some(ConstantValue::Number(number))
+            }
             Expr::DoubleLit(literal) => literal
                 .value()
                 .replace('_', "")
@@ -618,10 +623,16 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
             }
             Expr::GenericInstantiation(generic) => self.evaluate_type_literal(generic),
             Expr::Unary(unary) => {
-                let op = unary.op();
                 let operand = unary.operand();
+                if unary.op() == UnaryOp::Minus
+                    && !expected.is_some_and(|ty| ty.interface("dart:core", "double"))
+                    && let Expr::IntLit(literal) = operand
+                    && parse_int(literal.value())? == i128::from(i64::MAX) + 1
+                {
+                    return Some(ConstantValue::Number(Number::Int(i128::from(i64::MIN))));
+                }
                 let value = self.evaluate_with_context(operand, expected)?;
-                eval_unary(op, value)
+                eval_unary(unary.op(), value)
             }
             Expr::Binary(binary) => self.evaluate_binary(binary),
             Expr::Conditional(conditional) => match self.evaluate(conditional.condition())? {
@@ -722,7 +733,7 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                 let elements = map.elements();
                 let arguments = self.collection_arguments(expression, expected)?;
                 let types = arguments.iter().map(constant_type).collect::<Option<_>>()?;
-                let mut values = collect_eager(elements.map(|element| {
+                let values = collect_eager(elements.map(|element| {
                     let MapElement::Entry(entry) = element else {
                         return None;
                     };
@@ -731,7 +742,6 @@ impl<'a, 'model> ConstEvaluator<'a, 'model> {
                         self.evaluate_with_context(entry.value(), arguments.get(1))?,
                     ))
                 }))?;
-                values.sort();
                 Some(ConstantValue::Map(types, values))
             }
             Expr::Record(record) => {
@@ -2676,6 +2686,20 @@ fn wrapping_integer(value: i128) -> ConstantValue {
     ConstantValue::Number(Number::Int(i128::from(i64::from_le_bytes(low_bytes))))
 }
 
+fn eval_relational(op: BinaryOp, left: Number, right: Number) -> ConstantValue {
+    let order = match (left, right) {
+        (Number::Int(left), Number::Int(right)) => Some(left.cmp(&right)),
+        _ => left.float().partial_cmp(&right.float()),
+    };
+    ConstantValue::Bool(match op {
+        BinaryOp::Lt => order.is_some_and(std::cmp::Ordering::is_lt),
+        BinaryOp::Gt => order.is_some_and(std::cmp::Ordering::is_gt),
+        BinaryOp::LtEq => order.is_some_and(std::cmp::Ordering::is_le),
+        BinaryOp::GtEq => order.is_some_and(std::cmp::Ordering::is_ge),
+        _ => unreachable!("relational operator"),
+    })
+}
+
 fn eval_binary(op: BinaryOp, left: ConstantValue, right: ConstantValue) -> Option<ConstantValue> {
     match op {
         BinaryOp::EqEq | BinaryOp::NotEq => return Some(eval_equality(op, &left, &right)),
@@ -2770,10 +2794,9 @@ fn eval_binary(op: BinaryOp, left: ConstantValue, right: ConstantValue) -> Optio
                 if remainder == 0.0 { 0.0 } else { remainder },
             )))
         }
-        (BinaryOp::Lt, left, right) => Some(ConstantValue::Bool(left.float() < right.float())),
-        (BinaryOp::Gt, left, right) => Some(ConstantValue::Bool(left.float() > right.float())),
-        (BinaryOp::LtEq, left, right) => Some(ConstantValue::Bool(left.float() <= right.float())),
-        (BinaryOp::GtEq, left, right) => Some(ConstantValue::Bool(left.float() >= right.float())),
+        (BinaryOp::Lt | BinaryOp::Gt | BinaryOp::LtEq | BinaryOp::GtEq, left, right) => {
+            Some(eval_relational(op, left, right))
+        }
         _ => None,
     }
 }
@@ -2785,8 +2808,51 @@ fn bool_pair(left: ConstantValue, right: ConstantValue) -> Option<(bool, bool)> 
     }
 }
 
+/// Parses exactly representable double-context integers. Dart 3.13 retains
+/// two's-complement identity for hexadecimal literals that fit in 64 bits,
+/// but accepts larger hexadecimal and decimal magnitudes as exact doubles.
+fn parse_double_integer(value: &str) -> Option<f64> {
+    let value = if value.contains('_') {
+        Cow::Owned(value.replace('_', ""))
+    } else {
+        Cow::Borrowed(value)
+    };
+    let number = if let Some(hex) = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+    {
+        let significant = hex.trim_matches('0');
+        if significant.is_empty() {
+            return Some(0.0);
+        }
+        let integer = u64::from_str_radix(significant, 16).ok()?;
+        if integer.bit_width() > f64::MANTISSA_DIGITS + integer.trailing_zeros() {
+            return None;
+        }
+        if let Ok(bits) = u64::from_str_radix(hex, 16) {
+            Number::Int(i128::from(bits.cast_signed())).float()
+        } else {
+            hex.chars().try_fold(0.0, |value, digit| {
+                Some(value * 16.0 + f64::from(digit.to_digit(16)?))
+            })?
+        }
+    } else {
+        let number = value.parse::<f64>().ok()?;
+        let exact = match value.parse::<u64>() {
+            Ok(integer) => integer.bit_width() <= f64::MANTISSA_DIGITS + integer.trailing_zeros(),
+            Err(_) => format!("{number:.0}") == value.trim_start_matches('0'),
+        };
+        if !exact {
+            return None;
+        }
+        number
+    };
+    number.is_finite().then_some(number)
+}
+
 /// Parse a Dart integer literal's source spelling, honouring `0x`/`0X` prefixes and
-/// `_` digit separators.
+/// `_` digit separators. Hexadecimal bits use native signed-64-bit identity;
+/// decimal magnitudes retain `i64::MAX + 1` only for unary minimum-int decoding.
 #[must_use]
 pub fn parse_int(value: &str) -> Option<i128> {
     let value = value.replace('_', "");
@@ -2794,9 +2860,14 @@ pub fn parse_int(value: &str) -> Option<i128> {
         .strip_prefix("0x")
         .or_else(|| value.strip_prefix("0X"))
     {
-        i128::from_str_radix(hex, 16).ok()
+        u64::from_str_radix(hex, 16)
+            .ok()
+            .map(|bits| i128::from(bits.cast_signed()))
     } else {
-        value.parse().ok()
+        value
+            .parse::<i128>()
+            .ok()
+            .filter(|value| *value >= 0 && *value <= i128::from(i64::MAX) + 1)
     }
 }
 
@@ -2809,6 +2880,145 @@ mod tests {
 
     use super::*;
     use crate::{IdentityIndex, IdentitySource, QualifiedName, TypeIndex};
+
+    #[test]
+    fn constant_collections_preserve_order_but_records_normalize_named_fields() {
+        with_source(
+            "const map = {'a': 1, 'b': 2}; const reorderedMap = {'b': 2, 'a': 1}; const set = {1, 2}; const reorderedSet = {2, 1}; const record = (a: 1, b: 2); const reorderedRecord = (b: 2, a: 1);",
+            |program, model, signatures| {
+                let evaluate = |name| evaluate_named(program, model, signatures, name).unwrap();
+                let integer = |value| ConstantValue::Number(Number::Int(value));
+                let types = vec![constant_type(&model.core_type("int", false)).unwrap()];
+                assert_eq!(
+                    evaluate("set"),
+                    ConstantValue::Set(types, vec![integer(1), integer(2)]),
+                );
+                assert!(matches!(
+                    evaluate("map"),
+                    ConstantValue::Map(_, entries)
+                        if entries == vec![
+                            (ConstantValue::String("a".into()), integer(1)),
+                            (ConstantValue::String("b".into()), integer(2)),
+                        ]
+                ));
+                for (ordered, reordered) in [("map", "reorderedMap"), ("set", "reorderedSet")] {
+                    assert_ne!(evaluate(ordered), evaluate(reordered));
+                }
+                assert_eq!(evaluate("record"), evaluate("reorderedRecord"));
+            },
+        );
+    }
+
+    #[test]
+    fn relational_constants_preserve_integer_precision() {
+        with_source(
+            "const less = 9007199254740992 < 9007199254740993; const greater = 9007199254740993 > 9007199254740992; const lessEqual = 9007199254740993 <= 9007199254740992; const greaterEqual = 9007199254740992 >= 9007199254740993; const mixed = 9007199254740993 <= 9007199254740992.0;",
+            |program, model, signatures| {
+                for (name, expected) in [
+                    ("less", true),
+                    ("greater", true),
+                    ("lessEqual", false),
+                    ("greaterEqual", false),
+                    ("mixed", true),
+                ] {
+                    assert_eq!(
+                        evaluate_named(program, model, signatures, name),
+                        Some(ConstantValue::Bool(expected)),
+                        "{name}",
+                    );
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn integer_literals_use_native_signed_boundaries() {
+        assert_eq!(parse_int("0Xffff_ffff_ffff_ffff"), Some(-1));
+        assert_eq!(parse_int("0x10000000000000000"), None);
+        with_source(
+            "const highBit = 0x8000000000000000; const allBits = 0xffffffffffffffff; const sum = 0xffffffffffffffff + 0; const minimum = -9223372036854775808; const invalid = 9223372036854775808; const tooLarge = 9223372036854775809; const invalidSum = 9223372036854775808 + 0; const invalidEquality = 9223372036854775808 == 9223372036854775808;",
+            |program, model, signatures| {
+                for (name, expected) in [
+                    ("highBit", i128::from(i64::MIN)),
+                    ("allBits", -1),
+                    ("sum", -1),
+                    ("minimum", i128::from(i64::MIN)),
+                ] {
+                    assert_eq!(
+                        evaluate_named(program, model, signatures, name),
+                        Some(ConstantValue::Number(Number::Int(expected))),
+                        "{name}",
+                    );
+                }
+                for name in ["invalid", "tooLarge", "invalidSum", "invalidEquality"] {
+                    assert_eq!(
+                        evaluate_named(program, model, signatures, name),
+                        None,
+                        "{name}"
+                    );
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn double_context_integer_literals_preserve_sdk_signed_hex_and_exact_magnitudes() {
+        for (literal, expected) in [
+            // Dart 3.13.6: const double hex = 0x8000000000000000 is -2^63,
+            // while const double decimal = 9223372036854775808 is +2^63.
+            // Confirmed with const-constructor assertions under dart analyze.
+            ("0x8000000000000000", -9_223_372_036_854_775_808.0),
+            ("9223372036854775808", 9_223_372_036_854_775_808.0),
+            ("-0x8000000000000000", 9_223_372_036_854_775_808.0),
+            ("-9223372036854775808", -9_223_372_036_854_775_808.0),
+            ("0x10000000000000000", 18_446_744_073_709_551_616.0),
+            ("18446744073709551616", 18_446_744_073_709_551_616.0),
+            ("0X1_0000_0000_0000_0000", 18_446_744_073_709_551_616.0),
+            (
+                "340282366920938463463374607431768211456",
+                3.402_823_669_209_385e38,
+            ),
+            (
+                "0x100000000000000000000000000000000",
+                3.402_823_669_209_385e38,
+            ),
+            ("-0", -0.0),
+        ] {
+            with_source(
+                &format!("const double value = {literal};"),
+                |_, model, signatures| {
+                    let fields = HashMap::new();
+                    let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
+                    assert_eq!(
+                        evaluator.resolve_name(&["value"]),
+                        Some(ConstantValue::Number(Number::from_float(expected))),
+                        "{literal}",
+                    );
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn double_context_integer_literals_reject_inexact_values() {
+        for literal in [
+            "9007199254740993",
+            "0x20000000000001",
+            "9223372036854775809",
+            "0x8000000000000001",
+            "-9223372036854775809",
+            "-0xffffffffffffffff",
+        ] {
+            with_source(
+                &format!("const double value = {literal};"),
+                |_, model, signatures| {
+                    let fields = HashMap::new();
+                    let mut evaluator = ConstEvaluator::new(None, &fields, model, signatures);
+                    assert_eq!(evaluator.resolve_name(&["value"]), None, "{literal}");
+                },
+            );
+        }
+    }
 
     #[test]
     fn argument_type_fallback_matches_source_nodes_to_borrowed_values() {
