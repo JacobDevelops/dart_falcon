@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
-use falcon_lsp::LspState;
+use falcon_lsp::{LspState, state::ChangeOutcome};
 
 const VIOLATING_SRC: &str = "void f() {\n  dynamic x = 1;\n  print(x);\n}\n";
 const CLEAN_SRC: &str = "void g() {\n  final int y = 2;\n  print(y);\n}\n";
@@ -111,7 +111,7 @@ fn cross_file_stage_parents_survive_lsp_worker_transfers() {
 
 fn counts(state: &LspState, uri: &str) -> (u64, u64) {
     let doc = state.document(uri).expect("document open");
-    (doc.parse_count, doc.analyze_count)
+    (doc.parse_count(), doc.analyze_count)
 }
 #[cfg(unix)]
 #[test]
@@ -128,7 +128,10 @@ fn analyze_refreshes_path_when_file_materializes_under_symlink() {
     state.open(&uri, VIOLATING_SRC.to_string(), Some(1));
     fs::write(&path, CLEAN_SRC).unwrap();
     state.watched_files_changed(std::slice::from_ref(&path));
-    assert!(state.change(&uri, VIOLATING_SRC.to_string(), Some(2)));
+    assert_eq!(
+        state.change(&uri, VIOLATING_SRC.to_string(), Some(2)),
+        ChangeOutcome::Applied
+    );
     let diagnostics = state.analyze(&uri);
     assert!(!diagnostics.is_empty());
     let canonical = fs::canonicalize(&path)
@@ -160,7 +163,10 @@ fn deleted_file_keeps_resolved_path_across_change_and_save() {
     state.open(&uri, VIOLATING_SRC.to_string(), Some(1));
     fs::remove_file(&path).unwrap();
 
-    assert!(state.change(&uri, VIOLATING_SRC.to_string(), Some(2)));
+    assert_eq!(
+        state.change(&uri, VIOLATING_SRC.to_string(), Some(2)),
+        ChangeOutcome::Applied
+    );
     for diagnostics in [state.analyze(&uri), state.save(&uri, None)] {
         assert!(!diagnostics.is_empty());
         assert!(
@@ -181,7 +187,10 @@ fn only_changed_file_is_reanalyzed() {
     assert_eq!(counts(&state, URI_A), (1, 1));
     assert_eq!(counts(&state, URI_B), (1, 1));
 
-    assert!(state.change(URI_A, CLEAN_SRC.to_string(), Some(2)));
+    assert_eq!(
+        state.change(URI_A, CLEAN_SRC.to_string(), Some(2)),
+        ChangeOutcome::Applied
+    );
     state.analyze(URI_A); // server loop flush
 
     assert_eq!(counts(&state, URI_A), (2, 2), "changed file re-analyzed");
@@ -211,7 +220,10 @@ fn non_resolving_rules_keep_the_single_document_fast_path() {
         "syntax-only analysis must not walk and index the workspace"
     );
 
-    assert!(state.change(&uri, CLEAN_SRC.to_string(), Some(2)));
+    assert_eq!(
+        state.change(&uri, CLEAN_SRC.to_string(), Some(2)),
+        ChangeOutcome::Applied
+    );
     let affected = state.analyze_affected_many(std::slice::from_ref(&uri));
     assert_eq!(affected.len(), 1);
     assert_eq!(state.semantic_snapshot_build_count(), 0);
@@ -241,7 +253,10 @@ fn changing_part_owner_refreshes_old_and_new_libraries() {
     state.open(&new_uri, "library new;\n".to_string(), Some(1));
     state.open(&pivot_uri, "part of 'old.dart';\n".to_string(), Some(1));
 
-    assert!(state.change(&pivot_uri, "part of 'new.dart';\n".to_string(), Some(2)));
+    assert_eq!(
+        state.change(&pivot_uri, "part of 'new.dart';\n".to_string(), Some(2)),
+        ChangeOutcome::Applied
+    );
     let affected = state.analyze_affected_many(std::slice::from_ref(&pivot_uri));
     let affected_uris = affected
         .iter()
@@ -284,9 +299,15 @@ fn rebuilt_intermediate_graph_is_merged_into_pending_affected_documents() {
     fs::write(&pivot_path, "part of 'a.dart';\n").unwrap();
     state.open(&pivot_uri, "part of 'a.dart';\n".to_string(), Some(1));
 
-    assert!(state.change(&pivot_uri, "part of 'b.dart';\n".to_string(), Some(2)));
+    assert_eq!(
+        state.change(&pivot_uri, "part of 'b.dart';\n".to_string(), Some(2)),
+        ChangeOutcome::Applied
+    );
     state.analyze(&owner_uris[1]);
-    assert!(state.change(&pivot_uri, "part of 'c.dart';\n".to_string(), Some(3)));
+    assert_eq!(
+        state.change(&pivot_uri, "part of 'c.dart';\n".to_string(), Some(3)),
+        ChangeOutcome::Applied
+    );
 
     let affected = state
         .analyze_affected_many(std::slice::from_ref(&pivot_uri))
@@ -335,14 +356,20 @@ fn cross_file_publication_rebuild_is_merged_into_pending_affected_documents() {
     fs::write(&pivot_path, "part of 'a.dart';\n").unwrap();
     state.open(&pivot_uri, "part of 'a.dart';\n".to_string(), Some(1));
 
-    assert!(state.change(&pivot_uri, "part of 'b.dart';\n".to_string(), Some(2)));
+    assert_eq!(
+        state.change(&pivot_uri, "part of 'b.dart';\n".to_string(), Some(2)),
+        ChangeOutcome::Applied
+    );
     let builds_before = state.semantic_snapshot_build_count();
     assert!(
         !state.cross_file_pass().is_empty(),
         "the cross-file pass must publish and rebuild semantic state"
     );
     assert!(state.semantic_snapshot_build_count() > builds_before);
-    assert!(state.change(&pivot_uri, "part of 'c.dart';\n".to_string(), Some(3)));
+    assert_eq!(
+        state.change(&pivot_uri, "part of 'c.dart';\n".to_string(), Some(3)),
+        ChangeOutcome::Applied
+    );
 
     let affected = state
         .analyze_affected_many(std::slice::from_ref(&pivot_uri))
@@ -416,8 +443,14 @@ fn multi_document_flush_analyzes_each_affected_document_once() {
     state.open(&api_uri, api.to_string(), Some(1));
     state.open(&consumer_uri, consumer.to_string(), Some(1));
 
-    assert!(state.change(&api_uri, "void calculate() {}\n".to_string(), Some(2)));
-    assert!(state.change(&consumer_uri, format!("{consumer}\n"), Some(2)));
+    assert_eq!(
+        state.change(&api_uri, "void calculate() {}\n".to_string(), Some(2)),
+        ChangeOutcome::Applied
+    );
+    assert_eq!(
+        state.change(&consumer_uri, format!("{consumer}\n"), Some(2)),
+        ChangeOutcome::Applied
+    );
     let api_before = counts(&state, &api_uri).1;
     let consumer_before = counts(&state, &consumer_uri).1;
 
@@ -458,7 +491,10 @@ fn affected_documents_share_one_invalidated_semantic_snapshot() {
     assert_eq!(state.semantic_snapshot_build_count(), 2);
     assert_eq!(state.semantic_topology_build_count(), 2);
 
-    assert!(state.change(&api_uri, "String calculate() => '';\n".to_string(), Some(2)));
+    assert_eq!(
+        state.change(&api_uri, "String calculate() => '';\n".to_string(), Some(2)),
+        ChangeOutcome::Applied
+    );
     assert_eq!(
         state.semantic_snapshot_build_count(),
         2,
@@ -469,7 +505,10 @@ fn affected_documents_share_one_invalidated_semantic_snapshot() {
         2,
         "old-graph discovery must query the topology cached in the published snapshot"
     );
-    assert!(state.change(&api_uri, "void calculate() {}\n".to_string(), Some(3)));
+    assert_eq!(
+        state.change(&api_uri, "void calculate() {}\n".to_string(), Some(3)),
+        ChangeOutcome::Applied
+    );
     assert_eq!(
         state.semantic_snapshot_build_count(),
         2,
@@ -535,7 +574,12 @@ fn external_semantic_indexes_survive_edits_and_refresh_dependency_facts() {
     assert_eq!(builds, 1);
     assert_eq!(state.external_index_build_count(), 1);
     assert!(
-        state.document(&uri).unwrap().last_diagnostics.is_empty(),
+        state
+            .document(&uri)
+            .unwrap()
+            .current_diagnostics()
+            .unwrap()
+            .is_empty(),
         "the missing generated declaration has no known return value"
     );
 
@@ -881,7 +925,8 @@ fn cross_file_indexes_refresh_after_watched_disk_changes() {
         state
             .document(&uri)
             .unwrap()
-            .last_diagnostics
+            .current_diagnostics()
+            .unwrap()
             .iter()
             .any(|diagnostic| diagnostic.rule == "unnecessary-nullable")
     );
@@ -900,7 +945,8 @@ fn cross_file_indexes_refresh_after_watched_disk_changes() {
         state
             .document(&uri)
             .unwrap()
-            .last_diagnostics
+            .current_diagnostics()
+            .unwrap()
             .iter()
             .all(|diagnostic| diagnostic.rule != "unnecessary-nullable")
     );
@@ -913,7 +959,8 @@ fn cross_file_indexes_refresh_after_watched_disk_changes() {
         state
             .document(&uri)
             .unwrap()
-            .last_diagnostics
+            .current_diagnostics()
+            .unwrap()
             .iter()
             .any(|diagnostic| diagnostic.rule == "unnecessary-nullable")
     );
@@ -925,7 +972,8 @@ fn cross_file_indexes_refresh_after_watched_disk_changes() {
         state
             .document(&uri)
             .unwrap()
-            .last_diagnostics
+            .current_diagnostics()
+            .unwrap()
             .iter()
             .all(|diagnostic| diagnostic.rule != "unnecessary-nullable")
     );
@@ -1026,7 +1074,10 @@ fn closed_document_operations_are_noops() {
     state.close(URI_A);
 
     assert!(state.document(URI_A).is_none());
-    assert!(!state.change(URI_A, VIOLATING_SRC.to_string(), Some(2)));
+    assert_eq!(
+        state.change(URI_A, VIOLATING_SRC.to_string(), Some(2)),
+        ChangeOutcome::NotOpen
+    );
     assert!(state.analyze(URI_A).is_empty());
     assert_eq!(state.open_uris(), [] as [std::string::String; 0]);
 }
@@ -1102,7 +1153,10 @@ fn workspace_package_import_resolves_and_refreshes_semantic_diagnostics() {
         "package:b must provide semantic return-type facts to package a: {initial:?}"
     );
 
-    assert!(state.change(&api_uri, returning_void.to_string(), Some(2)));
+    assert_eq!(
+        state.change(&api_uri, returning_void.to_string(), Some(2)),
+        ChangeOutcome::Applied
+    );
     let affected = state.analyze_affected_many(std::slice::from_ref(&api_uri));
     let (_, diagnostics) = affected
         .iter()
@@ -1115,7 +1169,10 @@ fn workspace_package_import_resolves_and_refreshes_semantic_diagnostics() {
         "a void return in package b must clear package a's diagnostic: {diagnostics:?}"
     );
 
-    assert!(state.change(&api_uri, returning.to_string(), Some(3)));
+    assert_eq!(
+        state.change(&api_uri, returning.to_string(), Some(3)),
+        ChangeOutcome::Applied
+    );
     let affected = state.analyze_affected_many(std::slice::from_ref(&api_uri));
     let (_, diagnostics) = affected
         .iter()
@@ -1220,7 +1277,8 @@ fn assert_existence_publications(client_root: impl FnOnce(&std::path::Path) -> s
             state
                 .document(&uri)
                 .unwrap()
-                .last_diagnostics
+                .current_diagnostics()
+                .unwrap()
                 .iter()
                 .any(|diagnostic| diagnostic.rule == rule),
             "initial {rule}"
@@ -1244,7 +1302,8 @@ fn assert_existence_publications(client_root: impl FnOnce(&std::path::Path) -> s
                 state
                     .document(&uri)
                     .unwrap()
-                    .last_diagnostics
+                    .current_diagnostics()
+                    .unwrap()
                     .iter()
                     .any(|diagnostic| diagnostic.rule == rule),
                 expected,

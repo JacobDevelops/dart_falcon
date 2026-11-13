@@ -62,17 +62,17 @@ pub struct DocumentState {
     path: PathBuf,
     /// Only unresolved paths need filesystem checks between document events.
     unresolved_path: bool,
-    pub version: Option<i32>,
+    version: Option<i32>,
+    // Saves are unversioned: their publications use the last received revision,
+    // without lowering the accepted-version watermark used to reject stale edits.
+    received_version: Option<i32>,
+    pub(crate) diagnostics_version: Option<i32>,
     language_version: LanguageVersion,
     /// Parse and worker diagnostics from the last parse, kept so `analyze` can
     /// publish them alongside lints without re-parsing (parity with the CLI).
     syntax_diagnostics: Vec<Diagnostic>,
     rule_worker_error: Option<String>,
-    /// Most recent published output (byte spans) — read by hover. May include
-    /// cross-file diagnostics after a cross-file pass; never an input to analysis.
-    pub last_diagnostics: Vec<Diagnostic>,
-    /// Parse revision represented by the cached diagnostics.
-    diagnostics_parse_count: u64,
+    diagnostics: AnalysedDiagnostics,
     /// Whether the last *cross-file pass* published a set carrying cross-file
     /// diagnostics. Lets the pass republish only docs whose cross-file set changed
     /// (adding new cross-file diags, or clearing ones shown before).
@@ -85,12 +85,51 @@ pub struct DocumentState {
     /// never clear them.
     had_cross_file_diags: bool,
     /// Number of times this document has been parsed (incremental tests).
-    pub parse_count: u64,
+    parse_count: u64,
     /// Number of times this document has been analyzed (incremental tests).
     pub analyze_count: u64,
 }
 
+#[derive(Default)]
+struct AnalysedDiagnostics {
+    source_revision: u64,
+    items: Vec<Diagnostic>,
+}
+
+/// Outcome of applying a client-supplied document revision.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ChangeOutcome {
+    Applied,
+    IgnoredOutdated,
+    NotOpen,
+}
 impl DocumentState {
+    /// Current client version, absent for internally managed documents.
+    #[must_use]
+    pub fn version(&self) -> Option<i32> {
+        self.version
+    }
+
+    /// Source revision advanced by every reparse, including saved-text refreshes.
+    #[must_use]
+    pub fn parse_count(&self) -> u64 {
+        self.parse_count
+    }
+
+    /// Analysed diagnostics only when they describe the current source.
+    #[must_use]
+    pub fn current_diagnostics(&self) -> Option<&[Diagnostic]> {
+        (self.diagnostics.source_revision == self.parse_count)
+            .then_some(self.diagnostics.items.as_slice())
+    }
+
+    pub(crate) fn accepts_version(&self, version: Option<i32>) -> bool {
+        match (self.version, version) {
+            (Some(current), Some(next)) => next > current,
+            _ => true,
+        }
+    }
+
     #[must_use]
     pub fn text(&self) -> &str {
         self.parsed.source()
@@ -1608,6 +1647,13 @@ impl LspState {
 
     /// `textDocument/didOpen`: cache and parse the document, then analyze it.
     pub fn open(&mut self, uri: &str, mut text: String, version: Option<i32>) -> Vec<Diagnostic> {
+        if let Some(document) = self.documents.get(uri)
+            && !document.accepts_version(version)
+        {
+            return document
+                .current_diagnostics()
+                .map_or_else(Vec::new, <[Diagnostic]>::to_vec);
+        }
         let (path, unresolved_path) = document_path(uri, &self.workspace_roots);
         let length = text.len() as u64;
         #[cfg(test)]
@@ -1664,8 +1710,7 @@ impl LspState {
                 language_version,
                 syntax_diagnostics,
                 rule_worker_error: None,
-                last_diagnostics: Vec::new(),
-                diagnostics_parse_count: 0,
+                diagnostics: AnalysedDiagnostics::default(),
                 had_cross_file_diags: false,
                 parse_count: 1,
                 analyze_count: 0,
@@ -1680,17 +1725,24 @@ impl LspState {
     /// boundaries, while resolved identities survive deletion. The server loop
     /// defers analysis behind the debounce window.
     ///
-    /// Returns false if the document is not open.
+    /// Returns the validated client revision transition.
     ///
     /// # Panics
     ///
     /// Panics if the document cache changes unexpectedly during this exclusive state mutation.
-    pub fn change(&mut self, uri: &str, mut text: String, version: Option<i32>) -> bool {
-        if !self.documents.contains_key(uri) {
-            warn!(uri, "didChange for unopened document — ignored");
-            return false;
+    pub fn change(&mut self, uri: &str, text: String, version: Option<i32>) -> ChangeOutcome {
+        let Some(document) = self.documents.get_mut(uri) else {
+            return ChangeOutcome::NotOpen;
+        };
+        document.received_version = version;
+        if !document.accepts_version(version) {
+            return ChangeOutcome::IgnoredOutdated;
         }
+        self.refresh_text(uri, text, version);
+        ChangeOutcome::Applied
+    }
 
+    fn refresh_text(&mut self, uri: &str, mut text: String, version: Option<i32>) {
         let path = self.documents[uri].path.clone();
         let length = text.len() as u64;
         #[cfg(test)]
@@ -1724,7 +1776,6 @@ impl LspState {
         doc.language_version = self.environment.language_version(&doc.path, doc.text());
         doc.parse_count += 1;
         self.update_document_snapshot(uri, unchanged_api);
-        true
     }
 
     pub(crate) fn is_dependency_probe_document(&self, uri: &str) -> bool {
@@ -1781,7 +1832,7 @@ impl LspState {
                 .is_some_and(|doc| doc.text() != text);
             if differs {
                 let version = self.documents.get(uri).and_then(|d| d.version);
-                self.change(uri, text, version);
+                self.refresh_text(uri, text, version);
             }
         }
         self.analyze(uri)
@@ -1871,18 +1922,18 @@ impl LspState {
             self.refresh_document_versions();
         }
         let doc = self.documents.get_mut(uri).expect("open document");
-        doc.diagnostics_parse_count = doc.parse_count;
+        doc.diagnostics.source_revision = doc.parse_count;
         if doc.parsed.is_rejected() {
             doc.analyze_count += 1;
-            doc.last_diagnostics = doc.syntax_diagnostics.clone();
-            return doc.last_diagnostics.clone();
+            doc.diagnostics.items = doc.syntax_diagnostics.clone();
+            return doc.diagnostics.items.clone();
         }
         let file_path = self.documents[uri].path.clone();
         if !self.admits_project_dart(&self.documents[uri].path) {
             let doc = self.documents.get_mut(uri).expect("open document");
             doc.analyze_count += 1;
             doc.rule_worker_error = None;
-            doc.last_diagnostics.clear();
+            doc.diagnostics.items.clear();
             return Vec::new();
         }
 
@@ -1933,8 +1984,10 @@ impl LspState {
         resolve_document_positions(&mut diagnostics, doc.text());
         sort_diagnostics(&mut diagnostics);
         doc.analyze_count += 1;
-        doc.diagnostics_parse_count = doc.parse_count;
-        doc.last_diagnostics.clone_from(&diagnostics);
+        doc.diagnostics = AnalysedDiagnostics {
+            source_revision: doc.parse_count,
+            items: diagnostics.clone(),
+        };
         debug!(uri, count = diagnostics.len(), "analyzed document");
         diagnostics
     }
@@ -2191,7 +2244,7 @@ impl LspState {
                 sort_diagnostics(&mut merged);
             }
             if let Some(doc) = self.documents.get_mut(&uri) {
-                doc.last_diagnostics.clone_from(&merged);
+                doc.diagnostics.items.clone_from(&merged);
                 doc.had_cross_file_diags = has_now;
             }
             published.push((uri, merged));

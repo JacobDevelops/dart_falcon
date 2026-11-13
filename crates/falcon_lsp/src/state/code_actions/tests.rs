@@ -37,7 +37,7 @@ fn params(uri: &str, only: Option<&str>) -> CodeActionParams {
 #[test]
 fn requesting_actions_preserves_published_diagnostic_cache() {
     let (_directory, mut state, uri) = fixture();
-    let published = &mut state.documents.get_mut(&uri).unwrap().last_diagnostics;
+    let published = &mut state.documents.get_mut(&uri).unwrap().diagnostics.items;
     assert_eq!(published.len(), 1);
     published[0].rule = "avoid-unused-files";
     published[0].message = "Published cross-file diagnostic".to_owned();
@@ -45,7 +45,7 @@ fn requesting_actions_preserves_published_diagnostic_cache() {
         .code_actions(&params(&uri, Some("quickfix")), &|| false)
         .unwrap();
     assert_eq!(actions.len(), 1);
-    let cached = &state.documents[&uri].last_diagnostics;
+    let cached = &state.documents[&uri].diagnostics.items;
     assert_eq!(cached.len(), 1);
     assert_eq!(cached[0].rule, "avoid-unused-files");
     assert_eq!(cached[0].message, "Published cross-file diagnostic");
@@ -144,7 +144,7 @@ fn fallback_commands_require_negotiated_apply_edit_support() {
 fn lazy_safe_fix_all_requires_an_effective_safe_fix() {
     let (_directory, mut state, uri) = fixture();
     state.capabilities.code_action_resolve = true;
-    state.documents.get_mut(&uri).unwrap().last_diagnostics[0]
+    state.documents.get_mut(&uri).unwrap().diagnostics.items[0]
         .fix
         .as_mut()
         .unwrap()
@@ -228,7 +228,7 @@ fn dirty_requests_wait_for_publish_without_reanalyzing() {
 #[test]
 fn cursor_at_diagnostic_end_offers_quick_fix() {
     let (_directory, mut state, uri) = fixture();
-    let diagnostic = &state.documents[&uri].last_diagnostics[0];
+    let diagnostic = &state.documents[&uri].diagnostics.items[0];
     let end = diagnostic
         .format_lsp_in(&LineIndex::new(state.documents[&uri].text()))
         .range
@@ -246,32 +246,26 @@ fn resolving_rejects_changed_cancelled_and_syntax_error_documents() {
         .code_actions(&params(&uri, Some(SAFE_FIX_ALL)), &|| false)
         .unwrap()
         .remove(0);
-    assert!(
-        state
-            .resolve_code_action(action.clone(), &|| true)
-            .unwrap_err()
-            .contains("cancelled")
-    );
+    assert!(matches!(
+        state.resolve_code_action(action.clone(), &|| true),
+        Err(ActionError::AnalysisUnavailable(_))
+    ));
     state.change(
         &uri,
         "void main( { final y = new Object(); }".to_owned(),
         Some(2),
     );
-    assert!(
-        state
-            .resolve_code_action(action.clone(), &|| false)
-            .unwrap_err()
-            .contains("changed")
-    );
+    assert!(matches!(
+        state.resolve_code_action(action.clone(), &|| false),
+        Err(ActionError::ContentModified)
+    ));
     state.analyze(&uri);
     let mut current = action;
     current.data.as_mut().unwrap()["version"] = serde_json::json!(2);
-    assert!(
-        state
-            .resolve_code_action(current, &|| false)
-            .unwrap_err()
-            .contains("syntax errors")
-    );
+    assert!(matches!(
+        state.resolve_code_action(current, &|| false),
+        Err(ActionError::AnalysisUnavailable(_))
+    ));
     assert_eq!(
         state
             .code_actions(&params(&uri, Some("quickfix")), &|| false)
@@ -302,12 +296,10 @@ fn resolving_rejects_failed_semantic_snapshot() {
         .unwrap()
         .remove(0);
     state.semantic_snapshot_error = Some(std::io::Error::other("snapshot failed"));
-    assert!(
-        state
-            .resolve_code_action(action, &|| false)
-            .unwrap_err()
-            .contains("valid semantic snapshot")
-    );
+    assert!(matches!(
+        state.resolve_code_action(action, &|| false),
+        Err(ActionError::AnalysisUnavailable(_))
+    ));
 }
 
 #[test]
@@ -349,12 +341,10 @@ fn fix_all_rejects_incomplete_package_companions_independently_of_workspace_fold
                 ..Default::default()
             };
             if required {
-                assert!(
-                    state
-                        .resolve_code_action(action(), &|| false)
-                        .unwrap_err()
-                        .contains("incomplete")
-                );
+                assert!(matches!(
+                    state.resolve_code_action(action(), &|| false).unwrap_err(),
+                    ActionError::AnalysisUnavailable(message) if message.contains("incomplete")
+                ));
             } else {
                 assert!(
                     state
@@ -364,12 +354,10 @@ fn fix_all_rejects_incomplete_package_companions_independently_of_workspace_fold
                         .is_some()
                 );
                 state.semantic_source_incomplete = true;
-                assert!(
-                    state
-                        .resolve_code_action(action(), &|| false)
-                        .unwrap_err()
-                        .contains("incomplete")
-                );
+                assert!(matches!(
+                    state.resolve_code_action(action(), &|| false).unwrap_err(),
+                    ActionError::AnalysisUnavailable(message) if message.contains("incomplete")
+                ));
             }
         }
     }

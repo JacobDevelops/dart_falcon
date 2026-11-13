@@ -9,6 +9,10 @@
 //! published once per file after each merged analysis round. Newer generations
 //! retain only the latest pending result per URI until that file is current;
 //! unrelated results remain publishable and requests support cancellation.
+//! Document edits require increasing client versions; hover and code actions only
+//! use diagnostics from the current source revision. Unavailable project inputs
+//! report analysis failure instead of running absence-sensitive cross-file rules.
+//! After shutdown, notifications are ignored and requests are rejected until exit.
 
 pub mod server;
 pub mod state;

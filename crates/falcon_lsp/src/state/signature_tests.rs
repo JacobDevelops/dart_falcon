@@ -154,7 +154,10 @@ fn body_only_part_edits_refresh_open_library_warnings_without_importers_or_rebui
         let topologies = state.semantic_topology_build_count;
         let importer_analyses = state.documents[&importer_uri].analyze_count;
         for (version, source, warning) in [(2, after, false), (3, before, true)] {
-            assert!(state.change(&part_uri, source.into(), Some(version)));
+            assert_eq!(
+                state.change(&part_uri, source.into(), Some(version)),
+                ChangeOutcome::Applied
+            );
             let published = state.analyze_affected_many(std::slice::from_ref(&part_uri));
             assert_eq!(
                 published.iter().map(|(uri, _)| uri).collect::<HashSet<_>>(),
@@ -235,7 +238,10 @@ fn body_shift_before_typed_build_and_generic_class_reuses_indexes_and_positions(
         (3, source("final values = <int>[1, 2, 3];")),
         (4, before),
     ] {
-        assert!(state.change(&uri, source.clone(), Some(version)));
+        assert_eq!(
+            state.change(&uri, source.clone(), Some(version)),
+            ChangeOutcome::Applied
+        );
         assert!(state.semantic_snapshot.is_some());
         let published = state.analyze_affected_many(std::slice::from_ref(&uri));
         assert_eq!(published.len(), 1, "{published:?}");
@@ -301,6 +307,7 @@ fn cross_file_only_body_reuse_preserves_types_after_save_close_and_same_text_rer
     };
     let before = source("");
     std::fs::write(&path, &before).unwrap();
+    let path = canonical_or_lexical(&path);
     let uri = uri(&path);
     let mut state = LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
     state.configure_resolution(false, false);

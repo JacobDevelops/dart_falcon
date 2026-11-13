@@ -36,6 +36,112 @@ const SYNTAX_ERR_SRC: &str = "void f() {\n  final int x = ;\n}\n";
 /// column must count UTF-16 code units (each emoji = 2), not scalar values.
 const EMOJI_SYNTAX_SRC: &str = "final s = \"\u{1F600}\u{1F600}\"; final int x = ;\n";
 
+#[test]
+fn hover_and_actions_do_not_use_diagnostics_from_an_older_source() {
+    let mut client = TestClient::start(
+        Duration::from_secs(60),
+        Some(
+            r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-dynamic":"warn"}}},"cross-file":{"enabled":false}}"#,
+        ),
+    );
+    client.open(DOC_URI, VIOLATING_SRC, 10);
+    assert!(has_rule(&client.recv_publish(), "avoid-dynamic"));
+    client.change(DOC_URI, CLEAN_SRC, 11);
+    let hover = client.request(
+        "textDocument/hover",
+        serde_json::json!({
+            "textDocument": {"uri": DOC_URI}, "position": {"line": 1, "character": 3}
+        }),
+    );
+    assert!(client.recv_response(&hover).result.unwrap().is_null());
+    let actions = client.request(
+        "textDocument/codeAction",
+        serde_json::json!({
+            "textDocument": {"uri": DOC_URI},
+            "range": {"start": {"line": 0, "character": 0}, "end": {"line": 4, "character": 0}},
+            "context": {"diagnostics": []}
+        }),
+    );
+    assert_eq!(
+        client.recv_response(&actions).result.unwrap(),
+        serde_json::json!([])
+    );
+    client.shutdown();
+}
+
+#[test]
+fn decreasing_and_duplicate_document_versions_are_ignored() {
+    let mut client = TestClient::start(
+        Duration::ZERO,
+        Some(
+            r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-dynamic":"warn"}}},"cross-file":{"enabled":false}}"#,
+        ),
+    );
+    client.open(DOC_URI, VIOLATING_SRC, 10);
+    assert_eq!(client.recv_publish().version, Some(10));
+    for version in [9, 10] {
+        client.change(DOC_URI, CLEAN_SRC, version);
+        let id = client.request(
+            "textDocument/hover",
+            serde_json::json!({
+                "textDocument": {"uri": DOC_URI}, "position": {"line": 1, "character": 3}
+            }),
+        );
+        assert!(!client.recv_response(&id).result.unwrap().is_null());
+    }
+    client.change(DOC_URI, CLEAN_SRC, 15);
+    let published = client.recv_publish();
+    assert_eq!(published.version, Some(15));
+    assert!(!has_rule(&published, "avoid-dynamic"));
+    client.shutdown();
+}
+
+#[test]
+fn code_action_errors_preserve_protocol_categories() {
+    let mut client = TestClient::start(
+        Duration::ZERO,
+        Some(r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"enabled":false}}"#),
+    );
+    client.open(DOC_URI, "void main() {}", 10);
+    client.recv_publish();
+    for (data, expected) in [
+        (serde_json::json!({}), lsp_server::ErrorCode::InvalidParams),
+        (
+            serde_json::json!({"uri": DOC_URI, "version": 9, "includeUnsafe": false}),
+            lsp_server::ErrorCode::ContentModified,
+        ),
+    ] {
+        let id = client.request(
+            "codeAction/resolve",
+            serde_json::json!({"title": "Fix all", "data": data}),
+        );
+        assert_eq!(
+            client.recv_response(&id).error.unwrap().code,
+            expected as i32
+        );
+    }
+    client.change(DOC_URI, SYNTAX_ERR_SRC, 11);
+    client.recv_publish();
+    let data = serde_json::json!({"uri": DOC_URI, "version": 11, "includeUnsafe": false});
+    for (method, params) in [
+        (
+            "codeAction/resolve",
+            serde_json::json!({"title":"Fix all", "data":data}),
+        ),
+        (
+            "workspace/executeCommand",
+            serde_json::json!({"command":"falcon.fixAll", "arguments":[data]}),
+        ),
+    ] {
+        let id = client.request(method, params);
+        assert_eq!(
+            client.recv_response(&id).error.unwrap().code,
+            lsp_server::ErrorCode::RequestFailed as i32
+        );
+    }
+    client.shutdown();
+}
+
 struct TestClient {
     client: Connection,
     server: Option<JoinHandle<()>>,

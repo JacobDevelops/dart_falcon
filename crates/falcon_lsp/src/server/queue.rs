@@ -96,7 +96,7 @@ pub(super) fn remember_document_version(versions: &mut HashMap<String, i32>, mes
                 .and_then(|version| i32::try_from(version).ok())
             {
                 if let Some(previous) = versions.get_mut(uri) {
-                    *previous = version;
+                    *previous = (*previous).max(version);
                 } else if notification.method == DidOpenTextDocument::METHOD {
                     versions.insert(uri.to_owned(), version);
                 }

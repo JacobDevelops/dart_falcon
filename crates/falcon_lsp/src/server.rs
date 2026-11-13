@@ -35,7 +35,7 @@ use tracing::{debug, info, warn};
 
 use falcon_diagnostics::{Diagnostic, lsp_position_to_byte};
 
-use crate::state::LspState;
+use crate::state::{ChangeOutcome::Applied, LspState};
 
 /// Server configuration. `debounce` is the quiet period after the last
 /// `didChange` before re-analysis; tests use `Duration::ZERO`.
@@ -547,6 +547,10 @@ fn relay(
     output: &crossbeam_channel::Receiver<AnalysisRound>,
 ) -> Result<(), ServerError> {
     let mut generation = 0;
+    let notifications_cancelled = Arc::new(RequestState {
+        cancelled: AtomicBool::new(false),
+        read: None,
+    });
     let mut pending_requests = PendingRequests::default();
     let mut document_versions = HashMap::new();
     let mut publications = HashMap::new();
@@ -557,13 +561,16 @@ fn relay(
         crossbeam_channel::select_biased! {
             recv(connection.receiver) -> message => {
                 let Ok(message) = message else { return Ok(()); };
-                let mut cancelled = None;
+                let mut cancelled = Some(Arc::clone(&notifications_cancelled));
                 match &message {
                     Message::Request(request) => {
                         if request.method == "shutdown" {
                             cancel_requests_on_shutdown(connection, &mut pending_requests)?;
-                            connection.handle_shutdown(request)?;
-                            return Ok(());
+                            notifications_cancelled.cancelled.store(true, Ordering::Relaxed);
+                            connection.sender.send(Response::new_ok(
+                                request.id.clone(), serde_json::Value::Null,
+                            ).into())?;
+                            return await_exit(connection, Instant::now() + Duration::from_secs(30));
                         }
                         let version = request.params["textDocument"]["uri"].as_str()
                             .and_then(|uri| document_versions.get(uri)).copied();
@@ -683,6 +690,32 @@ fn cancel_requests_on_shutdown(
     Ok(())
 }
 
+// Match lsp-server's shutdown deadline even if the client keeps stdin open.
+fn await_exit(connection: &Connection, deadline: Instant) -> Result<(), ServerError> {
+    loop {
+        let message = match connection.receiver.recv_deadline(deadline) {
+            Ok(message) => message,
+            Err(RecvTimeoutError::Timeout) => {
+                return Err("timed out waiting for exit notification".into());
+            }
+            Err(RecvTimeoutError::Disconnected) => return Ok(()),
+        };
+        match message {
+            Message::Notification(notification) if notification.method == "exit" => return Ok(()),
+            Message::Request(request) => {
+                connection.sender.send(
+                    Response::new_err(
+                        request.id,
+                        ErrorCode::InvalidRequest as i32,
+                        "server has shut down".to_owned(),
+                    )
+                    .into(),
+                )?;
+            }
+            _ => {}
+        }
+    }
+}
 fn buffer_round_messages(
     messages: Vec<Message>,
     current: bool,
@@ -873,7 +906,7 @@ fn handle_queued_request(
         .is_some_and(|read| {
             state
                 .document(read.uri.as_ref())
-                .and_then(|document| document.version)
+                .and_then(crate::state::DocumentState::version)
                 != read.version
         })
     {
@@ -962,7 +995,7 @@ fn handle_notification(
             let Some(change) = params.content_changes.into_iter().next_back() else {
                 return Ok(false);
             };
-            if !state.change(&uri, change.text, Some(params.text_document.version)) {
+            if state.change(&uri, change.text, Some(params.text_document.version)) != Applied {
                 return Ok(false);
             }
             if delay.is_zero() {
@@ -1137,9 +1170,7 @@ fn handle_request(
                 match serde_json::from_value::<lsp_types::CodeActionParams>(request.params) {
                     Ok(params) => match state.code_actions(&params, cancelled) {
                         Ok(actions) => Response::new_ok(request.id, actions),
-                        Err(error) => {
-                            Response::new_err(request.id, ErrorCode::RequestFailed as i32, error)
-                        }
+                        Err(error) => error.response(request.id),
                     },
                     Err(error) => Response::new_err(
                         request.id,
@@ -1155,9 +1186,7 @@ fn handle_request(
             let response = match serde_json::from_value::<lsp_types::CodeAction>(request.params) {
                 Ok(action) => match state.resolve_code_action(action, cancelled) {
                     Ok(action) => Response::new_ok(request.id, action),
-                    Err(error) => {
-                        Response::new_err(request.id, ErrorCode::RequestFailed as i32, error)
-                    }
+                    Err(error) => error.response(request.id),
                 },
                 Err(error) => Response::new_err(
                     request.id,
@@ -1252,7 +1281,7 @@ fn execute_command(
                     }
                     Response::new_ok(request.id, serde_json::Value::Null)
                 }
-                Err(error) => Response::new_err(request.id, ErrorCode::RequestFailed as i32, error),
+                Err(error) => error.response(request.id),
             }
         }
         Ok(_) => Response::new_err(
@@ -1285,7 +1314,7 @@ fn hover(state: &LspState, params: &HoverParams, cancelled: &dyn Fn() -> bool) -
         params.text_document_position_params.position,
     );
     let lines: Vec<String> = document
-        .last_diagnostics
+        .current_diagnostics()?
         .iter()
         .take_while(|_| !cancelled())
         .filter(|d| d.span.start <= offset && offset < d.span.end.max(d.span.start + 1))
@@ -1388,7 +1417,7 @@ fn publish(
                         .iter()
                         .map(|diagnostic| diagnostic.format_lsp_in(&lines))
                         .collect(),
-                    document.version,
+                    document.diagnostics_version,
                 )
             }
             // Closed document: publish an empty set to clear editor state.

@@ -81,11 +81,14 @@ fn optional_manifest_failures_recover_to_fresh_secure_url_diagnostics() {
         );
         assert_eq!((diagnostic.line, diagnostic.col), (2, 11));
         assert_eq!((diagnostic.span.start, diagnostic.span.end), (24, 42));
-        assert!(!lsp.change(
-            &manifest_uri,
-            "name: example\nhomepage: https://example.com\n".into(),
-            Some(2)
-        ));
+        assert_eq!(
+            lsp.change(
+                &manifest_uri,
+                "name: example\nhomepage: https://example.com\n".into(),
+                Some(2)
+            ),
+            falcon_lsp::state::ChangeOutcome::NotOpen
+        );
         let unsaved = lsp.cross_file_pass();
         assert!(unsaved.iter().all(|(uri, _)| uri != &manifest_uri));
         fs::write(&manifest, "name: example\nhomepage: https://example.com\n").unwrap();
@@ -814,7 +817,10 @@ fn cli_and_lsp_have_sdk_resolution_parity_for_unsaved_buffers() {
     let uri = format!("file://{}", path.display());
     lsp.open(&uri, saved.to_owned(), Some(1));
     assert!(lsp.analyze(&uri).is_empty());
-    assert!(lsp.change(&uri, source.to_owned(), Some(2)));
+    assert_eq!(
+        lsp.change(&uri, source.to_owned(), Some(2)),
+        falcon_lsp::state::ChangeOutcome::Applied
+    );
     let editor_diagnostics = lsp.analyze(&uri);
     assert_eq!(lsp.take_config_messages(), Vec::new());
     assert_eq!(fs::read_to_string(&path).unwrap(), saved);

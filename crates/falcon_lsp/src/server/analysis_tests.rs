@@ -408,6 +408,69 @@ fn shutdown_resolves_pending_requests_before_its_response() {
 }
 
 #[test]
+fn shutdown_discards_queued_notifications_and_rejects_further_requests() {
+    let client = RelayClient::start();
+    client
+        .connection
+        .sender
+        .send(
+            ServerNotification::new(
+                DidCloseTextDocument::METHOD.to_owned(),
+                json!({"textDocument":{"uri":"file:///queued.dart"}}),
+            )
+            .into(),
+        )
+        .unwrap();
+    let (_, _, token) = client.inputs.recv_timeout(TIMEOUT).unwrap();
+    let token = token.expect("queued notifications participate in shutdown");
+    assert!(!token.cancelled.load(Ordering::Relaxed));
+    client
+        .connection
+        .sender
+        .send(Request::new(10.into(), "shutdown".to_owned(), ()).into())
+        .unwrap();
+    let Message::Response(shutdown) = client.recv() else {
+        panic!("shutdown response")
+    };
+    assert_eq!(shutdown.id, RequestId::from(10));
+    assert!(shutdown.error.is_none());
+    assert!(token.cancelled.load(Ordering::Relaxed));
+    for notification in [
+        "$/cancelRequest",
+        DidCloseTextDocument::METHOD,
+        "unknown/notification",
+    ] {
+        client
+            .connection
+            .sender
+            .send(ServerNotification::new(notification.to_owned(), json!({})).into())
+            .unwrap();
+    }
+    for id in [11, 12] {
+        client
+            .connection
+            .sender
+            .send(Request::new(id.into(), HoverRequest::METHOD.to_owned(), json!({})).into())
+            .unwrap();
+        let Message::Response(response) = client.recv() else {
+            panic!("invalid request response")
+        };
+        assert_eq!(response.id, RequestId::from(id));
+        assert_eq!(
+            response.error.unwrap().code,
+            ErrorCode::InvalidRequest as i32
+        );
+    }
+    assert!(client.inputs.recv_timeout(Duration::ZERO).is_err());
+    client
+        .connection
+        .sender
+        .send(ServerNotification::new("exit".to_owned(), ()).into())
+        .unwrap();
+    client.finish();
+}
+
+#[test]
 fn real_worker_cancels_and_supersedes_before_an_ignored_notification() {
     let temp = tempfile::tempdir().unwrap();
     let config = temp.path().join("falcon.json");

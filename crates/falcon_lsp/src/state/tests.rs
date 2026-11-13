@@ -1,3 +1,4 @@
+use super::ChangeOutcome::Applied;
 use super::*;
 use falcon_diagnostics::{
     INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID, RULES_THREAD_ERROR_DIAGNOSTIC_ID, Severity, Span,
@@ -152,6 +153,215 @@ fn secondary_root_requirements_follow_its_registered_rules_on_reload() {
         assert_eq!(state.resolve_semantics(), file || cross_file);
         assert_eq!(state.cross_file_resolve_semantics(), cross_file);
     }
+}
+
+#[test]
+fn repeated_open_rejects_old_versions() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut state = LspState::new_from(None, |_| None, directory.path().to_path_buf());
+    let uri = format!("file://{}", directory.path().join("main.dart").display());
+    state.open(&uri, "void current() {}".into(), Some(10));
+    for version in [9, 10] {
+        state.open(&uri, "void stale() {}".into(), Some(version));
+        let document = state.document(&uri).unwrap();
+        assert_eq!(document.version(), Some(10));
+        assert_eq!(document.text(), "void current() {}");
+        assert_eq!(
+            state.change(&uri, "void staleEdit() {}".into(), Some(10)),
+            ChangeOutcome::IgnoredOutdated
+        );
+    }
+    state.open(&uri, "void newer() {}".into(), Some(11));
+    assert_eq!(state.document(&uri).unwrap().text(), "void newer() {}");
+}
+
+#[test]
+fn atomic_save_preserves_collection_failure() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let failed = root.join("failed.dart");
+    std::fs::write(&failed, [0xff]).unwrap();
+    let healthy = root.join("healthy.dart");
+    std::fs::write(&healthy, "void healthy() {}").unwrap();
+    let unrelated = root.join("unrelated.dart");
+    std::fs::write(&unrelated, "void unrelated() {}").unwrap();
+    let mut state = LspState::new_from(None, |_| None, root.clone());
+    state.configure_resolution(true, false);
+    let uri = format!("file://{}", healthy.display());
+    state.set_dynamic_file_watching(false);
+    state.open(&uri, "void healthy() {}".into(), Some(1));
+    assert!(state.required_source_failures.contains_key(&failed));
+    let replacement = tempfile::NamedTempFile::new_in(&root).unwrap();
+    std::fs::write(replacement.path(), "void replaced() {}").unwrap();
+    replacement.persist(&unrelated).unwrap();
+    state.revalidate_disk();
+    assert!(state.required_source_failures.contains_key(&failed));
+    assert!(state.semantic_snapshot_error.is_none());
+}
+
+#[test]
+fn collection_failure_survives_unrelated_edits_and_watcher_events() {
+    for dynamic in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let failed = root.join("failed.dart");
+        std::fs::write(&failed, [0xff]).unwrap();
+        let healthy = root.join("healthy.dart");
+        std::fs::write(&healthy, "void healthy() {}").unwrap();
+        let unrelated = root.join("unrelated.dart");
+        std::fs::write(&unrelated, "void unrelated() {}").unwrap();
+        let mut state = LspState::new_from(None, |_| None, root);
+        state.configure_resolution(true, false);
+        state.set_dynamic_file_watching(dynamic);
+        let uri = format!("file://{}", healthy.display());
+        state.open(&uri, "void healthy() {}".into(), Some(1));
+        assert!(state.required_source_failures.contains_key(&failed));
+        state.change(&uri, "void edited() {}".into(), Some(2));
+        assert!(
+            state.required_source_failures.contains_key(&failed),
+            "an unrelated buffer edit must preserve the failed input"
+        );
+        state.analyze(&uri);
+        state.cross_file_pass();
+        assert!(state.semantic_snapshot_error.is_none());
+        state.watched_files_changed(std::slice::from_ref(&healthy));
+        assert!(state.required_source_failures.contains_key(&failed));
+        assert!(state.semantic_snapshot_error.is_none());
+        state.watched_files_changed(std::slice::from_ref(&unrelated));
+        assert!(state.required_source_failures.contains_key(&failed));
+        assert!(state.semantic_snapshot_error.is_none());
+        state.close(&uri);
+        state.open(&uri, "void reopened() {}".into(), Some(3));
+        assert!(state.required_source_failures.contains_key(&failed));
+        assert!(state.semantic_snapshot_error.is_none());
+        std::fs::write(&failed, "class Recovered {}").unwrap();
+        if dynamic {
+            state.watched_files_changed(&[failed.parent().unwrap().to_path_buf()]);
+        } else {
+            state.revalidate_disk();
+        }
+        assert!(state.required_source_failures.is_empty());
+        assert!(state.semantic_snapshot.is_some());
+        std::fs::write(&failed, [0xff]).unwrap();
+        state.watched_files_changed(std::slice::from_ref(&failed));
+        assert!(state.required_source_failures.contains_key(&failed));
+        let failed_uri = format!("file://{}", failed.display());
+        state.open(&failed_uri, "class BufferedRecovery {}".into(), Some(1));
+        assert!(state.required_source_failures.is_empty());
+        assert!(state.semantic_snapshot.is_some());
+    }
+}
+
+#[test]
+fn document_revision_rejects_old_edits_but_allows_save_refresh() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut state = LspState::new_from(None, |_| None, directory.path().to_path_buf());
+    let uri = format!("file://{}", directory.path().join("main.dart").display());
+    state.open(&uri, "void main() { print('old'); }".into(), Some(10));
+    let document = state.document(&uri).unwrap();
+    let parses = document.parse_count();
+    assert!(document.current_diagnostics().is_some());
+    for version in [9, 10] {
+        assert_eq!(
+            state.change(&uri, "void replaced() {}".into(), Some(version)),
+            ChangeOutcome::IgnoredOutdated
+        );
+        let document = state.document(&uri).unwrap();
+        assert_eq!(document.version(), Some(10));
+        assert_eq!(document.parse_count(), parses);
+        assert!(document.text().contains("print"));
+        assert!(document.current_diagnostics().is_some());
+        assert_eq!(document.diagnostics_version, Some(10));
+    }
+    assert_eq!(
+        state.change(&uri, "void replaced() {}".into(), Some(15)),
+        ChangeOutcome::Applied
+    );
+    assert!(
+        state
+            .document(&uri)
+            .unwrap()
+            .current_diagnostics()
+            .is_none()
+    );
+    state.save(&uri, Some("void saved() {}".into()));
+    let document = state.document(&uri).unwrap();
+    assert_eq!(document.version(), Some(15));
+    assert_eq!(document.text(), "void saved() {}");
+    assert!(document.current_diagnostics().is_some());
+    state.change(&uri, "void stale() {}".into(), Some(2));
+    state.save(&uri, Some("void lastSaved() {}".into()));
+    let document = state.document(&uri).unwrap();
+    assert_eq!(document.version(), Some(15));
+    assert_eq!(document.diagnostics_version, Some(2));
+    assert_eq!(document.text(), "void lastSaved() {}");
+    state.close(&uri);
+    assert_eq!(
+        state.change(&uri, String::new(), Some(16)),
+        ChangeOutcome::NotOpen
+    );
+    state.open(&uri, "void internal() {}".into(), None);
+    assert_eq!(
+        state.change(&uri, "void internalEdit() {}".into(), None),
+        ChangeOutcome::Applied
+    );
+}
+
+#[test]
+fn project_reads_track_missing_and_unreadable_required_sources() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("gone.dart");
+    let mut complete = true;
+    let mut failures = HashMap::new();
+    assert_eq!(LspState::read_project_source(&path, true, &mut complete, &mut failures).unwrap_err().kind(), std::io::ErrorKind::NotFound);
+    assert!(!complete);
+    assert!(failures.contains_key(&path));
+    std::fs::write(&path, [0xff]).unwrap();
+    assert_eq!(
+        LspState::read_project_source(&path, true, &mut complete, &mut failures).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+}
+
+#[test]
+fn unreadable_project_suppresses_absence_rules_without_semantic_analysis() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    std::fs::create_dir(root.join("lib")).unwrap();
+    let config = root.join("falcon.json");
+    std::fs::write(&config, r#"{"linter":{"enabled":false},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#).unwrap();
+    let main = root.join("lib/main.dart");
+    std::fs::write(&main, [0xff]).unwrap();
+    let used = root.join("lib/used.dart");
+    let source = "class Used {}";
+    std::fs::write(&used, source).unwrap();
+    let mut state = LspState::new_from(Some(config), |_| None, root.to_path_buf());
+    let uri = format!("file://{}", used.display());
+    state.open(&uri, source.into(), Some(1));
+    let published = state.cross_file_pass();
+    assert_eq!(published.len(), 1);
+    let diagnostics = &published[0].1;
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "unused-files")
+    );
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.rule
+                == falcon_diagnostics::INCOMPLETE_ANALYSIS_DIAGNOSTIC_ID)
+            .count(),
+        1
+    );
+    assert!(state.semantic_snapshot_error.is_none());
+    let failure = &state.required_source_failures[&canonical_or_lexical(&main)];
+    assert_eq!(failure.source.kind(), std::io::ErrorKind::InvalidData);
+    assert_eq!(failure.path, canonical_or_lexical(&main));
+    std::fs::write(&main, "import 'used.dart'; void main() { Used(); }").unwrap();
+    state.watched_files_changed(&[main]);
+    assert!(state.semantic_snapshot_error.is_none());
+    assert!(state.cross_file_diagnostics().is_empty());
 }
 
 #[test]
@@ -808,7 +1018,10 @@ fn return_type_edits_rebuild_indexes_and_refresh_dependent_diagnostics() {
             let snapshots = state.semantic_snapshot_build_count;
             let topologies = state.semantic_topology_build_count;
             let dependent_analyses = state.document(&dependent_uri).unwrap().analyze_count;
-            assert!(state.change(&api_uri, source.into(), Some(version)));
+            assert_eq!(
+                state.change(&api_uri, source.into(), Some(version)),
+                ChangeOutcome::Applied
+            );
             let analyzed = state.analyze_affected_many(std::slice::from_ref(&api_uri));
             assert_eq!(
                 analyzed.iter().map(|(uri, _)| uri).collect::<HashSet<_>>(),
@@ -860,7 +1073,7 @@ fn declaration_updates_rebuild_only_affected_libraries_in_both_views() {
             state.ensure_semantic_snapshot();
             state.semantic_library_rebuild_count
         } else {
-            let (files, _) = state.collect_project_files(ProjectView::CrossFile);
+            let files = state.collect_project_files(ProjectView::CrossFile).0;
             state.ensure_cross_file_indexes(&files);
             state.cross_file_library_rebuild_count
         };
@@ -869,7 +1082,7 @@ fn declaration_updates_rebuild_only_affected_libraries_in_both_views() {
             state.ensure_semantic_snapshot();
             state.semantic_library_rebuild_count
         } else {
-            let (files, _) = state.collect_project_files(ProjectView::CrossFile);
+            let files = state.collect_project_files(ProjectView::CrossFile).0;
             state.ensure_cross_file_indexes(&files);
             state.cross_file_library_rebuild_count
         };
@@ -908,7 +1121,8 @@ fn import_and_part_edits_rebuild_only_affected_libraries_in_both_views() {
             if semantic {
                 state.ensure_semantic_snapshot();
             } else {
-                let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+                let (files, complete) =
+                    state.collect_project_files(ProjectView::CrossFile);
                 assert!(complete);
                 state.ensure_cross_file_indexes(&files);
             }
@@ -930,16 +1144,20 @@ fn import_and_part_edits_rebuild_only_affected_libraries_in_both_views() {
                             .identities,
                     )
                 });
-                assert!(state.change(
-                    &uri,
-                    format!("import 'external.dart'; {directive} '{target}'; void main() {{}}"),
-                    Some(version),
-                ));
+                assert_eq!(
+                    state.change(
+                        &uri,
+                        format!("import 'external.dart'; {directive} '{target}'; void main() {{}}"),
+                        Some(version),
+                    ),
+                    ChangeOutcome::Applied
+                );
                 let after = if semantic {
                     state.ensure_semantic_snapshot();
                     state.semantic_library_rebuild_count
                 } else {
-                    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+                    let (files, complete) =
+                        state.collect_project_files(ProjectView::CrossFile);
                     assert!(complete);
                     state.ensure_cross_file_indexes(&files);
                     assert!(Arc::ptr_eq(
@@ -1067,7 +1285,7 @@ fn coalesced_declaration_and_directive_edits_match_fresh_semantics() {
     for (uri, (_, source)) in uris.iter().zip(sources) {
         state.open(uri, source.into(), Some(1));
     }
-    let (files, _) = state.collect_project_files(ProjectView::CrossFile);
+    let files = state.collect_project_files(ProjectView::CrossFile).0;
     state.ensure_cross_file_indexes(&files);
     for edits in [
         vec![(0, "int api() => 1;"), (1, "export 'api.dart' show api;")],
@@ -1099,9 +1317,9 @@ fn coalesced_declaration_and_directive_edits_match_fresh_semantics() {
         assert_semantic_snapshot_values_match(&state, &fresh);
         // Exercise the independently retained cache too, rather than borrowing
         // the current semantic snapshot through cross_file_pass.
-        let (files, _) = state.collect_project_files(ProjectView::CrossFile);
+        let files = state.collect_project_files(ProjectView::CrossFile).0;
         state.ensure_cross_file_indexes(&files);
-        let (fresh_files, _) = fresh.collect_project_files(ProjectView::CrossFile);
+        let fresh_files = fresh.collect_project_files(ProjectView::CrossFile).0;
         fresh.ensure_cross_file_indexes(&fresh_files);
         let cache = state.cross_file_index_cache.as_ref().unwrap();
         let rebuilt = fresh.cross_file_index_cache.as_ref().unwrap();
@@ -1201,7 +1419,10 @@ fn body_only_edits_refresh_loop_mutation_facts_without_rebuilding_indexes() {
         ),
         (4, before, 1),
     ] {
-        assert!(state.change(&uri, changed, Some(version)));
+        assert_eq!(
+            state.change(&uri, changed, Some(version)),
+            ChangeOutcome::Applied
+        );
         let analyzed = state.analyze_affected_many(std::slice::from_ref(&uri));
         assert_eq!(analyzed.len(), 1, "{analyzed:?}");
         let diagnostics = &analyzed[0].1;
@@ -1254,8 +1475,12 @@ fn cross_file_only_indexes_reuse_explicit_bodies_but_rebuild_changed_return_type
             3,
         ),
     ] {
-        assert!(state.change(&uri, source.into(), Some(version)));
-        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+        assert_eq!(
+            state.change(&uri, source.into(), Some(version)),
+            ChangeOutcome::Applied
+        );
+        let (files, complete) =
+            state.collect_project_files(ProjectView::CrossFile);
         assert!(complete);
         state.ensure_cross_file_indexes(&files);
         assert_eq!(
@@ -1355,7 +1580,8 @@ fn unsupported_directory_entries_reuse_discovery() {
                 format!("void main() {{ print({version}); }}"),
                 Some(version),
             );
-            let (_, complete) = state.collect_project_files(ProjectView::CrossFile);
+            let (_, complete) =
+                state.collect_project_files(ProjectView::CrossFile);
             assert!(complete);
             assert_eq!(state.workspace_walk_count, walks);
             assert_eq!(state.disk_parse_count, parses);
@@ -1839,7 +2065,7 @@ mod source_size_tests {
         assert!(state.cross_file_diagnostics().is_empty());
         assert_eq!(runs.load(Ordering::SeqCst), 0);
         state.parser_failure_path = None;
-        assert!(state.change(&uri, SOURCE.into(), Some(2)));
+        assert_eq!(state.change(&uri, SOURCE.into(), Some(2)), ChangeOutcome::Applied);
         assert!(!state.document(&uri).unwrap().parsed.is_rejected());
         let recovered = &state.document(&uri).unwrap().parsed;
         assert!(!recovered.has_parse_errors());
@@ -1857,11 +2083,11 @@ mod source_size_tests {
                 .any(|diagnostic| diagnostic.rule == "eol-at-end-of-file")
         );
         state.parser_failure_path = Some(failure_path);
-        assert!(state.change(&uri, SOURCE.into(), Some(3)));
+        assert_eq!(state.change(&uri, SOURCE.into(), Some(3)), ChangeOutcome::Applied);
         assert_failure(&state.analyze(&uri));
         assert!(state.document(&uri).unwrap().parsed.is_rejected());
         state.parser_failure_path = None;
-        assert!(state.change(&uri, SOURCE.into(), Some(4)));
+        assert_eq!(state.change(&uri, SOURCE.into(), Some(4)), ChangeOutcome::Applied);
         assert!(!state.document(&uri).unwrap().parsed.is_rejected());
         assert!(
             state.analyze(&uri).iter().all(|diagnostic| diagnostic.rule
@@ -1924,7 +2150,7 @@ mod source_size_tests {
             assert_eq!(retained.declaration_signature(), signature);
             assert_eq!(state.analyze(&uri).len(), 1);
             state.parser_failure_path = None;
-            assert!(state.change(&uri, SOURCE.into(), Some(2)));
+            assert_eq!(state.change(&uri, SOURCE.into(), Some(2)), ChangeOutcome::Applied);
             let recovered = state.analyze(&uri);
             assert!(recovered.iter().all(|diagnostic| {
                 diagnostic.rule != falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
@@ -1945,7 +2171,7 @@ mod source_size_tests {
     }
 
     #[test]
-    fn project_parse_failures_publish_once_skip_cross_rules_and_recover_on_disk_events() {
+    fn project_parser_failures_publish_once_skip_cross_rules_and_recover_on_disk_events() {
         for companion in [false, true] {
             let directory = tempfile::tempdir().unwrap();
             let app = directory.path().join("app");
@@ -1996,8 +2222,8 @@ mod source_size_tests {
                 Some(1),
             );
             let failed = canonical_or_lexical(&failed);
-            state.parser_failure_path = Some(failed.clone());
             let source = std::fs::read_to_string(&failed).unwrap();
+            state.parser_failure_path = Some(failed.clone());
             std::fs::write(&failed, format!("{source}\n")).unwrap();
             let runs = Arc::new(AtomicUsize::new(0));
             state.edit_test_registries(|_, cross_file_rules| {
@@ -2031,6 +2257,7 @@ mod source_size_tests {
             assert!(state.watched_local_sources.contains(&failed));
             assert!(state.watched_local_paths.contains(&watched_path(&failed)));
             state.parser_failure_path = None;
+            std::fs::write(&failed, source).unwrap();
             let recovered = state.watched_files_changed(&[failed]);
             assert_eq!(recovered.len(), 2);
             assert!(
@@ -2060,7 +2287,6 @@ mod source_size_tests {
         std::fs::write(app.join("falcon.json"), "{}").unwrap();
         (directory, app, dep)
     }
-
     #[test]
     fn build_panics_publish_once_and_recover_on_dependency_events() {
         for cross_file in [false, true] {
@@ -2479,7 +2705,7 @@ mod source_size_tests {
             state
                 .document(&other_uri)
                 .unwrap()
-                .last_diagnostics
+                .diagnostics.items
                 .iter()
                 .all(|diagnostic| diagnostic.rule != "incomplete-analysis")
         );
@@ -2646,7 +2872,8 @@ mod source_size_tests {
         let mut state = LspState::new(None);
         state.initialize_workspace_roots(vec![directory.path().join("missing")]);
         state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
-        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+        let (files, complete) =
+            state.collect_project_files(ProjectView::CrossFile);
         assert!(complete);
         assert!(files.is_empty());
         let root = directory.path().join("missing");
@@ -2707,7 +2934,7 @@ mod source_size_tests {
         assert_eq!(snapshot.files[0].path(), healthy);
         assert!(state.semantic_snapshot_error.is_none());
 
-        assert!(state.change(&uri, "void main() {}".into(), Some(2)));
+        assert_eq!(state.change(&uri, "void main() {}".into(), Some(2)), ChangeOutcome::Applied);
         assert!(!state.document(&uri).unwrap().parsed.is_rejected());
         assert!(
             !state
@@ -2716,13 +2943,13 @@ mod source_size_tests {
                 .any(|diagnostic| diagnostic.rule == "syntax-error")
         );
         state.buffer_length_override = Some(u64::from(u32::MAX) + 1);
-        assert!(state.change(&uri, "void rejected_again() {}".into(), Some(3)));
+        assert_eq!(state.change(&uri, "void rejected_again() {}".into(), Some(3)), ChangeOutcome::Applied);
         assert_rejected_snapshot(&state.documents[&uri].parsed, "");
         let diagnostics = state.analyze(&uri);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].rule, "syntax-error");
         state.buffer_length_override = None;
-        assert!(state.change(&uri, "void current() {}".into(), Some(4)));
+        assert_eq!(state.change(&uri, "void current() {}".into(), Some(4)), ChangeOutcome::Applied);
         assert!(!state.documents[&uri].parsed.is_rejected());
         assert!(
             state
@@ -3067,7 +3294,8 @@ mod config_tests {
         std::fs::write(&main, "void main() {}\n").unwrap();
         let mut state = LspState::new_from(None, |_| None, dir.path().join("nested"));
         assert_eq!(state.workspace_root, canonical_or_lexical(dir.path()));
-        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+        let (files, complete) =
+            state.collect_project_files(ProjectView::CrossFile);
         assert!(complete);
         assert!(
             files
@@ -3515,7 +3743,10 @@ mod dependency_tests {
 
             write_package_version(dir.path(), "2.19");
             state.watched_files_changed(&[dir.path().join(".dart_tool/package_config.json")]);
-            assert!(state.change(&uri, VERSIONED_SWITCH.to_string(), Some(2)));
+            assert_eq!(
+                state.change(&uri, VERSIONED_SWITCH.to_string(), Some(2)),
+                ChangeOutcome::Applied
+            );
             let diagnostics = state.analyze(&uri);
             assert!(!diagnostics.iter().any(|diag| diag.rule == "syntax-error"));
             assert!(!switch_has_pattern(state.documents[&uri].parsed.program()));
@@ -3553,7 +3784,7 @@ mod dependency_tests {
             assert_eq!(switch_has_pattern(file.program()), pattern);
             assert_eq!(file.has_parse_errors(), pattern);
         }
-        let (files, _) = state.collect_project_files(ProjectView::CrossFile);
+        let files = state.collect_project_files(ProjectView::CrossFile).0;
         for (path, pattern) in paths.iter().zip([false, true]) {
             let file = files.iter().find(|file| file.path() == path).unwrap();
             assert_eq!(switch_has_pattern(file.program()), pattern);
@@ -3625,7 +3856,8 @@ mod dependency_tests {
         let mut state = LspState::new(Some(config_path));
         state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
 
-        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+        let (files, complete) =
+            state.collect_project_files(ProjectView::CrossFile);
         assert!(complete);
         let manifest = files
             .iter()
@@ -3709,7 +3941,8 @@ mod dependency_tests {
             state.cross_file_pass();
             assert!(
                 state.documents[&uri]
-                    .last_diagnostics
+                    .current_diagnostics()
+                    .unwrap()
                     .iter()
                     .any(|diagnostic| diagnostic.rule == "unnecessary-nullable")
             );
@@ -3724,7 +3957,8 @@ mod dependency_tests {
             if opened == "external" {
                 std::fs::remove_file(sdk.join("core/core.dart")).unwrap();
             }
-            let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
+            let (files, complete) =
+                state.collect_project_files(ProjectView::CrossFile);
             assert!(complete);
             state.ensure_cross_file_indexes(&files);
             assert!(
@@ -3740,7 +3974,8 @@ mod dependency_tests {
             state.cross_file_pass();
             assert!(
                 state.documents[&uri]
-                    .last_diagnostics
+                    .current_diagnostics()
+                    .unwrap()
                     .iter()
                     .any(|diagnostic| diagnostic.rule == "unnecessary-nullable")
             );
@@ -3798,17 +4033,21 @@ mod dependency_tests {
         let external_loads = state.cross_file_external_load_count;
         assert!(external_loads > 0);
         for version in [2, 3] {
-            assert!(state.change(
-                uri,
-                format!("{source}// body edit {version}\n"),
-                Some(version),
-            ));
+            assert_eq!(
+                state.change(
+                    uri,
+                    format!("{source}// body edit {version}\n"),
+                    Some(version),
+                ),
+                ChangeOutcome::Applied
+            );
             state.analyze(uri);
             state.cross_file_pass();
             assert_eq!(state.cross_file_external_load_count, external_loads);
             assert!(
                 state.documents[uri]
-                    .last_diagnostics
+                    .current_diagnostics()
+                    .unwrap()
                     .iter()
                     .any(|diagnostic| diagnostic.rule == "unnecessary-nullable")
             );
@@ -3818,7 +4057,10 @@ mod dependency_tests {
         let changed_imports = source
             .replace("package:dep/api.dart", "package:dep/added.dart")
             .replace("_take(value())", "_take(addedValue())");
-        assert!(state.change(uri, changed_imports, Some(4)));
+        assert_eq!(
+            state.change(uri, changed_imports, Some(4)),
+            ChangeOutcome::Applied
+        );
         state.analyze(uri);
         state.cross_file_pass();
         assert_eq!(state.cross_file_external_load_count, external_loads + 1);
@@ -3839,7 +4081,8 @@ mod dependency_tests {
         );
         assert!(
             state.documents[uri]
-                .last_diagnostics
+                .current_diagnostics()
+                .unwrap()
                 .iter()
                 .any(|diagnostic| diagnostic.rule == "unnecessary-nullable")
         );
@@ -3849,7 +4092,8 @@ mod dependency_tests {
         assert_eq!(state.cross_file_external_load_count, external_loads + 2);
         assert!(
             state.documents[uri]
-                .last_diagnostics
+                .current_diagnostics()
+                .unwrap()
                 .iter()
                 .all(|diagnostic| diagnostic.rule != "unnecessary-nullable")
         );
@@ -4081,7 +4325,7 @@ mod dependency_tests {
             assert_eq!(doc.path, canonical);
             assert_eq!(doc.parse_count, 1);
             for view in [ProjectView::Semantic, ProjectView::CrossFile] {
-                let (files, _) = state.collect_project_files(view);
+                let files = state.collect_project_files(view).0;
                 assert_eq!(files.len(), 2);
                 let file = files.iter().find(|file| file.path() == canonical).unwrap();
                 assert_eq!(file.source(), buffer);
@@ -4132,7 +4376,7 @@ mod dependency_tests {
         let canonical = canonical_or_lexical(&path);
         assert_ne!(old_path, canonical);
         assert_eq!(state.document(&uri).unwrap().path, canonical);
-        let (files, _) = state.collect_project_files(ProjectView::Semantic);
+        let files = state.collect_project_files(ProjectView::Semantic).0;
         assert_eq!(
             files.len(),
             2,
@@ -4552,8 +4796,8 @@ mod environment_regressions {
         );
         let identities = Arc::clone(&state.external_indexes.as_ref().unwrap().identities);
         let resets = state.external_reset_count;
-        assert!(state.change(&uri,
-            "import 'package:dep/api.dart'; import 'package:core/api.dart'; void main() { coreApi(); } // pending".into(), Some(3)));
+        assert_eq!(state.change(&uri,
+            "import 'package:dep/api.dart'; import 'package:core/api.dart'; void main() { coreApi(); } // pending".into(), Some(3)), ChangeOutcome::Applied);
         assert!(state.semantic_snapshot.is_none());
         std::fs::write(&core, "int coreApi() => 1; class NestedBefore {}").unwrap();
         let published = state.watched_files_changed(std::slice::from_ref(&core));
@@ -4568,8 +4812,8 @@ mod environment_regressions {
             &identities,
             &state.external_indexes.as_ref().unwrap().identities
         ));
-        assert!(state.change(&uri,
-            "import 'package:dep/api.dart'; import 'package:core/api.dart'; void main() { coreApi(); } // next pending".into(), Some(4)));
+        assert_eq!(state.change(&uri,
+            "import 'package:dep/api.dart'; import 'package:core/api.dart'; void main() { coreApi(); } // next pending".into(), Some(4)), ChangeOutcome::Applied);
         assert!(state.semantic_snapshot.is_none());
         let generated = core.with_file_name("new.g.dart");
         std::fs::write(&generated, "class NewlyGenerated {}").unwrap();
@@ -4878,11 +5122,14 @@ mod environment_regressions {
         let signatures = Arc::clone(&cache.signatures);
         let builds = state.external_index_build_count;
         assert!(!state.environment.has_sdk());
-        assert!(state.change(
-            &uri,
-            "import 'package:dep/api.dart'; void main() { final value = Original(); }".into(),
-            Some(2)
-        ));
+        assert_eq!(
+            state.change(
+                &uri,
+                "import 'package:dep/api.dart'; void main() { final value = Original(); }".into(),
+                Some(2)
+            ),
+            ChangeOutcome::Applied
+        );
         state.analyze(&uri);
         let project = state.documents[&uri].path.clone();
         assert!(state.watched_files_changed(&[project]).is_empty());
@@ -5328,7 +5575,10 @@ mod environment_regressions {
             let types = Arc::clone(&cache.types);
             let signatures = Arc::clone(&cache.signatures);
             let builds = state.external_index_build_count;
-            assert!(state.change(&uris[0], format!("{source} // {version}"), Some(version)));
+            assert_eq!(
+                state.change(&uris[0], format!("{source} // {version}"), Some(version)),
+                ChangeOutcome::Applied
+            );
             state.analyze(&uris[0]);
             assert_eq!(
                 topology,
@@ -5347,7 +5597,10 @@ mod environment_regressions {
         state.open(&shared_uri, buffered.into(), Some(1));
         for version in [1, 2] {
             if version == 2 {
-                assert!(state.change(&shared_uri, format!("{buffered} // edited"), Some(version)));
+                assert_eq!(
+                    state.change(&shared_uri, format!("{buffered} // edited"), Some(version)),
+                    ChangeOutcome::Applied
+                );
             }
             state.ensure_semantic_snapshot();
             assert!(
@@ -5431,11 +5684,14 @@ mod environment_regressions {
         let before = primary_function(&state);
         let builds = state.external_index_build_count;
         let library_count = state.external_libraries.libraries().len();
-        assert!(state.change(
-            &uris[1],
-            format!("{second_source} import 'package:bar/bar.dart';"),
-            Some(2),
-        ));
+        assert_eq!(
+            state.change(
+                &uris[1],
+                format!("{second_source} import 'package:bar/bar.dart';"),
+                Some(2),
+            ),
+            ChangeOutcome::Applied
+        );
         state.ensure_semantic_snapshot();
         assert_eq!(state.external_libraries.libraries().len(), library_count);
         assert!(state.external_index_build_count > builds);
@@ -5527,11 +5783,14 @@ mod environment_regressions {
             let parses = state.disk_parse_count;
             let reads = state.disk_read_count;
             assert!(parses > 0, "the unopened defining companion was not parsed");
-            assert!(state.change(
-                &app_uri,
-                "import 'package:dep/bridge.dart'; void main() {}".into(),
-                Some(2),
-            ));
+            assert_eq!(
+                state.change(
+                    &app_uri,
+                    "import 'package:dep/bridge.dart'; void main() {}".into(),
+                    Some(2),
+                ),
+                ChangeOutcome::Applied
+            );
             state.analyze(&app_uri);
             let snapshot = state.semantic_snapshot.as_ref().unwrap();
             let companion = &snapshot.files[snapshot.by_path[&defining]];
@@ -5720,21 +5979,20 @@ fn project_worker_failures_recover_all_publications_after_only_one_document_chan
             *cross_file_rules = CrossFileRuleRegistry::new();
             cross_file_rules.register("current-source", Box::new(ProjectRule(false)));
         });
-        assert!(state.change(&uris[0], "class After {}".into(), Some(2)));
+        let changed = state.change(&uris[0], "class After {}".into(), Some(2));
+        assert_eq!(changed, Applied);
         state.analyze_affected_many(std::slice::from_ref(&uris[0]));
         let recovered = state.cross_file_pass();
         assert_eq!(recovered.len(), 2, "{recovered:?}");
         for (uri, diagnostics) in recovered {
             assert_eq!(diagnostics.len(), 1, "{uri}: {diagnostics:?}");
             assert_eq!(diagnostics[0].rule, "current-source");
-            assert_eq!(
-                diagnostics[0].message,
-                if uri == uris[0] {
-                    "class After {}"
-                } else {
-                    "class Beforeb {}"
-                }
-            );
+            let expected = if uri == uris[0] {
+                "class After {}"
+            } else {
+                "class Beforeb {}"
+            };
+            assert_eq!(diagnostics[0].message, expected);
         }
         assert!(state.incomplete_failures().is_empty());
     }
@@ -5867,7 +6125,7 @@ fn external_parser_worker_recovery(remove_import: bool) {
 }
 
 fn exercise_external_worker_reachability(state: &mut LspState, uri: &str, source: &str) {
-    assert!(state.change(uri, "void main() {}".into(), Some(2)));
+    assert_eq!(state.change(uri, "void main() {}".into(), Some(2)), ChangeOutcome::Applied);
     state.analyze(uri);
     let recovered = state.cross_file_pass();
     let diagnostics = &recovered
@@ -5889,7 +6147,7 @@ fn exercise_external_worker_reachability(state: &mut LspState, uri: &str, source
             .as_ref()
             .is_none_or(|cache| cache.libraries.worker_failure().is_none())
     );
-    assert!(state.change(uri, source.into(), Some(3)));
+    assert_eq!(state.change(uri, source.into(), Some(3)), ChangeOutcome::Applied);
     state.analyze(uri);
     let failed_again = state.cross_file_pass();
     assert!(

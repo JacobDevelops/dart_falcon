@@ -895,6 +895,6 @@ fn interleaved_close_refreshes_disk_state_and_publishes_clear_before_reopen() {
     }
     assert!(closed);
     let document = state.document(&uri).unwrap();
-    assert_eq!(document.version, Some(2));
+    assert_eq!(document.version(), Some(2));
     assert_eq!(document.text(), "class Reopened {}");
 }

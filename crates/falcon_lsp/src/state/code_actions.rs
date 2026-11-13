@@ -13,6 +13,27 @@ pub(crate) const SAFE_FIX_ALL: &str = "source.fixAll.falcon";
 pub(crate) const UNSAFE_FIX_ALL: &str = "source.falcon.fixAllUnsafe";
 pub(crate) const FIX_ALL_COMMAND: &str = "falcon.fixAll";
 
+#[derive(Debug)]
+pub(crate) enum ActionError {
+    InvalidData(String),
+    ContentModified,
+    AnalysisUnavailable(String),
+}
+
+impl ActionError {
+    pub(crate) fn response(self, id: lsp_server::RequestId) -> lsp_server::Response {
+        let (code, message) = match self {
+            Self::InvalidData(message) => (lsp_server::ErrorCode::InvalidParams, message),
+            Self::ContentModified => (
+                lsp_server::ErrorCode::ContentModified,
+                "Document changed since Falcon offered the action".to_owned(),
+            ),
+            Self::AnalysisUnavailable(message) => (lsp_server::ErrorCode::RequestFailed, message),
+        };
+        lsp_server::Response::new_err(id, code as i32, message)
+    }
+}
+
 fn requested(params: &CodeActionParams, kind: &str) -> bool {
     params.context.only.as_ref().is_none_or(|only| {
         only.iter().any(|parent| {
@@ -95,15 +116,17 @@ impl QuickFixContext<'_> {
         params: &CodeActionParams,
         cancelled: &dyn Fn() -> bool,
         actions: &mut Vec<CodeAction>,
-    ) -> Result<(), String> {
+    ) -> Result<(), ActionError> {
         let document = self.document;
         let config = self.config;
         let lines = self.lines;
         let source = document.text();
         let uri = &params.text_document.uri;
-        for diagnostic in &document.last_diagnostics {
+        for diagnostic in document.current_diagnostics().unwrap_or_default() {
             if cancelled() {
-                return Err("Falcon code actions cancelled".to_owned());
+                return Err(ActionError::AnalysisUnavailable(
+                    "Falcon code actions cancelled".to_owned(),
+                ));
             }
             let Some(fix) = &diagnostic.fix else { continue };
             let Some(kind) = effective_fix_kind(config, &document.path, diagnostic.rule, fix.kind)
@@ -204,7 +227,7 @@ impl LspState {
         &mut self,
         params: &CodeActionParams,
         cancelled: &dyn Fn() -> bool,
-    ) -> Result<Vec<CodeAction>, String> {
+    ) -> Result<Vec<CodeAction>, ActionError> {
         let quickfix = requested(params, "quickfix");
         let safe = requested(params, SAFE_FIX_ALL);
         let unsafe_fixes = requested(params, UNSAFE_FIX_ALL);
@@ -215,14 +238,12 @@ impl LspState {
         let Some(document) = self.documents.get(uri.as_str()) else {
             return Ok(Vec::new());
         };
-        if cancelled()
-            || document.parsed.is_rejected()
-            || document.version.is_none()
-            || document.diagnostics_parse_count != document.parse_count
-        {
+        if cancelled() || document.parsed.is_rejected() || document.version.is_none() {
             return Ok(Vec::new());
         }
-        let document = &self.documents[uri.as_str()];
+        let Some(diagnostics) = document.current_diagnostics() else {
+            return Ok(Vec::new());
+        };
         let root_index = self.root_index(&document.path);
         let config = if root_index == 0 {
             &self.config
@@ -230,7 +251,6 @@ impl LspState {
             &self.additional_root_configs[root_index - 1].config
         };
         let source = document.text();
-        let diagnostics = &document.last_diagnostics;
         let lines = LineIndex::new(source);
         let capacity = if quickfix { diagnostics.len() } else { 0 }
             + usize::from(safe)
@@ -304,43 +324,53 @@ impl LspState {
         &mut self,
         mut action: CodeAction,
         cancelled: &dyn Fn() -> bool,
-    ) -> Result<CodeAction, String> {
-        let data = action.data.as_ref().ok_or("Missing Falcon fix-all data")?;
-        let uri: Uri =
-            serde_json::from_value(data["uri"].clone()).map_err(|error| error.to_string())?;
-        let version: Option<i32> =
-            serde_json::from_value(data["version"].clone()).map_err(|error| error.to_string())?;
+    ) -> Result<CodeAction, ActionError> {
+        let data = action
+            .data
+            .as_ref()
+            .ok_or_else(|| ActionError::InvalidData("Missing Falcon fix-all data".to_owned()))?;
+        let uri: Uri = serde_json::from_value(data["uri"].clone())
+            .map_err(|error| ActionError::InvalidData(error.to_string()))?;
+        let version: i32 = serde_json::from_value(data["version"].clone())
+            .map_err(|error| ActionError::InvalidData(error.to_string()))?;
+        let version = Some(version);
         let include_unsafe = data["includeUnsafe"]
             .as_bool()
-            .ok_or("Missing fix-all policy")?;
+            .ok_or_else(|| ActionError::InvalidData("Missing fix-all policy".to_owned()))?;
         let document = self
             .documents
             .get(uri.as_str())
-            .ok_or("Document is no longer open")?;
-        if document.version != version || document.diagnostics_parse_count != document.parse_count {
-            return Err("Document changed since Falcon offered the action".to_owned());
+            .ok_or(ActionError::ContentModified)?;
+        if document.version != version || document.current_diagnostics().is_none() {
+            return Err(ActionError::ContentModified);
         }
         if cancelled() {
-            return Err("Falcon fix all cancelled".to_owned());
+            return Err(ActionError::AnalysisUnavailable(
+                "Falcon fix all cancelled".to_owned(),
+            ));
         }
         if document.has_parse_errors() {
-            return Err("Falcon cannot fix a document with syntax errors".to_owned());
+            return Err(ActionError::AnalysisUnavailable(
+                "Falcon cannot fix a document with syntax errors".to_owned(),
+            ));
         }
         if self.resolve_semantics() && self.semantic_snapshot.is_none() {
             self.ensure_semantic_snapshot();
         }
         self.refresh_required_source_roots(&[]);
         let document = self.documents.get(uri.as_str()).expect("open document");
-        if document.version != version || document.diagnostics_parse_count != document.parse_count {
-            return Err("Document changed since Falcon offered the action".to_owned());
+        if document.version != version || document.current_diagnostics().is_none() {
+            return Err(ActionError::ContentModified);
         }
         if let Some(error) = &self.semantic_snapshot_error {
-            return Err(format!(
+            return Err(ActionError::AnalysisUnavailable(format!(
                 "Falcon cannot fix without a valid semantic snapshot: {error}"
-            ));
+            )));
         }
         if self.semantic_source_incomplete {
-            return Err("Falcon cannot fix while semantic sources are incomplete".to_owned());
+            return Err(ActionError::AnalysisUnavailable(
+                "Falcon cannot fix while semantic sources are incomplete".to_owned(),
+            ));
         }
         let root_index = self.root_index(&document.path);
         let config = if root_index == 0 {
@@ -375,9 +405,9 @@ impl LspState {
             },
         );
         if let Some(stop) = outcome.stop {
-            return Err(format!(
+            return Err(ActionError::AnalysisUnavailable(format!(
                 "Falcon fix all stopped without returning edits: {stop}"
-            ));
+            )));
         }
         if outcome.source != document.text() {
             action.edit = Some(workspace_edit(
