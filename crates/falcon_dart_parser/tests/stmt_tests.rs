@@ -15,6 +15,85 @@ fn only_stmt(program: Program<'_>) -> Stmt<'_> {
 }
 
 #[test]
+fn contextual_identifiers_can_label_statements_and_name_local_functions() {
+    for name in [
+        "async", "await", "yield", "type", "on", "show", "hide", "sync", "override",
+    ] {
+        let source = format!("void f() {{ {name}: while (true) {{ break {name}; }} }}");
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty(), "{name}: {:?}", parsed.errors);
+        let Stmt::Labeled(label) = only_stmt(parsed.tree.program(&source)) else {
+            panic!("expected label");
+        };
+        assert_eq!(label.label().name(), name);
+        let source = format!("void f() {{ {name}<T>() => T; }}");
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty(), "{name}: {:?}", parsed.errors);
+        assert!(matches!(
+            only_stmt(parsed.tree.program(&source)),
+            Stmt::LocalFunc(_)
+        ));
+    }
+}
+
+#[test]
+fn typed_patterns_and_c_style_pattern_initializers() {
+    for pattern in ["(a, b)", "[a, b]", "<int>[a, b]", "<int, int>{0: a, 1: b}"] {
+        let source =
+            format!("void f() {{ for (var {pattern} = values; a < b; a++) {{ print(b); }} }}");
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty(), "{pattern}: {:?}", parsed.errors);
+        let Stmt::For(statement) = only_stmt(parsed.tree.program(&source)) else {
+            panic!("expected for");
+        };
+        assert!(matches!(
+            statement.header().init(),
+            Some(ForInit::PatternDecl(_))
+        ));
+        assert!(statement.header().condition().is_some());
+        assert_eq!(statement.header().updates().len(), 1);
+        assert!(parsed.tree.is_lossless(&source));
+        let source = format!("void f() {{ for (final {pattern} in values) {{}} }}");
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty(), "{pattern}: {:?}", parsed.errors);
+        let Stmt::For(statement) = only_stmt(parsed.tree.program(&source)) else {
+            panic!("expected for");
+        };
+        assert!(matches!(
+            statement.header().init(),
+            Some(ForInit::PatternForIn(_))
+        ));
+        let source = format!("void f() {{ var {pattern} = values; }}");
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty(), "{pattern}: {:?}", parsed.errors);
+        assert!(matches!(
+            only_stmt(parsed.tree.program(&source)),
+            Stmt::PatternDecl(_)
+        ));
+    }
+}
+
+#[test]
+fn long_else_if_ladder_keeps_nested_if_shape() {
+    let source = format!(
+        "void f() {{ if (x == 0) {{}} {} else {{}} }}",
+        "else if (x == 1) {} ".repeat(4999)
+    );
+    let parsed = parse(&source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    assert!(parsed.tree.is_lossless(&source));
+    let mut statement = only_stmt(parsed.tree.program(&source));
+    let mut count = 0;
+    while let Stmt::If(branch) = statement {
+        count += 1;
+        assert!(matches!(branch.then_branch(), Stmt::Block(_)));
+        statement = branch.else_branch().unwrap();
+    }
+    assert_eq!(count, 5000);
+    assert!(matches!(statement, Stmt::Block(_)));
+}
+
+#[test]
 fn test_empty_and_rethrow_have_no_expression_children() {
     use falcon_syntax::cst::visit::{Visitor, walk_stmt};
     #[derive(Default)]

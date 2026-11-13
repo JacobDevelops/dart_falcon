@@ -143,12 +143,11 @@ impl<'src> Parser<'src> {
             }
         }
         Some(match self.cur().kind {
-            TokenKind::Class => self.parse_class_or_type_alias(),
+            TokenKind::Class => self.parse_class_or_type_alias(false),
             TokenKind::Mixin => {
                 if self.peek(1).kind == TokenKind::Class {
                     self.advance(); // mixin
-                    self.parse_mixin_class();
-                    NodeKind::MixinClassDecl
+                    self.parse_class_or_type_alias(true)
                 } else {
                     self.parse_mixin();
                     NodeKind::MixinDecl
@@ -175,7 +174,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn parse_class_or_type_alias(&mut self) -> NodeKind {
+    fn parse_class_or_type_alias(&mut self, is_mixin: bool) -> NodeKind {
         self.expect(TokenKind::Class);
         let (name, has_primary_constructor) = self.parse_name_maybe_primary(false);
         // Mixin-application class: `class MA = Super with M [implements I];`
@@ -195,7 +194,11 @@ impl<'src> Parser<'src> {
         self.parse_type_clause(TokenKind::With);
         self.parse_type_clause(TokenKind::Implements);
         self.parse_class_body_in(Some(name.text(self)));
-        NodeKind::ClassDecl
+        if is_mixin {
+            NodeKind::MixinClassDecl
+        } else {
+            NodeKind::ClassDecl
+        }
     }
 
     /// `<classNameMaybePrimary>`: `[const] Name<T>`, optionally followed by a
@@ -228,15 +231,6 @@ impl<'src> Parser<'src> {
         self.parse_type_clause(TokenKind::On);
         self.parse_type_clause(TokenKind::Implements);
         self.parse_class_body_in(None);
-    }
-
-    fn parse_mixin_class(&mut self) {
-        self.expect(TokenKind::Class);
-        let (name, _) = self.parse_name_maybe_primary(false);
-        self.parse_extends_clause();
-        self.parse_type_clause(TokenKind::With);
-        self.parse_type_clause(TokenKind::Implements);
-        self.parse_class_body_in(Some(name.text(self)));
     }
 
     fn parse_extends_clause(&mut self) {
@@ -386,7 +380,12 @@ impl<'src> Parser<'src> {
                 TokenKind::Async
                     if !matches!(
                         self.peek(1).kind,
-                        TokenKind::LParen | TokenKind::Lt | TokenKind::Semicolon | TokenKind::Eq
+                        TokenKind::LParen
+                            | TokenKind::Lt
+                            | TokenKind::Semicolon
+                            | TokenKind::Comma
+                            | TokenKind::Eq
+                            | TokenKind::Dot
                     ) =>
                 {
                     self.advance();
@@ -404,6 +403,7 @@ impl<'src> Parser<'src> {
                             | TokenKind::Comma
                             | TokenKind::LParen
                             | TokenKind::Lt
+                            | TokenKind::Dot
                     ) =>
                 {
                     self.advance();
@@ -760,14 +760,20 @@ impl<'src> Parser<'src> {
                 TokenKind::Super => {
                     self.advance();
                     if self.eat(TokenKind::Dot).is_some() {
-                        self.expect_ident();
+                        self.expect_ctor_name();
                     }
                     self.parse_arg_list();
                     NodeKind::SuperCallInitializer
                 }
                 TokenKind::This => {
                     self.advance();
-                    let call_name = self.eat(TokenKind::Dot).map(|_| self.expect_ident());
+                    let call_name = self.eat(TokenKind::Dot).map(|_| {
+                        if self.at(TokenKind::New) && self.peek(1).kind == TokenKind::LParen {
+                            self.expect_ctor_name()
+                        } else {
+                            self.expect_ident()
+                        }
+                    });
                     if self.at(TokenKind::LParen) {
                         self.parse_arg_list();
                         NodeKind::ThisCallInitializer

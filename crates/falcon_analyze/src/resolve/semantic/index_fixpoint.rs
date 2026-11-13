@@ -494,6 +494,9 @@ impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> Visitor<'a> for InitializerDepend
                     self.bind(declarator.name().name());
                 }
             }
+            Some(ForInit::PatternDecl(declaration)) => {
+                self.bind_pattern(declaration.pattern());
+            }
             Some(ForInit::ForIn(initializer)) if initializer.declares_variable() => {
                 self.visit_expr(initializer.iterable());
                 self.bind(initializer.name().name());

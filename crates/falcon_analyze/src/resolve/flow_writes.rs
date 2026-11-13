@@ -204,6 +204,9 @@ impl FlowWrites {
         if let Some(init) = header.init() {
             match init {
                 ForInit::VarDecl(declaration) => self.visit_local_var(declaration),
+                ForInit::PatternDecl(declaration) => {
+                    self.visit_stmt(Stmt::PatternDecl(declaration));
+                }
                 ForInit::ForIn(init) => {
                     self.visit_expr(init.iterable());
                     if init.declares_variable() {

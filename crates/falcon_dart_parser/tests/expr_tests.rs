@@ -15,6 +15,45 @@ fn parse_expr(expr_src: &str) -> (String, falcon_dart_parser::ParseResult) {
     (source, parsed)
 }
 
+#[test]
+fn null_aware_dot_shorthand_elements_preserve_split_tokens() {
+    for expression in [
+        "<E>[?.a, ? .a]",
+        "<E>{?.a, ? .a}",
+        "<E, E>{?.a: ?.a, ? .a: ? .a}",
+    ] {
+        let (source, parsed) = parse_expr(expression);
+        assert!(
+            parsed.errors.is_empty(),
+            "{expression}: {:?}",
+            parsed.errors
+        );
+        assert!(parsed.tree.is_lossless(&source));
+        let assert_element = |element| {
+            let CollectionElement::NullAware(element) = element else {
+                panic!("expected null-aware element");
+            };
+            assert!(matches!(element.expr(), Expr::DotShorthand(_)));
+        };
+        match initializer(parsed.tree.program(&source)) {
+            Expr::List(list) => list.elements().for_each(assert_element),
+            Expr::Set(set) => set.elements().for_each(assert_element),
+            Expr::Map(map) => {
+                for entry in map.elements() {
+                    let MapElement::Entry(entry) = entry else {
+                        panic!("expected map entry");
+                    };
+                    assert!(entry.key_null_aware());
+                    assert!(entry.value_null_aware());
+                    assert!(matches!(entry.key(), Expr::DotShorthand(_)));
+                    assert!(matches!(entry.value(), Expr::DotShorthand(_)));
+                }
+            }
+            other => panic!("expected collection, got {other:?}"),
+        }
+    }
+}
+
 fn initializer(program: Program<'_>) -> Expr<'_> {
     match program
         .declarations()

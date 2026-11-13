@@ -23,6 +23,39 @@ fn assert_depth_limited(source: &str) {
     Walk.visit_program(parsed.tree.program(source));
 }
 
+#[test]
+fn depth_recovery_reports_one_error_and_keeps_following_declarations() {
+    for construct in [
+        format!("void f() {{ {}{} }}", "{".repeat(5000), "}".repeat(5000)),
+        format!("var f = {}0;", "() => ".repeat(5000)),
+        format!(
+            "{}int{} f;",
+            "void Function(".repeat(5000),
+            ")".repeat(5000)
+        ),
+        format!(
+            "typedef X = {}int{};",
+            "List<".repeat(5000),
+            ">".repeat(5000)
+        ),
+        format!(
+            "void f(Object o) {{ if (o case {}_{}) {{}} }}",
+            "(".repeat(5000),
+            ")".repeat(5000)
+        ),
+    ] {
+        let source = format!("{construct} class After {{}}");
+        let parsed = parse(&source);
+        assert_eq!(parsed.errors.len(), 1, "{:?}", parsed.errors);
+        assert_eq!(parsed.errors[0].message, "nesting too deep");
+        assert!(parsed.tree.is_lossless(&source));
+        assert!(matches!(
+            parsed.tree.program(&source).declarations().last(),
+            Some(TopLevelDecl::Class(_))
+        ));
+    }
+}
+
 fn first_pattern<'a>(parsed: &'a ParseResult, source: &'a str) -> Pattern<'a> {
     let Stmt::Switch(switch) = common::body_stmts(parsed.tree.program(source))
         .next()

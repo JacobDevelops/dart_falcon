@@ -57,7 +57,7 @@ impl Collector<'_, '_> {
         let span = match init {
             ForInit::ForIn(for_in) => for_in.name().span(),
             ForInit::PatternForIn(for_in) => for_in.pattern().span(),
-            ForInit::VarDecl(_) | ForInit::Exprs(_) => return,
+            ForInit::VarDecl(_) | ForInit::PatternDecl(_) | ForInit::Exprs(_) => return,
         };
         if !self
             .bodies

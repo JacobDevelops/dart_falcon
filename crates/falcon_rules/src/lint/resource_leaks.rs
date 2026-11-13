@@ -957,6 +957,13 @@ impl<'a> Visitor<'a> for References<'a> {
         visitor::walk_local_var(self, node);
     }
 
+    fn visit_pattern_declaration(&mut self, node: PatternDeclaration<'a>) {
+        for name in visitor::bound_names(node.pattern()) {
+            self.bind(name, name.span(), BindingKind::Local);
+        }
+        visitor::walk_pattern_declaration(self, node);
+    }
+
     fn visit_formal_param(&mut self, node: FormalParam<'a>) {
         // `this.field` parameters are field references, not shadowing locals.
         if !self.in_primary && node.initializing() != Some(InitializingFormal::This) {

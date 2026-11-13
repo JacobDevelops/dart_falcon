@@ -309,6 +309,7 @@ impl<'a> ForStmt<'a> {
 #[derive(Clone, Copy)]
 pub enum ForInit<'a> {
     VarDecl(LocalVarDecl<'a>),
+    PatternDecl(PatternDeclaration<'a>),
     ForIn(ForInInit<'a>),
     PatternForIn(PatternForInInit<'a>),
     Exprs(ForExprsInit<'a>),
@@ -317,6 +318,7 @@ impl<'a> AstNode<'a> for ForInit<'a> {
     fn cast(node: SyntaxNode<'a>) -> Option<Self> {
         match node.kind() {
             NodeKind::LocalVarDecl => Some(Self::VarDecl(LocalVarDecl(node))),
+            NodeKind::PatternDeclaration => Some(Self::PatternDecl(PatternDeclaration(node))),
             NodeKind::ForInInit => Some(Self::ForIn(ForInInit(node))),
             NodeKind::PatternForInInit => Some(Self::PatternForIn(PatternForInInit(node))),
             NodeKind::ForExprsInit => Some(Self::Exprs(ForExprsInit(node))),
@@ -326,6 +328,7 @@ impl<'a> AstNode<'a> for ForInit<'a> {
     fn syntax(self) -> SyntaxNode<'a> {
         match self {
             Self::VarDecl(v) => v.syntax(),
+            Self::PatternDecl(v) => v.syntax(),
             Self::ForIn(v) => v.syntax(),
             Self::PatternForIn(v) => v.syntax(),
             Self::Exprs(v) => v.syntax(),
@@ -350,6 +353,7 @@ impl fmt::Debug for ForInit<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::VarDecl(v) => f.debug_tuple("VarDecl").field(v).finish(),
+            Self::PatternDecl(v) => f.debug_tuple("PatternDecl").field(v).finish(),
             Self::ForIn(v) => fmt::Debug::fmt(v, f),
             Self::PatternForIn(v) => fmt::Debug::fmt(v, f),
             Self::Exprs(v) => f.debug_tuple("Exprs").field(&v.exprs()).finish(),

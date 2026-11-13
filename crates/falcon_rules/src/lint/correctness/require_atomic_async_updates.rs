@@ -305,6 +305,10 @@ impl<'a> AwaitedRead<'_, 'a> {
                     self.visit_expr(init.iterable());
                     self.suppress_reads |= self.pattern_shadows(init.pattern());
                 }
+                ForInit::PatternDecl(init) => {
+                    self.visit_expr(init.init());
+                    self.suppress_reads |= self.pattern_shadows(init.pattern());
+                }
                 ForInit::VarDecl(init) => {
                     self.suppress_reads |= init
                         .declarators()

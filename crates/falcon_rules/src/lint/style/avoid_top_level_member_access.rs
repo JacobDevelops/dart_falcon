@@ -95,6 +95,12 @@ impl<'a> Collector<'a> {
                 }
                 self.suppress_next_local_var_binding = true;
             }
+            ForInit::PatternDecl(declaration) => {
+                self.bind_pattern(
+                    declaration.pattern(),
+                    Span::new(declaration.span().end, statement.span().end),
+                );
+            }
             ForInit::ForIn(init) if init.declares_variable() => {
                 self.bind(init.name(), statement.body().span());
             }

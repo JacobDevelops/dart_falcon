@@ -16,7 +16,11 @@ impl Parser<'_> {
 
     fn parse_logical_or_pattern(&mut self) -> (CompletedMarker, bool) {
         self.guarded(
-            |p| (p.missing(NodeKind::ErrorPattern), false),
+            |p| {
+                let marker = p.start();
+                p.skip_overflowed_expr();
+                (marker.complete(p, NodeKind::ErrorPattern), false)
+            },
             |p| {
                 let left = p.parse_logical_and_pattern();
                 p.parse_logical_pattern_tail(

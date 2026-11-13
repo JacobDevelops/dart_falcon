@@ -131,10 +131,16 @@ impl StableLocals {
     }
 
     fn record_for_init(&mut self, init: ForInit<'_>) {
-        if let ForInit::ForIn(node) = init
-            && node.keyword() == VarKeyword::Final
-        {
-            self.0.insert(node.name().syntax().id(), Callee::Variable);
+        match init {
+            ForInit::ForIn(node) if node.keyword() == VarKeyword::Final => {
+                self.0.insert(node.name().syntax().id(), Callee::Variable);
+            }
+            ForInit::PatternDecl(node) if node.keyword() == VarKeyword::Final => {
+                for name in falcon_syntax::cst::visit::bound_names(node.pattern()) {
+                    self.0.insert(name.syntax().id(), Callee::Variable);
+                }
+            }
+            _ => {}
         }
     }
 }

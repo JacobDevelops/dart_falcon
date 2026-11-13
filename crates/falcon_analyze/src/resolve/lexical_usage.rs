@@ -297,6 +297,7 @@ impl UsageCollector {
     fn visit_for_init(&mut self, init: ForInit<'_>) {
         match init {
             ForInit::VarDecl(declaration) => self.visit_local_declaration(declaration),
+            ForInit::PatternDecl(declaration) => self.visit_stmt(Stmt::PatternDecl(declaration)),
             ForInit::ForIn(init) => {
                 self.visit_expr(init.iterable());
                 let name = init.name();
@@ -693,6 +694,54 @@ mod tests {
     use falcon_dart_parser::parse;
 
     use super::*;
+
+    #[test]
+    fn c_style_pattern_bindings_track_uses_and_writes_without_escaping() {
+        for keyword in ["var", "final"] {
+            for suffix in ["", "print(value);"] {
+                let update = if keyword == "var" { "value++" } else { "" };
+                let source = format!(
+                    "void f(int value, (int, int) input) {{ for ({keyword} (value, other) = input; value < 2; {update}) {{ print(value + other); }} {suffix} }}"
+                );
+                let parsed = parse(&source);
+                assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+                let program = parsed.tree.program(&source);
+                let TopLevelDecl::Function(function) = program.declarations().first().unwrap()
+                else {
+                    panic!()
+                };
+                let params = function.params().unwrap();
+                let parameter = params.params().first().unwrap().name();
+                let input = params.params().nth(1).unwrap().name();
+                let used = used_parameters(params, function.body().unwrap());
+                assert_eq!(used.contains(&parameter.span().start), !suffix.is_empty());
+                assert!(used.contains(&input.span().start));
+                let bindings = local_declarations(program);
+                assert_eq!(
+                    bindings[&(source.find("= input").unwrap() + 2)],
+                    input.syntax().id()
+                );
+                let condition = source.find("value <").unwrap();
+                let body = source.find("value +").unwrap();
+                assert_eq!(bindings[&condition], bindings[&body]);
+                assert_ne!(bindings[&condition], parameter.syntax().id());
+                let writes = local_writes(program);
+                if keyword == "var" {
+                    assert_eq!(writes.len(), 1);
+                    assert_eq!(writes[0].declaration, bindings[&condition]);
+                    assert_eq!(writes[0].kind, LocalWriteKind::IncDec);
+                } else {
+                    assert!(writes.is_empty());
+                }
+                if !suffix.is_empty() {
+                    assert_eq!(
+                        bindings[&source.rfind("value").unwrap()],
+                        parameter.syntax().id()
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn long_binary_chain_preserves_lexical_uses_and_writes() {

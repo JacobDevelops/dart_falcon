@@ -2,7 +2,7 @@ use falcon_syntax::cst::{NodeKind, ParamKind};
 use falcon_syntax::language_version::Feature;
 use falcon_syntax::token::TokenKind;
 
-use super::{CompletedMarker, Parser};
+use super::{CompletedMarker, Parser, expr::Brackets};
 
 impl Parser<'_> {
     pub(super) fn parse_type(&mut self) -> CompletedMarker {
@@ -12,9 +12,69 @@ impl Parser<'_> {
     /// Also reports whether the type is an unqualified, argument-free, nonnullable name.
     pub(super) fn parse_type_with_binding_name(&mut self) -> (CompletedMarker, bool) {
         self.guarded(
-            |p| (p.missing(NodeKind::DynamicType), false),
+            |p| (p.skip_overflowed_type(), false),
             Self::parse_type_with_binding_name_inner,
         )
+    }
+
+    fn skip_overflowed_type(&mut self) -> CompletedMarker {
+        let marker = self.start();
+        let mut brackets = 0usize;
+        let mut angles = 0usize;
+        loop {
+            match self.cur().kind {
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => brackets += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                    if brackets == 0 {
+                        break;
+                    }
+                    brackets -= 1;
+                }
+                TokenKind::Lt => angles += 1,
+                TokenKind::Gt | TokenKind::GtGt | TokenKind::GtGtGt => {
+                    if angles == 0 {
+                        break;
+                    }
+                    let count = match self.cur().kind {
+                        TokenKind::GtGtGt => 3,
+                        TokenKind::GtGt => 2,
+                        _ => 1,
+                    };
+                    if count > angles {
+                        for _ in 0..angles {
+                            self.consume_type_arg_close();
+                        }
+                        break;
+                    }
+                    angles -= count;
+                }
+                TokenKind::Comma | TokenKind::Semicolon | TokenKind::Eq
+                    if brackets == 0 && angles == 0 =>
+                {
+                    break;
+                }
+                TokenKind::Eof => break,
+                _ => {}
+            }
+            let closes_type = matches!(
+                self.cur().kind,
+                TokenKind::RParen
+                    | TokenKind::RBracket
+                    | TokenKind::RBrace
+                    | TokenKind::Gt
+                    | TokenKind::GtGt
+                    | TokenKind::GtGtGt
+            ) && brackets == 0
+                && angles == 0;
+            self.advance();
+            if closes_type {
+                self.eat_type_qmark();
+                if !self.at_function_type_start() {
+                    break;
+                }
+            }
+        }
+        marker.complete(self, NodeKind::DynamicType)
     }
 
     fn parse_type_with_binding_name_inner(&mut self) -> (CompletedMarker, bool) {
@@ -90,7 +150,11 @@ impl Parser<'_> {
 
     fn parse_function_type(&mut self, return_marker: Option<CompletedMarker>) -> CompletedMarker {
         self.guarded(
-            |p| return_marker.unwrap_or_else(|| p.missing(NodeKind::DynamicType)),
+            |p| {
+                let marker = return_marker.map(|completed| completed.precede(p));
+                let skipped = p.skip_overflowed_type();
+                marker.map_or(skipped, |marker| marker.complete(p, NodeKind::DynamicType))
+            },
             |p| p.parse_function_type_inner(return_marker),
         )
     }
@@ -260,7 +324,15 @@ impl Parser<'_> {
 
     pub(super) fn parse_formal_param_list(&mut self) -> CompletedMarker {
         self.guarded(
-            |p| p.missing(NodeKind::FormalParamList),
+            |p| {
+                let marker = p.start();
+                if let Some(close) = p.matching_close(p.pos, Brackets::Mixed, |_| false, None) {
+                    while p.pos <= close && !p.at(TokenKind::Eof) {
+                        p.advance();
+                    }
+                }
+                marker.complete(p, NodeKind::FormalParamList)
+            },
             Self::parse_formal_param_list_inner,
         )
     }

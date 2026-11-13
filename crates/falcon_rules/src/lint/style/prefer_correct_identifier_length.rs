@@ -147,11 +147,9 @@ impl<'a> StructuralRuleVisitor<'a> for Names<'a, 'a> {
         StructuralTraversal::Continue
     }
 
-    fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
-        if let Stmt::PatternDecl(declaration) = node {
-            for name in bound_names(declaration.pattern()) {
-                self.check(name);
-            }
+    fn visit_pattern_declaration(&mut self, node: PatternDeclaration<'a>) -> StructuralTraversal {
+        for name in bound_names(node.pattern()) {
+            self.check(name);
         }
         StructuralTraversal::Continue
     }

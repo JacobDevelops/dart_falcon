@@ -109,6 +109,9 @@ class LoopInitializers {
     for (final values in this.values) {
       print(values);
     }
+    for (var (x, _) = (1, 2); x < 3; x++) {
+      print(this.x);
+    }
   }
 }
 

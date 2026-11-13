@@ -1,5 +1,6 @@
 use super::{ClosureReturns, DeclarationIdentity, Expr, ResolvedType, Visitor};
 use crate::resolve::semantic::ResolvedTypeKind;
+use falcon_syntax::cst::Stmt;
 
 pub(super) struct CollectionTypes<'a, 'model, L> {
     pub(super) lexical: ClosureReturns<'a, 'model, L>,
@@ -69,6 +70,9 @@ impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
         self.lexical.environment.push_scope();
         match header.init() {
             Some(ForInit::VarDecl(declaration)) => self.lexical.declare_local(declaration),
+            Some(ForInit::PatternDecl(declaration)) => {
+                self.lexical.visit_stmt(Stmt::PatternDecl(declaration));
+            }
             Some(ForInit::ForIn(binding)) if binding.declares_variable() => {
                 let var_type = binding.var_type();
                 let name = binding.name();

@@ -776,11 +776,6 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             Stmt::LocalVar(declaration) => {
                 self.check_declarators(declaration.var_type(), declaration.declarators());
             }
-            Stmt::PatternDecl(declaration) => {
-                // Pattern declarations are not ordinary variable declarations:
-                // retain the non-expression-parent whitespace exemptions.
-                self.check(declaration.init(), Parent::OtherNode);
-            }
             Stmt::Assert(statement) => {
                 self.check(statement.condition(), Parent::OtherNode);
                 if let Some(message) = statement.message() {
@@ -797,6 +792,12 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         self.bare.pop();
         self.in_cascade.pop();
         self.statement_start.pop();
+    }
+
+    fn visit_pattern_declaration(&mut self, node: PatternDeclaration<'a>) -> StructuralTraversal {
+        // Pattern declarations retain the non-expression-parent whitespace exemptions.
+        self.check(node.init(), Parent::OtherNode);
+        StructuralTraversal::Continue
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {

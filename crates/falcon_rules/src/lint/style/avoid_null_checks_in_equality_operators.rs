@@ -125,7 +125,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     }
                 }
                 Some(ForInit::ForIn(initializer)) => checks.check(initializer.name()),
-                Some(ForInit::PatternForIn(_) | ForInit::Exprs(_)) | None => {}
+                Some(ForInit::PatternDecl(_) | ForInit::PatternForIn(_) | ForInit::Exprs(_)) | None => {}
             },
             Stmt::TryCatch(statement) => {
                 for clause in statement.catches() {

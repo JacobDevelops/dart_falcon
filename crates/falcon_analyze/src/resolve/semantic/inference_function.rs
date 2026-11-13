@@ -447,10 +447,13 @@ impl<L: Fn(&str) -> Option<ResolvedType>> ClosureReturns<'_, '_, L> {
     }
 
     fn visit_for_returns(&mut self, statement: falcon_syntax::cst::ForStmt<'_>) {
-        use falcon_syntax::cst::ForInit;
+        use falcon_syntax::cst::{ForInit, Stmt};
         self.scoped(|returns| {
             match statement.header().init() {
                 Some(ForInit::VarDecl(declaration)) => returns.declare_local(declaration),
+                Some(ForInit::PatternDecl(declaration)) => {
+                    returns.visit_stmt(Stmt::PatternDecl(declaration));
+                }
                 Some(ForInit::ForIn(binding)) if binding.declares_variable() => {
                     let var_type = binding.var_type();
                     let name = binding.name();

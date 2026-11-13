@@ -8,6 +8,58 @@ use crate::common_class;
 use common_class::only_class;
 
 #[test]
+fn mixin_class_alias_preserves_following_declarations() {
+    for modifier in ["", "base ", "abstract "] {
+        let source = format!("{modifier}mixin class C = Object with M; class After {{}}");
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        assert!(parsed.tree.is_lossless(&source));
+        let mut declarations = parsed.tree.program(&source).declarations();
+        let TopLevelDecl::ClassTypeAlias(alias) = declarations.next().unwrap() else {
+            panic!("expected class alias");
+        };
+        assert_eq!(alias.name().name(), "C");
+        assert_eq!(alias.with_clause().len(), 1);
+        assert!(matches!(declarations.next(), Some(TopLevelDecl::Class(_))));
+    }
+}
+
+#[test]
+fn initializer_calls_accept_new_constructor_name() {
+    for initializer in ["super.new()", "this.new()"] {
+        let source = format!("class C {{ C() : {initializer}; }}");
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let ClassMember::Constructor(ctor) = only_class(parsed.tree.program(&source))
+            .members()
+            .next()
+            .unwrap()
+        else {
+            panic!("expected constructor");
+        };
+        assert_eq!(ctor.initializers().len(), 1);
+        assert!(parsed.tree.is_lossless(&source));
+    }
+}
+
+#[test]
+fn new_is_not_a_field_initializer_name() {
+    let parsed = parse("class C { C() : this.new = 1; }");
+    assert!(!parsed.errors.is_empty());
+}
+
+#[test]
+fn contextual_import_prefixes_are_not_member_modifiers() {
+    for prefix in ["async", "override", "await", "yield", "type", "on", "show"] {
+        let source = format!("class C {{ {prefix}.Value field; }}");
+        let parsed = parse(&source);
+        assert!(parsed.errors.is_empty(), "{prefix}: {:?}", parsed.errors);
+        assert_eq!(only_class(parsed.tree.program(&source)).members().len(), 1);
+        assert!(parsed.tree.is_lossless(&source));
+    }
+}
+
+#[test]
 fn test_untyped_async_method() {
     let source = "class C { foo() async {} }";
     let falcon_dart_parser::ParseResult { tree, errors } = parse(source);

@@ -4,6 +4,21 @@ use falcon_dart_parser::parser::parse;
 use falcon_syntax::cst::visit::*;
 use falcon_syntax::cst::*;
 
+#[test]
+fn c_style_pattern_initializer_walks_bindings_and_value_once() {
+    let source = "void f() { for (var (first, second) = (11, 22); condition; update()) {} }";
+    let parsed = parse(source);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let mut recorder = Recorder::default();
+    recorder.visit_program(parsed.tree.program(source));
+    assert!(recorder.has_ident("first"));
+    assert!(recorder.has_ident("second"));
+    assert!(recorder.has_int("11"));
+    assert!(recorder.has_int("22"));
+    assert!(recorder.has_ident("condition"));
+    assert!(recorder.has_ident("update"));
+}
+
 /// Records every leaf the default walk delivers, keyed by kind, so a sentinel's
 /// exact-once presence proves traversal reached its position without duplication.
 #[derive(Default)]

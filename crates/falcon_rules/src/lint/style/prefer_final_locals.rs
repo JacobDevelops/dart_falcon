@@ -183,8 +183,12 @@ impl<'a> Collector<'_, 'a> {
         if self.outside_body {
             return;
         }
-        if let Some(ForInit::PatternForIn(init)) = header.init() {
-            self.check_for_each_pattern(init.keyword(), init.pattern());
+        match header.init() {
+            Some(ForInit::PatternDecl(declaration)) => self.check_pattern_declaration(declaration),
+            Some(ForInit::PatternForIn(init)) => {
+                self.check_for_each_pattern(init.keyword(), init.pattern());
+            }
+            _ => {}
         }
     }
 

@@ -543,6 +543,25 @@ impl<'src> Parser<'src> {
         }
     }
 
+    pub(super) fn eat_element_qmark(&mut self) -> bool {
+        if self.at(TokenKind::QmarkDot) {
+            self.events.push(Event::Token {
+                kind: TokenKind::Qmark,
+                offset: self.cur().offset(),
+                len: 1,
+            });
+            self.split = Some(Token::new(
+                TokenKind::Dot,
+                self.cur().offset(),
+                self.cur().len(),
+            ));
+            self.split_count = 1;
+            true
+        } else {
+            self.eat(TokenKind::Qmark).is_some()
+        }
+    }
+
     pub(super) fn expect(&mut self, kind: TokenKind) -> Token {
         if self.at(kind) {
             self.advance()
@@ -777,6 +796,12 @@ impl<'src> Parser<'src> {
                 break;
             }
         }
+        self.consume_type_arg_close();
+        marker.complete(self, NodeKind::TypeArgs);
+        count
+    }
+
+    pub(super) fn consume_type_arg_close(&mut self) {
         // Narrow only the cursor view; canonical shift tokens stay unchanged.
         let narrowed = match self.cur().kind {
             TokenKind::GtGtGt => Some(TokenKind::GtGt),
@@ -794,8 +819,6 @@ impl<'src> Parser<'src> {
         } else {
             self.eat(TokenKind::Gt);
         }
-        marker.complete(self, NodeKind::TypeArgs);
-        count
     }
 
     /// Token index after skipping any run of annotations starting at `i`. A pure

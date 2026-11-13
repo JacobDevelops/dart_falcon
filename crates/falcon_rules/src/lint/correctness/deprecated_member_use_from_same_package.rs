@@ -533,6 +533,9 @@ impl<'a> Visitor<'a> for Frontier<'a> {
     }
     fn visit_for_header(&mut self, node: ForHeader<'a>) {
         let previous = self.declaration;
+        if let Some(ForInit::PatternDecl(declaration)) = node.init() {
+            self.declaration = Some(declaration.span());
+        }
         if let Some(ForInit::ForIn(initializer)) = node.init()
             && initializer.declares_variable()
         {

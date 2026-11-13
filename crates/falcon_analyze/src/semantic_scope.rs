@@ -2025,7 +2025,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
             Stmt::For(statement)
                 if matches!(
                     statement.header().init(),
-                    None | Some(ForInit::VarDecl(_) | ForInit::Exprs(_))
+                    None | Some(ForInit::VarDecl(_) | ForInit::PatternDecl(_) | ForInit::Exprs(_))
                 ) =>
             {
                 statement.header().condition().is_some_and(
@@ -2958,6 +2958,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
     fn visit_for_init(&mut self, init: ForInit<'a>, is_await: bool) {
         match init {
             ForInit::VarDecl(declaration) => self.visit_local_declaration(declaration),
+            ForInit::PatternDecl(declaration) => self.visit_stmt(Stmt::PatternDecl(declaration)),
             ForInit::ForIn(node) if node.declares_variable() => {
                 self.visit_declaration_annotations(node.annotations());
                 self.visit_expr(node.iterable());

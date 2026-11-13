@@ -135,14 +135,17 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'_, 'a> {
             && let Some(keyword) = declaration.keyword_span()
         {
             self.report_final(keyword);
-        } else if let Stmt::PatternDecl(declaration) = node
-            && declaration.keyword() == VarKeyword::Final
-        {
-            self.report_final(declaration.keyword_span());
         } else if let Stmt::For(statement) = node
             && let Some(init) = statement.header().init()
         {
             self.check_for_init(init, statement.span().start);
+        }
+        StructuralTraversal::Continue
+    }
+
+    fn visit_pattern_declaration(&mut self, node: PatternDeclaration<'a>) -> StructuralTraversal {
+        if node.keyword() == VarKeyword::Final {
+            self.report_final(node.keyword_span());
         }
         StructuralTraversal::Continue
     }

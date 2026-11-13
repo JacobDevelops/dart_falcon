@@ -183,12 +183,11 @@ mod dcl {
         fn visit_local_var(&mut self, _node: LocalVarDecl<'ctx>) -> StructuralTraversal {
             StructuralTraversal::SkipChildren
         }
-        fn visit_stmt(&mut self, node: Stmt<'ctx>) -> StructuralTraversal {
-            if matches!(node, Stmt::PatternDecl(_)) {
-                StructuralTraversal::SkipChildren
-            } else {
-                StructuralTraversal::Continue
-            }
+        fn visit_pattern_declaration(
+            &mut self,
+            _node: PatternDeclaration<'ctx>,
+        ) -> StructuralTraversal {
+            StructuralTraversal::SkipChildren
         }
 
         fn visit_expr(&mut self, node: Expr<'ctx>) -> StructuralTraversal {

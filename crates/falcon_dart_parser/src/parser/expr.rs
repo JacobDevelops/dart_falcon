@@ -535,7 +535,7 @@ impl Parser<'_> {
 
     /// Past the depth limit, swallow the rest of the operand as one error node
     /// so deeper input costs neither recursion nor a selector chain per token.
-    fn skip_overflowed_expr(&mut self) -> CompletedMarker {
+    pub(super) fn skip_overflowed_expr(&mut self) -> CompletedMarker {
         let marker = self.start();
         let mut depth = 0usize;
         loop {
@@ -1133,7 +1133,7 @@ impl Parser<'_> {
                 (NodeKind::ForElement, NodeKind::MapForElement)
             }
             _ => {
-                let null_aware = self.eat(TokenKind::Qmark).is_some();
+                let null_aware = self.eat_element_qmark();
                 let before = self.pos;
                 let element = self.parse_expr();
                 if self.pos == before && is_map.is_none() {
@@ -1146,7 +1146,7 @@ impl Parser<'_> {
                         self.error("map entry in set literal");
                     }
                     is_map.get_or_insert(true);
-                    self.eat(TokenKind::Qmark);
+                    self.eat_element_qmark();
                     self.parse_expr();
                     return marker.complete(
                         self,
@@ -1196,8 +1196,8 @@ impl Parser<'_> {
         let marker = self.start();
         match self.cur().kind {
             // Dart 3.0 null-aware element `?expr`
-            TokenKind::Qmark => {
-                self.advance();
+            TokenKind::Qmark | TokenKind::QmarkDot => {
+                self.eat_element_qmark();
                 self.parse_expr();
                 marker.complete(self, NodeKind::NullAwareElement)
             }

@@ -96,8 +96,8 @@ mixinDeclaration
 
 mixinClassDeclaration
   : annotation* ( 'abstract' )? ( 'base' )? 'mixin' 'class' typeIdentifier typeParameters?
-    superclass? withClause? implementsClause?
-    '{' classMember* '}'
+    ( superclass? withClause? implementsClause? '{' classMember* '}'
+    | '=' type withClause implementsClause? ';' )
   ;
 
 onClause : 'on' typeList ;

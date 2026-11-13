@@ -19,15 +19,14 @@ impl Parser<'_> {
         let before = self.pos;
         let marker = self.start();
         let stmt = self.guarded(
-            |p| {
-                let error = p.start();
-                p.advance();
-                error.complete(p, NodeKind::ErrorExpr);
-                Err(NodeKind::ExprStmt)
-            },
+            |p| Err(p.skip_overflowed_stmt()),
             |p| {
                 // A statement-leading `label:` is unambiguous; labels may nest.
-                if p.at(TokenKind::Ident) && p.peek(1).kind == TokenKind::Colon {
+                if p.cur().kind.is_identifier_like()
+                    && !(p.at(TokenKind::Await) && p.ctx.body.is_async())
+                    && !(p.at(TokenKind::Yield) && p.ctx.body.is_generator())
+                    && p.peek(1).kind == TokenKind::Colon
+                {
                     let name_marker = p.start();
                     p.advance();
                     name_marker.complete(p, NodeKind::Identifier);
@@ -129,12 +128,41 @@ impl Parser<'_> {
         }
     }
 
+    fn skip_overflowed_stmt(&mut self) -> NodeKind {
+        let marker = self.start();
+        if self.at(TokenKind::LBrace) {
+            if let Some(close) = self.matching_close(self.pos, Brackets::BraceOnly, |_| false, None)
+            {
+                while self.pos <= close && !self.at(TokenKind::Eof) {
+                    self.advance();
+                }
+            } else {
+                self.skip_overflowed_expr();
+            }
+        } else {
+            self.skip_overflowed_expr();
+        }
+        marker.complete(self, NodeKind::ErrorExpr);
+        NodeKind::ExprStmt
+    }
+
     fn parse_if_stmt(&mut self) -> NodeKind {
-        self.advance(); // if
-        self.parse_if_condition();
-        self.parse_stmt();
-        if self.eat(TokenKind::Else).is_some() {
+        let mut branches = Vec::new();
+        loop {
+            self.advance(); // if
+            self.parse_if_condition();
             self.parse_stmt();
+            if self.eat(TokenKind::Else).is_none() {
+                break;
+            }
+            if !self.at(TokenKind::If) {
+                self.parse_stmt();
+                break;
+            }
+            branches.push(self.start());
+        }
+        for branch in branches.into_iter().rev() {
+            branch.complete(self, NodeKind::IfStmt);
         }
         NodeKind::IfStmt
     }
@@ -189,24 +217,27 @@ impl Parser<'_> {
             return self.finish_for_clauses();
         }
 
-        // Dart 3 pattern for-in: `for (final (a, b) in xs)`. The keyword must be
-        // directly followed by a `(`/`[`/`{` opening a destructuring pattern, or
-        // by an ident-led object pattern (`final MapEntry(:key, :value) in ...`),
-        // with the pattern then followed by `in`. A plain typed `final Foo x in`
-        // has no `(` before the terminator, so it stays a typed ForIn (below).
+        // Pattern declarations can initialize either form of loop. Keep the
+        // keyword inside the initializer so consumers retain final/var.
         if self.at_any(&[TokenKind::Final, TokenKind::Var])
             && (matches!(
                 self.peek(1).kind,
-                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace | TokenKind::Lt
             ) || self.ident_led_object_pattern_ahead())
             && let Some(is_for_in) = self.speculate(|p| {
                 p.advance();
                 p.parse_binding_pattern();
-                p.eat(TokenKind::In)?;
-                p.parse_expr();
-                init_marker.complete(p, NodeKind::PatternForInInit);
-                p.expect(TokenKind::RParen);
-                Some(true)
+                if p.eat(TokenKind::In).is_some() {
+                    p.parse_expr();
+                    init_marker.complete(p, NodeKind::PatternForInInit);
+                    p.expect(TokenKind::RParen);
+                    Some(true)
+                } else {
+                    p.eat(TokenKind::Eq)?;
+                    p.parse_expr();
+                    init_marker.complete(p, NodeKind::PatternDeclaration);
+                    Some(p.finish_for_clauses())
+                }
             })
         {
             return is_for_in;
@@ -499,7 +530,7 @@ impl Parser<'_> {
         if self.at_any(&[TokenKind::Final, TokenKind::Var])
             && (matches!(
                 self.peek(1).kind,
-                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace | TokenKind::Lt
             ) || self.object_pattern_assign_ahead(self.pos + 1))
             && let Some(stmt) = self.try_parse_pattern_declaration()
         {
@@ -579,7 +610,9 @@ impl Parser<'_> {
         // (no return type). A balanced lookahead confirms a function body
         // follows the parameter list before we commit — otherwise this is a
         // call statement (`foo();`, `g((x) => x);`), parsed as an expression.
-        if self.at(TokenKind::Ident)
+        if self.cur().kind.is_identifier_like()
+            && !(self.at(TokenKind::Await) && self.ctx.body.is_async())
+            && !(self.at(TokenKind::Yield) && self.ctx.body.is_generator())
             && matches!(self.peek(1).kind, TokenKind::LParen | TokenKind::Lt)
             && self.untyped_local_func_ahead()
             && let Some(stmt) = self.try_parse_untyped_local_func()

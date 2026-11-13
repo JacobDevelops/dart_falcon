@@ -893,6 +893,7 @@ fn adjacent_delimiters_never_mix_raw_and_interpolated_segments() {
 fn statement_loops_share_complete_headers() {
     for (clause, kind, updates) in [
         ("var i = 0; i < 3; i++, i += 1", "declaration", 2),
+        ("var (i, j) = (0, 3); i < j; i++", "pattern-declaration", 1),
         ("i = 0; i < 3; i++", "expression", 1),
         ("final x in xs", "for-in", 0),
         ("final (x, y) in xs", "pattern", 0),
@@ -912,6 +913,7 @@ fn statement_loops_share_complete_headers() {
         };
         let actual = match &statement.header().init() {
             Some(ForInit::VarDecl(_)) => "declaration",
+            Some(ForInit::PatternDecl(_)) => "pattern-declaration",
             Some(ForInit::Exprs(_)) => "expression",
             Some(ForInit::ForIn(_)) => "for-in",
             Some(ForInit::PatternForIn(_)) => "pattern",

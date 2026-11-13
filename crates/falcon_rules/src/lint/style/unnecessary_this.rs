@@ -192,7 +192,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                     self.binding_patterns.push(pattern.syntax().id());
                 }
                 matches!(child, StructuralNode::LocalVar(_) | StructuralNode::Pattern(_)
-                    | StructuralNode::Expr(_))
+                    | StructuralNode::PatternDeclaration(_) | StructuralNode::Expr(_))
             }
             StructuralNode::IfCondition(condition @ IfCondition::Case(_))
                 if self.if_conditions.last().copied() == Some(condition.syntax().id()) =>

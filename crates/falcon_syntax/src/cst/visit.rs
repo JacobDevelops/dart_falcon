@@ -1535,6 +1535,7 @@ pub fn walk_local_var<'a, V: Visitor<'a>>(v: &mut V, node: LocalVarDecl<'a>) {
 pub fn walk_for_init<'a, V: Visitor<'a>>(v: &mut V, init: ForInit<'a>) {
     match init {
         ForInit::VarDecl(d) => v.visit_local_var(d),
+        ForInit::PatternDecl(d) => v.visit_pattern_declaration(d),
         ForInit::ForIn(n) => {
             let annotations = n.annotations();
             let var_type = n.var_type();

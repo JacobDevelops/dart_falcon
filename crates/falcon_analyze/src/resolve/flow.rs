@@ -1229,7 +1229,7 @@ pub(super) fn exits<'tree>(
         Stmt::For(statement) => {
             matches!(
                 statement.header().init(),
-                None | Some(ForInit::VarDecl(_) | ForInit::Exprs(_))
+                None | Some(ForInit::VarDecl(_) | ForInit::PatternDecl(_) | ForInit::Exprs(_))
             ) && always_true(statement.header().condition())
                 && !breaks_to(None, statement.body())
         }
