@@ -3,7 +3,10 @@
 //! Public barrels are analyzed non-part libraries under `lib/`, outside `lib/src/`,
 //! containing an export directive. Export namespaces include public declarations
 //! and transitive same-package exports, respecting `show`/`hide` and the default
-//! conditional URI. If either barrel transitively exports the other, they are exempt, so
+//! conditional URI (not the alternative branches). Parts, including nested parts,
+//! contribute declarations to their owning library. Local declarations shadow
+//! exported declarations of the same name, but a getter and setter remain a valid
+//! complementary pair. If either barrel transitively exports the other, they are exempt, so
 //! umbrella barrels are allowed. Reports once per export directive in the later
 //! barrel by path, choosing the first matching earlier barrel and name in sorted
 //! order. Private names, `main`, `@internal`, and `@visibleForTesting` declarations
@@ -66,8 +69,10 @@ impl CrossFileRule for DuplicateBarrelExports {
                     .iter()
                     .filter_map(|&index| {
                         let declaration = &project.declarations[index];
-                        (!declaration.exempt && export.includes(declaration.name))
-                            .then_some((declaration.name, index))
+                        (!declaration.exempt
+                            && export.includes(declaration.name)
+                            && project.namespaces[later].contains(&index))
+                        .then_some((declaration.name, index))
                     })
                     .collect();
                 let duplicate = independent.iter().find_map(|&earlier| {
@@ -75,7 +80,11 @@ impl CrossFileRule for DuplicateBarrelExports {
                         .iter()
                         .find(|&&(name, declaration)| {
                             names_by_barrel[&earlier].get(name).is_some_and(|others| {
-                                others.iter().any(|&other| other != declaration)
+                                others.iter().any(|&other| {
+                                    other != declaration
+                                        && project.declarations[declaration]
+                                            .conflicts_with(&project.declarations[other])
+                                })
                             })
                         })
                         .map(|&(name, _)| (earlier, name))

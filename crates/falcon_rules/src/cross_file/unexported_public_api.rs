@@ -4,11 +4,15 @@
 //! under `lib/src/`. Public libraries are analyzed non-part libraries under `lib/`
 //! outside `lib/src/`; their own declarations and transitive same-package exports
 //! form the public namespace, respecting `show`/`hide` and unioning every conditional
-//! export alternative. Exempts `main`, `@internal`, and `@visibleForTesting`.
+//! export alternative. Parts, including nested parts, contribute to their owner's
+//! namespace. Local declarations shadow same-named exports, except that a getter
+//! and setter form a complementary pair. Exempts `main`, `@internal`, and
+//! `@visibleForTesting`.
 //! Usage is name-based in analyzed same-package files outside `lib/src/` and `test/`.
 //! Declaration names, import/export directives, comments, and strings do not count.
 //! Other identifiers, including member selectors, are matched by spelling without
-//! binding resolution, so unrelated same-named references can count as usage.
+//! binding resolution, so unrelated same-named references can count as usage,
+//! including references to a local replacement of a hidden exported declaration.
 //! Unknown packages are not checked. Packages containing malformed Dart files are
 //! skipped because their public namespace is incomplete.
 

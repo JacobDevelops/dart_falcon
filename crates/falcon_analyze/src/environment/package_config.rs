@@ -194,7 +194,11 @@ impl PackageConfig {
     pub fn resolve_package_uri(&self, uri: &str) -> Option<PathBuf> {
         let (name, rest) = uri.strip_prefix("package:")?.split_once('/')?;
         let package = self.package(name)?;
-        let target = lexical_normalize(&package.lib_root.join(percent_decode(rest)?));
+        let target = lexical_normalize(
+            &package
+                .lib_root
+                .join(crate::decode_uri_path(rest)?.as_ref()),
+        );
         target.starts_with(&package.lib_root).then_some(target)
     }
 

@@ -1271,7 +1271,7 @@ fn resolve(
     } else if uri.contains(':') {
         return None;
     } else {
-        from.parent()?.join(uri)
+        from.parent()?.join(crate::decode_uri_path(uri)?.as_ref())
     };
     if let Some(canonical) = canonical_paths
         .read()
@@ -1813,6 +1813,29 @@ mod tests {
                 .source()
                 .contains("class AfterPart {}")
         );
+    }
+
+    #[test]
+    fn relative_directives_decode_once_before_external_resolution() {
+        let environment = AnalysisEnvironment::default();
+        let cache = CanonicalPaths::default();
+        for (uri, expected) in [
+            ("with%20space.dart", "with space.dart"),
+            ("%C3%A9.dart", "é.dart"),
+            ("%2561.dart", "%61.dart"),
+            ("100%.dart", "100%.dart"),
+        ] {
+            assert_eq!(
+                resolve(
+                    &environment,
+                    &cache,
+                    None,
+                    Path::new("/project/main.dart"),
+                    uri
+                ),
+                Some(PathBuf::from("/project").join(expected))
+            );
+        }
     }
 
     #[test]

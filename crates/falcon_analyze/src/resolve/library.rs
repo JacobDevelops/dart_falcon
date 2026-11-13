@@ -12,6 +12,7 @@
 //! flags the file's group `has_unresolved_parts`. Files with no directives are
 //! each their own single-file library.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -275,7 +276,36 @@ fn resolve_relative(dir: &Path, uri: &str) -> Option<PathBuf> {
     if uri.starts_with("dart:") || uri.starts_with("package:") {
         return None;
     }
-    Some(canonical_or_lexical(&dir.join(uri)))
+    Some(canonical_or_lexical(
+        &dir.join(decode_uri_path(uri)?.as_ref()),
+    ))
+}
+
+/// Decode a directive's path once, preserving literal percent signs.
+/// Callers recognize schemes on the raw URI before decoding its path. Package
+/// resolvers pass only the path after the package name. Encoded slashes become
+/// filesystem separators, matching Dart's file URI resolution.
+#[must_use]
+pub fn decode_uri_path(uri: &str) -> Option<Cow<'_, str>> {
+    let bytes = uri.as_bytes();
+    let is_escape =
+        |part: &[u8]| part[0] == b'%' && part[1].is_ascii_hexdigit() && part[2].is_ascii_hexdigit();
+    if uri.starts_with("package:") || uri.starts_with("dart:") || !bytes.windows(3).any(is_escape) {
+        return Some(Cow::Borrowed(uri));
+    }
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if let Some(escape) = bytes.get(index..index + 3).filter(|part| is_escape(part)) {
+            let hex = std::str::from_utf8(&escape[1..]).ok()?;
+            decoded.push(u8::from_str_radix(hex, 16).ok()?);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok().map(Cow::Owned)
 }
 
 /// Canonical path when it exists (so two spellings compare equal), else a
@@ -354,6 +384,77 @@ pub(crate) fn parsed_fixture(source: &str) -> Arc<ParsedFile> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directive_path_decoding_preserves_literals_and_schemes() {
+        for (uri, expected) in [
+            ("with%20space.dart", "with space.dart"),
+            ("%C3%A9.dart", "é.dart"),
+            ("100%.dart", "100%.dart"),
+            ("%zz.dart", "%zz.dart"),
+            ("%25%20.dart", "% .dart"),
+            ("%2561.dart", "%61.dart"),
+            ("already decoded.dart", "already decoded.dart"),
+            ("package:app/%61.dart", "package:app/%61.dart"),
+            ("dart:core", "dart:core"),
+        ] {
+            assert_eq!(decode_uri_path(uri).unwrap(), expected);
+        }
+        assert!(decode_uri_path("%FF.dart").is_none());
+        assert!(resolve_relative(Path::new("/root"), "package:app/a.dart").is_none());
+        assert_eq!(
+            resolve_relative(Path::new("/root"), "with%20space.dart"),
+            Some(PathBuf::from("/root/with space.dart"))
+        );
+    }
+
+    #[test]
+    fn encoded_part_and_part_of_uris_form_one_library() {
+        let owner = parsed_fixture("part 'with%20space.dart';");
+        let part = parsed_fixture("part of '%6fwner.dart'; class Api {}");
+        let files = [
+            (PathBuf::from("/project/owner.dart"), owner.program()),
+            (PathBuf::from("/project/with space.dart"), part.program()),
+        ];
+        let grouping = group_libraries(&files);
+        assert_eq!(grouping.siblings(0), [1]);
+        assert_eq!(grouping.siblings(1), [0]);
+        assert!(!grouping.is_unresolved(0));
+    }
+
+    #[test]
+    fn import_paths_decode_relative_and_package_paths_once() {
+        let from = Path::new("/project/lib/main.dart");
+        let packages = [crate::PackageIdentity {
+            name: "app".into(),
+            lib_root: PathBuf::from("/project/lib"),
+        }];
+        for uri in ["with%20space.dart", "package:app/with%20space.dart"] {
+            assert_eq!(
+                crate::import_path(from, uri, &packages),
+                Some(PathBuf::from("/project/lib/with space.dart"))
+            );
+        }
+        for (uri, path) in [
+            ("package%3Afoo/a.dart", "/project/lib/package:foo/a.dart"),
+            ("sub%2Ftarget.dart", "/project/lib/sub/target.dart"),
+        ] {
+            assert_eq!(
+                crate::import_path(from, uri, &packages),
+                Some(PathBuf::from(path))
+            );
+            assert_eq!(
+                resolve_relative(Path::new("/project/lib"), uri),
+                Some(PathBuf::from(path))
+            );
+        }
+        for uri in ["%2561.dart", "package:app/%2561.dart"] {
+            assert_eq!(
+                crate::import_path(from, uri, &packages),
+                Some(PathBuf::from("/project/lib/%61.dart"))
+            );
+        }
+    }
 
     #[test]
     fn standalone_files_are_single_file_libraries() {

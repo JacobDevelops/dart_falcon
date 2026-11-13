@@ -284,6 +284,7 @@ pub fn resolve_directive_uri(
     }
     if let Some(rest) = uri.strip_prefix("package:") {
         let (name, subpath) = rest.split_once('/')?;
+        let subpath = falcon_analyze::decode_uri_path(subpath)?;
         let own_package = own_package.filter(|package| package.name == name);
         if packages.is_empty() && own_package.is_none() {
             return (!subpath.is_empty()).then(|| ResolvedRef::Suffix(format!("lib/{subpath}")));
@@ -296,15 +297,81 @@ pub fn resolve_directive_uri(
             return None;
         }
         let root = environment.canonical_path(&package.lib_root);
-        let target = environment.canonical_path(&root.join(subpath));
+        let target = environment.canonical_path(&root.join(subpath.as_ref()));
         return target
             .starts_with(root)
             .then_some(ResolvedRef::Path(target));
     }
     let from_dir = from_file.parent().unwrap_or_else(|| Path::new(""));
+    let path = falcon_analyze::decode_uri_path(uri)?;
     Some(ResolvedRef::Path(
-        environment.canonical_path(&from_dir.join(uri)),
+        environment.canonical_path(&from_dir.join(path.as_ref())),
     ))
+}
+
+fn program_export_uris(
+    program: Program<'_>,
+) -> impl Iterator<Item = falcon_syntax::cst::StringLitNode<'_>> {
+    program.exports().flat_map(|directive| {
+        std::iter::once(directive.uri()).chain(
+            directive
+                .configurable_uris()
+                .map(falcon_syntax::cst::ConfigurableUri::uri),
+        )
+    })
+}
+
+/// Every exported library branch, including the parts contributing its API.
+fn exported_library_files(
+    environment: &falcon_analyze::AnalysisEnvironment,
+    files: &[ProjectFile],
+    file_packages: &[falcon_analyze::FilePackage],
+    packages: &[PackageIdentity],
+) -> ReferenceSet {
+    let mut exported = ReferenceSet::default();
+    for (index, file) in files.iter().enumerate() {
+        for uri in program_export_uris(file.program()) {
+            if let Some(target) = resolve_directive_uri(
+                environment,
+                file.path(),
+                &uri.value(),
+                file_packages[index].identity(),
+                packages,
+            ) {
+                exported.insert(target);
+            }
+        }
+    }
+    let paths: Vec<_> = files
+        .iter()
+        .map(|file| environment.canonical_path(file.path()))
+        .collect();
+    let mut expanded = vec![false; files.len()];
+    loop {
+        let mut changed = false;
+        for (index, file) in files.iter().enumerate() {
+            if expanded[index] || !exported.contains(&paths[index]) {
+                continue;
+            }
+            expanded[index] = true;
+            changed = true;
+            for part in file.program().part_directives() {
+                if let Some(target) = resolve_directive_uri(
+                    environment,
+                    file.path(),
+                    &part.uri().value(),
+                    file_packages[index].identity(),
+                    packages,
+                ) {
+                    exported.insert(target);
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    exported
 }
 
 /// Conditional alternatives also keep platform-specific files reachable.
@@ -318,13 +385,7 @@ fn program_reference_uris(
                 .map(falcon_syntax::cst::ConfigurableUri::uri),
         )
     });
-    let exports = program.exports().flat_map(|directive| {
-        std::iter::once(directive.uri()).chain(
-            directive
-                .configurable_uris()
-                .map(falcon_syntax::cst::ConfigurableUri::uri),
-        )
-    });
+    let exports = program_export_uris(program);
     let parts = program
         .part_directives()
         .map(falcon_syntax::cst::PartDirective::uri);
@@ -504,23 +565,27 @@ pub fn build_reference_graph(
             let own_package = file_packages[i].identity();
             let candidate = if let Some(rest) = uri.strip_prefix("package:") {
                 rest.split_once('/').and_then(|(name, subpath)| {
-                    let package = own_package
-                        .filter(|package| package.name == name)
-                        .or_else(|| {
-                            let mut matches =
-                                packages.iter().filter(|package| package.name == name);
-                            let package = matches.next()?;
-                            matches.next().is_none().then_some(package)
-                        })?;
-                    let path = package.lib_root.join(subpath);
+                    let package =
+                        own_package
+                            .filter(|package| package.name == name)
+                            .or_else(|| {
+                                let mut matches =
+                                    packages.iter().filter(|package| package.name == name);
+                                let package = matches.next()?;
+                                matches.next().is_none().then_some(package)
+                            })?;
+                    let subpath = falcon_analyze::decode_uri_path(subpath)?;
+                    let path = package.lib_root.join(subpath.as_ref());
                     path.starts_with(&package.lib_root).then_some(path)
                 })
             } else if uri.starts_with("dart:") {
                 None
             } else {
-                canons[i].parent().map(|parent| parent.join(uri.as_ref()))
+                falcon_analyze::decode_uri_path(&uri)
+                    .and_then(|path| canons[i].parent().map(|parent| parent.join(path.as_ref())))
             };
-            // A path already in the canonical source table needs no filesystem resolution.
+            // Keys are canonical source paths: a candidate found here is already
+            // normalized and resolves to the same file as filesystem canonicalization.
             if let Some(&target) = candidate.as_deref().and_then(|path| by_path.get(path)) {
                 adj[i].push(target);
                 continue;
@@ -664,16 +729,26 @@ mod tests {
     fn reference_graph_preserves_uri_resolution_for_known_sources() {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("lib/src")).unwrap();
-        std::fs::write(root.path().join("pubspec.yaml"), "name: app\n").unwrap();
+        std::fs::create_dir_all(root.path().join("dep/lib")).unwrap();
+        std::fs::write(
+            root.path().join("pubspec.yaml"),
+            "name: app\ndependencies:\n  dep:\n    path: dep\n",
+        )
+        .unwrap();
+        std::fs::write(root.path().join("dep/pubspec.yaml"), "name: dep\n").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("src/a.dart", root.path().join("lib/link.dart")).unwrap();
         let sources = [
             (
                 "lib/main.dart",
                 "import 'package:app/src/a.dart';\nimport 'src/a.dart';\n\
                  import 'src/../src/a.dart';\nimport 'package:app/../outside.dart';\n\
-                 import 'missing.dart';\nimport 'dart:core';\n",
+                 import 'missing.dart';\nimport 'dart:core';\n\
+                 import 'package:dep/dep.dart';\nimport 'link.dart';\n",
             ),
             ("lib/src/a.dart", ""),
             ("outside.dart", ""),
+            ("dep/lib/dep.dart", ""),
         ];
         let files: Vec<_> = sources
             .into_iter()
@@ -712,7 +787,8 @@ mod tests {
                             &uri.value(),
                             file_packages[index].identity(),
                             &packages,
-                        )? else {
+                        )?
+                        else {
                             return None;
                         };
                         canons.iter().position(|canonical| *canonical == path)
@@ -720,7 +796,10 @@ mod tests {
                     .collect()
             })
             .collect();
-        assert_eq!(expected[0], [1, 1, 1]);
+        let mut expected_main = vec![1, 1, 1, 3];
+        #[cfg(unix)]
+        expected_main.push(1);
+        assert_eq!(expected[0], expected_main);
         assert_eq!(
             build_reference_graph(&environment, &files, &canons, &file_packages, &packages),
             expected

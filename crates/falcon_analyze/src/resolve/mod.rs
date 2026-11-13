@@ -25,8 +25,8 @@ pub use identity::{
 #[cfg(test)]
 mod identity_import_tests;
 pub use library::{
-    LibraryGrouping, LibraryUnit, canonical_or_lexical, group_libraries, is_generated_dart_file,
-    lexical_normalize, library_unit, library_unit_by,
+    LibraryGrouping, LibraryUnit, canonical_or_lexical, decode_uri_path, group_libraries,
+    is_generated_dart_file, lexical_normalize, library_unit, library_unit_by,
 };
 pub use semantic::{
     ConstConstructorBody, DeclarationFacts, FunctionTypeShape, InferenceContext, MemberFacts,

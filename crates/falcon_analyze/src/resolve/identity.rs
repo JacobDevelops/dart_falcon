@@ -3415,7 +3415,11 @@ fn uri_missing(environment: &AnalysisEnvironment, from: &Path, uri: &str) -> boo
             .sdk(from)
             .is_some_and(|sdk| sdk.library(uri).is_none());
     }
-    !uri.contains(':') && from.parent().is_some_and(|dir| !dir.join(uri).exists())
+    !uri.contains(':')
+        && crate::decode_uri_path(uri).is_some_and(|path| {
+            from.parent()
+                .is_some_and(|dir| !dir.join(path.as_ref()).exists())
+        })
 }
 
 impl Combinators {
@@ -3494,7 +3498,9 @@ pub fn import_path(from: &Path, uri: &str, packages: &[PackageIdentity]) -> Opti
     }
     let Some(rest) = uri.strip_prefix("package:") else {
         let parent = from.parent().unwrap_or_else(|| Path::new(""));
-        return Some(canonical_or_lexical(&parent.join(uri)));
+        return Some(canonical_or_lexical(
+            &parent.join(crate::decode_uri_path(uri)?.as_ref()),
+        ));
     };
     let (package, subpath) = rest.split_once('/')?;
     let mut matches = packages
@@ -3505,7 +3511,7 @@ pub fn import_path(from: &Path, uri: &str, packages: &[PackageIdentity]) -> Opti
         return None;
     }
     let lib_root = canonical_or_lexical(&package_match.lib_root);
-    let target = canonical_or_lexical(&lib_root.join(subpath));
+    let target = canonical_or_lexical(&lib_root.join(crate::decode_uri_path(subpath)?.as_ref()));
     target.starts_with(&lib_root).then_some(target)
 }
 

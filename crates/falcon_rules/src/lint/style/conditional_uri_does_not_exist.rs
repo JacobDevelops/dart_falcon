@@ -25,7 +25,7 @@
 
 use std::path::{Path, PathBuf};
 
-use falcon_analyze::{AnalyzeContext, PackageConfigInput, Rule, RulePreparation, percent_decode};
+use falcon_analyze::{AnalyzeContext, PackageConfigInput, Rule, RulePreparation, decode_uri_path};
 use falcon_syntax::cst::{ExportDirective, ImportDirective, Program};
 
 use crate::lint::support::uri::uri_scheme;
@@ -141,7 +141,7 @@ impl Resolver<'_> {
                     }
                     let directory = self.file.parent().unwrap_or(Path::new(""));
                     self.environment
-                        .file_exists(&directory.join(percent_decode(rest)?))
+                        .file_exists(&directory.join(decode_uri_path(rest)?.as_ref()))
                 }
             }
             "package" => {
@@ -163,7 +163,7 @@ impl Resolver<'_> {
                 let path = path.strip_prefix("//").map_or(path, |authority| {
                     authority.find('/').map_or("", |slash| &authority[slash..])
                 });
-                let path = PathBuf::from(percent_decode(path)?);
+                let path = PathBuf::from(decode_uri_path(path)?.as_ref());
                 if path.is_absolute() {
                     self.environment.file_exists(&path)
                 } else {
@@ -258,6 +258,18 @@ mod tests {
             "conditional-uri-does-not-exist",
             &ConditionalUriDoesNotExist,
         );
+    }
+
+    #[test]
+    fn literal_percent_paths_are_known_missing_without_configuration() {
+        let resolver = Resolver {
+            environment: &falcon_analyze::AnalysisEnvironment::default(),
+            file: std::path::Path::new("/missing/main.dart"),
+            config: PackageConfigInput::Missing,
+            sdk_library: &|_| None,
+        };
+        assert_eq!(resolver.exists("100%.dart"), Some(false));
+        assert_eq!(resolver.exists("file:/missing/100%.dart"), Some(false));
     }
 
     #[test]

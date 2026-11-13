@@ -13,6 +13,9 @@
 //! to files with a `lib/` path component and the public-surface exemption is not
 //! applied (no `lib/` root is known). This is a cross-file rule: it runs in the
 //! cross-file pass and is configured under the top-level `cross-file` section.
+//! All conditional import/export branches and transitive part references create
+//! graph edges. Getter/setter pairs and local export shadowing do not alter
+//! file reachability.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};

@@ -61,7 +61,7 @@ pub use resolve::{
     ParameterContract, ParameterDefault, QualifiedName, ResolvedInvocation, ResolvedSignature,
     ResolvedType, ResolvedTypeView, RuntimeIntersection, SemanticModel, SignatureIndex,
     SourceSelector, Truth, TypeIndex, TypeKind, TypeParameterId, TypeParameterScope, TypeRelation,
-    canonical_or_lexical, doc_imports, expression_segments, group_libraries,
+    canonical_or_lexical, decode_uri_path, doc_imports, expression_segments, group_libraries,
     has_immutable_annotation, import_path, is_generated_dart_file, lexical_normalize,
     library_doc_imports, library_unit, library_unit_by, resolve_call_constructor,
     resolve_new_constructor,

@@ -116,10 +116,10 @@ impl CrossFileRule for NoDeepPackageImports {
                         };
                         environment.canonical_path(&target)
                     } else {
-                        let Some(decoded) = falcon_analyze::percent_decode(relative) else {
+                        let Some(decoded) = falcon_analyze::decode_uri_path(relative) else {
                             continue;
                         };
-                        environment.canonical_path(&barrel.root.join(decoded))
+                        environment.canonical_path(&barrel.root.join(decoded.as_ref()))
                     };
                     let Ok(relative) = target.strip_prefix(&barrel.root) else {
                         continue;
@@ -215,13 +215,10 @@ fn push_export(
     package: &PackageIdentity,
     pending: &mut Vec<PathBuf>,
 ) {
-    let Some(decoded) = falcon_analyze::percent_decode(value) else {
-        return;
-    };
     if let Some(ResolvedRef::Path(target)) = resolve_directive_uri(
         environment,
         path,
-        &decoded,
+        value,
         Some(package),
         std::slice::from_ref(package),
     ) && target.starts_with(&package.lib_root)
@@ -299,6 +296,41 @@ mod tests {
                 assert_eq!(diagnostics[0].file_path, files[0].path().to_string_lossy());
             }
         }
+    }
+
+    #[test]
+    fn unconfigured_workspace_imports_preserve_literal_percent_signs() {
+        let root = tempfile::tempdir().unwrap();
+        for (path, source) in [
+            ("pubspec.yaml", "name: app\n"),
+            ("lib/main.dart", "import 'package:dep/100%.dart';"),
+            ("dep/pubspec.yaml", "name: dep\n"),
+            ("dep/lib/dep.dart", "export '100%.dart';"),
+            ("dep/lib/100%.dart", "class Value {}"),
+        ] {
+            let path = root.path().join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, source).unwrap();
+        }
+        let files: Vec<_> = ["lib/main.dart", "dep/lib/dep.dart", "dep/lib/100%.dart"]
+            .iter()
+            .map(|path| {
+                let path = root.path().join(path);
+                let source = std::fs::read_to_string(&path).unwrap();
+                ProjectFile::new(path, Arc::new(falcon_analyze::ParsedFile::parse(source))).unwrap()
+            })
+            .collect();
+        let environment = AnalysisEnvironment::discover_with_sdk_locator(
+            files.iter().map(ProjectFile::path),
+            |_| None,
+        );
+        let diagnostics = NoDeepPackageImports.prepare_project(
+            &environment,
+            &files,
+            &FalconConfig::default(),
+            None,
+        );
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
     }
 
     #[test]

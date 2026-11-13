@@ -6,8 +6,11 @@
 //! An unreferenced public API is usually dead code that outlived its callers,
 //! but removing something still in use is worse than missing one, so the rule is
 //! tuned to avoid false positives: it exempts `main`, annotated declarations,
-//! members of re-exported files, and unnamed extensions, treats any same-name
-//! identifier anywhere as usage, and skips files that failed to parse. Private
+//! members of re-exported files (including parts and nested parts in every
+//! conditional export branch), and unnamed extensions. These are file-level
+//! exemptions: local shadowing and getter/setter pairs do not narrow them.
+//! The rule treats any same-name identifier anywhere as usage and skips files
+//! that failed to parse. Private
 //! (`_`-prefixed) declarations are out of scope. This is a cross-file rule: it
 //! runs in the cross-file pass over the whole analyzed file set and is
 //! configured under the top-level `cross-file` section rather than `linter`.
@@ -19,7 +22,7 @@ use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
 use falcon_syntax::cst::*;
 
-use super::{has_lib_component, is_under_lib, project_packages, resolve_directive_uri};
+use super::{exported_library_files, has_lib_component, is_under_lib, project_packages};
 
 #[derive(Default)]
 pub struct UnusedCode;
@@ -64,7 +67,7 @@ impl CrossFileRule for UnusedCode {
 
         // Files re-exported by another file: treat every public member as used
         // (the export surfaces the whole file's API).
-        let exported = collect_exported_files(environment, files, &file_packages, &packages);
+        let exported = exported_library_files(environment, files, &file_packages, &packages);
 
         let mut diags = Vec::new();
         for (idx, f) in files.iter().enumerate() {
@@ -172,31 +175,6 @@ fn candidates<'a>(program: Program<'a>) -> Vec<Candidate<'a>> {
         }
     }
     out
-}
-
-/// Files that appear as the target of an `export` directive anywhere in the set.
-fn collect_exported_files(
-    environment: &falcon_analyze::AnalysisEnvironment,
-    files: &[ProjectFile],
-    file_packages: &[falcon_analyze::FilePackage],
-    packages: &[falcon_analyze::PackageIdentity],
-) -> super::ReferenceSet {
-    let mut refs = super::ReferenceSet::default();
-    for (index, f) in files.iter().enumerate() {
-        let from = environment.canonical_path(f.path());
-        for exp in f.program().exports() {
-            if let Some(r) = resolve_directive_uri(
-                environment,
-                &from,
-                &exp.uri().value(),
-                file_packages[index].identity(),
-                packages,
-            ) {
-                refs.insert(r);
-            }
-        }
-    }
-    refs
 }
 
 /// `(byte offset, byte length)` of every identifier a file *uses*. This is
