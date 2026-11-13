@@ -207,17 +207,22 @@ pub fn render_with_packages(
         return output;
     }
     if format == OutputFormat::Json {
+        #[derive(serde::Serialize)]
+        struct Entry<'a> {
+            #[serde(flatten)]
+            diagnostic: &'a Diagnostic,
+            package: Option<&'a str>,
+        }
+
         let entries: Vec<_> = diagnostics
             .iter()
             .zip(&indices)
-            .map(|(diagnostic, index)| {
-                let mut entry =
-                    serde_json::to_value(diagnostic).expect("diagnostics are JSON serializable");
-                entry["package"] = json!(index.map(|index| packages[index].name.as_str()));
-                entry
+            .map(|(diagnostic, index)| Entry {
+                diagnostic,
+                package: index.map(|index| packages[index].name.as_str()),
             })
             .collect();
-        return json_string(&entries.into());
+        return serde_json::to_string_pretty(&entries).expect("diagnostics are JSON serializable");
     }
     render_impl(format, diagnostics, root, packages)
 }
@@ -684,13 +689,8 @@ mod tests {
             ),
         ];
         let summaries = summarize_packages(&packages, std::iter::empty(), &diagnostics);
-        let report: Vec<Value> = serde_json::from_str(&render_with_packages(
-            ReportFormat::Json,
-            &diagnostics,
-            root,
-            &summaries,
-        ))
-        .unwrap();
+        let rendered = render_with_packages(ReportFormat::Json, &diagnostics, root, &summaries);
+        let report: Vec<Value> = serde_json::from_str(&rendered).unwrap();
         let mut expected: Vec<Value> = diagnostics
             .iter()
             .map(|diagnostic| serde_json::to_value(diagnostic).unwrap())
@@ -698,6 +698,7 @@ mod tests {
         expected[0]["package"] = json!("app");
         expected[1]["package"] = Value::Null;
         assert_eq!(report, expected);
+        assert_eq!(rendered, serde_json::to_string_pretty(&expected).unwrap());
         let empty: Vec<Value> = serde_json::from_str(&render_with_packages(
             ReportFormat::Json,
             &[],

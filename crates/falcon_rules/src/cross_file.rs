@@ -500,11 +500,36 @@ pub fn build_reference_graph(
     let mut adj = vec![Vec::new(); files.len()];
     for (i, f) in files.iter().enumerate() {
         for uri in program_reference_uris(f.program()) {
+            let uri = uri.value();
+            let own_package = file_packages[i].identity();
+            let candidate = if let Some(rest) = uri.strip_prefix("package:") {
+                rest.split_once('/').and_then(|(name, subpath)| {
+                    let package = own_package
+                        .filter(|package| package.name == name)
+                        .or_else(|| {
+                            let mut matches =
+                                packages.iter().filter(|package| package.name == name);
+                            let package = matches.next()?;
+                            matches.next().is_none().then_some(package)
+                        })?;
+                    let path = package.lib_root.join(subpath);
+                    path.starts_with(&package.lib_root).then_some(path)
+                })
+            } else if uri.starts_with("dart:") {
+                None
+            } else {
+                canons[i].parent().map(|parent| parent.join(uri.as_ref()))
+            };
+            // A path already in the canonical source table needs no filesystem resolution.
+            if let Some(&target) = candidate.as_deref().and_then(|path| by_path.get(path)) {
+                adj[i].push(target);
+                continue;
+            }
             match resolve_directive_uri(
                 environment,
                 &canons[i],
-                &uri.value(),
-                file_packages[i].identity(),
+                &uri,
+                own_package,
                 packages,
             ) {
                 Some(ResolvedRef::Path(p)) => {
@@ -633,6 +658,111 @@ mod tests {
 
     fn lib_dir_package(path: &Path) -> Option<PackageIdentity> {
         package_at(path, true)
+    }
+
+    #[test]
+    fn reference_graph_preserves_uri_resolution_for_known_sources() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("lib/src")).unwrap();
+        std::fs::write(root.path().join("pubspec.yaml"), "name: app\n").unwrap();
+        let sources = [
+            (
+                "lib/main.dart",
+                "import 'package:app/src/a.dart';\nimport 'src/a.dart';\n\
+                 import 'src/../src/a.dart';\nimport 'package:app/../outside.dart';\n\
+                 import 'missing.dart';\nimport 'dart:core';\n",
+            ),
+            ("lib/src/a.dart", ""),
+            ("outside.dart", ""),
+        ];
+        let files: Vec<_> = sources
+            .into_iter()
+            .map(|(path, source)| {
+                let path = root.path().join(path);
+                std::fs::write(&path, source).unwrap();
+                ProjectFile::new(
+                    path,
+                    std::sync::Arc::new(falcon_analyze::ParsedFile::parse(source)),
+                )
+                .expect("fixture must parse")
+            })
+            .collect();
+        let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+            files.iter().map(ProjectFile::path),
+            |_| None,
+        );
+        let file_packages: Vec<_> = files
+            .iter()
+            .map(|file| environment.file_package(file.path()))
+            .collect();
+        let packages = project_packages(&file_packages);
+        let canons: Vec<_> = files
+            .iter()
+            .map(|file| canonical_package_path(file.path()))
+            .collect();
+        let expected: Vec<Vec<_>> = files
+            .iter()
+            .enumerate()
+            .map(|(index, file)| {
+                program_reference_uris(file.program())
+                    .filter_map(|uri| {
+                        let ResolvedRef::Path(path) = resolve_directive_uri(
+                            &environment,
+                            &canons[index],
+                            &uri.value(),
+                            file_packages[index].identity(),
+                            &packages,
+                        )? else {
+                            return None;
+                        };
+                        canons.iter().position(|canonical| *canonical == path)
+                    })
+                    .collect()
+            })
+            .collect();
+        assert_eq!(expected[0], [1, 1, 1]);
+        assert_eq!(
+            build_reference_graph(&environment, &files, &canons, &file_packages, &packages),
+            expected
+        );
+    }
+
+    #[test]
+    fn package_snapshots_preserve_first_file_order_and_nested_owners() {
+        let root = tempfile::tempdir().unwrap();
+        let outer = root.path().join("outer");
+        let nested = outer.join("nested");
+        std::fs::create_dir_all(nested.join("lib")).unwrap();
+        std::fs::create_dir_all(outer.join("lib")).unwrap();
+        std::fs::write(outer.join("pubspec.yaml"), "name: outer\n").unwrap();
+        std::fs::write(nested.join("pubspec.yaml"), "name: nested\n").unwrap();
+        let parsed = std::sync::Arc::new(falcon_analyze::ParsedFile::parse(""));
+        let files: Vec<_> = [
+            nested.join("lib/a.dart"),
+            outer.join("lib/a.dart"),
+            nested.join("lib/b.dart"),
+            root.path().join("unowned.dart"),
+        ]
+        .into_iter()
+        .map(|path| {
+            ProjectFile::new(path, std::sync::Arc::clone(&parsed)).expect("fixture must parse")
+        })
+        .collect();
+        let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator(
+            files.iter().map(ProjectFile::path),
+            |_| None,
+        );
+        let mut seen = HashSet::new();
+        let manifests: Vec<_> = files
+            .iter()
+            .filter_map(|file| environment.package(file.path()))
+            .map(|package| &package.manifest)
+            .filter(|manifest| seen.insert(*manifest))
+            .collect();
+        assert_eq!(
+            manifests,
+            [&nested.join("pubspec.yaml"), &outer.join("pubspec.yaml")]
+        );
     }
 
     #[test]
