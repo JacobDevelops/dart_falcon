@@ -1544,7 +1544,7 @@ impl SignatureIndex {
     ) -> Option<ResolvedType> {
         fn visit(
             index: &SignatureIndex,
-            receiver: &ResolvedType,
+            receiver: Cow<'_, ResolvedType>,
             name: &str,
             access: InstanceAccess,
             interfaces: bool,
@@ -1558,17 +1558,25 @@ impl SignatureIndex {
             }
             if let ResolvedType {
                 kind: ResolvedTypeKind::TypeParameter { bound, .. },
-            } = receiver
-            {
-                return visit(index, bound, name, access, interfaces, model, visited);
-            }
-            if let ResolvedType {
-                kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
-            } = receiver
+            } = receiver.as_ref()
             {
                 return visit(
                     index,
-                    &bound.non_null(),
+                    Cow::Borrowed(bound),
+                    name,
+                    access,
+                    interfaces,
+                    model,
+                    visited,
+                );
+            }
+            if let ResolvedType {
+                kind: ResolvedTypeKind::NonNullTypeParameter { bound, .. },
+            } = receiver.as_ref()
+            {
+                return visit(
+                    index,
+                    Cow::Owned(bound.non_null()),
                     name,
                     access,
                     interfaces,
@@ -1584,7 +1592,7 @@ impl SignatureIndex {
                         arguments,
                         ..
                     },
-            } = receiver
+            } = receiver.as_ref()
             else {
                 return None;
             };
@@ -1600,7 +1608,7 @@ impl SignatureIndex {
             if model.member_visible(identity, name)
                 && index.has_instance_declaration(identity, name, access)
             {
-                return Some(receiver.clone());
+                return Some(receiver.into_owned());
             }
             let (parameters, supertypes) = index.type_facts.get(identity)?.supertypes.as_ref()?;
             let substitutions = index.owner_substitutions(parameters, arguments, Some(occurrence));
@@ -1610,10 +1618,14 @@ impl SignatureIndex {
                 index.type_facts.get(identity)?.member_supertypes.as_ref()?
             };
             supertypes.iter().find_map(|supertype| {
-                let instantiated = model.substitute(supertype, &substitutions);
+                let instantiated = if substitutions.is_empty() {
+                    Cow::Borrowed(supertype)
+                } else {
+                    Cow::Owned(model.substitute(supertype, &substitutions))
+                };
                 visit(
                     index,
-                    &instantiated,
+                    instantiated,
                     name,
                     access,
                     interfaces,
@@ -1624,7 +1636,7 @@ impl SignatureIndex {
         }
         visit(
             self,
-            receiver,
+            Cow::Borrowed(receiver),
             name,
             access,
             interfaces,
