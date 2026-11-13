@@ -27,3 +27,17 @@ void sdkGetter(String value) {
   final cached = value.length.isOdd;
   print(value.length.isOdd); /* expect: use-existing-variable */
 }
+int commentWhitespace() {
+  final x = 2;
+  final cached = x /* same comment */ + 1;
+  return x /*samecomment*/ + 1; /* expect: use-existing-variable */
+}
+int separateScope() {
+  final x = 2;
+  final cached = x + 1;
+  {
+    final nested = x + 1;
+    print(x + 1); /* expect: use-existing-variable */
+  }
+  return x + 1; /* expect: use-existing-variable */
+}

@@ -647,6 +647,39 @@ fn existing_variable_checks_long_initializer_and_repeated_chains() {
 }
 
 #[test]
+fn existing_variable_deduplicates_candidates_before_if_conditions() {
+    use std::fmt::Write as _;
+
+    let count = 16_000;
+    let mut source = String::from("void repeated() {\nfinal value = 1;\n");
+    for index in 0..count {
+        writeln!(source, "final cached{index} = value + 1;").unwrap();
+    }
+    let conditions_start = source.len();
+    source.push_str(&"if (value + 1 > 0) {}\n".repeat(count));
+    source.push_str("}\n");
+    let rules = all_rules();
+    let (name, rule) = rules
+        .iter()
+        .find(|(name, _)| *name == "use-existing-variable")
+        .unwrap();
+    let diagnostics = inference::analyze(
+        name,
+        rule.as_ref(),
+        Path::new("main.dart"),
+        &source,
+        &FalconConfig::default(),
+    );
+    assert_eq!(diagnostics.len(), count - 1);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.span.end <= conditions_start),
+        "If conditions must not reuse locals from the enclosing block"
+    );
+}
+
+#[test]
 fn existing_variable_summaries_preserve_mutation_promotion_and_const_checks() {
     assert_lints(
         "use-existing-variable",

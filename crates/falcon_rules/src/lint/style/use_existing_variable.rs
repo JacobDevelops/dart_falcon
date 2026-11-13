@@ -1,14 +1,16 @@
 //! Reuse a local for stable SDK arithmetic and String.length/int parity getters.
 //! Calls, user getters, allocations and overloaded operators are excluded.
 //! Whole-scope mutation facts deliberately reject even later/closure writes.
+//! Per-block token fingerprints narrow candidates; exact comparison resolves collisions.
 
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 
 use falcon_analyze::{SemanticRuleVisitor, SemanticState};
 use falcon_analyze::{AnalyzeContext, ResolvedTypeView, Rule, RulePreparation};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHasher};
 
 #[derive(Default)]
 pub struct UseExistingVariable;
@@ -27,7 +29,7 @@ impl Rule for UseExistingVariable {
             expressions: FxHashMap::default(),
             const_ancestors: FxHashMap::default(),
             initializers: FxHashMap::default(),
-            candidates: Vec::new(),
+            candidates: FxHashMap::default(),
             diagnostics: Vec::new(),
         }))
     }
@@ -36,7 +38,6 @@ impl Rule for UseExistingVariable {
 struct Candidate<'a> {
     declaration: LocalVarDecl<'a>,
     value: Expr<'a>,
-    nodes: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -54,7 +55,7 @@ struct Collector<'a> {
     expressions: FxHashMap<NodeId, ExpressionFacts>,
     const_ancestors: FxHashMap<NodeId, bool>,
     initializers: FxHashMap<NodeId, (LocalVarDecl<'a>, NodeId)>,
-    candidates: Vec<Candidate<'a>>,
+    candidates: FxHashMap<usize, FxHashMap<(NodeId, u64), Vec<Candidate<'a>>>>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -191,6 +192,31 @@ impl<'a> Collector<'a> {
         is_const
     }
 
+    fn fingerprint(&self, expr: Expr<'a>) -> u64 {
+        let mut hash = FxHasher::default();
+        for token in self
+            .ctx
+            .tree()
+            .tokens_in(self.ctx.source(), expr.unparenthesized().span())
+            .filter(|token| !token.is_trivia() || token.kind().is_comment())
+        {
+            token.kind().hash(&mut hash);
+            if token.kind().is_comment() {
+                for character in token
+                    .text()
+                    .chars()
+                    .filter(|character| !character.is_whitespace())
+                {
+                    character.hash(&mut hash);
+                }
+            } else {
+                token.text().hash(&mut hash);
+            }
+            self.references.get(&token.span().start).hash(&mut hash);
+        }
+        hash.finish()
+    }
+
     fn equivalent(&self, left: Expr<'a>, right: Expr<'a>) -> bool {
         let left = left.unparenthesized();
         let right = right.unparenthesized();
@@ -208,6 +234,37 @@ impl<'a> Collector<'a> {
         tokens(left).zip(tokens(right)).all(|(a, b)| {
             self.references.get(&a.span().start) == self.references.get(&b.span().start)
         })
+    }
+
+    fn insert_candidate(&mut self, declaration: LocalVarDecl<'a>, value: Expr<'a>) {
+        let Some(block) = declaration
+            .syntax()
+            .parent()
+            .filter(|parent| parent.kind() == NodeKind::Block)
+        else {
+            return;
+        };
+        let nodes = self.expressions[&value.unparenthesized().syntax().id()].nodes;
+        let key = (block.id(), self.fingerprint(value));
+        if self
+            .candidates
+            .get(&nodes)
+            .and_then(|candidates| candidates.get(&key))
+            .is_some_and(|candidates| {
+                candidates
+                    .iter()
+                    .any(|candidate| self.equivalent(candidate.value, value))
+            })
+        {
+            // The earliest equivalent declaration passes same_block whenever a later one would.
+            return;
+        }
+        self.candidates
+            .entry(nodes)
+            .or_default()
+            .entry(key)
+            .or_default()
+            .push(Candidate { declaration, value });
     }
 }
 
@@ -239,11 +296,7 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
                 && matches!(node.unparenthesized(), Expr::Binary(_) | Expr::Field(_))
                 && self.safe_number(node, state)
             {
-                self.candidates.push(Candidate {
-                    declaration,
-                    value: node,
-                    nodes: self.expressions[&node.unparenthesized().syntax().id()].nodes,
-                });
+                self.insert_candidate(declaration, node);
             }
             self.stable.insert(variable);
             self.expressions.clear();
@@ -254,10 +307,23 @@ impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
         {
             return;
         }
-        for candidate in &self.candidates {
-            // Reject differently shaped prefixes before comparing tokens; ignore whitespace and outer parentheses.
-            if candidate.nodes == self.expressions[&node.unparenthesized().syntax().id()].nodes
-                && same_block(candidate.declaration.syntax(), node.syntax())
+        // Skip differently shaped prefixes before hashing; long chains otherwise rehash every prefix.
+        let nodes = self.expressions[&node.unparenthesized().syntax().id()].nodes;
+        let Some(candidates) = self
+            .candidates
+            .get(&nodes)
+            .and_then(|candidates| {
+                let block = node
+                    .syntax()
+                    .ancestors()
+                    .find(|ancestor| ancestor.kind() == NodeKind::Block)?;
+                candidates.get(&(block.id(), self.fingerprint(node)))
+            })
+        else {
+            return;
+        };
+        for candidate in candidates {
+            if same_block(candidate.declaration.syntax(), node.syntax())
                 && self.equivalent(candidate.value, node)
             {
                 self.diagnostics.push(self.ctx.diagnostic("Reuse the existing local instead of repeating this computation.", node.span()));
