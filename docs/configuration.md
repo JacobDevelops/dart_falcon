@@ -169,7 +169,7 @@ Rule objects also accept `"fix": "none" | "safe" | "unsafe"` alongside `level` a
 }
 ```
 
-Matching overrides resolve `fix` independently of severity and options: the last explicit `fix` wins, and an override that omits it leaves the earlier policy intact. Package configurations select fix policy just like rule severity.
+Matching overrides resolve `fix` independently of severity and options: the last explicit `fix` wins, and an override that omits it leaves the earlier policy intact. Package configurations select fix policy just like rule severity. Fix policy, severity, and options use the same per-file override snapshot during document analysis; a subsequent analysis resolves that snapshot again.
 
 The same option is accepted for cross-file rules, but automatic fixing currently applies only file-rule fixes. Cross-file diagnostics remain visible after fixing.
 

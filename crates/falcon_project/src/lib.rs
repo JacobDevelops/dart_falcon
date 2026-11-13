@@ -412,13 +412,12 @@ pub fn analyze_sources(
 /// Syntax diagnostics are supplied by the parser/cache owner, never reparsed here.
 pub fn analyze_document<'a>(
     registry: &RuleRegistry,
-    config: &FalconConfig,
     ctx: &'a AnalyzeContext<'a>,
     mut syntax_diagnostics: Vec<Diagnostic>,
 ) -> Vec<Diagnostic> {
     syntax_diagnostics.extend(registry.run_all(ctx.parsed().program(), ctx));
     falcon_rules::apply_file_severities(&mut syntax_diagnostics, ctx.file_config());
-    apply_fix_policies(config, &mut syntax_diagnostics);
+    autofix::apply_file_fix_policies(ctx.file_config(), &mut syntax_diagnostics);
     syntax_diagnostics
 }
 
@@ -464,7 +463,7 @@ pub fn complete_analysis(
     failed
 }
 
-/// Filter project findings and resolve their one-based positions from retained sources.
+/// Filter project findings and resolve positions from already admitted sources.
 /// Missing-path and worker-failure diagnostics are always retained.
 pub fn finalize_diagnostics<'a>(
     diagnostics: &mut Vec<Diagnostic>,
@@ -472,25 +471,34 @@ pub fn finalize_diagnostics<'a>(
     sources: impl IntoIterator<Item = (&'a Path, &'a str)>,
 ) {
     let _stage = tracing::debug_span!(target: "falcon::stages", "reporting").entered();
-    diagnostics.retain(|diagnostic| {
-        diagnostic.rule == UNMATCHED_PATH_DIAGNOSTIC_ID
-            || diagnostic.rule == RULES_THREAD_ERROR_DIAGNOSTIC_ID
-            || if Path::new(&diagnostic.file_path)
-                .extension()
-                .is_some_and(|ext| ext == "dart")
-            {
-                filter.admits(&diagnostic.file_path)
-            } else {
-                !filter.excludes(&diagnostic.file_path)
-            }
-    });
-    if diagnostics.is_empty() {
-        return;
-    }
     let sources: HashMap<Cow<'_, str>, &str> = sources
         .into_iter()
         .map(|(path, source)| (path.to_string_lossy(), source))
         .collect();
+    let mut admitted = HashMap::new();
+    diagnostics.retain(|diagnostic| {
+        diagnostic.rule == UNMATCHED_PATH_DIAGNOSTIC_ID
+            || diagnostic.rule == RULES_THREAD_ERROR_DIAGNOSTIC_ID
+            || sources.contains_key(diagnostic.file_path.as_str())
+            || admitted
+                .get(diagnostic.file_path.as_str())
+                .copied()
+                .unwrap_or_else(|| {
+                    let keep = if Path::new(&diagnostic.file_path)
+                        .extension()
+                        .is_some_and(|ext| ext == "dart")
+                    {
+                        filter.admits(&diagnostic.file_path)
+                    } else {
+                        !filter.excludes(&diagnostic.file_path)
+                    };
+                    admitted.insert(diagnostic.file_path.clone(), keep);
+                    keep
+                })
+    });
+    if diagnostics.is_empty() {
+        return;
+    }
     let mut lines: HashMap<&str, LineIndex<'_>> = HashMap::new();
     for diagnostic in diagnostics.iter_mut() {
         if let Some((path, source)) = sources.get_key_value(diagnostic.file_path.as_str()) {

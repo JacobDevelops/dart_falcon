@@ -1297,6 +1297,38 @@ impl<'a> ResolvedFileConfig<'a> {
                 .resolve_rule(group, name, recommended),
         )
     }
+
+    /// Return the effective file-rule autofix policy from this file's snapshot.
+    #[must_use]
+    pub fn rule_fix(&self, group: &str, name: &str) -> Option<RuleFix> {
+        self.fix(group, name, Section::Linter)
+    }
+
+    /// Return the effective cross-file autofix policy from this file's snapshot.
+    #[must_use]
+    pub fn cross_file_fix(&self, group: &str, name: &str) -> Option<RuleFix> {
+        self.fix(group, name, Section::CrossFile)
+    }
+
+    fn fix(&self, group: &str, name: &str, section: Section) -> Option<RuleFix> {
+        let mut result = section
+            .rules(self.config)
+            .groups
+            .get(group)
+            .and_then(|rules| rules.get(name))
+            .and_then(RuleConfiguration::fix);
+        for &(_, ov) in &self.overrides {
+            if let Some(fix) = section
+                .override_rules(ov)
+                .and_then(|block| block.rules.groups.get(group))
+                .and_then(|rules| rules.get(name))
+                .and_then(RuleConfiguration::fix)
+            {
+                result = Some(fix);
+            }
+        }
+        result
+    }
 }
 
 fn options_location(
@@ -1349,59 +1381,6 @@ impl FalconConfig {
         domains: &[&str],
     ) -> Option<ResolvedSeverity> {
         self.linter.resolve_rule(group, name, recommended, domains)
-    }
-
-    /// Return the effective file-rule autofix policy for `path`.
-    ///
-    /// Matching overrides apply in order. An absent fix policy inherits the
-    /// previous policy independently of levels and options.
-    #[must_use]
-    pub fn rule_fix_for(&self, path: &str, group: &str, rule_name: &str) -> Option<RuleFix> {
-        self.fix_for(path, group, rule_name, Section::Linter)
-    }
-
-    /// Return the effective cross-file-rule autofix policy for `path`.
-    ///
-    /// Matching overrides apply in order; an absent policy leaves the previous
-    /// policy intact. Package configurations replace the workspace configuration.
-    #[must_use]
-    pub fn cross_file_fix_for(&self, path: &str, group: &str, rule_name: &str) -> Option<RuleFix> {
-        self.fix_for(path, group, rule_name, Section::CrossFile)
-    }
-
-    fn fix_for(
-        &self,
-        path: &str,
-        group: &str,
-        rule_name: &str,
-        section: Section,
-    ) -> Option<RuleFix> {
-        let path = self.files.includes.match_path(path);
-        let config = self.config_for_identity(&path);
-        let rules = match section {
-            Section::Linter => &config.linter.rules,
-            Section::CrossFile => &config.cross_file.rules,
-        };
-        let mut result = rules
-            .groups
-            .get(group)
-            .and_then(|rules| rules.get(rule_name))
-            .and_then(RuleConfiguration::fix);
-        for ov in config
-            .overrides
-            .iter()
-            .filter(|ov| ov.includes.admits_identity(&path))
-        {
-            if let Some(fix) = section
-                .override_rules(ov)
-                .and_then(|block| block.rules.groups.get(group))
-                .and_then(|rules| rules.get(rule_name))
-                .and_then(RuleConfiguration::fix)
-            {
-                result = Some(fix);
-            }
-        }
-        result
     }
 
     /// Whether a **cross-file** rule is enabled for any path — the base cross-file
@@ -2079,6 +2058,8 @@ mod path_resolution_tests {
             let _ = file.resolve_cross_file_rule("style", "test", true);
             let _ = file.rule_options_data("style", "test");
             let _ = file.cross_file_options_data("style", "test");
+            let _ = file.rule_fix("style", "test");
+            let _ = file.cross_file_fix("style", "test");
         }
         assert_eq!(probes(), 1);
         assert!(std::ptr::eq(
@@ -2094,7 +2075,7 @@ mod path_resolution_tests {
             .resolve_file(&path)
             .rule_options_data("style", "test");
         assert_eq!(probes(), 5);
-        let _ = workspace.rule_fix_for(&path, "style", "test");
+        let _ = workspace.resolve_file(&path).rule_fix("style", "test");
         assert_eq!(probes(), 6);
         let _ = workspace
             .resolve_file(&path)
@@ -2104,7 +2085,9 @@ mod path_resolution_tests {
             .resolve_file(&path)
             .cross_file_options_data("style", "test");
         assert_eq!(probes(), 8);
-        let _ = workspace.cross_file_fix_for(&path, "style", "test");
+        let _ = workspace
+            .resolve_file(&path)
+            .cross_file_fix("style", "test");
         assert_eq!(probes(), 9);
         assert!(
             !workspace
@@ -2889,11 +2872,13 @@ mod option_tests {
                 let selected = if section == "linter" {
                     loaded
                         .config
-                        .rule_fix_for("lib/main.dart", "style", "example")
+                        .resolve_file("lib/main.dart")
+                        .rule_fix("style", "example")
                 } else {
                     loaded
                         .config
-                        .cross_file_fix_for("lib/main.dart", "style", "example")
+                        .resolve_file("lib/main.dart")
+                        .cross_file_fix("style", "example")
                 };
                 assert_eq!(selected, Some(expected));
             }
@@ -2960,26 +2945,34 @@ mod option_tests {
                 ("test/special/main.dart", RuleFix::Unsafe),
             ] {
                 let selected = if section == "linter" {
-                    config.rule_fix_for(path, "style", "example")
+                    config.resolve_file(path).rule_fix("style", "example")
                 } else {
-                    config.cross_file_fix_for(path, "style", "example")
+                    config.resolve_file(path).cross_file_fix("style", "example")
                 };
                 assert_eq!(selected, Some(expected));
             }
             assert_eq!(
-                config.rule_fix_for("test/main.dart", "wrong", "example"),
+                config
+                    .resolve_file("test/main.dart")
+                    .rule_fix("wrong", "example"),
                 None
             );
             assert_eq!(
-                config.cross_file_fix_for("test/main.dart", "wrong", "example"),
+                config
+                    .resolve_file("test/main.dart")
+                    .cross_file_fix("wrong", "example"),
                 None
             );
             assert_eq!(
-                config.rule_fix_for("lib/main.dart", "style", "missing"),
+                config
+                    .resolve_file("lib/main.dart")
+                    .rule_fix("style", "missing"),
                 None
             );
             assert_eq!(
-                config.cross_file_fix_for("lib/main.dart", "style", "missing"),
+                config
+                    .resolve_file("lib/main.dart")
+                    .cross_file_fix("style", "missing"),
                 None
             );
         }
@@ -3023,9 +3016,9 @@ mod option_tests {
                 let path = root.join(relative);
                 let path = path.to_str().unwrap();
                 let selected = if section == "linter" {
-                    config.rule_fix_for(path, "style", "example")
+                    config.resolve_file(path).rule_fix("style", "example")
                 } else {
-                    config.cross_file_fix_for(path, "style", "example")
+                    config.resolve_file(path).cross_file_fix("style", "example")
                 };
                 assert_eq!(selected, expected, "{relative}");
             }

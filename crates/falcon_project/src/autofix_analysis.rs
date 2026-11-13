@@ -147,7 +147,7 @@ impl<'a> AutofixAnalyzer<'a> {
         if !self.analysis.resolve() {
             let ctx = AnalyzeContext::new(self.path, self.config, file.parsed())
                 .with_environment(Some(self.environment));
-            return analyze_document(self.analysis.registry(), self.config, &ctx, diagnostics);
+            return analyze_document(self.analysis.registry(), &ctx, diagnostics);
         }
         if !self.initialized
             && let Err(error) = self.load_external(&file)
@@ -233,7 +233,7 @@ impl<'a> AutofixAnalyzer<'a> {
             .with_signatures(&indexes.signatures)
             .with_library(&library)
             .with_environment(Some(self.environment));
-        analyze_document(self.analysis.registry(), self.config, &ctx, diagnostics)
+        analyze_document(self.analysis.registry(), &ctx, diagnostics)
     }
 
     fn parse(

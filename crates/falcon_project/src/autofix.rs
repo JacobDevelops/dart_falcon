@@ -6,7 +6,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 
 use falcon_analyze::{AnalysisEnvironment, ExternalIndexParts};
-use falcon_config::{FalconConfig, RuleFix};
+use falcon_config::{FalconConfig, ResolvedFileConfig, RuleFix};
 use falcon_diagnostics::{
     ApplyFixError, Diagnostic, Fix, FixKind, RULES_THREAD_ERROR_DIAGNOSTIC_ID,
     SYNTAX_ERROR_DIAGNOSTIC_ID,
@@ -82,19 +82,17 @@ impl std::error::Error for FixStop {}
 /// iterative file engine never runs or applies cross-file rules.
 #[must_use]
 pub fn effective_fix_kind(
-    config: &FalconConfig,
-    path: &Path,
+    config: &ResolvedFileConfig<'_>,
     rule: &str,
     declared: FixKind,
 ) -> Option<FixKind> {
     let Some(metadata) = falcon_rules::meta::meta_for(rule) else {
         return Some(declared);
     };
-    let path = path.to_string_lossy();
     let policy = if metadata.is_cross_file() {
-        config.cross_file_fix_for(&path, metadata.group.as_str(), metadata.name)
+        config.cross_file_fix(metadata.group.as_str(), metadata.name)
     } else {
-        config.rule_fix_for(&path, metadata.group.as_str(), metadata.name)
+        config.rule_fix(metadata.group.as_str(), metadata.name)
     };
     match policy {
         Some(RuleFix::None) => None,
@@ -106,17 +104,34 @@ pub fn effective_fix_kind(
 
 /// Suppress or reclassify fix payloads for normal diagnostics and quick fixes.
 pub fn apply_fix_policies(config: &FalconConfig, diagnostics: &mut [Diagnostic]) {
+    let mut files = HashMap::new();
     for diagnostic in diagnostics {
-        if let Some(fix) = &mut diagnostic.fix {
-            match effective_fix_kind(
-                config,
-                Path::new(&diagnostic.file_path),
-                diagnostic.rule,
-                fix.kind,
-            ) {
-                Some(kind) => fix.kind = kind,
-                None => diagnostic.fix = None,
+        if diagnostic.fix.is_some() {
+            if !files.contains_key(diagnostic.file_path.as_str()) {
+                files.insert(
+                    diagnostic.file_path.clone(),
+                    config.resolve_file(&diagnostic.file_path),
+                );
             }
+            apply_fix_policy(&files[diagnostic.file_path.as_str()], diagnostic);
+        }
+    }
+}
+
+pub(crate) fn apply_file_fix_policies(
+    config: &ResolvedFileConfig<'_>,
+    diagnostics: &mut [Diagnostic],
+) {
+    for diagnostic in diagnostics {
+        apply_fix_policy(config, diagnostic);
+    }
+}
+
+fn apply_fix_policy(config: &ResolvedFileConfig<'_>, diagnostic: &mut Diagnostic) {
+    if let Some(fix) = &mut diagnostic.fix {
+        match effective_fix_kind(config, diagnostic.rule, fix.kind) {
+            Some(kind) => fix.kind = kind,
+            None => diagnostic.fix = None,
         }
     }
 }
@@ -819,8 +834,7 @@ linter:
         .unwrap();
         assert_eq!(
             effective_fix_kind(
-                &config,
-                Path::new("test.dart"),
+                &config.resolve_file("test.dart"),
                 "unnecessary-new",
                 FixKind::Unsafe
             ),

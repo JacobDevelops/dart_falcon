@@ -1975,7 +1975,7 @@ impl LspState {
                 .with_signatures(&snapshot.indexes.signatures)
                 .with_library(&library);
         }
-        let mut diagnostics = analyze_document(rules, config, &ctx, doc.syntax_diagnostics.clone());
+        let mut diagnostics = analyze_document(rules, &ctx, doc.syntax_diagnostics.clone());
         doc.rule_worker_error = diagnostics
             .iter()
             .find(|diagnostic| {

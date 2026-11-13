@@ -105,7 +105,7 @@ fn minimal_edit(source: &str, mut replacement: String, lines: &LineIndex) -> Tex
 
 struct QuickFixContext<'a> {
     document: &'a DocumentState,
-    config: &'a falcon_config::FalconConfig,
+    config: &'a falcon_config::ResolvedFileConfig<'a>,
     lines: &'a LineIndex<'a>,
     document_changes: bool,
 }
@@ -129,8 +129,7 @@ impl QuickFixContext<'_> {
                 ));
             }
             let Some(fix) = &diagnostic.fix else { continue };
-            let Some(kind) = effective_fix_kind(config, &document.path, diagnostic.rule, fix.kind)
-            else {
+            let Some(kind) = effective_fix_kind(config, diagnostic.rule, fix.kind) else {
                 continue;
             };
             let lsp_diagnostic = diagnostic.format_lsp_in(lines);
@@ -250,6 +249,7 @@ impl LspState {
         } else {
             &self.additional_root_configs[root_index - 1].config
         };
+        let file_config = config.resolve_file(&document.path.to_string_lossy());
         let source = document.text();
         let lines = LineIndex::new(source);
         let capacity = if quickfix { diagnostics.len() } else { 0 }
@@ -259,7 +259,7 @@ impl LspState {
         if quickfix && !document.has_parse_errors() {
             QuickFixContext {
                 document,
-                config,
+                config: &file_config,
                 lines: &lines,
                 document_changes: self.capabilities.workspace_document_changes,
             }
@@ -284,7 +284,7 @@ impl LspState {
             if !document.has_parse_errors()
                 && !diagnostics.iter().any(|diagnostic| {
                     diagnostic.fix.as_ref().is_some_and(|fix| {
-                        effective_fix_kind(config, &document.path, diagnostic.rule, fix.kind)
+                        effective_fix_kind(&file_config, diagnostic.rule, fix.kind)
                             .is_some_and(|kind| include_unsafe || kind == FixKind::Safe)
                     })
                 })
