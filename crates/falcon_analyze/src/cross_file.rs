@@ -12,6 +12,7 @@ use falcon_syntax::cst::{
     AstNode, Expr, FunctionDecl, GetterDecl, MethodDecl, NodeId, NodeKind, OperatorDecl, Program,
     SyntaxNode, SyntaxTree,
 };
+use rayon::prelude::*;
 
 /// Shared project facts; callers may retain these after per-file analysis.
 pub struct SemanticIndexes {
@@ -498,16 +499,19 @@ impl CrossFileRuleRegistry {
         crate::registry::with_rules_stack(|| {
             let _stage =
                 tracing::debug_span!(target: "falcon::stages", "cross_file_rules").entered();
-            self.rules
-                .iter()
-                .flat_map(|(name, rule)| {
+            // Collect indexed results before flattening to preserve registry and rule-local order.
+            let results: Vec<_> = self
+                .rules
+                .par_iter()
+                .map(|(name, rule)| {
                     let _rule = tracing::debug_span!(
                         target: "falcon::detail", "cross_file_rule", rule = name
                     )
                     .entered();
                     rule.analyze_project(name, environment, files, config, indexes)
                 })
-                .collect()
+                .collect();
+            results.into_iter().flatten().collect()
         })
     }
 }
@@ -661,6 +665,54 @@ mod tests {
         assert_eq!(retained.expr().syntax().text(), "42");
         assert!(!Arc::ptr_eq(file.parsed(), &retained.file));
         assert!(std::ptr::eq(retained.view().tree(), retained.file.tree()));
+    }
+
+    #[test]
+    fn cross_file_results_preserve_registry_and_rule_local_order() {
+        struct OrderedRule(usize);
+        impl CrossFileRule for OrderedRule {
+            fn prepare_project(
+                &self,
+                _environment: &crate::AnalysisEnvironment,
+                _files: &[ProjectFile],
+                _config: &FalconConfig,
+                _indexes: Option<&SemanticIndexes>,
+            ) -> Vec<Diagnostic> {
+                (0..2)
+                    .map(|index| {
+                        Diagnostic::new(
+                            "unassigned",
+                            falcon_diagnostics::Severity::Warning,
+                            format!("{}:{index}", self.0),
+                            "main.dart",
+                            falcon_diagnostics::Span { start: 0, end: 0 },
+                        )
+                    })
+                    .collect()
+            }
+        }
+
+        let mut registry = CrossFileRuleRegistry::new();
+        for index in 0..32 {
+            registry.register("ordered-rule", Box::new(OrderedRule(index)));
+        }
+        let environment = crate::AnalysisEnvironment::with_sdk_locator(|_| None);
+        let diagnostics = registry
+            .run_all(&environment, &[], &FalconConfig::default(), None)
+            .unwrap();
+        let messages: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+        let expected: Vec<_> = (0..32)
+            .flat_map(|rule| (0..2).map(move |index| format!("{rule}:{index}")))
+            .collect();
+        assert_eq!(messages, expected);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.rule == "ordered-rule")
+        );
     }
 
     #[test]
