@@ -168,6 +168,9 @@ impl UsageCollector {
             bound_uses: None,
         };
         for param in params.params() {
+            if param.name().is_wildcard_variable() {
+                continue;
+            }
             collector.scopes.declare(
                 param.name().name().to_owned(),
                 Binding::Parameter(param.name().span().start),
@@ -197,6 +200,13 @@ impl UsageCollector {
 
     /// Declares a local binding; tracked as a write target in write mode.
     fn bind(&mut self, name: Identifier<'_>) {
+        if name.is_wildcard_variable() {
+            return;
+        }
+        self.bind_declaration(name);
+    }
+
+    fn bind_declaration(&mut self, name: Identifier<'_>) {
         let binding = if self.writes.is_some() {
             Binding::Declaration(name.syntax().id())
         } else {
@@ -284,7 +294,7 @@ impl UsageCollector {
             statement = labeled.stmt();
         }
         if let Stmt::LocalFunc(function) = statement {
-            self.bind(function.name());
+            self.bind_declaration(function.name());
         }
     }
 

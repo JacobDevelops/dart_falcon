@@ -64,7 +64,7 @@ impl TypeEnvironment {
                         })
                         .unwrap_or_else(|| signatures.uncontextual_closure_type(expected))
                 };
-                environment.declare(param.name().name().to_owned(), ty.clone());
+                environment.declare_variable(param.name(), ty.clone());
                 ty
             })
             .collect();
@@ -84,7 +84,7 @@ impl TypeEnvironment {
                         })
                         .unwrap_or_else(|| signatures.uncontextual_closure_type(expected))
                 };
-                environment.declare(param.name().name().to_owned(), ty.clone());
+                environment.declare_variable(param.name(), ty.clone());
                 (param.name().name().to_owned(), ty)
             })
             .collect();
@@ -382,8 +382,7 @@ impl<L: Fn(&str) -> Option<ResolvedType>> ClosureReturns<'_, '_, L> {
             if let Some(initializer) = declarator.initializer() {
                 self.visit_expr(initializer);
             }
-            self.environment
-                .declare(declarator.name().name().to_owned(), ty);
+            self.environment.declare_variable(declarator.name(), ty);
         }
     }
 
@@ -467,7 +466,7 @@ impl<L: Fn(&str) -> Option<ResolvedType>> ClosureReturns<'_, '_, L> {
                             .flow
                             .iterable_element(&returns.infer(iterable, None), statement.is_await()),
                     };
-                    returns.environment.declare(name.name().to_owned(), ty);
+                    returns.environment.declare_variable(name, ty);
                 }
                 Some(ForInit::PatternForIn(binding)) => {
                     let pattern = binding.pattern();
@@ -511,11 +510,11 @@ impl<L: Fn(&str) -> Option<ResolvedType>> ClosureReturns<'_, '_, L> {
                         || model.core_type("Object", false),
                         |ty| model.resolve_type_in(ty, returns.flow.type_parameters),
                     );
-                    returns.environment.declare(name.name().to_owned(), ty);
+                    returns.environment.declare_variable(name, ty);
                 }
                 if let Some(name) = catch.stack_trace_var() {
                     let ty = returns.flow.model.core_type("StackTrace", false);
-                    returns.environment.declare(name.name().to_owned(), ty);
+                    returns.environment.declare_variable(name, ty);
                 }
                 for statement in catch.body().stmts() {
                     returns.visit_stmt(statement);

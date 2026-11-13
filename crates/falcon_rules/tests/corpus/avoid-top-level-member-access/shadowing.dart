@@ -56,8 +56,10 @@ void implicitStatementLists(int value) {
     Object shared() => 2;
   } catch (_) {
     print(shared); /* expect: avoid-top-level-member-access */
-    final shared = 3;
-    print(shared);
+    {
+      final shared = 3;
+      print(shared);
+    }
   } finally {
     print(shared());
     Object shared() => 4;

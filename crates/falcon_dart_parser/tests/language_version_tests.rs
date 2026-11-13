@@ -54,6 +54,12 @@ fn file_marker_precedes_package_language_for_switch_grammar() {
     ] {
         let source = format!("{prefix}{body}");
         let parsed = parse_for_package(&source, package);
+        assert_eq!(
+            parsed.tree.language_version(),
+            LanguageVersion::file_override(&source)
+                .or(package)
+                .unwrap_or(LanguageVersion::CURRENT),
+        );
         assert!(
             parsed.errors.is_empty(),
             "source: {source}\nerrors: {:?}",

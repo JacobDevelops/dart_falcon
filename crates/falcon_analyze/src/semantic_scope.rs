@@ -1493,6 +1493,10 @@ enum BinaryChainPending<'a> {
 }
 
 impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
+    fn bind_local(&mut self, name: Identifier<'a>, ty: ResolvedType) {
+        self.state.environment.declare_variable(name, ty);
+    }
+
     fn visit_selector_chain(&mut self, root: Expr<'a>) {
         let mut spine = Vec::new();
         let mut operand = root;
@@ -2305,11 +2309,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                         )
                         .unwrap_or_else(|| self.uncontextual_type());
                 }
-                self.state.environment.declare_at(
-                    setter.param().name().to_owned(),
-                    ty,
-                    setter.param().span(),
-                );
+                self.bind_local(setter.param(), ty);
             }
             None => {}
         }
@@ -2516,11 +2516,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                         .unwrap_or_else(|| self.uncontextual_type());
                 }
             }
-            self.state.environment.declare_at(
-                param.name().name().to_owned(),
-                ty,
-                param.name().span(),
-            );
+            self.bind_local(param.name(), ty);
             if !matches!(param.kind(), ParamKind::Named { .. }) {
                 positional_ordinal += 1;
             }
@@ -2638,6 +2634,9 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                 Some(declared) => (declared, initialized),
                 None => (initialized.unwrap_or(ResolvedType::UNKNOWN), None),
             };
+            if declarator.name().is_wildcard_variable() {
+                continue;
+            }
             self.state.environment.declare_at(
                 declarator.name().name().to_owned(),
                 ty,
@@ -2802,9 +2801,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
             }
             .assign_variable(&mut self.state.environment, name.name(), &ty);
         } else {
-            self.state
-                .environment
-                .declare_at(name.name().to_owned(), ty, name.span());
+            self.bind_local(name, ty);
         }
     }
 
@@ -2875,11 +2872,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                     &field_type,
                 );
             } else {
-                self.state.environment.declare_at(
-                    field.name().name().to_owned(),
-                    field_type,
-                    field.name().span(),
-                );
+                self.bind_local(field.name(), field_type);
             }
         }
     }
@@ -2970,11 +2963,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                             .resolve_type_in(ty, &self.state.type_parameters)
                     },
                 );
-                self.state.environment.declare_at(
-                    node.name().name().to_owned(),
-                    ty,
-                    node.name().span(),
-                );
+                self.bind_local(node.name(), ty);
             }
             // `for (x in xs)` writes an existing `x` at each iteration's start.
             ForInit::ForIn(node) => self.visit_expr(node.iterable()),
@@ -3271,6 +3260,35 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
 }
 
 impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
+    fn visit_statements(&mut self, statements: AstChildren<'a, Stmt<'a>>) {
+        // A local's Dart scope is the whole statement list, even when using it
+        // before its declaration is an error. Never resolve that use outward.
+        for statement in statements.clone() {
+            match statement {
+                Stmt::LocalFunc(function) => self.declare_local_function(function, false),
+                Stmt::LocalVar(declaration) => {
+                    let ty = declaration.var_type().map_or(ResolvedType::UNKNOWN, |ty| {
+                        self.state
+                            .model
+                            .resolve_type_in(ty, &self.state.type_parameters)
+                    });
+                    for declarator in declaration.declarators() {
+                        self.bind_local(declarator.name(), ty.clone());
+                    }
+                }
+                Stmt::PatternDecl(declaration) => {
+                    for name in falcon_syntax::cst::visit::bound_names(declaration.pattern()) {
+                        self.bind_local(name, ResolvedType::UNKNOWN);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for statement in statements {
+            self.visit_stmt(statement);
+        }
+    }
+
     fn visit_if_statement(&mut self, statement: IfStmt<'a>) {
         if let IfCondition::Expr(condition) = statement.condition() {
             self.visit_expr(condition);
@@ -3384,9 +3402,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                     matched_empty = Some(walker.state.environment.clone());
                     return;
                 }
-                for statement in case.body() {
-                    walker.visit_stmt(statement);
-                }
+                walker.visit_statements(case.body());
             });
             unmatched.pop_scope();
             if !falls_through && !self.block_exits(case.body()) {
@@ -3436,17 +3452,11 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                                 .resolve_type_in(ty, &walker.state.type_parameters)
                         },
                     );
-                    walker
-                        .state
-                        .environment
-                        .declare_at(name.name().to_owned(), ty, name.span());
+                    walker.bind_local(name, ty);
                 }
                 if let Some(name) = catch.stack_trace_var() {
                     let ty = walker.state.model.core_type("StackTrace", false);
-                    walker
-                        .state
-                        .environment
-                        .declare_at(name.name().to_owned(), ty, name.span());
+                    walker.bind_local(name, ty);
                 }
                 walker.visit_block(catch.body());
             });
@@ -3475,13 +3485,15 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
         }
     }
 
-    fn visit_local_function_statement(&mut self, function: LocalFuncDecl<'a>) {
-        self.visit_declaration_annotations(function.annotations());
+    fn declare_local_function(&mut self, function: LocalFuncDecl<'a>, infer_return: bool) {
         self.state
             .type_parameters
             .push(function.type_params(), &self.state.model);
         let mut inferred_return = ResolvedType::UNKNOWN;
-        if function.return_type().is_none() && function.async_marker() == AsyncMarker::Sync {
+        if infer_return
+            && function.return_type().is_none()
+            && function.async_marker() == AsyncMarker::Sync
+        {
             self.with_scope(|walker| {
                 walker.bind_params(function.params(), None, false, None);
                 if let FunctionBody::Arrow(body) = function.body() {
@@ -3500,7 +3512,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                         .collect(),
                     function
                         .type_params()
-                        .filter_map(|param| self.state.type_parameters.lookup(param.name().name()))
+                        .filter_map(|param| self.state.type_parameters.parameter(param))
                         .collect(),
                 )),
                 optional_positional: function
@@ -3549,6 +3561,11 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
             function.name().span(),
         );
         self.state.type_parameters.pop();
+    }
+
+    fn visit_local_function_statement(&mut self, function: LocalFuncDecl<'a>) {
+        self.visit_declaration_annotations(function.annotations());
+        self.declare_local_function(function, true);
         self.visit_function(
             Callable {
                 nested: Some(function.span().start),
@@ -3593,7 +3610,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                 walker
                     .state
                     .type_parameters
-                    .lookup(param.name().name())
+                    .parameter(param)
                     .unwrap_or(ResolvedType::UNKNOWN)
             })
             .collect();
@@ -3662,11 +3679,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> ScopedWalker<'_, 'a, V> {
                         .state
                         .model
                         .resolve_formal_parameter_in(param, &walker.state.type_parameters);
-                    walker.state.environment.declare_at(
-                        param.name().name().to_owned(),
-                        ty,
-                        param.name().span(),
-                    );
+                    walker.bind_local(param.name(), ty);
                 }
                 walker.primary_body_environment = Some(walker.state.environment.clone());
             });
@@ -4080,9 +4093,7 @@ impl<'a, V: SemanticRuleVisitor<'a> + ?Sized> Visitor<'a> for ScopedWalker<'_, '
     }
 
     fn visit_block(&mut self, node: Block<'a>) {
-        for statement in node.stmts() {
-            self.visit_stmt(statement);
-        }
+        self.visit_statements(node.stmts());
         self.visitor.visit_block_end(node, &self.state);
     }
 

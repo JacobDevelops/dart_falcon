@@ -86,6 +86,13 @@ impl FlowWrites {
     }
 
     fn bind(&mut self, identifier: Identifier<'_>) {
+        if identifier.is_wildcard_variable() {
+            return;
+        }
+        self.bind_declaration(identifier);
+    }
+
+    fn bind_declaration(&mut self, identifier: Identifier<'_>) {
         self.scopes
             .declare(identifier.name().to_owned(), identifier.span().start);
     }
@@ -274,7 +281,7 @@ impl<'a> Visitor<'a> for FlowWrites {
     }
 
     fn visit_function_decl(&mut self, declaration: FunctionDecl<'a>) {
-        self.bind(declaration.name());
+        self.bind_declaration(declaration.name());
         self.callable(None, |visitor| walk_function_decl(visitor, declaration));
     }
 
@@ -364,7 +371,7 @@ impl<'a> Visitor<'a> for FlowWrites {
                 self.assigning_pattern = false;
             }
             Stmt::LocalFunc(function) => {
-                self.bind(function.name());
+                self.bind_declaration(function.name());
                 self.callable_bindings
                     .insert(function.span().start, self.bindings());
                 self.callable(Some(function.span().start), |visitor| {

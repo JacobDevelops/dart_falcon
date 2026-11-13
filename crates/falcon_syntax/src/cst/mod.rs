@@ -122,6 +122,18 @@ impl<'a> Identifier<'a> {
         }
     }
 
+    /// Whether this name is non-binding in a local, parameter, or type-parameter
+    /// declaration (Dart 3.7 wildcard variables). Members still bind this name.
+    #[must_use]
+    pub fn is_wildcard_variable(self) -> bool {
+        self.name() == "_"
+            && self
+                .node
+                .tree()
+                .language_version()
+                .supports(crate::Feature::WildcardVariables)
+    }
+
     #[must_use]
     pub fn span(self) -> Span {
         match self.origin {

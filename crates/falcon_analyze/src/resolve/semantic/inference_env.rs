@@ -180,6 +180,12 @@ impl TypeEnvironment {
         self.declare_binding(name.into(), ty, true).declaration = Some(span);
     }
 
+    pub fn declare_variable(&mut self, name: falcon_syntax::cst::Identifier<'_>, ty: ResolvedType) {
+        if !name.is_wildcard_variable() {
+            self.declare_at(name.name().to_owned(), ty, name.span());
+        }
+    }
+
     /// The declaration of the nearest visible binding, not its reusable scope depth.
     pub fn binding_declaration(&self, name: &str) -> Option<Span> {
         self.binding(name)?.declaration
@@ -319,11 +325,9 @@ impl TypeEnvironment {
 
     /// Applies a flow refinement without making it a tested type of interest.
     pub(crate) fn promote_without_test(&mut self, name: &str, ty: ResolvedType) {
-        if ty != ResolvedType::UNKNOWN
-            && self.binding(name).is_some_and(|binding| {
-                binding.promotable && !binding.captured && binding.promoted.last() != Some(&ty)
-            })
-            && let Some(binding) = self.binding_mut(name)
+        if self.binding(name).is_some_and(|binding| {
+            binding.promotable && !binding.captured && binding.promoted.last() != Some(&ty)
+        }) && let Some(binding) = self.binding_mut(name)
         {
             binding.promoted.push(ty);
         }
@@ -345,13 +349,11 @@ impl TypeEnvironment {
     }
 
     pub fn promote(&mut self, name: &str, ty: ResolvedType) {
-        if ty != ResolvedType::UNKNOWN
-            && self.binding(name).is_some_and(|binding| {
-                binding.promotable
-                    && !binding.captured
-                    && (binding.promoted.last() != Some(&ty) || !binding.tested.contains(&ty))
-            })
-            && let Some(binding) = self.binding_mut(name)
+        if self.binding(name).is_some_and(|binding| {
+            binding.promotable
+                && !binding.captured
+                && (binding.promoted.last() != Some(&ty) || !binding.tested.contains(&ty))
+        }) && let Some(binding) = self.binding_mut(name)
         {
             binding.push_promotion(ty);
         }
@@ -544,7 +546,7 @@ impl TypeEnvironment {
     ) {
         for param in params.params() {
             let ty = model.resolve_formal_parameter_in(param, type_params);
-            self.declare_at(param.name().name().to_owned(), ty, param.name().span());
+            self.declare_variable(param.name(), ty);
         }
     }
 

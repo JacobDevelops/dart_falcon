@@ -70,7 +70,7 @@
     "rules": {
       "annotate-overrides": 2,
       "avoid-duplicate-bloc-event-handlers": 1,
-      "avoid-dynamic-calls": 11,
+      "avoid-dynamic-calls": 7,
       "avoid-emit-outside-bloc": 6,
       "avoid-empty-setstate": 1,
       "avoid-passing-async-when-sync-expected": 2,

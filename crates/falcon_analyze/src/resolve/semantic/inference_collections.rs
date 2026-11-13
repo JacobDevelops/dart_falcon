@@ -90,7 +90,7 @@ impl<L: Fn(&str) -> Option<ResolvedType>> CollectionTypes<'_, '_, L> {
                             .resolve_type_in(ty, self.lexical.flow.type_parameters)
                     },
                 );
-                self.lexical.environment.declare(name.name().to_owned(), ty);
+                self.lexical.environment.declare_variable(name, ty);
             }
             Some(ForInit::PatternForIn(binding)) => {
                 let pattern = binding.pattern();

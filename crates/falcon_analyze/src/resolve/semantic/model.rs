@@ -98,6 +98,31 @@ pub struct TypeParameterScope {
 }
 
 impl TypeParameterScope {
+    fn parameter_key(parameter: TypeParam<'_>) -> std::borrow::Cow<'_, str> {
+        let name = parameter.name().name();
+        if parameter.name().is_wildcard_variable() {
+            // `:` cannot occur in a Dart identifier; each wildcard retains its
+            // generic position without becoming a name in lexical lookup.
+            format!(":{}", parameter.span().start).into()
+        } else {
+            name.into()
+        }
+    }
+
+    #[must_use]
+    pub fn parameter(&self, parameter: TypeParam<'_>) -> Option<ResolvedType> {
+        self.lookup(&Self::parameter_key(parameter))
+    }
+
+    #[must_use]
+    pub fn contains_parameter(&self, parameter: &TypeParameterId) -> bool {
+        self.scopes.iter().any(|scope| {
+            scope.values().any(|ty| {
+            matches!(&ty.kind, ResolvedTypeKind::TypeParameter { id, .. } if id == parameter)
+        })
+        })
+    }
+
     /// # Panics
     ///
     /// Panics if the scope stack cannot retain the scope just created.
@@ -120,7 +145,10 @@ impl TypeParameterScope {
                 .last_mut()
                 .expect("type-parameter scope")
                 .insert(
-                    name.clone(),
+                    match Self::parameter_key(param) {
+                        std::borrow::Cow::Borrowed(_) => name.clone(),
+                        std::borrow::Cow::Owned(key) => key.into(),
+                    },
                     ResolvedType::from_kind(ResolvedTypeKind::TypeParameter {
                         id: TypeParameterId {
                             owner,
@@ -135,7 +163,7 @@ impl TypeParameterScope {
         for param in params {
             let Some(ResolvedType {
                 kind: ResolvedTypeKind::TypeParameter { id, .. },
-            }) = self.lookup(param.name().name())
+            }) = self.parameter(param)
             else {
                 unreachable!("registered type parameter");
             };
@@ -147,7 +175,10 @@ impl TypeParameterScope {
                 .last_mut()
                 .expect("type-parameter scope")
                 .insert(
-                    id.name.clone(),
+                    match Self::parameter_key(param) {
+                        std::borrow::Cow::Borrowed(_) => id.name.clone(),
+                        std::borrow::Cow::Owned(key) => key.into(),
+                    },
                     ResolvedType::from_kind(ResolvedTypeKind::TypeParameter {
                         id,
                         bound: Arc::new(bound),
@@ -1228,7 +1259,7 @@ impl<'a> SemanticModel<'a> {
                 .filter_map(|(ordinal, parameter)| {
                     let ResolvedType {
                         kind: ResolvedTypeKind::TypeParameter { id, bound, .. },
-                    } = scope.lookup(parameter.name().name())?
+                    } = scope.parameter(parameter)?
                     else {
                         return None;
                     };

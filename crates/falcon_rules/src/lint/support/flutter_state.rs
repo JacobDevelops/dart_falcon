@@ -142,11 +142,11 @@ struct Collector<'a> {
     methods: Vec<Method<'a>>,
     late: Vec<(Span, bool)>,
     closures: Vec<Span>,
-    contexts: Vec<(Span, &'a str)>,
+    contexts: Vec<(Span, &'a str, bool)>,
     diags: Vec<Diagnostic>,
 }
 
-impl Collector<'_> {
+impl<'a> Collector<'a> {
     fn report(&mut self, span: Span) {
         let message = match self.rule {
             "require-super-dispose" => "Call `super.dispose()` in this `State.dispose` override.",
@@ -208,6 +208,43 @@ impl Collector<'_> {
                 })
         })
     }
+    fn enter_closure(&mut self, expression: Expr<'a>, state: &SemanticState<'a>) {
+        let Expr::FuncExpr(function) = expression else {
+            return;
+        };
+        self.closures.push(expression.span());
+        if self.rule != "use-closest-build-context" {
+            return;
+        }
+        let inferred = state.infer_with_context(expression, state.expected());
+        let (positional, named) = match inferred.view() {
+            ResolvedTypeView::Function {
+                positional, named, ..
+            } => (positional.as_ref(), Some(named)),
+            _ => (&[][..], None),
+        };
+        let mut ordinal = 0;
+        for parameter in function.params().params() {
+            let ty = if matches!(parameter.kind(), ParamKind::Named { .. }) {
+                named.and_then(|named| {
+                    named
+                        .iter()
+                        .find(|(name, _)| name == parameter.name().name())
+                        .map(|(_, ty)| ty)
+                })
+            } else {
+                let ty = positional.get(ordinal);
+                ordinal += 1;
+                ty
+            };
+            // Wildcards have parameter types without lexical bindings.
+            self.contexts.push((
+                expression.span(),
+                parameter.name().name(),
+                ty.is_some_and(is_context),
+            ));
+        }
+    }
     fn check_context_reference(&mut self, expression: Expr<'_>, state: &SemanticState<'_>) {
         if self.rule == "avoid-late-context" {
             if matches!(expression, Expr::Ident(_) | Expr::Field(_))
@@ -228,15 +265,16 @@ impl Collector<'_> {
         }
         if self.rule == "use-closest-build-context"
             && let Expr::Ident(identifier) = expression
-            && let Some((scope, closest)) = self.contexts.iter().rev().find(|(span, name)| {
-                span.contains(expression.span())
-                    && is_context(&state.environment.declared_type(name))
-            })
+            && let Some((scope, closest, _)) = self
+                .contexts
+                .iter()
+                .rev()
+                .find(|(span, _, context)| span.contains(expression.span()) && *context)
             && identifier.name() != *closest
             && !self
                 .contexts
                 .iter()
-                .any(|(span, name)| span == scope && *name == identifier.name())
+                .any(|(span, name, _)| span == scope && *name == identifier.name())
             && is_context(&state.infer(expression))
         {
             self.report(expression.span());
@@ -245,23 +283,25 @@ impl Collector<'_> {
 }
 
 impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
-    fn visit_stmt(&mut self, statement: Stmt<'a>, _state: &SemanticState<'a>) {
+    fn visit_stmt(&mut self, statement: Stmt<'a>, state: &SemanticState<'a>) {
         if let Stmt::LocalFunc(function) = statement {
             self.closures.push(statement.span());
-            for parameter in function.params().params() {
-                self.contexts
-                    .push((statement.span(), parameter.name().name()));
+            if self.rule == "use-closest-build-context" {
+                for parameter in function.params().params() {
+                    let ty = state
+                        .model
+                        .resolve_formal_parameter_in(parameter, &state.type_parameters);
+                    self.contexts.push((
+                        statement.span(),
+                        parameter.name().name(),
+                        is_context(&ty),
+                    ));
+                }
             }
         }
     }
     fn visit_expr(&mut self, expression: Expr<'a>, state: &SemanticState<'a>) {
-        if let Expr::FuncExpr(function) = expression {
-            self.closures.push(expression.span());
-            for parameter in function.params().params() {
-                self.contexts
-                    .push((expression.span(), parameter.name().name()));
-            }
-        }
+        self.enter_closure(expression, state);
         if matches!(
             self.rule,
             "avoid-late-context" | "use-closest-build-context"

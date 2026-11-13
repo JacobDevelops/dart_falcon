@@ -16,6 +16,16 @@ use crate::resolve::semantic::ResolvedTypeKind;
 
 type IndexedProgram<'a> = (Option<FileId>, &'a Arc<crate::ParsedFile>, bool);
 
+fn mixins_syntax(declaration: TopLevelDecl<'_>) -> AstChildren<'_, DartType<'_>> {
+    match declaration {
+        TopLevelDecl::Class(node) => node.with_clause(),
+        TopLevelDecl::MixinClass(node) => node.with_clause(),
+        TopLevelDecl::ClassTypeAlias(node) => node.with_clause(),
+        TopLevelDecl::Enum(node) => node.with_clause(),
+        _ => AstChildren::empty(),
+    }
+}
+
 pub(super) enum ConstructorInferenceEntry<'a> {
     Alias {
         identity: DeclarationIdentity,
@@ -660,7 +670,7 @@ impl SignatureIndex {
                 .filter_map(|parameter| {
                     let ResolvedType {
                         kind: ResolvedTypeKind::TypeParameter { id, bound, .. },
-                    } = parameters.lookup(parameter.name().name())?
+                    } = parameters.parameter(parameter)?
                     else {
                         return None;
                     };
@@ -1802,7 +1812,7 @@ impl SignatureIndex {
         scope: &TypeParameterScope,
         model: &SemanticModel<'_>,
     ) {
-        let (superclass, mixins, constraints, interfaces) = match declaration {
+        let (superclass, mixin_syntax, constraints, interfaces) = match declaration {
             TopLevelDecl::Class(node) => {
                 (node.extends(), node.with_clause(), None, node.implements())
             }
@@ -1828,7 +1838,15 @@ impl SignatureIndex {
             _ => (None, AstChildren::empty(), None, AstChildren::empty()),
         };
         let superclass = superclass.map(|ty| model.resolve_type_in(ty, scope));
-        let mixins: Vec<_> = mixins.map(|ty| model.resolve_type_in(ty, scope)).collect();
+        let mut mixins = Vec::with_capacity(mixin_syntax.size_hint().0);
+        for syntax in mixin_syntax {
+            let raw = model.resolve_type_in(syntax, scope);
+            mixins.push(self.infer_mixin_application(
+                raw,
+                &superclass.iter().chain(&mixins),
+                model,
+            ));
+        }
         let constraints: Option<Vec<_>> =
             constraints.map(|types| types.map(|ty| model.resolve_type_in(ty, scope)).collect());
         // Resolve each declared edge once, retaining source order for subtype
@@ -1875,6 +1893,143 @@ impl SignatureIndex {
             .entry(identity.clone())
             .or_default()
             .member_supertypes = Some(resolved_member_supertypes);
+    }
+
+    fn infer_mixin_application<'a>(
+        &self,
+        mut mixin: ResolvedType,
+        bases: &(impl Iterator<Item = &'a ResolvedType> + Clone),
+        model: &SemanticModel<'_>,
+    ) -> ResolvedType {
+        let ResolvedTypeKind::Interface {
+            identity,
+            arguments,
+            ..
+        } = &mixin.kind
+        else {
+            return mixin;
+        };
+        if !arguments.is_empty() {
+            return mixin;
+        }
+        let Some(facts) = self.type_facts.get(identity) else {
+            return mixin;
+        };
+        let Some((parameters, _)) = &facts.supertypes else {
+            return mixin;
+        };
+        let Some(constraints) = &facts.mixin_constraints else {
+            return mixin;
+        };
+        if parameters.is_empty() || constraints.is_empty() {
+            return mixin;
+        }
+        let mut inferred =
+            FxHashMap::with_capacity_and_hasher(parameters.len(), rustc_hash::FxBuildHasher);
+        let mut upper =
+            FxHashMap::with_capacity_and_hasher(parameters.len(), rustc_hash::FxBuildHasher);
+        // Dart 2.1 mixin inference matches on-constraints against the superclass
+        // after applying every earlier mixin, not against raw declaration types.
+        for constraint in constraints {
+            let ResolvedTypeKind::Interface {
+                identity: target, ..
+            } = &constraint.kind
+            else {
+                return mixin;
+            };
+            let Some(actual) = bases
+                .clone()
+                .find_map(|base| self.as_instance_of(base, target, model))
+            else {
+                return mixin;
+            };
+            super::infer_type_constraints(
+                constraint,
+                &actual,
+                true,
+                &mut super::TypeConstraintContext {
+                    parameters,
+                    inferred: &mut inferred,
+                    upper: &mut upper,
+                    signatures: self,
+                    model,
+                    poison_unknown: true,
+                    partial: None,
+                },
+            );
+        }
+        let arguments: Option<Vec<_>> = parameters
+            .iter()
+            .map(|id| {
+                super::inference_candidate(inferred.get(id), upper.get(id), self, model)
+                    .or_else(|| self.owner_defaults.get(id).cloned())
+                    .filter(|ty| *ty != ResolvedType::UNKNOWN)
+            })
+            .collect();
+        if let Some(arguments) = arguments
+            && let ResolvedTypeKind::Interface {
+                arguments: target, ..
+            } = &mut mixin.kind
+        {
+            *target = arguments.into();
+        }
+        mixin
+    }
+
+    pub(super) fn infer_raw_mixin_applications(
+        &mut self,
+        programs: &[(Program<'_>, SemanticModel<'_>)],
+    ) {
+        let mut work = Vec::new();
+        for (program, model) in programs {
+            for declaration in program.declarations() {
+                let (name, parameters) = match declaration {
+                    TopLevelDecl::Class(node) => (node.name(), node.type_params()),
+                    TopLevelDecl::MixinClass(node) => (node.name(), node.type_params()),
+                    TopLevelDecl::ClassTypeAlias(node) => (node.name(), node.type_params()),
+                    TopLevelDecl::Enum(node) => (node.name(), node.type_params()),
+                    _ => continue,
+                };
+                if !model.owns_top_level_declaration(declaration)
+                    || !mixins_syntax(declaration).any(|syntax| {
+                        let ty = model.resolve_type(syntax);
+                        matches!(&ty.kind, ResolvedTypeKind::Interface { identity, arguments, .. }
+                            if arguments.is_empty()
+                                && self.type_facts.get(identity).and_then(|facts| facts.supertypes.as_ref())
+                                    .is_some_and(|(parameters, _)| !parameters.is_empty()))
+                    })
+                {
+                    continue;
+                }
+                let Some(identity) = model.resolve_name(name.name()) else {
+                    continue;
+                };
+                let mut scope = TypeParameterScope::default();
+                scope.push(parameters.clone(), model);
+                let owner_parameters = parameter_ids(&scope, parameters);
+                work.push((declaration, identity, scope, owner_parameters, model));
+            }
+        }
+        // A forward-declared superclass may itself contain an inferred mixin.
+        // At most one pass per dependent declaration is needed for an acyclic chain.
+        for _ in 0..work.len() {
+            let mut changed = false;
+            for (declaration, identity, scope, parameters, model) in &work {
+                let before = self
+                    .type_facts
+                    .get(identity)
+                    .and_then(|facts| facts.supertypes.clone());
+                self.add_type_supertypes(*declaration, identity, false, parameters, scope, model);
+                changed |= self
+                    .type_facts
+                    .get(identity)
+                    .and_then(|facts| facts.supertypes.as_ref())
+                    != before.as_ref();
+            }
+            if !changed {
+                break;
+            }
+        }
     }
 }
 
@@ -2595,7 +2750,7 @@ fn parameter_ids<'a>(
     parameters: impl Iterator<Item = TypeParam<'a>>,
 ) -> Vec<TypeParameterId> {
     parameters
-        .filter_map(|parameter| match scope.lookup(parameter.name().name()) {
+        .filter_map(|parameter| match scope.parameter(parameter) {
             Some(ResolvedType {
                 kind: ResolvedTypeKind::TypeParameter { id, .. },
             }) => Some(id),
@@ -2613,7 +2768,7 @@ fn record_bound_declarations<'a>(
     for parameter in parameters {
         if let Some(ResolvedType {
             kind: ResolvedTypeKind::TypeParameter { id, .. },
-        }) = scope.lookup(parameter.name().name())
+        }) = scope.parameter(parameter)
         {
             declared.insert(id, parameter.bound().is_some());
         }

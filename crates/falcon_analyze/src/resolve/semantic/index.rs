@@ -121,10 +121,8 @@ impl ResolvedSignature {
         for ty in self.named.values() {
             collect_parameter_ids(ty, &mut self.call_parameters);
         }
-        self.call_parameters.retain(|id| {
-            !matches!(scope.lookup(&id.name),
-            Some(ResolvedType { kind: ResolvedTypeKind::TypeParameter { id: scoped, .. } }) if scoped == *id)
-        });
+        self.call_parameters
+            .retain(|id| !scope.contains_parameter(id));
         self.call_parameters.sort_by_key(|id| id.ordinal);
     }
 

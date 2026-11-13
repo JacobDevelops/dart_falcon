@@ -321,8 +321,9 @@ struct InitializerDependencies<F> {
 }
 
 impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> InitializerDependencies<F> {
-    fn bind(&mut self, name: &str) {
-        self.environment.declare(name, ResolvedType::UNKNOWN);
+    fn bind(&mut self, name: falcon_syntax::cst::Identifier<'_>) {
+        self.environment
+            .declare_variable(name, ResolvedType::UNKNOWN);
     }
 
     fn bind_statements(&mut self, statements: AstChildren<'a, falcon_syntax::cst::Stmt<'a>>) {
@@ -331,10 +332,13 @@ impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> InitializerDependencies<F> {
             match statement {
                 Stmt::LocalVar(variable) => {
                     for declarator in variable.declarators() {
-                        self.bind(declarator.name().name());
+                        self.bind(declarator.name());
                     }
                 }
-                Stmt::LocalFunc(function) => self.bind(function.name().name()),
+                Stmt::LocalFunc(function) => {
+                    self.environment
+                        .declare_local_function(function.name().name(), ResolvedType::UNKNOWN);
+                }
                 Stmt::PatternDecl(declaration) => self.bind_pattern(declaration.pattern()),
                 _ => {}
             }
@@ -347,12 +351,12 @@ impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> InitializerDependencies<F> {
             fn visit_pattern(&mut self, pattern: falcon_syntax::cst::Pattern<'a>) {
                 if let falcon_syntax::cst::Pattern::Variable(variable) = pattern {
                     self.0
-                        .declare(variable.name().name(), ResolvedType::UNKNOWN);
+                        .declare_variable(variable.name(), ResolvedType::UNKNOWN);
                 }
                 if let falcon_syntax::cst::Pattern::Object(object) = pattern {
                     for field in object.fields() {
                         if field.pattern().is_none() {
-                            self.0.declare(field.name().name(), ResolvedType::UNKNOWN);
+                            self.0.declare_variable(field.name(), ResolvedType::UNKNOWN);
                         }
                     }
                 }
@@ -438,7 +442,7 @@ impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> Visitor<'a> for InitializerDepend
                 if let Expr::FuncExpr(function) = expression {
                     visitor.scoped(|visitor| {
                         for parameter in function.params().params() {
-                            visitor.bind(parameter.name().name());
+                            visitor.bind(parameter.name());
                         }
                         walk_expr(visitor, expression);
                         (visitor.inspect)(expression, &visitor.environment);
@@ -469,7 +473,7 @@ impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> Visitor<'a> for InitializerDepend
         match statement {
             Stmt::LocalFunc(function) => self.scoped(|visitor| {
                 for parameter in function.params().params() {
-                    visitor.bind(parameter.name().name());
+                    visitor.bind(parameter.name());
                 }
                 walk_stmt(visitor, statement);
             }),
@@ -491,7 +495,7 @@ impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> Visitor<'a> for InitializerDepend
         match header.init() {
             Some(ForInit::VarDecl(declaration)) => {
                 for declarator in declaration.declarators() {
-                    self.bind(declarator.name().name());
+                    self.bind(declarator.name());
                 }
             }
             Some(ForInit::PatternDecl(declaration)) => {
@@ -499,7 +503,7 @@ impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> Visitor<'a> for InitializerDepend
             }
             Some(ForInit::ForIn(initializer)) if initializer.declares_variable() => {
                 self.visit_expr(initializer.iterable());
-                self.bind(initializer.name().name());
+                self.bind(initializer.name());
                 return;
             }
             Some(ForInit::PatternForIn(initializer)) => {
@@ -519,7 +523,7 @@ impl<'a, F: FnMut(Expr<'a>, &TypeEnvironment)> Visitor<'a> for InitializerDepend
                 .into_iter()
                 .flatten()
             {
-                visitor.bind(name.name());
+                visitor.bind(name);
             }
             falcon_syntax::cst::visit::walk_catch_clause(visitor, catch);
         });
@@ -1095,6 +1099,7 @@ impl SignatureIndex {
     }
 
     pub(super) fn infer_programs(&mut self, programs: &[(Program<'_>, SemanticModel<'_>)]) {
+        self.infer_raw_mixin_applications(programs);
         let mut dependencies = FxHashMap::default();
         let mut entries = Vec::new();
         for (file, (program, model)) in programs.iter().enumerate() {
@@ -1158,7 +1163,7 @@ impl SignatureIndex {
                     occurrence: super::FunctionTypeAlias::default(),
                     identity: identity.clone(),
                     arguments: parameters
-                        .filter_map(|parameter| scope.lookup(parameter.name().name()))
+                        .filter_map(|parameter| scope.parameter(parameter))
                         .collect(),
                     nullable: false,
                     extension_type: matches!(declaration, TopLevelDecl::ExtensionType(_)),

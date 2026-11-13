@@ -1826,3 +1826,130 @@ fn binary_chains_carry_evaluated_receiver_types_across_local_writes() {
     assert_eq!(observed.rhs, 2);
     assert_eq!(observed.typed_optional, 1);
 }
+
+#[test]
+fn wildcard_bindings_follow_the_library_language_version() {
+    struct References {
+        expected_global: bool,
+        count: usize,
+    }
+    impl<'a> SemanticRuleVisitor<'a> for References {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            if matches!(node, Expr::Ident(name) if name.name() == "_") {
+                assert_eq!(
+                    state.referenced_declaration(node, false).is_some(),
+                    self.expected_global,
+                );
+                self.count += 1;
+            }
+        }
+    }
+    for (version, expected_global) in [("3.6", false), ("3.7", true)] {
+        let source = format!(
+            "// @dart = {version}\n\
+             bool? _;\n\
+             void parameter(bool _) {{ print(_); }}\n\
+             void local() {{ bool _ = true; print(_); }}\n\
+             void loop() {{ for (var _ in [true]) {{ print(_); }} }}\n\
+             void caught() {{ try {{ throw 1; }} catch (_) {{ print(_); }} }}\n\
+             void stack() {{ try {{ throw 1; }} catch (e, _) {{ print(_); }} }}"
+        );
+        let mut observed = References {
+            expected_global,
+            count: 0,
+        };
+        visit_with_signatures(
+            &source,
+            std::path::Path::new("/project/lib/main.dart"),
+            &mut observed,
+        );
+        assert_eq!(observed.count, 5);
+    }
+}
+
+#[test]
+fn statement_list_locals_never_resolve_to_an_outer_declaration() {
+    #[derive(Default)]
+    struct References(usize);
+    impl<'a> SemanticRuleVisitor<'a> for References {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            if matches!(node, Expr::Ident(name) if name.name() == "shared") {
+                assert!(state.referenced_declaration(node, false).is_none());
+                self.0 += 1;
+            }
+        }
+    }
+    let mut observed = References::default();
+    visit_with_signatures(
+        "Object shared = 1; void check(int n) { \
+         try { print(shared()); Object shared() => 2; } \
+         finally { print(shared); Object shared = 3; } \
+         switch (n) { \
+           case 0: print(shared()); Object shared() => 4; break; \
+           default: print(shared); Object shared = 5; \
+         } \
+         { print(shared); Object shared = 6; } \
+         { print(shared()); Object shared() => 7; } \
+         }",
+        std::path::Path::new("/project/lib/main.dart"),
+        &mut observed,
+    );
+    assert_eq!(observed.0, 6);
+}
+
+#[test]
+fn generic_mixin_members_retain_instantiated_owner_arguments() {
+    #[derive(Default)]
+    struct Calls(usize);
+    impl<'a> SemanticRuleVisitor<'a> for Calls {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            if let Expr::Call(call) = node
+                && matches!(call.callee(), Expr::Field(field)
+                    if field.field().name() == "echo" && matches!(field.object(), Expr::Ident(_)))
+            {
+                assert!(state.infer(node).interface("dart:core", "bool"));
+                self.0 += 1;
+            }
+        }
+    }
+    let mut observed = Calls::default();
+    visit_with_signatures(
+        "mixin Echo<T> { T echo(T value) => value; } \
+         class Raw extends Base<bool> with Constrained {} \
+         class Chained extends Raw with Constrained {} \
+         class Base<T> { T echo(T value) => value; } \
+         mixin Constrained<T> on Base<T> { T echo(T value) => super.echo(value); } \
+         class Direct with Echo<bool> {} \
+         class Generic<T> with Echo<T> {} \
+         class Applied extends Base<bool> with Constrained<bool> {} \
+         void check(Direct a, Generic<bool> b, Applied c, Raw d, Chained e) { \
+           a.echo(true); b.echo(true); c.echo(true); d.echo(true); e.echo(true); \
+         }",
+        std::path::Path::new("/project/lib/main.dart"),
+        &mut observed,
+    );
+    assert_eq!(observed.0, 5);
+}
+
+#[test]
+fn unresolved_type_promotion_does_not_remain_dynamic() {
+    #[derive(Default)]
+    struct References(usize);
+    impl<'a> SemanticRuleVisitor<'a> for References {
+        fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+            if let Expr::Field(field) = node
+                && field.field().name() == "member"
+            {
+                assert_eq!(state.infer(field.object()), ResolvedType::UNKNOWN);
+                self.0 += 1;
+            }
+        }
+    }
+    let mut observed = References::default();
+    visit_with_signatures(
+        "void check(dynamic value) { if (value is MissingType) { value.member(); } }",
+        std::path::Path::new("/project/lib/main.dart"),
+        &mut observed,
+    );
+    assert_eq!(observed.0, 1);
+}

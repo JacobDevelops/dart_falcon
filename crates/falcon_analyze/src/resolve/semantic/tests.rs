@@ -1137,7 +1137,6 @@ fn no_op_flow_mutations_preserve_shared_scopes() {
     environment.mark_captured("blocked");
     let snapshot = environment.clone();
 
-    environment.promote("plain", ResolvedType::UNKNOWN);
     environment.promote("value", ResolvedType::NULL);
     environment.promote("blocked", ResolvedType::NULL);
     environment.promote("missing", ResolvedType::NULL);
@@ -1152,6 +1151,17 @@ fn no_op_flow_mutations_preserve_shared_scopes() {
     assert!(Arc::ptr_eq(&environment.scopes[0], &snapshot.scopes[0]));
     assert_eq!(environment.lookup("value"), ResolvedType::NULL);
     assert_eq!(environment.lookup("plain"), ResolvedType::DYNAMIC);
+}
+
+#[test]
+fn unknown_type_tests_replace_dynamic_and_repeated_promotions_are_no_ops() {
+    let mut environment = TypeEnvironment::new();
+    environment.declare("value", ResolvedType::DYNAMIC);
+    environment.promote("value", ResolvedType::UNKNOWN);
+    assert_eq!(environment.lookup("value"), ResolvedType::UNKNOWN);
+    let snapshot = environment.clone();
+    environment.promote("value", ResolvedType::UNKNOWN);
+    assert!(Arc::ptr_eq(&environment.scopes[0], &snapshot.scopes[0]));
 }
 
 #[test]
@@ -9100,4 +9110,38 @@ fn inference_worklist_checks_late_receiver_reads_during_partial_settlement() {
             );
         },
     );
+}
+
+#[test]
+fn wildcard_type_parameters_keep_distinct_positions_without_binding_names() {
+    for version in ["3.6", "3.7"] {
+        let source = format!("// @dart = {version}\nvoid check<_, T>() {{}}");
+        with_model(&source, |program, model| {
+            let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {
+                panic!("function");
+            };
+            let mut scope = TypeParameterScope::default();
+            scope.push(function.type_params(), model);
+            assert_eq!(scope.lookup("_").is_some(), version == "3.6");
+            let parameters: Vec<_> = function
+                .type_params()
+                .map(|parameter| scope.parameter(parameter).unwrap())
+                .collect();
+            assert_eq!(parameters.len(), 2);
+            assert_ne!(parameters[0], parameters[1]);
+        });
+    }
+    with_model("void check<_, _>() {}", |program, model| {
+        let TopLevelDecl::Function(function) = program.declarations().next().unwrap() else {
+            panic!("function");
+        };
+        let mut scope = TypeParameterScope::default();
+        scope.push(function.type_params(), model);
+        let parameters: Vec<_> = function
+            .type_params()
+            .map(|parameter| scope.parameter(parameter).unwrap())
+            .collect();
+        assert_ne!(parameters[0], parameters[1]);
+        assert!(scope.lookup("_").is_none());
+    });
 }

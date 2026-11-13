@@ -40,7 +40,14 @@ pub fn parse(source: &str) -> ParseResult {
 #[must_use]
 pub fn parse_for_package(source: &str, package_version: Option<LanguageVersion>) -> ParseResult {
     try_parse_for_package(source, package_version).unwrap_or_else(|error| {
-        let tree = SyntaxTree::build("", &[], Vec::new());
+        let tree = SyntaxTree::build_with_language_version(
+            "",
+            &[],
+            Vec::new(),
+            LanguageVersion::file_override(source)
+                .or(package_version)
+                .unwrap_or(LanguageVersion::CURRENT),
+        );
         ParseResult {
             errors: vec![ParseError {
                 kind: ParseErrorKind::Syntax,
@@ -74,10 +81,11 @@ fn parse_inner(source: &str, version: LanguageVersion) -> ParseResult {
     p.parse_program();
     p.interpolation_tokens
         .sort_unstable_by_key(|(span, _)| span.start);
-    let tree = SyntaxTree::build(
+    let tree = SyntaxTree::build_with_language_version(
         source,
         &lexical::cst_tokens(&tokens, source, &p.interpolation_tokens),
         p.events,
+        version,
     );
     debug_assert!(
         tree.is_lossless(source),

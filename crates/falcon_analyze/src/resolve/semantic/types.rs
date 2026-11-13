@@ -415,7 +415,7 @@ impl FunctionTypeShape {
         scope: &TypeParameterScope,
     ) -> Option<Arc<Self>> {
         let parameters = parameters
-            .map(|parameter| scope.lookup(parameter.name().name()))
+            .map(|parameter| scope.parameter(parameter))
             .collect::<Option<Vec<_>>>()?;
         Some(Self::new(required_named, parameters))
     }

@@ -114,6 +114,7 @@ impl NodeData {
 #[derive(Debug, Clone)]
 pub struct SyntaxTree {
     pub(crate) source_len: usize,
+    language_version: crate::LanguageVersion,
     pub(crate) nodes: Box<[NodeData]>,
     pub(crate) elements: Box<[Element]>,
     pub(crate) tokens: Box<[Token]>,
@@ -148,6 +149,7 @@ impl SyntaxTree {
         };
         Self {
             source_len: len,
+            language_version: crate::LanguageVersion::CURRENT,
             nodes: vec![NodeData {
                 kind: NodeKind::Program,
                 parent: None,
@@ -164,6 +166,11 @@ impl SyntaxTree {
             delimiter_pairs: OnceLock::new(),
             recovery_spans: Box::new([]),
         }
+    }
+
+    #[must_use]
+    pub const fn language_version(&self) -> crate::LanguageVersion {
+        self.language_version
     }
 
     pub fn root<'a>(&'a self, source: &'a str) -> SyntaxNode<'a> {
@@ -229,7 +236,28 @@ impl SyntaxTree {
     /// recovery span has no enclosing node, there is more than one root, or
     /// the node or token arena exceeds its 31-bit ID capacity.
     #[must_use]
-    pub fn build(source: &str, tokens: &[Token], mut events: Vec<Event>) -> Self {
+    pub fn build(source: &str, tokens: &[Token], events: Vec<Event>) -> Self {
+        Self::build_with_language_version(
+            source,
+            tokens,
+            events,
+            crate::LanguageVersion::file_override(source)
+                .unwrap_or(crate::LanguageVersion::CURRENT),
+        )
+    }
+
+    /// Builds a tree with the effective language version selected by its parser.
+    ///
+    /// # Panics
+    ///
+    /// Panics for invalid event streams under the same conditions as [`Self::build`].
+    #[must_use]
+    pub fn build_with_language_version(
+        source: &str,
+        tokens: &[Token],
+        mut events: Vec<Event>,
+        language_version: crate::LanguageVersion,
+    ) -> Self {
         let node_capacity = events
             .iter()
             .filter(|event| matches!(event, Event::Start { .. }))
@@ -318,6 +346,7 @@ impl SyntaxTree {
         recovery_spans.sort_unstable_by_key(|(node, _)| *node);
         Self {
             source_len: source.len(),
+            language_version,
             nodes: sink.nodes.into_boxed_slice(),
             elements: elements.into_boxed_slice(),
             tokens: sink.tokens.into_boxed_slice(),

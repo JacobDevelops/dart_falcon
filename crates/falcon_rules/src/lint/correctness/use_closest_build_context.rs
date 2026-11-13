@@ -1,4 +1,8 @@
 //! Use the nearest `BuildContext` parameter inside nested callbacks. Only resolved Flutter contexts are checked, avoiding unrelated variables named context.
+//!
+//! A nearer context parameter named `_` still counts, including non-binding
+//! wildcard parameters in Dart 3.7 and later. Give it a usable name instead of
+//! capturing an outer context.
 
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
 use falcon_syntax::cst::Program;

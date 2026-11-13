@@ -528,7 +528,7 @@ impl FlowContext<'_, '_> {
         if matches!(
             ty,
             ResolvedType {
-                kind: ResolvedTypeKind::Dynamic | ResolvedTypeKind::Unknown
+                kind: ResolvedTypeKind::Dynamic
             }
         ) {
             return;

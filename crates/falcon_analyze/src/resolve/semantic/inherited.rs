@@ -43,7 +43,7 @@ impl OverrideShape {
                 .collect(),
             bounds: type_params
                 .into_iter()
-                .map(|param| match scope.lookup(param.name().name()) {
+                .map(|param| match scope.parameter(param) {
                     Some(ResolvedType {
                         kind: ResolvedTypeKind::TypeParameter { bound, .. },
                     }) => bound.as_ref().clone(),
