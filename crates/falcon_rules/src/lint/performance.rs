@@ -8,7 +8,7 @@ crate::declare_rules! {
     avoid_border_all::AvoidBorderAll => ("avoid-border-all", resolved, Some(Domain::Flutter), false, RuleSource::Falcon);
     prefer_using_list_view::PreferUsingListView => ("prefer-using-list-view", resolved, Some(Domain::Flutter), false, RuleSource::Falcon);
     avoid_unnecessary_gesture_detector::AvoidUnnecessaryGestureDetector => ("avoid-unnecessary-gesture-detector", resolved, Some(Domain::Flutter), false, RuleSource::Falcon);
-    sized_box_for_whitespace::SizedBoxForWhitespace => ("sized-box-for-whitespace", file, Some(Domain::Flutter), true, RuleSource::Lints("sized_box_for_whitespace"));
+    sized_box_for_whitespace::SizedBoxForWhitespace => ("sized-box-for-whitespace", resolved, Some(Domain::Flutter), true, RuleSource::Lints("sized_box_for_whitespace"));
     unnecessary_to_list_in_spreads::UnnecessaryToListInSpreads => ("unnecessary-to-list-in-spreads", file, None, true, RuleSource::Lints("unnecessary_to_list_in_spreads"));
     prefer_const_border_radius::PreferConstBorderRadius => ("prefer-const-border-radius", file, Some(Domain::Flutter), true, RuleSource::DartCodeLinter("prefer-const-border-radius"));
     prefer_correct_edge_insets_constructor::PreferCorrectEdgeInsetsConstructor => ("prefer-correct-edge-insets-constructor", file, Some(Domain::Flutter), true, RuleSource::DartCodeLinter("prefer-correct-edge-insets-constructor"));

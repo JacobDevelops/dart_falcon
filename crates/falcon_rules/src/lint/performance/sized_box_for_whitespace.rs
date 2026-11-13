@@ -7,9 +7,7 @@
 //! and no named arguments other than `width`, `height`, `child`, or `key`.
 //! The diagnostic covers the constructor name, excluding `new` and arguments.
 
-use falcon_analyze::{
-    AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
-};
+use falcon_analyze::{AnalyzeContext, Rule, RulePreparation, SemanticRuleVisitor, SemanticState};
 use falcon_diagnostics::Diagnostic;
 use falcon_syntax::cst::*;
 
@@ -21,7 +19,7 @@ impl Rule for SizedBoxForWhitespace {
         &self,
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
-    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags) }
+    ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Semantic, Collector, ctx, diags) }
 }
 
 struct Collector<'a> {
@@ -29,11 +27,10 @@ struct Collector<'a> {
     ctx: &'a AnalyzeContext<'a>,
 }
 
-falcon_analyze::structural_visitor! {
-impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
-    fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
-        if let Some((name, args, _)) = crate::lint::flutter::widget_construction(node)
-        && name == "Container"
+impl<'a> SemanticRuleVisitor<'a> for Collector<'a> {
+    fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
+        if let Some((identity, "new", args)) = crate::lint::flutter::scoped_constructor_invocation(node, state)
+        && self.ctx.identities().is_some_and(|index| index.is_package_declaration(&identity, "flutter", "Container"))
         && args.positional().is_empty()
         // Only sizing/pass-through args, and at least one dimension set: this
         // Container adds whitespace only, so a SizedBox expresses it directly.
@@ -49,13 +46,11 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
                 crate::lint::flutter::constructor_span(node),
             ));
         }
-        StructuralTraversal::Continue
     }
 
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.diags
     }
-}
 }
 
 #[cfg(test)]
@@ -68,6 +63,8 @@ mod tests {
     #[test]
     fn reports_constructor_name_without_keyword_or_arguments() {
         let source = r"
+import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' as widgets;
 void build() {
   Container(width: 2, child: text);
   new Container(height: 2, child: text);
@@ -78,7 +75,16 @@ void build() {
         assert!(parsed_errors.is_empty(), "{parsed_errors:?}");
         let parsed = std::sync::Arc::new(parsed);
         let config = FalconConfig::default();
-        let ctx = AnalyzeContext::new(Path::new("test.dart"), &config, &parsed);
+        let file = Path::new("test.dart");
+        let environment = falcon_analyze::AnalysisEnvironment::discover_with_sdk_locator([file], |_| None);
+        let externals = falcon_analyze::ExternalLibraries::load(&environment, &[(file, parsed.program(), source)], |path| path == file);
+        let identities = falcon_analyze::IdentityIndex::build(
+            &[falcon_analyze::IdentitySource { path: file, parsed: &parsed, has_parse_errors: false }],
+            &[source],
+            &[],
+            Some(falcon_analyze::ExternalSources { libraries: &externals, environment: &environment }),
+        );
+        let ctx = AnalyzeContext::new(file, &config, &parsed).with_identities(&identities).with_environment(Some(&environment));
         let diagnostics = SizedBoxForWhitespace.analyze(SizedBoxForWhitespace::NAME, parsed.program(), &ctx);
         assert_eq!(diagnostics.len(), 3);
         for (diagnostic, invocation) in diagnostics.iter().zip([

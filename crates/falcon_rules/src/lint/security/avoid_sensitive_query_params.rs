@@ -85,21 +85,32 @@ impl<'a> Collector<'a> {
     }
 
     fn check_map(&mut self, expr: Expr<'a>) {
-        if let Expr::Map(map) = expr.unparenthesized() {
-            for element in map.elements() {
-                if let MapElement::Entry(entry) = element
-                    && let Expr::StringLit(key) = entry.key().unparenthesized()
+        match expr.unparenthesized() {
+            Expr::Map(map) => map.elements().for_each(|element| self.check_map_element(element)),
+            Expr::Set(set) => set.elements().for_each(|element| self.check_map_element(element)),
+            _ => {}
+        }
+    }
+
+    fn check_map_element<E: Element<'a>>(&mut self, element: E) {
+        match element.kind() {
+            ElementKind::Entry(entry) => {
+                if let Expr::StringLit(key) = entry.key().unparenthesized()
                     && key.interpolations().next().is_none()
+                    && sensitive(&crate::lint::support::directive_strings::uri_value(key))
                 {
-                    let mut segments = key.segments();
-                    if let Some((segment, _)) = segments.next()
-                        && segments.next().is_none()
-                        && sensitive(segment.content)
-                    {
-                        self.report(entry.key().span());
-                    }
+                    self.report(entry.key().span());
                 }
             }
+            ElementKind::If { then_element, else_element, .. } => {
+                self.check_map_element(then_element);
+                if let Some(otherwise) = else_element {
+                    self.check_map_element(otherwise);
+                }
+            }
+            ElementKind::For { body, .. } => self.check_map_element(body),
+            ElementKind::Spread { expression } => self.check_map(expression),
+            ElementKind::Expression(_) | ElementKind::NullAware(_) => {}
         }
     }
 
@@ -108,7 +119,27 @@ impl<'a> Collector<'a> {
     }
 }
 
+fn has_literal_sensitive_query(literal: StringLitNode<'_>, query_only: bool) -> bool {
+    let value = crate::lint::support::directive_strings::uri_value(literal);
+    let query = if query_only {
+        value.as_str()
+    } else {
+        if !value.starts_with("https://") && !value.starts_with("http://") {
+            return false;
+        }
+        let url = value.split('#').next().unwrap_or_default();
+        let Some((_, query)) = url.split_once('?') else { return false; };
+        query
+    };
+    query.split('&').any(|entry| {
+        entry.split_once('=').is_some_and(|(key, _)| sensitive_query_key(key))
+    })
+}
+
 fn has_sensitive_query(literal: StringLitNode<'_>, query_only: bool) -> bool {
+    if literal.interpolations().next().is_none() {
+        return has_literal_sensitive_query(literal, query_only);
+    }
     let mut at_key_start = query_only;
     for (segment, span) in literal.segments() {
         let text = segment.content;

@@ -1,11 +1,9 @@
 //! Flags `BorderRadius.only(...)` whose four corner radii are all equal.
 //!
 //! When every corner uses the same `Radius.circular(n)`,
-//! `BorderRadius.circular(n)` is shorter and const-constructible, so Flutter can
-//! canonicalize and reuse the value instead of rebuilding it. The rule fires
-//! only when all four corners (`topLeft`, `topRight`, `bottomLeft`,
-//! `bottomRight`) are present and their `Radius.circular(...)` values are
-//! textually equal.
+//! `BorderRadius.all(Radius.circular(n))` preserves const construction and
+//! avoids repeating the radius. Unlike `BorderRadius.circular`, `all` is const.
+//! All four corners must be present and their circular values textually equal.
 
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
@@ -24,17 +22,12 @@ impl Rule for PreferConstBorderRadius {
     ) -> RulePreparation<'a> { crate::lint::support::preparation::prepare!(Structural, Collector, ctx, diags) }
 }
 fn check_border_radius_only_call(
-    callee: Expr<'_>,
     args: ArgList<'_>,
     span: Span,
     diags: &mut Vec<Diagnostic>,
     ctx: &AnalyzeContext,
 ) {
-    if let Expr::Field(field) = callee.unparenthesized()
-        && let Expr::Ident(ident) = field.object().unparenthesized()
-        && ident.name() == "BorderRadius"
-        && field.field().name() == "only"
-        && all_border_radii_equal(args)
+    if all_border_radii_equal(args)
     {
         let source = ctx.source();
         let start_line = source[..span.start].chars().filter(|&c| c == '\n').count();
@@ -61,7 +54,7 @@ fn check_border_radius_only_call(
             }
         };
 
-        diags.push(ctx.diagnostic("`BorderRadius.only()` with all equal radii should use `BorderRadius.circular()`.", report_span));
+        diags.push(ctx.diagnostic("`BorderRadius.only()` with all equal radii should use `BorderRadius.all(Radius.circular(...))`.", report_span));
     }
 }
 
@@ -91,20 +84,28 @@ fn all_border_radii_equal(args: ArgList<'_>) -> bool {
     }
 }
 
-fn extract_radius_value(expr: Expr<'_>) -> Option<&str> {
-    if let Expr::Call(call) = expr.unparenthesized()
-        && let Expr::Field(field) = call.callee().unparenthesized()
-        && let Expr::Ident(ident) = field.object().unparenthesized()
-        && ident.name() == "Radius"
-        && field.field().name() == "circular"
-        && let (Some(argument), None) = {
-            let mut arguments = call.args().positional();
-            (arguments.next(), arguments.next())
+fn named_construction<'a>(expr: Expr<'a>, class: &str, constructor: &str) -> Option<ArgList<'a>> {
+    match expr.unparenthesized() {
+        Expr::Call(call) => {
+            let Expr::Field(field) = call.callee().unparenthesized() else { return None; };
+            let Expr::Ident(ident) = field.object().unparenthesized() else { return None; };
+            (ident.name() == class && field.field().name() == constructor).then(|| call.args())
         }
-    {
-        return scalar_text(argument);
+        Expr::New(new) => {
+            let DartType::Named(named) = new.dart_type() else { return None; };
+            let mut segments = named.segments();
+            let name = new.constructor_name().or_else(|| segments.next_back())?;
+            (segments.next_back()?.name() == class && name.name() == constructor).then(|| new.args())
+        }
+        _ => None,
     }
-    None
+}
+
+fn extract_radius_value(expr: Expr<'_>) -> Option<&str> {
+    let args = named_construction(expr, "Radius", "circular")?;
+    let mut arguments = args.positional();
+    let value = scalar_text(arguments.next()?)?;
+    arguments.next().is_none().then_some(value)
 }
 
 use crate::lint::expressions::scalar_text;
@@ -123,8 +124,8 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     }
 
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
-        if let Expr::Call(call) = node {
-            check_border_radius_only_call(call.callee(), call.args(), call.span(), &mut self.diags, self.ctx);
+        if let Some(args) = named_construction(node, "BorderRadius", "only") {
+            check_border_radius_only_call(args, node.span(), &mut self.diags, self.ctx);
         }
         StructuralTraversal::Continue
     }

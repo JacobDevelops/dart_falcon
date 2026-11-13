@@ -44,7 +44,6 @@ impl Rule for CognitiveComplexity {
             count: 0,
             depth: 0,
             else_if: None,
-            logical: None,
             bodies: Vec::new(),
             statements: Vec::new(),
             expressions: Vec::new(),
@@ -58,24 +57,52 @@ struct Collector<'a> {
     count: usize,
     depth: usize,
     else_if: Option<usize>,
-    logical: Option<BinaryOp>,
-    bodies: Vec<(usize, usize, Option<usize>, Option<BinaryOp>)>,
+    bodies: Vec<(usize, usize, Option<usize>)>,
     statements: Vec<(usize, Option<usize>)>,
-    expressions: Vec<(usize, Option<BinaryOp>)>,
+    expressions: Vec<ExpressionFrame>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct LogicalSequence {
+    first: Option<BinaryOp>,
+    last: Option<BinaryOp>,
+    score: usize,
+}
+
+impl LogicalSequence {
+    fn append(&mut self, other: Self) {
+        self.score += other.score;
+        if self.last.is_some() && self.last == other.first {
+            self.score -= 1;
+        }
+        self.first = self.first.or(other.first);
+        self.last = other.last.or(self.last);
+    }
+
+    fn operator(&mut self, op: BinaryOp) {
+        self.append(Self { first: Some(op), last: Some(op), score: 1 });
+    }
+}
+
+struct ExpressionFrame {
+    depth: usize,
+    connected: bool,
+    operator: Option<BinaryOp>,
+    sequence: LogicalSequence,
 }
 falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> { self.diags }
     fn visit_function_body(&mut self, _node: FunctionBody<'a>) -> StructuralTraversal {
-        self.bodies.push((self.count, self.depth, self.else_if, self.logical));
-        self.count = 0; self.depth = 0; self.else_if = None; self.logical = None;
+        self.bodies.push((self.count, self.depth, self.else_if));
+        self.count = 0; self.depth = 0; self.else_if = None;
         StructuralTraversal::Continue
     }
     fn exit_function_body(&mut self, node: FunctionBody<'a>) {
         if self.count > self.threshold {
             self.diags.push(self.ctx.diagnostic(format!("Function has cognitive complexity {} (max {}). Reduce nesting or extract helpers.", self.count, self.threshold), node.span()));
         }
-        if let Some(saved) = self.bodies.pop() { (self.count, self.depth, self.else_if, self.logical) = saved; }
+        if let Some(saved) = self.bodies.pop() { (self.count, self.depth, self.else_if) = saved; }
     }
     fn visit_stmt(&mut self, node: Stmt<'a>) -> StructuralTraversal {
         self.statements.push((self.depth, self.else_if));
@@ -104,19 +131,35 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         if !self.bodies.is_empty() { self.depth -= 1; }
     }
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
-        self.expressions.push((self.depth, self.logical));
+        let operator = match node {
+            Expr::Binary(binary) if matches!(binary.op(), BinaryOp::And | BinaryOp::Or) => Some(binary.op()),
+            _ => None,
+        };
+        self.expressions.push(ExpressionFrame {
+            depth: self.depth,
+            connected: operator.is_some() || matches!(node, Expr::Paren(_)),
+            operator,
+            sequence: LogicalSequence::default(),
+        });
         if self.bodies.is_empty() { return StructuralTraversal::Continue; }
         if matches!(node, Expr::Conditional(_) | Expr::Switch(_)) {
             self.count += 1 + self.depth; self.depth += 1;
         }
-        if let Expr::Binary(binary) = node && matches!(binary.op(), BinaryOp::And | BinaryOp::Or) {
-            if self.logical != Some(binary.op()) { self.count += 1; }
-            self.logical = Some(binary.op());
-        } else if !matches!(node, Expr::Paren(_)) { self.logical = None; }
         StructuralTraversal::Continue
     }
     fn exit_expr(&mut self, _node: Expr<'a>) {
-        if let Some(saved) = self.expressions.pop() { (self.depth, self.logical) = saved; }
+        if let Some(frame) = self.expressions.pop() {
+            self.depth = frame.depth;
+            if let Some(parent) = self.expressions.last_mut().filter(|parent| parent.connected) {
+                parent.sequence.append(frame.sequence);
+                // The shared walker visits the left operand before the right.
+                if let Some(operator) = parent.operator.take() {
+                    parent.sequence.operator(operator);
+                }
+            } else if !self.bodies.is_empty() {
+                self.count += frame.sequence.score;
+            }
+        }
     }
 }
 }

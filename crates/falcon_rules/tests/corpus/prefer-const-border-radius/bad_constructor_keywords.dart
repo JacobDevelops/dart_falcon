@@ -1,0 +1,5 @@
+const implicit = BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8), bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)); /* expect: prefer-const-border-radius, msg: "`BorderRadius.only()` with all equal radii should use `BorderRadius.all(Radius.circular(...))`." */
+const explicit = const BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8), bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)); /* expect: prefer-const-border-radius */
+final allocated = new BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8), bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)); /* expect: prefer-const-border-radius */
+final inner = BorderRadius.only(topLeft: const Radius.circular(8), topRight: const Radius.circular(8), bottomLeft: const Radius.circular(8), bottomRight: const Radius.circular(8)); /* expect: prefer-const-border-radius */
+final innerNew = BorderRadius.only(topLeft: new Radius.circular(8), topRight: new Radius.circular(8), bottomLeft: new Radius.circular(8), bottomRight: new Radius.circular(8)); /* expect: prefer-const-border-radius */
