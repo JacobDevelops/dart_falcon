@@ -689,7 +689,7 @@ impl LspState {
     }
 
     /// Apply initialize roots before opening documents, resolving each folder's config.
-    pub(crate) fn initialize_workspace_roots(&mut self, roots: Vec<PathBuf>) {
+    pub fn initialize_workspace_roots(&mut self, roots: Vec<PathBuf>) {
         let client_roots = roots.clone();
         let mut roots = roots
             .into_iter()

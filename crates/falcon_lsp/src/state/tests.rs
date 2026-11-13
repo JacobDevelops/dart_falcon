@@ -155,6 +155,11 @@ fn secondary_root_requirements_follow_its_registered_rules_on_reload() {
     }
 }
 
+// Disk-cache identities are canonical; URI-alias tests create explicit symlinks.
+pub(super) fn tempdir() -> tempfile::TempDir {
+    tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+}
+
 #[test]
 fn repeated_open_rejects_old_versions() {
     let directory = tempfile::tempdir().unwrap();
@@ -313,12 +318,19 @@ fn project_reads_track_missing_and_unreadable_required_sources() {
     let path = directory.path().join("gone.dart");
     let mut complete = true;
     let mut failures = HashMap::new();
-    assert_eq!(LspState::read_project_source(&path, true, &mut complete, &mut failures).unwrap_err().kind(), std::io::ErrorKind::NotFound);
+    assert_eq!(
+        LspState::read_project_source(&path, true, &mut complete, &mut failures)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::NotFound
+    );
     assert!(!complete);
     assert!(failures.contains_key(&path));
     std::fs::write(&path, [0xff]).unwrap();
     assert_eq!(
-        LspState::read_project_source(&path, true, &mut complete, &mut failures).unwrap_err().kind(),
+        LspState::read_project_source(&path, true, &mut complete, &mut failures)
+            .unwrap_err()
+            .kind(),
         std::io::ErrorKind::InvalidData
     );
 }
@@ -366,7 +378,7 @@ fn unreadable_project_suppresses_absence_rules_without_semantic_analysis() {
 
 #[test]
 fn invalid_secondary_root_edit_retains_last_good_rules() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let first = directory.path().join("first");
     let second = directory.path().join("second");
     for root in [&first, &second] {
@@ -441,7 +453,7 @@ fn invalid_secondary_root_edit_retains_last_good_rules() {
 
 #[test]
 fn secondary_root_cross_file_rules_run_without_enabling_primary_root_rules() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let first = directory.path().join("first");
     let second = directory.path().join("second");
     for root in [&first, &second] {
@@ -479,7 +491,7 @@ fn secondary_root_cross_file_rules_run_without_enabling_primary_root_rules() {
 
 #[test]
 fn cross_file_usage_in_another_editor_root_does_not_suppress_unused_files() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let first = directory.path().join("first");
     let second = directory.path().join("second");
     for root in [&first, &second] {
@@ -516,7 +528,7 @@ fn cross_file_usage_in_another_editor_root_does_not_suppress_unused_files() {
 
 #[test]
 fn nested_workspace_roots_remain_inputs_to_the_parent_cross_file_run() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let root = directory.path();
     let nested = root.join("nested");
     std::fs::create_dir_all(root.join("lib")).unwrap();
@@ -542,7 +554,7 @@ fn nested_workspace_roots_remain_inputs_to_the_parent_cross_file_run() {
 
 #[test]
 fn invalid_member_config_preserves_valid_workspace_and_member_rules() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let root = directory.path();
     std::fs::write(
         root.join("pubspec.yaml"),
@@ -606,7 +618,7 @@ fn invalid_member_config_preserves_valid_workspace_and_member_rules() {
 
 #[test]
 fn starting_inside_non_git_workspace_member_preserves_shared_loader_root_and_overrides() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let root = directory.path();
     let member = root.join("packages/member");
     let start = member.join("lib/nested");
@@ -662,7 +674,7 @@ fn starting_inside_non_git_workspace_member_preserves_shared_loader_root_and_ove
 
 #[test]
 fn initialized_roots_report_shared_ancestor_configuration_error_once() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     std::fs::create_dir(directory.path().join(".git")).unwrap();
     let first = directory.path().join("first");
     let second = directory.path().join("second");
@@ -692,7 +704,7 @@ fn initialized_roots_report_shared_ancestor_configuration_error_once() {
 #[test]
 fn workspace_declaration_events_rebuild_effective_rule_registry() {
     for declaration in ["melos.yaml", "pubspec.yaml"] {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = tempdir();
         let config = directory.path().join("falcon.json");
         std::fs::write(
             &config,
@@ -721,7 +733,7 @@ fn workspace_declaration_events_rebuild_effective_rule_registry() {
 
 #[test]
 fn initialized_roots_replace_cwd_discovery_and_report_each_config_error() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let cwd = directory.path().join("cwd");
     let first = directory.path().join("first");
     let second = directory.path().join("second");
@@ -778,7 +790,7 @@ fn initialized_roots_replace_cwd_discovery_and_report_each_config_error() {
 
 #[test]
 fn initialized_roots_use_independent_rules_and_file_includes_after_reload() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let first = directory.path().join("first");
     let second = directory.path().join("second");
     let source = "void main() { dynamic value = 1; print(value); }\n";
@@ -858,7 +870,7 @@ fn initialized_roots_use_independent_rules_and_file_includes_after_reload() {
 
 #[test]
 fn initialized_root_does_not_expand_to_ancestor_configuration_directory() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     std::fs::create_dir(directory.path().join(".git")).unwrap();
     std::fs::write(directory.path().join("falcon.json"), "{}").unwrap();
     std::fs::write(directory.path().join("outside.dart"), "void outside() {}").unwrap();
@@ -877,7 +889,7 @@ fn initialized_root_does_not_expand_to_ancestor_configuration_directory() {
 
 #[test]
 fn edit_reuses_workspace_disk_parses_and_discovery() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let config = directory.path().join("falcon.json");
     std::fs::write(&config, "{}").unwrap();
     let main = directory.path().join("main.dart");
@@ -980,7 +992,7 @@ fn return_type_edits_rebuild_indexes_and_refresh_dependent_diagnostics() {
             "void sink() {} int value() => 1; final api = value;",
         ),
     ] {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = tempdir();
         let config = directory.path().join("falcon.json");
         std::fs::write(
             &config,
@@ -1055,7 +1067,7 @@ fn return_type_edits_rebuild_indexes_and_refresh_dependent_diagnostics() {
 #[test]
 fn declaration_updates_rebuild_only_affected_libraries_in_both_views() {
     for semantic in [false, true] {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = tempdir();
         let config = directory.path().join("falcon.json");
         std::fs::write(&config, "{}").unwrap();
         for (name, source) in [
@@ -1094,7 +1106,7 @@ fn declaration_updates_rebuild_only_affected_libraries_in_both_views() {
 fn import_and_part_edits_rebuild_only_affected_libraries_in_both_views() {
     for semantic in [false, true] {
         for (directive, expected_rebuilds) in [("import", 1), ("part", 2)] {
-            let directory = tempfile::tempdir().unwrap();
+            let directory = tempdir();
             let config = directory.path().join("falcon.json");
             std::fs::write(&config, "{}").unwrap();
             let before = format!("import 'external.dart'; {directive} 'a.dart'; void main() {{}}");
@@ -1121,8 +1133,7 @@ fn import_and_part_edits_rebuild_only_affected_libraries_in_both_views() {
             if semantic {
                 state.ensure_semantic_snapshot();
             } else {
-                let (files, complete) =
-                    state.collect_project_files(ProjectView::CrossFile);
+                let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
                 assert!(complete);
                 state.ensure_cross_file_indexes(&files);
             }
@@ -1156,8 +1167,7 @@ fn import_and_part_edits_rebuild_only_affected_libraries_in_both_views() {
                     state.ensure_semantic_snapshot();
                     state.semantic_library_rebuild_count
                 } else {
-                    let (files, complete) =
-                        state.collect_project_files(ProjectView::CrossFile);
+                    let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
                     assert!(complete);
                     state.ensure_cross_file_indexes(&files);
                     assert!(Arc::ptr_eq(
@@ -1185,7 +1195,7 @@ fn import_and_part_edits_rebuild_only_affected_libraries_in_both_views() {
 
 #[test]
 fn coalesced_part_regrouping_keeps_old_and_new_dependents() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let config = directory.path().join("falcon.json");
     std::fs::write(&config, "{}").unwrap();
     let sources = [
@@ -1222,7 +1232,7 @@ fn coalesced_part_regrouping_keeps_old_and_new_dependents() {
 
 #[test]
 fn closing_coalesced_declaration_edit_restores_disk_before_incremental_update() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let config = directory.path().join("falcon.json");
     std::fs::write(&config, "{}").unwrap();
     let path = directory.path().join("api.dart");
@@ -1258,7 +1268,7 @@ fn closing_coalesced_declaration_edit_restores_disk_before_incremental_update() 
 fn coalesced_declaration_and_directive_edits_match_fresh_semantics() {
     use falcon_analyze::SemanticModel;
 
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let config = directory.path().join("falcon.json");
     std::fs::write(&config, r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-ignoring-return-values":"warn"}}}}"#).unwrap();
     let sources = [
@@ -1375,7 +1385,7 @@ fn assert_semantic_snapshot_values_match(state: &LspState, fresh: &LspState) {
 
 #[test]
 fn body_only_edits_refresh_loop_mutation_facts_without_rebuilding_indexes() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let config = directory.path().join("falcon.json");
     std::fs::write(
         &config,
@@ -1442,7 +1452,7 @@ fn body_only_edits_refresh_loop_mutation_facts_without_rebuilding_indexes() {
 
 #[test]
 fn cross_file_only_indexes_reuse_explicit_bodies_but_rebuild_changed_return_types() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let config = directory.path().join("falcon.json");
     std::fs::write(&config, "{}").unwrap();
     let path = directory.path().join("main.dart");
@@ -1479,8 +1489,7 @@ fn cross_file_only_indexes_reuse_explicit_bodies_but_rebuild_changed_return_type
             state.change(&uri, source.into(), Some(version)),
             ChangeOutcome::Applied
         );
-        let (files, complete) =
-            state.collect_project_files(ProjectView::CrossFile);
+        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
         assert!(complete);
         state.ensure_cross_file_indexes(&files);
         assert_eq!(
@@ -1505,7 +1514,7 @@ fn cross_file_only_indexes_reuse_explicit_bodies_but_rebuild_changed_return_type
 
 #[test]
 fn atomic_source_replacement_reuses_discovery() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let config = directory.path().join("falcon.json");
     std::fs::write(&config, "{}").unwrap();
     let main = directory.path().join("main.dart");
@@ -1540,7 +1549,7 @@ fn atomic_source_replacement_reuses_discovery() {
 
 #[test]
 fn unsupported_directory_entries_reuse_discovery() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let config = directory.path().join("falcon.json");
     std::fs::write(&config, "{}").unwrap();
     let git = directory.path().join(".git");
@@ -1580,8 +1589,7 @@ fn unsupported_directory_entries_reuse_discovery() {
                 format!("void main() {{ print({version}); }}"),
                 Some(version),
             );
-            let (_, complete) =
-                state.collect_project_files(ProjectView::CrossFile);
+            let (_, complete) = state.collect_project_files(ProjectView::CrossFile);
             assert!(complete);
             assert_eq!(state.workspace_walk_count, walks);
             assert_eq!(state.disk_parse_count, parses);
@@ -1603,7 +1611,7 @@ fn unsupported_directory_entries_reuse_discovery() {
 
 #[test]
 fn new_and_renamed_directories_refresh_discovery() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let config = directory.path().join("falcon.json");
     std::fs::write(&config, "{}").unwrap();
     std::fs::write(directory.path().join("main.dart"), "void main() {}").unwrap();
@@ -1648,7 +1656,7 @@ fn new_and_renamed_directories_refresh_discovery() {
 
 #[test]
 fn watched_disk_changes_refresh_cached_cross_file_input() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let config = directory.path().join("falcon.json");
     std::fs::write(&config, "{}").unwrap();
     let main = directory.path().join("main.dart");
@@ -1692,7 +1700,7 @@ fn watched_disk_changes_refresh_cached_cross_file_input() {
 
 #[test]
 fn changed_disk_mtime_reuses_unchanged_parsed_source() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let config = directory.path().join("falcon.json");
     std::fs::write(&config, "{}").unwrap();
     let support = directory.path().join("support.dart");
@@ -1726,7 +1734,7 @@ fn changed_disk_mtime_reuses_unchanged_parsed_source() {
 
 #[test]
 fn save_invalidates_cached_disk_source_with_unchanged_metadata() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let config = directory.path().join("falcon.json");
     std::fs::write(&config, "{}").unwrap();
     let support = directory.path().join("support.dart");
@@ -1779,7 +1787,7 @@ fn save_invalidates_cached_disk_source_with_unchanged_metadata() {
 
 #[test]
 fn close_refreshes_cached_disk_source_with_unchanged_metadata() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let config = directory.path().join("falcon.json");
     std::fs::write(&config, "{}").unwrap();
     let support = directory.path().join("support.dart");
@@ -1842,7 +1850,7 @@ fn close_refreshes_cached_disk_source_with_unchanged_metadata() {
 
 #[test]
 fn ancestor_manifest_cross_file_findings_refresh_after_disk_change() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let root = std::fs::canonicalize(directory.path()).unwrap();
     let workspace = root.join("tool");
     std::fs::create_dir(&workspace).unwrap();
@@ -2065,7 +2073,10 @@ mod source_size_tests {
         assert!(state.cross_file_diagnostics().is_empty());
         assert_eq!(runs.load(Ordering::SeqCst), 0);
         state.parser_failure_path = None;
-        assert_eq!(state.change(&uri, SOURCE.into(), Some(2)), ChangeOutcome::Applied);
+        assert_eq!(
+            state.change(&uri, SOURCE.into(), Some(2)),
+            ChangeOutcome::Applied
+        );
         assert!(!state.document(&uri).unwrap().parsed.is_rejected());
         let recovered = &state.document(&uri).unwrap().parsed;
         assert!(!recovered.has_parse_errors());
@@ -2083,11 +2094,17 @@ mod source_size_tests {
                 .any(|diagnostic| diagnostic.rule == "eol-at-end-of-file")
         );
         state.parser_failure_path = Some(failure_path);
-        assert_eq!(state.change(&uri, SOURCE.into(), Some(3)), ChangeOutcome::Applied);
+        assert_eq!(
+            state.change(&uri, SOURCE.into(), Some(3)),
+            ChangeOutcome::Applied
+        );
         assert_failure(&state.analyze(&uri));
         assert!(state.document(&uri).unwrap().parsed.is_rejected());
         state.parser_failure_path = None;
-        assert_eq!(state.change(&uri, SOURCE.into(), Some(4)), ChangeOutcome::Applied);
+        assert_eq!(
+            state.change(&uri, SOURCE.into(), Some(4)),
+            ChangeOutcome::Applied
+        );
         assert!(!state.document(&uri).unwrap().parsed.is_rejected());
         assert!(
             state.analyze(&uri).iter().all(|diagnostic| diagnostic.rule
@@ -2150,7 +2167,10 @@ mod source_size_tests {
             assert_eq!(retained.declaration_signature(), signature);
             assert_eq!(state.analyze(&uri).len(), 1);
             state.parser_failure_path = None;
-            assert_eq!(state.change(&uri, SOURCE.into(), Some(2)), ChangeOutcome::Applied);
+            assert_eq!(
+                state.change(&uri, SOURCE.into(), Some(2)),
+                ChangeOutcome::Applied
+            );
             let recovered = state.analyze(&uri);
             assert!(recovered.iter().all(|diagnostic| {
                 diagnostic.rule != falcon_diagnostics::RULES_THREAD_ERROR_DIAGNOSTIC_ID
@@ -2705,7 +2725,8 @@ mod source_size_tests {
             state
                 .document(&other_uri)
                 .unwrap()
-                .diagnostics.items
+                .diagnostics
+                .items
                 .iter()
                 .all(|diagnostic| diagnostic.rule != "incomplete-analysis")
         );
@@ -2872,8 +2893,7 @@ mod source_size_tests {
         let mut state = LspState::new(None);
         state.initialize_workspace_roots(vec![directory.path().join("missing")]);
         state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
-        let (files, complete) =
-            state.collect_project_files(ProjectView::CrossFile);
+        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
         assert!(complete);
         assert!(files.is_empty());
         let root = directory.path().join("missing");
@@ -2888,7 +2908,7 @@ mod source_size_tests {
 
     #[test]
     fn rejected_buffer_diagnostic_survives_refresh_and_recovers_on_change() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = tempdir();
         std::fs::write(directory.path().join("main.dart"), "void main() {}").unwrap();
         let uri = format!("file://{}", directory.path().join("main.dart").display());
         let mut state = LspState::new(None);
@@ -2934,7 +2954,10 @@ mod source_size_tests {
         assert_eq!(snapshot.files[0].path(), healthy);
         assert!(state.semantic_snapshot_error.is_none());
 
-        assert_eq!(state.change(&uri, "void main() {}".into(), Some(2)), ChangeOutcome::Applied);
+        assert_eq!(
+            state.change(&uri, "void main() {}".into(), Some(2)),
+            ChangeOutcome::Applied
+        );
         assert!(!state.document(&uri).unwrap().parsed.is_rejected());
         assert!(
             !state
@@ -2943,13 +2966,19 @@ mod source_size_tests {
                 .any(|diagnostic| diagnostic.rule == "syntax-error")
         );
         state.buffer_length_override = Some(u64::from(u32::MAX) + 1);
-        assert_eq!(state.change(&uri, "void rejected_again() {}".into(), Some(3)), ChangeOutcome::Applied);
+        assert_eq!(
+            state.change(&uri, "void rejected_again() {}".into(), Some(3)),
+            ChangeOutcome::Applied
+        );
         assert_rejected_snapshot(&state.documents[&uri].parsed, "");
         let diagnostics = state.analyze(&uri);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].rule, "syntax-error");
         state.buffer_length_override = None;
-        assert_eq!(state.change(&uri, "void current() {}".into(), Some(4)), ChangeOutcome::Applied);
+        assert_eq!(
+            state.change(&uri, "void current() {}".into(), Some(4)),
+            ChangeOutcome::Applied
+        );
         assert!(!state.documents[&uri].parsed.is_rejected());
         assert!(
             state
@@ -3059,21 +3088,21 @@ mod source_size_tests {
     #[test]
     fn oversized_required_sources_clear_cross_file_results_but_optional_manifests_do_not() {
         for name in ["oversized.dart", "pubspec.yaml"] {
-            let directory = tempfile::tempdir().unwrap();
+            let directory = tempdir();
             let config = directory.path().join("falcon.json");
             std::fs::write(
                 &config,
                 r#"{"linter":{"rules":{"recommended":false}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"},"security":{"secure-pubspec-urls":"warn"}}}}"#,
             )
             .unwrap();
-            let lib = directory.path().join("lib");
-            std::fs::create_dir(&lib).unwrap();
+            let lib = directory.path().join("lib/src");
+            std::fs::create_dir_all(&lib).unwrap();
             std::fs::write(lib.join("main.dart"), "void main() {}").unwrap();
             let orphan = lib.join("orphan.dart");
             std::fs::write(&orphan, "class Orphan {}").unwrap();
             let uri = format!("file://{}", orphan.display());
-            let mut state = LspState::new(Some(config));
-            state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
+            let mut state =
+                LspState::new_from(Some(config), |_| None, directory.path().to_path_buf());
             state.open(&uri, "class Orphan {}".into(), Some(1));
             assert!(state.cross_file_pass().iter().any(|(_, diagnostics)| {
                 diagnostics
@@ -3210,7 +3239,7 @@ mod config_tests {
 
     #[test]
     fn canonicalizing_loader_preserves_legacy_rule_configuration() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let path = dir.path().join("falcon.json");
         std::fs::write(
             &path,
@@ -3249,7 +3278,7 @@ mod config_tests {
 
     #[test]
     fn relative_filters_and_overrides_match_absolute_documents() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let path = dir.path().join("falcon.json");
         std::fs::write(
             &path,
@@ -3286,7 +3315,7 @@ mod config_tests {
 
     #[test]
     fn discovered_config_root_drives_workspace_collection() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         std::fs::create_dir_all(dir.path().join("nested")).unwrap();
         std::fs::write(dir.path().join("falcon.json"), "{}").unwrap();
@@ -3294,8 +3323,7 @@ mod config_tests {
         std::fs::write(&main, "void main() {}\n").unwrap();
         let mut state = LspState::new_from(None, |_| None, dir.path().join("nested"));
         assert_eq!(state.workspace_root, canonical_or_lexical(dir.path()));
-        let (files, complete) =
-            state.collect_project_files(ProjectView::CrossFile);
+        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
         assert!(complete);
         assert!(
             files
@@ -3306,7 +3334,7 @@ mod config_tests {
 
     #[test]
     fn excluded_subtrees_do_not_make_workspace_collection_incomplete() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let config = dir.path().join("falcon.json");
         std::fs::write(
             &config,
@@ -3340,7 +3368,7 @@ mod config_tests {
     fn home_fallback_settings_do_not_expand_workspace_to_home() {
         const CHILD: &str = "FALCON_TEST_LSP_HOME_CONFIG_ROOT";
         if std::env::var_os(CHILD).is_none() {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = tempdir();
             let workspace = dir.path().join("project");
             std::fs::create_dir_all(&workspace).unwrap();
             std::fs::write(
@@ -3430,7 +3458,7 @@ mod config_tests {
 
     #[test]
     fn invalid_reload_preserves_rules_root_and_open_document_diagnostics() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let path = dir.path().join("falcon.json");
         std::fs::write(
             &path,
@@ -3470,7 +3498,7 @@ mod config_tests {
 
     #[test]
     fn nested_config_events_do_not_repeat_unchanged_active_warnings() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let path = dir.path().join("falcon.json");
         std::fs::write(&path, r#"{"max_errors":10}"#).unwrap();
         let mut state = LspState::new_with_sdk_locator(Some(path.clone()), |_| None);
@@ -3497,7 +3525,7 @@ mod config_tests {
 
     #[test]
     fn config_messages_are_drained_and_reloaded() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let path = dir.path().join("falcon.json");
         std::fs::write(&path, r#"{"max_errors": 10}"#).unwrap();
         let mut state = LspState::new_with_sdk_locator(Some(path.clone()), |_| None);
@@ -3612,7 +3640,7 @@ mod dependency_tests {
 
     #[test]
     fn unreadable_nested_pubspec_remains_an_ownership_boundary() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let outer = dir.path();
         let nested = outer.join("nested");
         std::fs::create_dir_all(nested.join("lib")).unwrap();
@@ -3680,7 +3708,7 @@ mod dependency_tests {
     #[test]
     fn package_version_reload_reparses_only_changed_effective_versions() {
         for semantic in [false, true] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = tempdir();
             let config_path = dir.path().join("falcon.json");
             let config = if semantic {
                 r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-ignoring-return-values":"warn"}}},"cross-file":{"enabled":false}}"#
@@ -3758,7 +3786,7 @@ mod dependency_tests {
 
     #[test]
     fn disk_collection_discovers_nested_versions_before_parsing_and_indexing() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let config_path = dir.path().join("falcon.json");
         std::fs::write(
             &config_path,
@@ -3797,7 +3825,7 @@ mod dependency_tests {
     #[test]
     fn materialized_path_reparses_at_new_owner_version_once() {
         for event in ["analyze", "save", "change"] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = tempdir();
             let config_path = dir.path().join("falcon.json");
             std::fs::write(
                 &config_path,
@@ -3846,7 +3874,7 @@ mod dependency_tests {
 
     #[test]
     fn cross_file_collection_includes_pubspec_manifests() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let config_path = dir.path().join("falcon.json");
         let manifest_path = dir.path().join("pubspec.yaml");
         std::fs::write(&config_path, "{}").unwrap();
@@ -3856,8 +3884,7 @@ mod dependency_tests {
         let mut state = LspState::new(Some(config_path));
         state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
 
-        let (files, complete) =
-            state.collect_project_files(ProjectView::CrossFile);
+        let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
         assert!(complete);
         let manifest = files
             .iter()
@@ -3897,7 +3924,7 @@ mod dependency_tests {
     #[test]
     fn opening_files_outside_cross_file_view_preserves_nullable_diagnostics() {
         for opened in ["external", "excluded", "dependency"] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = tempdir();
             let app = dir.path().join("app");
             let flutter = dir.path().join("flutter");
             let sdk = flutter.join("bin/cache/dart-sdk/lib");
@@ -3957,8 +3984,7 @@ mod dependency_tests {
             if opened == "external" {
                 std::fs::remove_file(sdk.join("core/core.dart")).unwrap();
             }
-            let (files, complete) =
-                state.collect_project_files(ProjectView::CrossFile);
+            let (files, complete) = state.collect_project_files(ProjectView::CrossFile);
             assert!(complete);
             state.ensure_cross_file_indexes(&files);
             assert!(
@@ -4114,7 +4140,7 @@ mod dependency_tests {
 
     #[test]
     fn cross_file_external_cache_invalidates_watched_excluded_companions() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let app = dir.path().join("app");
         std::fs::create_dir_all(app.join("lib")).unwrap();
         std::fs::create_dir_all(dir.path().join("dep")).unwrap();
@@ -4176,7 +4202,7 @@ mod dependency_tests {
 
     #[test]
     fn cross_file_indexes_cache_tracks_disk_revisions_and_file_set() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let config = dir.path().join("falcon.json");
         std::fs::write(
             &config,
@@ -4221,7 +4247,7 @@ mod dependency_tests {
     #[cfg(unix)]
     #[test]
     fn symlinked_workspace_publishes_canonical_cross_file_diagnostics() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let workspace = dir.path().join("workspace");
         std::fs::create_dir_all(workspace.join("lib")).unwrap();
         std::fs::write(
@@ -4280,7 +4306,7 @@ mod dependency_tests {
         for (resolve, parent_segment) in
             [(true, false), (false, false), (true, true), (false, true)]
         {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = tempdir();
             let workspace = dir.path().join("workspace");
             std::fs::create_dir_all(workspace.join("lib/deep")).unwrap();
             let config_path = workspace.join("falcon.json");
@@ -4342,7 +4368,7 @@ mod dependency_tests {
     #[cfg(unix)]
     #[test]
     fn saving_materialized_symlink_document_refreshes_project_identity() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let workspace = dir.path().join("workspace");
         std::fs::create_dir_all(workspace.join("lib")).unwrap();
         let config_path = workspace.join("falcon.json");
@@ -4412,7 +4438,7 @@ mod dependency_tests {
         use lsp_types::NumberOrString;
         use serde_json::json;
 
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let config_path = write_debounced_publish_config(dir.path());
         let a_uri = format!("file://{}", dir.path().join("a.dart").display());
         let b_uri = format!("file://{}", dir.path().join("b.dart").display());
@@ -4633,7 +4659,7 @@ mod environment_regressions {
 
     #[test]
     fn watched_file_normalization_preserves_filesystem_metadata() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = tempdir();
         let file = directory.path().join("api.dart");
         std::fs::write(&file, "class C {}").unwrap();
         let expected = std::fs::canonicalize(&file).unwrap();
@@ -4857,7 +4883,7 @@ mod environment_regressions {
     }
 
     fn dependency_fixture(hosted: bool) -> (tempfile::TempDir, LspState, String, PathBuf) {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let app = dir.path().join("app");
         std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
         let dependency = dir.path().join("dep/lib/api.dart");
@@ -5003,7 +5029,7 @@ mod environment_regressions {
     #[cfg(unix)]
     #[test]
     fn watched_workspace_alias_event_refreshes_unopened_project_file() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let root = dir.path().join("workspace");
         let alias = dir.path().join("workspace-alias");
         std::fs::create_dir(&root).unwrap();
@@ -5356,7 +5382,7 @@ mod environment_regressions {
     #[test]
     fn first_package_configuration_refreshes_open_buffer_grammar() {
         for semantic in [false, true] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = tempdir();
             let mut state = state(dir.path());
             state.configure_resolution(semantic, false);
             let path = dir.path().join("main.dart");
@@ -5385,7 +5411,7 @@ mod environment_regressions {
     #[test]
     fn missing_workspace_alias_buffer_refreshes_grammar_and_preserves_uri() {
         for semantic in [false, true] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = tempdir();
             let root = dir.path().join("workspace");
             let alias = dir.path().join("alias");
             std::fs::create_dir(&root).unwrap();
@@ -5424,7 +5450,7 @@ mod environment_regressions {
 
     #[test]
     fn doc_import_dependencies_refresh_and_yield_to_open_buffers_without_sdk() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let app = dir.path().join("app");
         std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
         let dependency = dir.path().join("dep/lib/api.dart");
@@ -5468,7 +5494,7 @@ mod environment_regressions {
     fn divergent_shared_dependency_survives_snapshot_edits_open_close_and_regroup() {
         use falcon_analyze::{ResolvedType, SemanticModel};
 
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let root = dir.path();
         let shared = root.join("shared/lib/bar.dart");
         std::fs::create_dir_all(shared.parent().unwrap()).unwrap();
@@ -5729,7 +5755,7 @@ mod environment_regressions {
     #[test]
     fn opening_dependency_parts_preserves_defining_files_and_buffered_parts() {
         for warm in [false, true] {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = tempdir();
             let app = dir.path().join("app");
             let dep = dir.path().join("dep/lib");
             std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
@@ -6125,7 +6151,10 @@ fn external_parser_worker_recovery(remove_import: bool) {
 }
 
 fn exercise_external_worker_reachability(state: &mut LspState, uri: &str, source: &str) {
-    assert_eq!(state.change(uri, "void main() {}".into(), Some(2)), ChangeOutcome::Applied);
+    assert_eq!(
+        state.change(uri, "void main() {}".into(), Some(2)),
+        ChangeOutcome::Applied
+    );
     state.analyze(uri);
     let recovered = state.cross_file_pass();
     let diagnostics = &recovered
@@ -6147,7 +6176,10 @@ fn exercise_external_worker_reachability(state: &mut LspState, uri: &str, source
             .as_ref()
             .is_none_or(|cache| cache.libraries.worker_failure().is_none())
     );
-    assert_eq!(state.change(uri, source.into(), Some(3)), ChangeOutcome::Applied);
+    assert_eq!(
+        state.change(uri, source.into(), Some(3)),
+        ChangeOutcome::Applied
+    );
     state.analyze(uri);
     let failed_again = state.cross_file_pass();
     assert!(

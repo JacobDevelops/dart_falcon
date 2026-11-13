@@ -76,8 +76,8 @@ pub use semantic_scope::{
     resolved_super_param_type, returned_expressions, visit_program,
 };
 pub use source::{
-    SourceAcquisition, SourceFailure, acquire_source, is_source_too_large, project_source_roots,
-    read_source,
+    SourceAcquisition, SourceFailure, acquire_source, check_source_size, is_source_too_large,
+    project_source_roots, read_source,
 };
 #[doc(hidden)]
 pub use structural_scope::StructuralInterests;

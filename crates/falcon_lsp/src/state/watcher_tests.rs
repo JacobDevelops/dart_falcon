@@ -1,7 +1,8 @@
+use super::tests::tempdir;
 use super::*;
 
 fn workspace(dynamic: bool) -> (tempfile::TempDir, LspState, String) {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let config = directory.path().join("falcon.json");
     std::fs::write(&config, "{}").unwrap();
     let main = directory.path().join("main.dart");
@@ -181,7 +182,7 @@ fn fallback_keeps_closed_and_companion_edits_pending_across_analysis_boundaries(
             )
             .unwrap();
             state.reload_config();
-            let outside = tempfile::tempdir().unwrap();
+            let outside = tempdir();
             let (closed, directive, prefix) = if companion {
                 let outside_name = outside.path().file_name().unwrap().to_str().unwrap();
                 let workspace_name = directory.path().file_name().unwrap().to_str().unwrap();
@@ -754,7 +755,7 @@ fn rejected_dynamic_watching_discovers_sources_at_idle() {
 
 #[test]
 fn fallback_refreshes_mutable_dependencies_and_package_configuration() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let app = directory.path().join("app");
     std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
     for (name, source) in [
@@ -893,7 +894,7 @@ fn disabled_rules_do_not_repeat_changed_directory_publications() {
 
 #[test]
 fn fallback_observes_rule_config_creation_deletion_and_equal_metadata_edits() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let first = directory.path().join("first");
     let second = directory.path().join("second");
     std::fs::create_dir(&first).unwrap();
@@ -960,7 +961,7 @@ fn fallback_observes_rule_config_creation_deletion_and_equal_metadata_edits() {
 
 #[test]
 fn fallback_discovers_new_mutable_dependency_subdirectories() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let app = directory.path().join("app");
     let dependency = directory.path().join("dep/lib");
     std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
@@ -1021,10 +1022,23 @@ fn fallback_discovers_new_mutable_dependency_subdirectories() {
 #[test]
 fn fallback_observes_closed_source_read_permission_recovery() {
     use std::os::unix::fs::PermissionsExt;
+    if std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .unwrap()
+        .stdout
+        == b"0\n"
+    {
+        return;
+    }
     let (directory, mut state, uri) = workspace(false);
     let source = directory.path().join("permission.dart");
     std::fs::write(&source, "class Recovered {}").unwrap();
     std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&source).is_ok() {
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
+        return;
+    }
     state.open(&uri, "void main() {}".into(), Some(1));
     let reads = state.disk_read_count;
     let modified = source.metadata().unwrap().modified().unwrap();
@@ -1044,7 +1058,7 @@ fn fallback_admits_lazy_package_inputs_without_hiding_known_changes() {
     let manifest = directory.path().join("pubspec.yaml");
     std::fs::write(&manifest, "name: example\n").unwrap();
     state.open(&uri, "void main() {}".into(), Some(1));
-    let external = tempfile::tempdir().unwrap();
+    let external = tempdir();
     std::fs::write(external.path().join("pubspec.yaml"), "name: external\n").unwrap();
     let _ = state
         .environment
@@ -1087,7 +1101,7 @@ fn rejected_buffers_do_not_trigger_idle_discovery_publications() {
 #[test]
 fn rejected_watcher_registration_reloads_previously_loaded_local_sources() {
     let (_directory, mut state, uri) = workspace(true);
-    let outside = tempfile::tempdir().unwrap();
+    let outside = tempdir();
     let source = outside.path().join("api.dart");
     std::fs::write(&source, "class BeforeRejection {}").unwrap();
     let text = format!(
@@ -1125,7 +1139,7 @@ fn deprecated_external_api_does_not_cause_idle_package_discovery_resets() {
         r#"{"linter":{"rules":{"recommended":false,"correctness":{"deprecated-member-use-from-same-package":"error"}}},"cross-file":{"enabled":false}}"#,
     ).unwrap();
     state.reload_config();
-    let outside = tempfile::tempdir().unwrap();
+    let outside = tempdir();
     std::fs::write(outside.path().join("pubspec.yaml"), "name: external\n").unwrap();
     std::fs::write(
         outside.path().join("api.dart"),
@@ -1155,7 +1169,7 @@ fn deprecated_external_api_does_not_cause_idle_package_discovery_resets() {
 fn fallback_observes_workspace_member_rule_config_candidates() {
     for declaration in ["pub", "melos"] {
         for initially_present in [false, true] {
-            let directory = tempfile::tempdir().unwrap();
+            let directory = tempdir();
             let root = directory.path();
             let member = root.join("packages/app");
             std::fs::create_dir_all(&member).unwrap();
@@ -1253,7 +1267,7 @@ fn fallback_saves_outside_project_membership_do_not_repeat_idle_publications() {
                 state.reload_config();
                 assert!(!state.cross_file_rules_enabled());
             }
-            let outside = tempfile::tempdir().unwrap();
+            let outside = tempdir();
             let other = if excluded {
                 directory.path().join("excluded.dart")
             } else {

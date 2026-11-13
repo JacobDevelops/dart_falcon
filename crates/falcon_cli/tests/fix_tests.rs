@@ -201,7 +201,7 @@ fn fixing_preserves_final_cross_file_diagnostics() {
 }
 
 #[test]
-fn cycles_report_stops_and_still_write_converged_files() {
+fn cycles_abort_before_writing_converged_files() {
     let (dir, options) = fixture(&json!("error"));
     let config_path = options.config_path.as_ref().unwrap();
     let mut config: serde_json::Value =
@@ -226,7 +226,7 @@ fn cycles_report_stops_and_still_write_converged_files() {
         fs::read_to_string(dir.path().join("main.dart")).unwrap(),
         source
     );
-    assert_eq!(fs::read_to_string(earlier).unwrap(), AFTER);
+    assert_eq!(fs::read_to_string(earlier).unwrap(), BEFORE);
 }
 
 #[test]

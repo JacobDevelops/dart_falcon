@@ -140,6 +140,9 @@ pub fn is_source_too_large(error: &io::Error) -> bool {
 
 /// Validate a UTF-8 byte length before constructing compact syntax coordinates.
 /// Exactly `u32::MAX` bytes are supported; larger sources are invalid input.
+///
+/// # Errors
+/// Returns `InvalidData` when the byte length exceeds `u32::MAX`.
 pub fn check_source_size(bytes: u64) -> io::Result<()> {
     if bytes > u64::from(u32::MAX) {
         Err(io::Error::new(

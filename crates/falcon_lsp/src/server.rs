@@ -1072,6 +1072,12 @@ fn open_and_publish(
     params: DidOpenTextDocumentParams,
 ) -> Result<(), ServerError> {
     let uri = params.text_document.uri.as_str().to_string();
+    if state
+        .document(&uri)
+        .is_some_and(|document| !document.accepts_version(Some(params.text_document.version)))
+    {
+        return Ok(());
+    }
     for (affected_uri, diagnostics) in state.revalidate_disk() {
         publish(connection, state, &affected_uri, &diagnostics)?;
     }

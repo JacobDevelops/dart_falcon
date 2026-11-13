@@ -178,6 +178,11 @@ The same option is accepted for cross-file rules, but automatic fixing currently
 is reanalyzed after one atomic fix, so overlapping edits are never merged. Repeated file text stops fixing and reports the rules in the cycle; a limit of 100 applied fixes per file also stops non-repeating growth and reports the involved rules. Remaining diagnostics are reported against the resulting text.
 
 Invalid fixes, cycles, and the iteration limit abort before any file is written. Dry-run diffs go to stdout for text reports and stderr for machine-readable report formats, keeping their stdout parseable.
+A fix run stages every changed file before saving. A staging failure writes nothing.
+A disk change detected while staging also aborts the whole transaction before saving.
+Files that are already symlinks or read-only are skipped individually; these policy refusals do not prevent fixes to other files.
+If a guarded disk write fails after saving starts, falcon exits 1 and reports both
+the files already written and those not written; it does not replace the baseline.
 `--dry-run` cannot be combined with `--write-baseline`; previewing never writes a
 baseline for source changes that were not saved.
 
@@ -703,7 +708,9 @@ This also applies when the home directory is reached through a symlink or anothe
 
 CLI relative paths, absolute paths, and LSP document paths therefore select the same files, including symlinked configuration or document roots and not-yet-created document paths beneath those roots.
 
-A link to a subdirectory also preserves its root-relative path: a document reached through `lib-link -> <root>/lib` matches `lib/**` in file filters and overrides.
+A link to a subdirectory also preserves its root-relative path: a document reached through `lib-link -> <root>/lib` matches `lib/**` in file filters and overrides, even when `lib-link` is inside the project or the project itself is reached through a symlink. Links whose targets are outside the configuration root retain their lexical path beneath that root. Traversal roots resolve once; walked file and directory matching performs no canonicalization. General lookups resolve a fresh identity once and share it across package and override matching; missing-parent resolution may probe ancestors.
+
+External links keep that root-relative spelling even when an ancestor of the traversal root is another symlink. Canonical identities are used for matching; published LSP diagnostics retain the document URI opened by the editor.
 `*` never crosses `/`; `**` crosses directories.
 For example, `lib/*.dart` matches direct children, while `lib/**/*.dart` also matches nested files. An exclusion matching a directory excludes its whole subtree, and that directory is pruned before traversal.
 
@@ -716,6 +723,13 @@ For example, `!build` excludes the build directory and its contents, while `!lib
 Run `falcon check` from a workspace root to analyze its packages together. falcon detects pub workspaces from the root `pubspec.yaml` `workspace` list and member
 `resolution: workspace` declarations. It also detects `melos.yaml` `packages`
 globs and Melos 7's `melos` section in the root `pubspec.yaml`.
+
+Absent workspace manifests are normal: standalone packages do not need workspace metadata.
+Unreadable or malformed candidate root manifests (`pubspec.yaml` or `melos.yaml`)
+warn and do not establish a workspace; discovery continues searching ancestors.
+Broken member manifests warn and are skipped for both explicit member names and
+glob patterns. Their Dart files remain ordinary inputs. Workspace discovery does
+not change the configuration error policy.
 
 | Configuration scope | Configuration used |
 | --- | --- |
@@ -788,6 +802,12 @@ Restart after manually editing hosted-package or Dart SDK sources too.
 | [`baseline`](#baseline) | Hide known findings while keeping new diagnostics visible. |
 | [`error-on-warnings`](#error-on-warnings) | Fail checks on warnings as well as errors. |
 
+Required source read failures and discovery failures abort CLI collection before
+analysis or autofix writes. The editor reports incomplete analysis rather than
+producing cross-file findings from missing required sources.
+
+An unreadable candidate workspace manifest produces a discovery warning before configuration exclusions are available; it does not itself prevent linting.
+
 ### `max-errors`
 
 Optional cap on printed diagnostics (`null` = unlimited). In `falcon.json`, the value must be **at least 1**; `0` is rejected at load. The CLI `--max-errors` flag overrides the config value and accepts `0` to hide every diagnostic.
@@ -809,6 +829,8 @@ Baseline fingerprints use paths relative to the nearest repository root containi
 root (or the current directory outside a project). Running from a subdirectory therefore preserves baseline matches within the same project, including a pub workspace nested below the repository root.
 
 Syntax errors and malformed suppression directives are never baselined. They remain reported with their normal exit policy while baseline writing records the lint findings; operational failures still prevent overwriting a baseline.
+Failed fixes do not disable filtering by an existing baseline; writing a baseline
+after an operational fix failure is explicitly refused.
 
 ### `error-on-warnings`
 

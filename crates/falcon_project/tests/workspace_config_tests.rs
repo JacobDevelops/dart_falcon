@@ -7,6 +7,10 @@ use falcon_project::{
 use std::fs;
 use std::path::{Path, PathBuf};
 
+fn tempdir() -> tempfile::TempDir {
+    tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+}
+
 fn write(root: &Path, path: &str, source: &str) -> PathBuf {
     let path = root.join(path);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -31,7 +35,7 @@ fn workspace(root: &Path) {
 
 #[test]
 fn member_configuration_replaces_disabled_parent_and_controls_shared_analysis() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempdir();
     let root = temp.path();
     workspace(root);
     write(
@@ -109,7 +113,7 @@ fn member_configuration_replaces_disabled_parent_and_controls_shared_analysis() 
 
 #[test]
 fn nearest_configuration_overrides_options_and_cross_file_settings() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempdir();
     let root = temp.path();
     workspace(root);
     write(
@@ -166,8 +170,34 @@ fn nearest_configuration_overrides_options_and_cross_file_settings() {
 }
 
 #[test]
+fn selected_workspace_does_not_load_unselected_cwd_configuration() {
+    let temp = tempdir();
+    let root = temp.path();
+    workspace(root);
+    let base = write(root, "falcon.json", r#"{"linter":{"enabled":false}}"#);
+    write(
+        root,
+        "packages/b/falcon.json",
+        r#"{"linter":{"enabld":false}}"#,
+    );
+    let unfiltered = falcon_project::discover_workspace(root).unwrap();
+    let mut selected = unfiltered.clone();
+    selected.packages.retain(|package| package.name == "a");
+    for explicit in [None, Some(base.as_path())] {
+        let loaded = falcon_project::load_workspace_config(
+            explicit,
+            &root.join("packages/b"),
+            Some(&selected),
+            Some(&unfiltered),
+        )
+        .unwrap();
+        assert!(!loaded.config.linter.enabled);
+    }
+}
+
+#[test]
 fn explicit_base_still_loads_members_and_cli_exclusions_remain_global() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempdir();
     let root = temp.path();
     workspace(root);
     let base = write(root, "custom.json", r#"{"linter":{"enabled":false}}"#);
@@ -177,8 +207,7 @@ fn explicit_base_still_loads_members_and_cli_exclusions_remain_global() {
         r#"{"linter":{"rules":{"recommended":false,"complexity":{"max-lines-for-file":"error"}}}}"#,
     );
     let file = write(root, "packages/a/lib/main.dart", "void main() {}\n");
-    let unrelated = tempfile::tempdir().unwrap();
-    let mut config = load_project_config(Some(&base), unrelated.path())
+    let mut config = load_project_config(Some(&base), file.parent().unwrap())
         .unwrap()
         .config;
     assert_eq!(
@@ -206,7 +235,7 @@ fn explicit_base_still_loads_members_and_cli_exclusions_remain_global() {
 
 #[test]
 fn malformed_member_configuration_is_not_silently_ignored() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempdir();
     workspace(temp.path());
     write(temp.path(), "falcon.json", "{}");
     write(
@@ -229,7 +258,7 @@ fn malformed_member_configuration_is_not_silently_ignored() {
 
 #[test]
 fn tolerant_loading_retains_root_and_valid_members_with_qualified_errors() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempdir();
     let root = temp.path();
     workspace(root);
     write(
@@ -271,7 +300,7 @@ fn tolerant_loading_retains_root_and_valid_members_with_qualified_errors() {
 
 #[test]
 fn tolerant_loading_still_rejects_invalid_base_configuration() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempdir();
     workspace(temp.path());
     write(temp.path(), "falcon.json", "{");
     assert!(load_project_config_with_errors(None, temp.path()).is_err());
@@ -281,7 +310,7 @@ fn tolerant_loading_still_rejects_invalid_base_configuration() {
 fn selected_workspace_binds_discovered_home_config_to_input_root() {
     const CHILD: &str = "FALCON_SELECTED_WORKSPACE_HOME_CONFIG_TEST";
     if std::env::var_os(CHILD).is_none() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = tempdir();
         let root = temp.path().join("project");
         workspace(&root);
         write(&root, "falcon.json", r#"{"linter":{"enabled":false}}"#);
@@ -334,7 +363,7 @@ fn selected_workspace_binds_discovered_home_config_to_input_root() {
 
 #[test]
 fn nested_member_filters_keep_reenabled_descendants_walkable() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempdir();
     let root = temp.path();
     write(
         root,
@@ -378,7 +407,7 @@ fn nested_member_filters_keep_reenabled_descendants_walkable() {
 
 #[test]
 fn member_defaults_and_domains_replace_parent_settings() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempdir();
     let root = temp.path();
     workspace(root);
     write(
@@ -427,7 +456,7 @@ fn member_defaults_and_domains_replace_parent_settings() {
 
 #[test]
 fn member_warnings_identify_their_configuration_file() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempdir();
     workspace(temp.path());
     write(temp.path(), "falcon.json", "{}");
     let member = write(temp.path(), "packages/a/falcon.json", r#"{"max_errors":5}"#);
@@ -449,7 +478,7 @@ fn explicit_member_run_wide_settings_warn_once_even_at_their_defaults() {
         ("baseline", "null"),
         ("baseline", r#""member-baseline.json""#),
     ] {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = tempdir();
         let root = temp.path();
         workspace(root);
         write(
@@ -484,7 +513,7 @@ fn explicit_member_run_wide_settings_warn_once_even_at_their_defaults() {
 #[test]
 fn explicit_member_base_applies_run_wide_settings_without_ignored_setting_warnings() {
     for key in ["max-errors", "max_errors"] {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = tempdir();
         let root = temp.path();
         workspace(root);
         write(root, "falcon.json", r#"{"max-errors":2}"#);
@@ -552,7 +581,7 @@ fn explicit_member_base_applies_run_wide_settings_without_ignored_setting_warnin
 
 #[test]
 fn absent_member_run_wide_settings_do_not_warn() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempdir();
     let root = temp.path();
     workspace(root);
     write(
@@ -567,7 +596,7 @@ fn absent_member_run_wide_settings_do_not_warn() {
 
 #[test]
 fn global_exclusions_escape_workspace_directory_metacharacters() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempdir();
     let root = temp.path().join("workspace[v2]");
     workspace(&root);
     write(&root, "falcon.json", "{}");
@@ -586,7 +615,7 @@ fn global_exclusions_escape_workspace_directory_metacharacters() {
 
 #[test]
 fn local_nonmember_configuration_is_preserved_inside_a_workspace() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempdir();
     let root = temp.path();
     workspace(root);
     write(root, "falcon.json", r#"{"linter":{"enabled":false}}"#);
@@ -614,7 +643,7 @@ fn local_nonmember_configuration_is_preserved_inside_a_workspace() {
 
 #[test]
 fn ignored_melos_package_retains_its_local_configuration() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempdir();
     let root = temp.path();
     write(
         root,
@@ -654,7 +683,7 @@ fn ignored_melos_package_retains_its_local_configuration() {
 fn explicit_home_configuration_binds_to_start_directory_not_process_directory() {
     const CHILD: &str = "FALCON_TEST_PROJECT_EXPLICIT_HOME_ROOT";
     if std::env::var_os(CHILD).is_none() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = tempdir();
         write(
             temp.path(),
             ".falcon.json",

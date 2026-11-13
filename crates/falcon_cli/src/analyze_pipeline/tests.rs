@@ -3,6 +3,144 @@ use std::fs;
 use std::time::{Duration, SystemTime};
 
 #[test]
+fn partial_write_file_reports_do_not_repeat_the_summary_lists() {
+    let partial = super::PartialFixWrite {
+        written: vec!["first.dart".into()],
+        not_written: vec!["second.dart".into(), "third.dart".into()],
+        cause: "disk conflict".into(),
+    };
+    let message = super::partial_fix_message(&partial);
+    assert!(message.contains("not written"));
+    assert!(!message.contains("first.dart"), "{message}");
+    assert!(partial.to_string().contains("first.dart"));
+}
+
+#[test]
+fn malformed_workspace_root_does_not_block_source_analysis() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("main.dart");
+    fs::write(&source, "void main() {}").unwrap();
+    fs::write(dir.path().join("pubspec.yaml"), "workspace: [").unwrap();
+    assert!(falcon_project::discover_workspace(dir.path()).is_none());
+    let output = super::collect_check_with_sdk_locator(
+        &super::CheckOptions {
+            paths: vec![source],
+            ..Default::default()
+        },
+        |_| None,
+    )
+    .unwrap();
+    assert_eq!(output.total_files, 1);
+}
+
+#[test]
+fn relative_missing_nested_input_uses_unmatched_policy() {
+    let output = super::collect_check_with_sdk_locator(
+        &super::CheckOptions {
+            paths: vec!["nonexistent-lifecycle-input/nested/main.dart".into()],
+            no_errors_on_unmatched: true,
+            ..Default::default()
+        },
+        |_| None,
+    )
+    .unwrap();
+    assert_eq!(output.exit_code, 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_excluded_explicit_input_warns_without_blocking_linting() {
+    use std::os::unix::fs::PermissionsExt;
+    struct Restore(std::path::PathBuf, std::fs::Permissions);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            fs::set_permissions(&self.0, self.1.clone()).unwrap();
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let private = directory.path().join("private");
+    fs::create_dir(&private).unwrap();
+    fs::write(private.join("main.dart"), "void main() {}").unwrap();
+    let config = directory.path().join("falcon.json");
+    fs::write(&config, r#"{"files":{"includes":["**","!private"]}}"#).unwrap();
+    let _restore = Restore(private.clone(), private.metadata().unwrap().permissions());
+    fs::set_permissions(&private, fs::Permissions::from_mode(0o0)).unwrap();
+    if std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .unwrap()
+        .stdout
+        == b"0\n"
+        || fs::read_dir(&private).is_ok()
+    {
+        return;
+    }
+    let output = super::collect_check_with_sdk_locator(
+        &super::CheckOptions {
+            paths: vec![private.join("main.dart")],
+            config_path: Some(config),
+            ..Default::default()
+        },
+        |_| None,
+    )
+    .unwrap();
+    assert_eq!(output.exit_code, 1);
+    assert_eq!(output.total_files, 0);
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.rule == super::UNMATCHED_PATH_DIAGNOSTIC_ID)
+    );
+}
+
+#[test]
+fn capture_conflict_aborts_all_staged_fixes() {
+    let directory = tempfile::tempdir().unwrap();
+    let before = "class Example {} void main() { new Example(); }\n";
+    let mut files: Vec<_> = ["first.dart", "second.dart"]
+        .into_iter()
+        .map(|name| {
+            let path = directory.path().join(name);
+            fs::write(&path, before).unwrap();
+            (path, before.to_owned())
+        })
+        .collect();
+    fs::write(&files[1].0, "// independent save\n").unwrap();
+    let config: falcon_config::FalconConfig = serde_json::from_str(
+        r#"{"linter":{"rules":{"recommended":false,"style":{"unnecessary-new":"error"}}},"cross-file":{"enabled":false}}"#,
+    )
+    .unwrap();
+    let analysis = falcon_project::ProjectAnalysis::new(&config);
+    let mut environment = falcon_analyze::AnalysisEnvironment::with_sdk_locator(|_| None);
+    let mut diff = String::new();
+    let mut reports = Vec::new();
+    super::apply_selected_fixes(
+        &super::CheckOptions {
+            write: true,
+            ..Default::default()
+        },
+        &analysis,
+        &config,
+        &mut environment,
+        (&mut files, &[]),
+        directory.path(),
+        (&mut diff, &mut reports),
+    )
+    .unwrap();
+    assert!(
+        reports
+            .iter()
+            .any(|report| report.message.contains("changed since it was read"))
+    );
+    assert_eq!(fs::read_to_string(&files[0].0).unwrap(), before);
+    assert_eq!(
+        fs::read_to_string(&files[1].0).unwrap(),
+        "// independent save\n"
+    );
+}
+
+#[test]
 fn changed_length_skips_write_and_reports_without_leaving_a_tempfile() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("main.dart");
@@ -46,7 +184,7 @@ fn changes_between_source_read_and_snapshot_are_rejected() {
     let path = dir.path().join("main.dart");
     fs::write(&path, "user edit").unwrap();
     let error = WriteSnapshot::capture(&path, "old source").err().unwrap();
-    assert!(error.contains("changed since it was read"));
+    assert!(matches!(error, super::CaptureFailure::Conflict(_)));
     assert_eq!(fs::read_to_string(path).unwrap(), "user edit");
 }
 
@@ -399,4 +537,38 @@ fn worker_failure_forces_nonzero_and_skips_cross_file_until_recovery() {
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].rule, "current-source");
     assert_eq!(diagnostics[0].message, "class After {}");
+}
+
+#[test]
+fn staged_write_failure_reports_committed_and_unwritten_paths() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut files: Vec<_> = ["first.dart", "second.dart", "third.dart"]
+        .into_iter()
+        .map(|name| {
+            let path = directory.path().join(name);
+            fs::write(&path, "original").unwrap();
+            (path, "original".to_owned())
+        })
+        .collect();
+    let staged = files
+        .iter()
+        .enumerate()
+        .map(|(index, (path, source))| super::StagedFix {
+            index,
+            source: "fixed".to_owned(),
+            snapshot: Some(WriteSnapshot::capture(path, source).unwrap()),
+        })
+        .collect();
+    fs::write(&files[1].0, "independent save").unwrap();
+    let failure = super::commit_staged_fixes(&mut files, staged).unwrap_err();
+    assert_eq!(failure.written, [files[0].0.clone()]);
+    assert_eq!(
+        failure.not_written,
+        [files[1].0.clone(), files[2].0.clone()]
+    );
+    assert_eq!(fs::read_to_string(&files[0].0).unwrap(), "fixed");
+    assert_eq!(fs::read_to_string(&files[1].0).unwrap(), "independent save");
+    assert_eq!(fs::read_to_string(&files[2].0).unwrap(), "original");
+    assert_eq!(files[0].1, "fixed");
+    assert_eq!(files[2].1, "original");
 }

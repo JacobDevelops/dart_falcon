@@ -153,6 +153,106 @@ fn document_alias_to_root_subdirectory_matches_includes_and_overrides() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn internal_aliases_share_file_filters_and_overrides_through_a_project_symlink() {
+    let directory = tempfile::tempdir().unwrap();
+    let project = directory.path().join("project");
+    std::fs::create_dir_all(project.join("lib/generated")).unwrap();
+    std::fs::write(project.join("lib/main.dart"), "void main() {}").unwrap();
+    std::os::unix::fs::symlink(project.join("lib"), project.join("lib-link")).unwrap();
+    std::os::unix::fs::symlink(&project, project.join("root-link")).unwrap();
+    let alias = directory.path().join("project-link");
+    std::os::unix::fs::symlink(&project, &alias).unwrap();
+    std::fs::write(
+        project.join("falcon.json"),
+        r#"{
+            "files": { "includes": ["lib/**", "!lib/generated/**"] },
+            "overrides": [{
+                "includes": ["lib/**"],
+                "linter": { "enabled": false }
+            }]
+        }"#,
+    )
+    .unwrap();
+    for base in [&project, &alias] {
+        let config = falcon_config::deserialize_config(&base.join("falcon.json"))
+            .unwrap()
+            .config;
+        for spelling in [&project, &alias] {
+            for subdirectory in ["lib", "lib-link", "root-link/lib"] {
+                let library = spelling.join(subdirectory);
+                for name in ["main.dart", "unsaved.dart", "missing/unsaved.dart"] {
+                    let path = library.join(name);
+                    let path = path.to_string_lossy();
+                    assert!(config.files.includes.admits(&path), "{path}");
+                    assert!(config.overrides[0].matches(&path), "{path}");
+                    assert_eq!(
+                        config.resolve_rule_for(&path, "style", "test-rule", true, &[]),
+                        None,
+                        "{path}"
+                    );
+                }
+                let generated = library.join("generated");
+                assert!(
+                    !config
+                        .files
+                        .includes
+                        .admits(&generated.join("unsaved.dart").to_string_lossy())
+                );
+                assert!(config.files.includes.excludes_directory(&generated));
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn replacement_roots_keep_ancestors_walkable_across_directory_spellings() {
+    let directory = tempfile::tempdir().unwrap();
+    let project = directory.path().join("project");
+    let nested = project.join("packages/app/example/nested");
+    std::fs::create_dir_all(nested.join("lib")).unwrap();
+    let alias = directory.path().join("project-link");
+    std::os::unix::fs::symlink(&project, &alias).unwrap();
+    let mut root: FalconConfig = serde_json::from_value(serde_json::json!({
+        "files": { "includes": ["!packages/**"] }
+    }))
+    .unwrap();
+    root.resolve_paths(&alias);
+    let mut member: FalconConfig = serde_json::from_value(serde_json::json!({
+        "files": { "includes": ["!example/**"] }
+    }))
+    .unwrap();
+    member.resolve_paths(&project.join("packages/app"));
+    let mut child: FalconConfig = serde_json::from_value(serde_json::json!({
+        "files": { "includes": ["lib/**"] }
+    }))
+    .unwrap();
+    child.resolve_paths(&nested);
+    member.set_package_configs(vec![child]);
+    root.set_package_configs(vec![member]);
+    for spelling in [&project, &alias] {
+        let member = spelling.join("packages/app");
+        assert_eq!(
+            root.config_for_path(&member.to_string_lossy()).root_dir(),
+            Some(std::fs::canonicalize(&member).unwrap().as_path())
+        );
+        for ancestor in [
+            "packages",
+            "packages/app",
+            "packages/app/example",
+            "packages/app/example/nested",
+            "packages/app/example/nested/lib",
+        ] {
+            let path = spelling.join(ancestor);
+            assert!(!root.files.includes.excludes_directory(&path), "{path:?}");
+        }
+        let file = spelling.join("packages/app/example/nested/lib/main.dart");
+        assert!(root.files.includes.admits(&file.to_string_lossy()));
+    }
+}
+
 #[cfg(windows)]
 #[test]
 fn canonical_windows_root_matches_non_verbatim_document_parents() {

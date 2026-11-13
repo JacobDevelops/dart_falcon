@@ -122,6 +122,7 @@ pub struct CheckOutput {
     pub packages: Vec<crate::report::PackageSummary>,
     /// Unified diff preview; machine-readable reports send it to stderr.
     pub diff: String,
+    pub partial_fix_write: Option<PartialFixWrite>,
 }
 
 /// Run analysis and collect results without printing diagnostics.
@@ -247,6 +248,29 @@ fn collect_check_impl(
     )
 }
 
+/// The exact committed and uncommitted paths after a guarded write failure.
+#[derive(Debug)]
+pub struct PartialFixWrite {
+    pub written: Vec<PathBuf>,
+    pub not_written: Vec<PathBuf>,
+    pub cause: String,
+}
+
+impl std::fmt::Display for PartialFixWrite {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(formatter, "could not finish fix writes: {}", self.cause)?;
+        writeln!(formatter, "files written:")?;
+        for path in &self.written {
+            writeln!(formatter, "  {}", path.display())?;
+        }
+        writeln!(formatter, "files not written:")?;
+        for path in &self.not_written {
+            writeln!(formatter, "  {}", path.display())?;
+        }
+        Ok(())
+    }
+}
+
 fn collect_selected_check(
     options: &CheckOptions,
     sdk_locator: Option<SdkLocator>,
@@ -281,17 +305,7 @@ fn collect_selected_check(
     );
     let mut environment = capture_environment(sdk_locator, &walked.manifest_paths);
     if files.is_empty() && manifests.is_empty() {
-        crate::adoption::apply_baseline(options, config, &root, &mut unmatched, &HashMap::new())?;
-        crate::report::count_package_diagnostics(&mut packages, &unmatched);
-        return Ok(CheckOutput {
-            exit_code: i32::from(!unmatched.is_empty()),
-            diagnostics: unmatched,
-            total_files: 0,
-            max_errors,
-            root,
-            packages,
-            diff: String::new(),
-        });
+        return unmatched_check_output(options, config, root, unmatched, packages, max_errors);
     }
     // Package configurations give every file its language version; resolving
     // runs also load the SDK and dependency libraries project files import.
@@ -300,10 +314,9 @@ fn collect_selected_check(
     ));
     let mut diff = String::new();
     let mut fix_reports = Vec::new();
-    if options.write {
-        // The fix pass shares the initial project snapshot and dependency closure.
+    let partial_fix_write = if options.write {
         analysis.set_autofix_snapshots(true);
-        apply_selected_fixes(
+        let partial = apply_selected_fixes(
             options,
             &analysis,
             config,
@@ -313,9 +326,17 @@ fn collect_selected_check(
             (&mut diff, &mut fix_reports),
         )?;
         analysis.set_autofix_snapshots(false);
-    }
+        partial
+    } else {
+        None
+    };
     let total_files = files.len();
-    let (mut diagnostics, project_files, pipeline_failed, has_unmatched) = finish_project_analysis(
+    let FinishedAnalysis {
+        mut diagnostics,
+        project_files,
+        pipeline_failed,
+        has_unmatched,
+    } = finish_project_analysis(
         &analysis,
         &mut environment,
         config,
@@ -336,7 +357,8 @@ fn collect_selected_check(
         &project_files,
         (&files, &manifests),
         analysis.collect_programs(),
-    )?;
+    )
+    .map_err(|error| baseline_failure_message(error, &diagnostics, partial_fix_write.as_ref()))?;
     crate::report::count_package_diagnostics(&mut packages, &diagnostics);
     let exit_code = check_exit_code(
         options,
@@ -352,6 +374,50 @@ fn collect_selected_check(
         root,
         packages,
         diff,
+        partial_fix_write,
+    })
+}
+
+fn baseline_failure_message(
+    mut error: String,
+    diagnostics: &[Diagnostic],
+    partial: Option<&PartialFixWrite>,
+) -> String {
+    for diagnostic in diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.rule == AUTOFIX_DIAGNOSTIC_ID)
+    {
+        error.push('\n');
+        error.push_str(&diagnostic.file_path);
+        error.push_str(": ");
+        error.push_str(&diagnostic.message);
+    }
+    if let Some(partial) = partial {
+        error.push('\n');
+        error.push_str(&partial.to_string());
+    }
+    error
+}
+
+fn unmatched_check_output(
+    options: &CheckOptions,
+    config: &falcon_config::FalconConfig,
+    root: PathBuf,
+    mut diagnostics: Vec<Diagnostic>,
+    mut packages: Vec<crate::report::PackageSummary>,
+    max_errors: Option<usize>,
+) -> Result<CheckOutput, String> {
+    crate::adoption::apply_baseline(options, config, &root, &mut diagnostics, &HashMap::new())?;
+    crate::report::count_package_diagnostics(&mut packages, &diagnostics);
+    Ok(CheckOutput {
+        exit_code: i32::from(!diagnostics.is_empty()),
+        diagnostics,
+        total_files: 0,
+        max_errors,
+        root,
+        packages,
+        diff: String::new(),
+        partial_fix_write: None,
     })
 }
 
@@ -488,24 +554,13 @@ fn apply_selected_fixes(
     sources: (&mut [SourceText], &[SourceText]),
     root: &Path,
     reports: (&mut String, &mut Vec<Diagnostic>),
-) -> Result<(), String> {
+) -> Result<Option<PartialFixWrite>, String> {
     let (diff, fix_reports) = reports;
     let (files, manifests) = sources;
-    let (mut initial, mut fix_files, _) =
+    let (initial, mut fix_files, _) =
         analyze_sources(analysis, files, manifests, config, environment)
             .map_err(|error| error.to_string())?;
-    falcon_rules::apply_severities(&mut initial, config);
-    falcon_project::apply_fix_policies(config, &mut initial);
-    let fixable: HashSet<_> = initial
-        .into_iter()
-        .filter(|diagnostic| {
-            diagnostic
-                .fix
-                .as_ref()
-                .is_some_and(|fix| fix.kind == FixKind::Safe || options.unsafe_fixes)
-        })
-        .map(|diagnostic| diagnostic.file_path)
-        .collect();
+    let fixable = fixable_paths(initial, config, options.unsafe_fixes);
     if !analysis.resolve() && !fixable.is_empty() {
         load_fix_companions(environment, &mut fix_files).map_err(|error| error.to_string())?;
     }
@@ -513,7 +568,9 @@ fn apply_selected_fixes(
         .then(|| FixExternals::load(environment, &mut fix_files))
         .transpose()
         .map_err(|error| error.to_string())?;
-    for (path, source) in files {
+    let mut staged = Vec::with_capacity(fixable.len());
+    let mut staging_failed = false;
+    for (index, (path, source)) in files.iter().enumerate() {
         if !fixable.contains(path.to_string_lossy().as_ref()) {
             continue;
         }
@@ -522,8 +579,9 @@ fn apply_selected_fixes(
         } else {
             match WriteSnapshot::capture(path, source) {
                 Ok(snapshot) => Some(snapshot),
-                Err(message) => {
-                    fix_reports.push(fix_report(path, &message));
+                Err(error) => {
+                    staging_failed |= !matches!(error, CaptureFailure::Ineligible(_));
+                    fix_reports.push(fix_report(path, &error.to_string()));
                     continue;
                 }
             }
@@ -543,6 +601,7 @@ fn apply_selected_fixes(
             },
         );
         if let Some(stop) = outcome.stop {
+            staging_failed |= !matches!(stop, falcon_project::FixStop::SyntaxErrors);
             let message = stop.to_string();
             fix_reports.push(fix_report(path, &message));
             continue;
@@ -552,23 +611,106 @@ fn apply_selected_fixes(
         }
         let project_file = fix_files.iter_mut().find(|file| file.path() == path);
         if let Err(message) = WriteSnapshot::apply_with_project_snapshot(
-            snapshot,
+            None,
             path,
             &outcome.source,
             project_file,
             environment,
         ) {
+            staging_failed = true;
             fix_reports.push(fix_report(path, &message));
             continue;
         }
-        if options.dry_run {
+        staged.push(StagedFix {
+            index,
+            source: outcome.source,
+            snapshot,
+        });
+    }
+    if staging_failed {
+        return Ok(None);
+    }
+    if options.dry_run {
+        for fix in staged {
+            let (path, source) = &files[fix.index];
             let relative = crate::baseline::relative_path(&path.to_string_lossy(), root);
-            append_full_file_diff(diff, &relative, source, &outcome.source);
-        } else {
-            *source = outcome.source;
+            append_full_file_diff(diff, &relative, source, &fix.source);
+        }
+        return Ok(None);
+    }
+    let partial = commit_staged_fixes(files, staged).err();
+    if let Some(partial) = &partial {
+        let message = partial_fix_message(partial);
+        for path in &partial.not_written {
+            fix_reports.push(fix_report(path, &message));
         }
     }
+    Ok(partial)
+}
+
+fn partial_fix_message(partial: &PartialFixWrite) -> String {
+    format!(
+        "write aborted: {}; this file was not written",
+        partial.cause
+    )
+}
+
+fn fixable_paths(
+    mut diagnostics: Vec<Diagnostic>,
+    config: &falcon_config::FalconConfig,
+    unsafe_fixes: bool,
+) -> HashSet<String> {
+    falcon_rules::apply_severities(&mut diagnostics, config);
+    falcon_project::apply_fix_policies(config, &mut diagnostics);
+    diagnostics
+        .into_iter()
+        .filter(|diagnostic| {
+            diagnostic
+                .fix
+                .as_ref()
+                .is_some_and(|fix| fix.kind == FixKind::Safe || unsafe_fixes)
+        })
+        .map(|diagnostic| diagnostic.file_path)
+        .collect()
+}
+
+struct StagedFix {
+    index: usize,
+    source: String,
+    snapshot: Option<WriteSnapshot>,
+}
+
+fn commit_staged_fixes(
+    files: &mut [SourceText],
+    staged: Vec<StagedFix>,
+) -> Result<(), PartialFixWrite> {
+    let mut written = Vec::with_capacity(staged.len());
+    let mut remaining = staged.into_iter();
+    while let Some(fix) = remaining.next() {
+        let (path, source) = &mut files[fix.index];
+        if let Some(snapshot) = fix.snapshot
+            && let Err(cause) = snapshot.write(path, &fix.source)
+        {
+            let mut not_written = Vec::with_capacity(remaining.len() + 1);
+            not_written.push(path.clone());
+            not_written.extend(remaining.map(|fix| files[fix.index].0.clone()));
+            return Err(PartialFixWrite {
+                written,
+                not_written,
+                cause,
+            });
+        }
+        written.push(path.clone());
+        *source = fix.source;
+    }
     Ok(())
+}
+
+struct FinishedAnalysis {
+    diagnostics: Vec<Diagnostic>,
+    project_files: Vec<ProjectFile>,
+    pipeline_failed: bool,
+    has_unmatched: bool,
 }
 
 fn finish_project_analysis(
@@ -579,7 +721,7 @@ fn finish_project_analysis(
     files: &mut Vec<(PathBuf, String)>,
     manifests: &mut Vec<(PathBuf, String)>,
     unmatched: &mut Vec<Diagnostic>,
-) -> Result<(Vec<Diagnostic>, Vec<ProjectFile>, bool, bool), String> {
+) -> Result<FinishedAnalysis, String> {
     let collect_programs = analysis.collect_programs();
     let (mut diagnostics, mut project_files, indexes) =
         analyze_sources(analysis, files, manifests, config, environment)
@@ -626,7 +768,12 @@ fn finish_project_analysis(
                 .map(|(path, source)| (path.as_path(), source.as_str())),
         );
     }
-    Ok((diagnostics, project_files, pipeline_failed, has_unmatched))
+    Ok(FinishedAnalysis {
+        diagnostics,
+        project_files,
+        pipeline_failed,
+        has_unmatched,
+    })
 }
 
 fn fix_report(path: &Path, message: &str) -> Diagnostic {
@@ -744,6 +891,31 @@ impl FixExternals {
     }
 }
 
+#[derive(Debug)]
+enum CaptureFailure {
+    Ineligible(&'static str),
+    Conflict(&'static str),
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for CaptureFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ineligible(message) | Self::Conflict(message) => formatter.write_str(message),
+            Self::Io(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for CaptureFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            Self::Ineligible(_) | Self::Conflict(_) => None,
+        }
+    }
+}
+
 struct WriteSnapshot {
     len: u64,
     modified: std::time::SystemTime,
@@ -751,42 +923,51 @@ struct WriteSnapshot {
 }
 
 impl WriteSnapshot {
-    fn capture(path: &Path, source: &str) -> Result<Self, String> {
+    fn capture(path: &Path, source: &str) -> Result<Self, CaptureFailure> {
         let metadata = Self::metadata(path)?;
         let snapshot = Self {
             len: metadata.len(),
-            modified: metadata.modified().map_err(|error| error.to_string())?,
+            modified: metadata.modified().map_err(CaptureFailure::Io)?,
             permissions: metadata.permissions(),
         };
         // The walker read source before this snapshot. Detect intervening saves.
-        let current = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+        let current = std::fs::read_to_string(path).map_err(CaptureFailure::Io)?;
         if current != source {
-            return Err("file changed since it was read".to_owned());
+            return Err(CaptureFailure::Conflict("file changed since it was read"));
         }
         drop(current);
-        snapshot.check(path)?;
+        snapshot.check(path).map_err(|error| match error {
+            CaptureFailure::Ineligible(_) => CaptureFailure::Conflict(
+                "file changed since it was read (file type or permissions differ)",
+            ),
+            other => other,
+        })?;
         Ok(snapshot)
     }
 
-    fn metadata(path: &Path) -> Result<std::fs::Metadata, String> {
-        let metadata = std::fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    fn metadata(path: &Path) -> Result<std::fs::Metadata, CaptureFailure> {
+        let metadata = std::fs::symlink_metadata(path).map_err(CaptureFailure::Io)?;
         if metadata.file_type().is_symlink() {
-            return Err("refusing to rewrite a symlink".to_owned());
+            return Err(CaptureFailure::Ineligible("refusing to rewrite a symlink"));
         }
         if !metadata.is_file() {
-            return Err("path is no longer a regular file".to_owned());
+            return Err(CaptureFailure::Conflict("path is no longer a regular file"));
         }
         if metadata.permissions().readonly() {
-            return Err("refusing to rewrite a read-only file".to_owned());
+            return Err(CaptureFailure::Ineligible(
+                "refusing to rewrite a read-only file",
+            ));
         }
         Ok(metadata)
     }
 
-    fn check(&self, path: &Path) -> Result<(), String> {
+    fn check(&self, path: &Path) -> Result<(), CaptureFailure> {
         let metadata = Self::metadata(path)?;
-        let modified = metadata.modified().map_err(|error| error.to_string())?;
+        let modified = metadata.modified().map_err(CaptureFailure::Io)?;
         if metadata.len() != self.len || modified != self.modified {
-            return Err("file changed since it was read (mtime or length differs)".to_owned());
+            return Err(CaptureFailure::Conflict(
+                "file changed since it was read (mtime or length differs)",
+            ));
         }
         Ok(())
     }
@@ -835,7 +1016,7 @@ impl WriteSnapshot {
             .as_file()
             .sync_all()
             .map_err(|error| format!("could not sync temporary file: {error}"))?;
-        self.check(path)?;
+        self.check(path).map_err(|error| error.to_string())?;
         temporary
             .persist(path)
             .map_err(|error| format!("could not replace file: {error}"))?;
@@ -894,6 +1075,9 @@ fn run_check_impl(options: &CheckOptions, sdk_locator: Option<SdkLocator>) -> i3
             return 1;
         }
     };
+    if let Some(partial) = &result.partial_fix_write {
+        eprintln!("error: {partial}");
+    }
 
     if !result.diff.is_empty() {
         if options.format == OutputFormat::Text {

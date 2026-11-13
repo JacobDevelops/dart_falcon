@@ -2,6 +2,23 @@ use super::*;
 use falcon_analyze::canonical_or_lexical;
 
 #[test]
+fn shutdown_without_exit_times_out_with_open_transport() {
+    let (server, _client) = Connection::memory();
+    let error = await_exit(&server, Instant::now()).unwrap_err();
+    assert!(error.to_string().contains("exit"));
+}
+
+#[test]
+fn shutdown_exit_before_deadline_completes_with_open_transport() {
+    let (server, client) = Connection::memory();
+    client
+        .sender
+        .send(ServerNotification::new("exit".to_string(), serde_json::Value::Null).into())
+        .unwrap();
+    await_exit(&server, Instant::now() + Duration::from_secs(30)).unwrap();
+}
+
+#[test]
 fn unchanged_idle_scans_back_off_and_changes_reset_the_delay() {
     let mut delay = Duration::from_secs(1);
     let mut elapsed = Duration::ZERO;
@@ -51,7 +68,7 @@ fn initialize_workspace_folders_take_precedence_over_root_uri() {
 fn initialize_analyzes_all_folders_and_reports_secondary_configuration_errors() {
     use serde_json::json;
 
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
     let first = directory.path().join("first");
     let second = directory.path().join("second");
     let legacy = directory.path().join("legacy");
@@ -226,9 +243,10 @@ fn fallback_fix_all_commands_are_lazy_and_execute_versioned_edits() {
     }));
     let uri = file_uri(&directory.path().join("main.dart")).unwrap();
     let source = "void main() { final x = new Object(); }";
-    state.open(uri.as_str(), source.to_owned(), Some(7));
     let (server, client) = Connection::memory();
     for (index, kind) in [SAFE_FIX_ALL, UNSAFE_FIX_ALL].into_iter().enumerate() {
+        let version = 7 + i32::try_from(index).expect("test request count fits i32") * 2;
+        state.open(uri.as_str(), source.to_owned(), Some(version));
         let id = RequestId::from(i32::try_from(index).expect("test request count fits i32") + 1);
         let polls = std::cell::Cell::new(0);
         handle_request(
@@ -284,7 +302,7 @@ fn fallback_fix_all_commands_are_lazy_and_execute_versioned_edits() {
         };
         assert_eq!(documents.len(), 1);
         assert_eq!(documents[0].text_document.uri, uri);
-        assert_eq!(documents[0].text_document.version, Some(7));
+        assert_eq!(documents[0].text_document.version, Some(version));
         let mut applied = source.to_owned();
         for edit in documents[0].edits.iter().rev() {
             let lsp_types::OneOf::Left(edit) = edit else {
@@ -302,7 +320,7 @@ fn fallback_fix_all_commands_are_lazy_and_execute_versioned_edits() {
         assert!(response.error.is_none());
 
         assert_rejected_fix_all_commands_then_restore(
-            &server, &client, &mut state, command, &uri, source,
+            &server, &client, &mut state, command, &uri, source, version,
         );
     }
 }
@@ -314,6 +332,7 @@ fn assert_rejected_fix_all_commands_then_restore(
     command: &lsp_types::Command,
     uri: &lsp_types::Uri,
     source: &str,
+    version: i32,
 ) {
     use serde_json::json;
 
@@ -326,7 +345,7 @@ fn assert_rejected_fix_all_commands_then_restore(
     )
     .unwrap();
     assert!(client.receiver.try_recv().is_err());
-    state.open(uri.as_str(), source.to_owned(), Some(8));
+    state.open(uri.as_str(), source.to_owned(), Some(version + 1));
     handle_request(
         server,
         state,
@@ -365,12 +384,69 @@ fn assert_rejected_fix_all_commands_then_restore(
     state.configure_code_actions(&json!({
             "capabilities": {"workspace": {"applyEdit": true, "workspaceEdit": {"documentChanges": true}}}
         }));
-    state.open(uri.as_str(), source.to_owned(), Some(7));
 }
 
 #[cfg(test)]
 mod debounce_tests {
     use super::*;
+
+    #[test]
+    fn stale_open_preserves_pending_change() {
+        use serde_json::json;
+
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("falcon.json");
+        std::fs::write(&config, r#"{"cross-file":{"enabled":false}}"#).unwrap();
+        let mut state = LspState::new_with_sdk_locator(Some(config), |_| None);
+        let uri = file_uri(&directory.path().join("main.dart")).unwrap();
+        state.open(uri.as_str(), "void old() {}".into(), Some(10));
+        let (server, client) = Connection::memory();
+        let mut debounce = Debounce::default();
+        let mut watching = FileWatching::new(&json!({}));
+        handle_notification(
+            &server,
+            &mut state,
+            &mut debounce,
+            &mut watching,
+            Duration::from_secs(1),
+            ServerNotification::new(
+                "textDocument/didChange".into(),
+                json!({
+                    "textDocument": {"uri": uri, "version": 11},
+                    "contentChanges": [{"text": "void current() {}"}]
+                }),
+            ),
+        )
+        .unwrap();
+        let deadline = debounce.deadline;
+        assert!(deadline.is_some());
+        open_and_publish(
+            &server,
+            &mut state,
+            &mut debounce,
+            serde_json::from_value(json!({"textDocument": {
+                "uri": uri, "languageId": "dart", "version": 10, "text": "void stale() {}"
+            }}))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(debounce.deadline, deadline);
+        assert!(debounce.dirty.contains(uri.as_str()));
+        assert!(
+            client.receiver.try_recv().is_err(),
+            "stale open must not publish"
+        );
+        assert_eq!(state.document(uri.as_str()).unwrap().version(), Some(11));
+        assert_eq!(
+            state.document(uri.as_str()).unwrap().text(),
+            "void current() {}"
+        );
+        analyze_affected_and_publish(&server, &mut state, uri.as_str()).unwrap();
+        let Message::Notification(publication) = client.receiver.try_recv().unwrap() else {
+            panic!("expected pending change diagnostics");
+        };
+        assert_eq!(publication.params["version"], 11);
+    }
 
     #[test]
     fn clearing_last_dirty_document_cancels_deadline() {

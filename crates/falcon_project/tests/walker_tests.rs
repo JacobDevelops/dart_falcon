@@ -354,3 +354,25 @@ fn discovery_preserves_missing_and_filtered_inputs() {
     assert_eq!(discovery.filtered_paths, [filtered]);
     assert_eq!(discovery.files, [] as [std::path::PathBuf; 0]);
 }
+
+#[test]
+fn undecodable_source_retains_path_and_read_cause() {
+    let directory = tempdir().unwrap();
+    let invalid = directory.path().join("invalid.dart");
+    fs::write(&invalid, [0xff, 0xfe]).unwrap();
+    fs::write(directory.path().join("good.dart"), "void main() {}").unwrap();
+    let output = walk_project(
+        &[directory.path().to_path_buf()],
+        &PathFilter::default(),
+        false,
+    )
+    .unwrap_err();
+    assert!(
+        output.contains(&invalid.to_string_lossy().to_string()),
+        "{output}"
+    );
+    assert!(
+        output.contains("stream did not contain valid UTF-8"),
+        "{output}"
+    );
+}

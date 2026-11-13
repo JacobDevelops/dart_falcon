@@ -596,4 +596,63 @@ mod tests {
         std::fs::write(&path, "name: recovered\nworkspace: []\n").unwrap();
         assert!(discover_workspace(directory.path()).is_some());
     }
+
+    #[test]
+    fn malformed_glob_member_without_input_does_not_abort_workspace() {
+        let directory = tempfile::tempdir().unwrap();
+        write(
+            directory.path(),
+            "pubspec.yaml",
+            "workspace: ['packages/**']\n",
+        );
+        write(
+            directory.path(),
+            "packages/app/pubspec.yaml",
+            "name: app\nresolution: workspace\n",
+        );
+        write(
+            directory.path(),
+            "packages/fixture/pubspec.yaml",
+            "name: {{name}}\n",
+        );
+        assert_eq!(
+            names(&discover_workspace(directory.path()).unwrap()),
+            ["app"]
+        );
+    }
+
+    #[test]
+    fn absent_metadata_and_standalone_packages_are_successful_absence() {
+        let directory = tempfile::tempdir().unwrap();
+        assert!(discover_workspace(directory.path()).is_none());
+        write(directory.path(), "pubspec.yaml", "name: standalone\n");
+        assert!(discover_workspace(directory.path()).is_none());
+    }
+
+    #[test]
+    fn legacy_melos_is_discovered_from_a_standalone_member() {
+        let directory = tempfile::tempdir().unwrap();
+        write(directory.path(), "melos.yaml", "packages: ['packages/*']\n");
+        write(directory.path(), "packages/app/pubspec.yaml", "name: app\n");
+        let workspace = discover_workspace(&directory.path().join("packages/app")).unwrap();
+        assert_eq!(workspace.root, directory.path().canonicalize().unwrap());
+        assert_eq!(names(&workspace), ["app"]);
+    }
+
+    #[test]
+    fn standalone_package_warns_about_broken_ancestor_metadata() {
+        let directory = tempfile::tempdir().unwrap();
+        write(directory.path(), "pubspec.yaml", "workspace: [\n");
+        write(directory.path(), "app/pubspec.yaml", "name: app\n");
+        let app = directory.path().join("app");
+        assert!(discover_workspace(&app).is_none());
+    }
+
+    #[test]
+    fn unreadable_manifest_is_optional_workspace_metadata() {
+        let directory = tempfile::tempdir().unwrap();
+        // A directory at the manifest path fails to read even under privileged test users.
+        std::fs::create_dir(directory.path().join("pubspec.yaml")).unwrap();
+        assert!(discover_workspace(directory.path()).is_none());
+    }
 }

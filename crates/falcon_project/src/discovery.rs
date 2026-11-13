@@ -50,6 +50,7 @@ impl DiscoveryWatch {
             return false;
         };
         let mut entries = Vec::with_capacity(expected.len());
+        let resolved_root = filter.resolve_walk_root(&self.path);
         for entry in directory {
             let Ok(entry) = entry else {
                 return false;
@@ -59,11 +60,16 @@ impl DiscoveryWatch {
             };
             let path = entry.path();
             if kind.is_dir() {
-                if !filter.excludes_directory(&path) {
+                if !filter.excludes_walked_directory(&resolved_root.join(entry.file_name())) {
                     entries.push((entry.file_name(), true, false));
                 }
             } else if (kind.is_file() || (kind.is_symlink() && path.is_file()))
-                && admitted_file(&path, filter, collect_manifests)
+                && admitted_file(
+                    &path,
+                    Some(&resolved_root.join(entry.file_name())),
+                    filter,
+                    collect_manifests,
+                )
             {
                 entries.push((entry.file_name(), false, kind.is_symlink()));
             }
@@ -226,7 +232,7 @@ pub fn discover_project_with_watches(
 fn discover_project_inner(
     paths: &[PathBuf],
     filter: &PathFilter,
-    collect_manifests: bool,
+    manifests: bool,
     track_watches: bool,
 ) -> ProjectDiscovery {
     let mut output = ProjectDiscovery::default();
@@ -257,13 +263,13 @@ fn discover_project_inner(
                     path: path.clone(),
                     source: error,
                 };
-                record_discovery_failure(failure, filter, collect_manifests, &mut output);
+                record_discovery_failure(failure, filter, manifests, &mut output);
                 continue;
             }
         };
         if metadata.is_file() {
             let is_dart = path.extension().and_then(|extension| extension.to_str()) == Some("dart");
-            let is_manifest = collect_manifests
+            let is_manifest = manifests
                 && path.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml");
             if !is_dart && !is_manifest {
                 continue;
@@ -277,7 +283,7 @@ fn discover_project_inner(
                 output.filtered_paths.push(path.clone());
             }
         }
-        if collect_manifests
+        if manifests
             && if metadata.is_file() {
                 !filter.excludes(&path.to_string_lossy())
             } else {
@@ -298,17 +304,17 @@ fn discover_project_inner(
                         .and_then(|metadata| metadata.modified().ok())
                 });
                 if manifest.is_file() {
-                    collect_file(&manifest, filter, true, &mut seen, &mut output);
+                    collect_file(&manifest, None, filter, true, &mut seen, &mut output);
                 }
             }
         }
         if metadata.is_file() {
-            collect_file(path, filter, collect_manifests, &mut seen, &mut output);
+            collect_file(path, None, filter, manifests, &mut seen, &mut output);
         } else if metadata.is_dir() {
             discover_directory(
                 path,
                 filter,
-                collect_manifests,
+                manifests,
                 &mut seen,
                 &mut output,
                 &mut index_by_path,
@@ -342,7 +348,7 @@ fn record_discovery_failure(
     }
     let required = filter.may_include_descendants(path)
         || (matches!(&failure, DiscoveryFailure::Metadata { .. })
-            && admitted_file(path, filter, collect_manifests));
+            && admitted_file(path, None, filter, collect_manifests));
     if required {
         output.failures.push(failure);
     } else {
@@ -360,6 +366,7 @@ fn discover_directory(
     watches: &mut Vec<DiscoveryWatch>,
 ) {
     let track_watches = index_by_path.is_some();
+    let resolved_root = filter.resolve_walk_root(path);
     // Flutter plugin symlinks point into dependency caches and may cycle.
     for item in WalkDir::new(path)
         .follow_links(false)
@@ -369,13 +376,19 @@ fn discover_directory(
             if !kind.is_dir() {
                 if track_watches
                     && (kind.is_file() || kind.is_symlink())
-                    && admitted_file(entry.path(), filter, collect_manifests)
+                    && admitted_file(
+                        entry.path(),
+                        Some(&resolved_root.join(entry.path().strip_prefix(path).unwrap())),
+                        filter,
+                        collect_manifests,
+                    )
                 {
                     record_entry(entry, index_by_path.as_ref(), watches);
                 }
                 return true;
             }
-            if filter.excludes_directory(entry.path()) {
+            let relative = entry.path().strip_prefix(path).unwrap();
+            if filter.excludes_walked_directory(&resolved_root.join(relative)) {
                 return false;
             }
             record_entry(entry, index_by_path.as_ref(), watches);
@@ -412,8 +425,12 @@ fn discover_directory(
         #[cfg(test)]
         VISITED_ENTRIES.with_borrow_mut(|visited| visited.push(entry.path().to_path_buf()));
         let is_file = if entry.file_type().is_symlink()
-            && admitted_file(entry.path(), filter, collect_manifests)
-        {
+            && admitted_file(
+                entry.path(),
+                Some(&resolved_root.join(entry.path().strip_prefix(path).unwrap())),
+                filter,
+                collect_manifests,
+            ) {
             match entry.path().metadata() {
                 Ok(metadata) => metadata.is_file(),
                 Err(source) => {
@@ -433,7 +450,15 @@ fn discover_directory(
             entry.file_type().is_file()
         };
         if is_file {
-            collect_file(entry.path(), filter, collect_manifests, seen, output);
+            let relative = entry.path().strip_prefix(path).unwrap();
+            collect_file(
+                entry.path(),
+                Some(&resolved_root.join(relative)),
+                filter,
+                collect_manifests,
+                seen,
+                output,
+            );
         }
     }
 }
@@ -476,18 +501,30 @@ fn record_entry(
     }
 }
 
-fn admitted_file(path: &Path, filter: &PathFilter, collect_manifests: bool) -> bool {
+fn admitted_file(
+    path: &Path,
+    walked_path: Option<&Path>,
+    filter: &PathFilter,
+    collect_manifests: bool,
+) -> bool {
     if collect_manifests && path.file_name().is_some_and(|name| name == "pubspec.yaml") {
-        !filter.excludes(&path.to_string_lossy())
+        !walked_path.map_or_else(
+            || filter.excludes(&path.to_string_lossy()),
+            |path| filter.excludes_walked_file(path),
+        )
     } else {
         path.extension()
             .is_some_and(|extension| extension == "dart")
-            && filter.admits(&path.to_string_lossy())
+            && walked_path.map_or_else(
+                || filter.admits(&path.to_string_lossy()),
+                |path| filter.admits_walked_file(path),
+            )
     }
 }
 
 fn collect_file(
     path: &Path,
+    walked_path: Option<&Path>,
     filter: &PathFilter,
     collect_manifests: bool,
     seen: &mut HashSet<PathBuf>,
@@ -495,7 +532,7 @@ fn collect_file(
 ) {
     let is_manifest = collect_manifests
         && path.file_name().and_then(|name| name.to_str()) == Some("pubspec.yaml");
-    if !admitted_file(path, filter, collect_manifests) || seen.contains(path) {
+    if !admitted_file(path, walked_path, filter, collect_manifests) || seen.contains(path) {
         return;
     }
     seen.insert(path.to_path_buf());
@@ -809,7 +846,10 @@ mod tests {
         let source_directory = directory.path().join("replaced.dart");
         std::fs::create_dir(&source_directory).unwrap();
         for path in [parent.join("main.dart"), source_directory] {
-            assert!(matches!(acquire_source(&path), SourceAcquisition::Failed(_)));
+            assert!(matches!(
+                acquire_source(&path),
+                SourceAcquisition::Failed(_)
+            ));
         }
     }
 

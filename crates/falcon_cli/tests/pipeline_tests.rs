@@ -14,6 +14,45 @@ fn run_check(options: &CheckOptions) -> i32 {
 }
 
 #[test]
+fn explicit_external_input_does_not_consult_cwd_workspace() {
+    const CHILD: &str = "FALCON_EXTERNAL_WORKSPACE_TEST";
+    if let Some(root) = std::env::var_os(CHILD) {
+        let root = std::path::PathBuf::from(root);
+        collect_check(&CheckOptions {
+            paths: vec![root.join("input/main.dart")],
+            config_path: Some(root.join("input/falcon.json")),
+            ..Default::default()
+        })
+        .unwrap();
+        return;
+    }
+    let directory = tempdir().unwrap();
+    let unrelated = directory.path().join("unrelated");
+    let input = directory.path().join("input");
+    fs::create_dir(&unrelated).unwrap();
+    fs::create_dir(&input).unwrap();
+    fs::write(unrelated.join("pubspec.yaml"), "workspace: [").unwrap();
+    fs::write(input.join("pubspec.yaml"), "name: input\n").unwrap();
+    fs::write(input.join("main.dart"), "void main() {}\n").unwrap();
+    fs::write(input.join("falcon.json"), "{}").unwrap();
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "explicit_external_input_does_not_consult_cwd_workspace",
+        ])
+        .current_dir(&unrelated)
+        .env(CHILD, directory.path())
+        .env("HOME", directory.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn non_json_reports_render_paths_beneath_regular_files() {
     let temp = tempdir().unwrap();
     let file = temp.path().join("main.dart");
@@ -1464,6 +1503,52 @@ fn package_discovery_deduplicates_real_and_symlinked_package_paths() {
 }
 
 #[test]
+fn broken_workspace_manifest_members_remain_ordinary_inputs() {
+    for literal in [false, true] {
+        let temp = tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        fs::write(
+            root.join("melos.yaml"),
+            if literal {
+                "packages: [packages/broken]\n"
+            } else {
+                "packages: [packages/*]\n"
+            },
+        )
+        .unwrap();
+        let member = root.join("packages/broken");
+        fs::create_dir_all(member.join("lib")).unwrap();
+        fs::write(member.join("pubspec.yaml"), "name: [\n").unwrap();
+        fs::write(member.join("falcon.json"), "{").unwrap();
+        fs::write(member.join("lib/main.dart"), "dynamic member = 1;\n").unwrap();
+        fs::write(root.join("main.dart"), "dynamic root = 1;\n").unwrap();
+        let config = root.join("falcon.json");
+        fs::write(&config, r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-dynamic":"error"}}},"cross-file":{"rules":{"recommended":false}}}"#).unwrap();
+        for (input, count) in [(root.clone(), 2), (member.join("lib/main.dart"), 1)] {
+            let output = collect_check(&CheckOptions {
+                paths: vec![input],
+                config_path: Some(config.clone()),
+                ..Default::default()
+            })
+            .unwrap();
+            assert_eq!(output.total_files, count);
+            assert_eq!(output.diagnostics.len(), count);
+            assert!(
+                output
+                    .diagnostics
+                    .iter()
+                    .all(|diagnostic| diagnostic.rule == "avoid-dynamic")
+            );
+            assert!(output.diagnostics.iter().any(|diagnostic| {
+                diagnostic
+                    .file_path
+                    .ends_with("packages/broken/lib/main.dart")
+            }));
+        }
+    }
+}
+
+#[test]
 fn workspace_reports_include_member_configs_clean_counts_and_lsp_parity() {
     for workspace in ["pub", "melos", "melos7"] {
         let temp = tempdir().unwrap();
@@ -1600,6 +1685,7 @@ fn workspace_reports_include_member_configs_clean_counts_and_lsp_parity() {
         );
 
         let mut lsp = LspState::new_with_sdk_locator(Some(config_path), |_| None);
+        lsp.initialize_workspace_roots(vec![root.to_path_buf()]);
         for (name, expected) in [("flagged", 1), ("clean", 0)] {
             let path = root.join("packages").join(name).join("lib/main.dart");
             let uri = format!("file://{}", path.display());
@@ -1651,7 +1737,7 @@ fn workspace_report_fixture(root: &std::path::Path) {
 fn selected_member_ignores_unselected_malformed_configuration() {
     const CHILD: &str = "FALCON_SELECTED_MEMBER_CONFIG_TEST";
     if std::env::var_os(CHILD).is_none() {
-        let temp = tempdir().unwrap();
+        let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
         workspace_report_fixture(temp.path());
         let bad_member = temp.path().join("packages/flagged");
         fs::write(
@@ -1910,4 +1996,106 @@ fn explicit_workspace_stdout_counts_after_baseline_before_print_limit() {
             assert!(!report.contains("avoid-dynamic"));
         }
     }
+}
+
+#[test]
+fn incomplete_scan_fails_before_fixing_or_replacing_baseline() {
+    let directory = tempdir().unwrap();
+    let source = "class A {}\nvoid f() { new A(); }\n";
+    let good = directory.path().join("good.dart");
+    fs::write(&good, source).unwrap();
+    fs::write(directory.path().join("invalid.dart"), [0xff]).unwrap();
+    let config = directory.path().join("falcon.json");
+    fs::write(&config, r#"{"linter":{"rules":{"recommended":false,"style":{"unnecessary-new":"warn"}}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#).unwrap();
+    let baseline = directory.path().join("baseline.json");
+    fs::write(&baseline, "original baseline").unwrap();
+    let read_only_error = collect_check(&CheckOptions {
+        paths: vec![directory.path().to_path_buf()],
+        config_path: Some(config.clone()),
+        ..Default::default()
+    })
+    .unwrap_err();
+    assert!(!read_only_error.contains("written"), "{read_only_error}");
+    let options = CheckOptions {
+        paths: vec![directory.path().to_path_buf()],
+        config_path: Some(config),
+        write: true,
+        write_baseline: Some(Some(baseline.clone())),
+        no_errors_on_unmatched: true,
+        error_exit_code: 0,
+        ..Default::default()
+    };
+    assert!(collect_check(&options).is_err());
+    assert_eq!(run_check(&options), 1);
+    assert_eq!(fs::read_to_string(good).unwrap(), source);
+    assert_eq!(fs::read_to_string(baseline).unwrap(), "original baseline");
+}
+
+#[test]
+fn failed_fix_keeps_baseline_filtering_and_refuses_baseline_writes() {
+    let directory = tempdir().unwrap();
+    let source = directory.path().join("main.dart");
+    let config = directory.path().join("falcon.json");
+    let baseline = directory.path().join("baseline.json");
+    fs::write(&config, r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-dynamic":"error"},"style":{"unnecessary-new":"error"}}},"cross-file":{"enabled":false}}"#).unwrap();
+    fs::write(&source, "dynamic existing = 1;\n").unwrap();
+    let mut options = CheckOptions {
+        paths: vec![directory.path().to_path_buf()],
+        config_path: Some(config),
+        write_baseline: Some(Some(baseline.clone())),
+        ..Default::default()
+    };
+    collect_check(&options).unwrap();
+    options.write_baseline = None;
+    options.baseline = Some(baseline.clone());
+    options.write = true;
+    fs::write(
+        directory.path().join("broken.dart"),
+        "class Example {} void broken() { new Example(); }\nvoid invalid( {",
+    )
+    .unwrap();
+    let output = collect_check(&options).unwrap();
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule == "autofix")
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.rule != "avoid-dynamic")
+    );
+    options.write_baseline = Some(Some(baseline));
+    let error = collect_check(&options).unwrap_err();
+    assert!(
+        error.contains("Cannot write a baseline after operational errors"),
+        "{error}"
+    );
+    assert!(error.contains("broken.dart"), "{error}");
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_project_applies_overrides_and_exclusions() {
+    let directory = tempdir().unwrap();
+    let root = directory.path().join("project");
+    fs::create_dir_all(root.join("lib")).unwrap();
+    fs::create_dir_all(root.join("excluded")).unwrap();
+    let source = "class A {}\nvoid f() { new A(); }\n";
+    fs::write(root.join("lib/main.dart"), source).unwrap();
+    fs::write(root.join("excluded/skip.dart"), [0xff]).unwrap();
+    fs::write(root.join("falcon.json"), r#"{"files":{"includes":["**","!excluded/**"]},"linter":{"rules":{"recommended":false,"style":{"unnecessary-new":"error"}}},"cross-file":{"enabled":false},"overrides":[{"includes":["lib/**"],"linter":{"rules":{"style":{"unnecessary-new":"off"}}}}]}"#).unwrap();
+    let alias = directory.path().join("alias");
+    std::os::unix::fs::symlink(&root, &alias).unwrap();
+    let output = collect_check(&CheckOptions {
+        paths: vec![alias.clone()],
+        config_path: Some(alias.join("falcon.json")),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(output.total_files, 1);
+    assert_eq!(output.exit_code, 0);
+    assert!(output.diagnostics.is_empty());
 }

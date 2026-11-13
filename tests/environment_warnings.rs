@@ -152,6 +152,127 @@ fn optional_manifest_warning_and_secure_url_recovery_reach_cli_output() {
     }
 }
 
+fn check_package(root: &std::path::Path) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_falcon"))
+        .args(["check", ".", "--format", "json"])
+        .current_dir(root)
+        .env_remove("DART_SDK")
+        .env_remove("FLUTTER_ROOT")
+        .env("PATH", "")
+        .output()
+        .unwrap()
+}
+
+fn diagnostic_package(root: &std::path::Path) {
+    std::fs::create_dir_all(root).unwrap();
+    std::fs::write(root.join("main.dart"), "dynamic value = 1;\n").unwrap();
+    std::fs::write(
+        root.join("falcon.json"),
+        r#"{"linter":{"rules":{"recommended":false,"suspicious":{"avoid-dynamic":"error"}}},"cross-file":{"rules":{"recommended":false}}}"#,
+    )
+    .unwrap();
+}
+
+fn assert_root_warning(output: &std::process::Output, manifest: &std::path::Path) {
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("avoid-dynamic"), "{stdout}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(&manifest.display().to_string()), "{stderr}");
+    assert!(
+        stderr.contains("invalid workspace metadata")
+            || stderr.contains("failed to read workspace metadata"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn malformed_standalone_manifest_warns_and_lints() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path().canonicalize().unwrap();
+    diagnostic_package(&root);
+    let without_metadata = check_package(&root);
+    let manifest = root.join("pubspec.yaml");
+    std::fs::write(&manifest, "name: [\n").unwrap();
+    let output = check_package(&root);
+    assert_root_warning(&output, &manifest);
+    assert_eq!(output.status.code(), without_metadata.status.code());
+    assert_eq!(output.stdout, without_metadata.stdout);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid workspace metadata"));
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_standalone_manifest_warns_and_lints() {
+    use std::os::unix::fs::PermissionsExt;
+
+    struct RestorePermissions(std::path::PathBuf, std::fs::Permissions);
+    impl Drop for RestorePermissions {
+        fn drop(&mut self) {
+            std::fs::set_permissions(&self.0, self.1.clone()).unwrap();
+        }
+    }
+
+    if Command::new("id").arg("-u").output().unwrap().stdout == b"0\n" {
+        return;
+    }
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path().canonicalize().unwrap();
+    diagnostic_package(&root);
+    let without_metadata = check_package(&root);
+    let manifest = root.join("pubspec.yaml");
+    std::fs::write(&manifest, "name: app\n").unwrap();
+    let _restore = RestorePermissions(manifest.clone(), manifest.metadata().unwrap().permissions());
+    std::fs::set_permissions(&manifest, std::fs::Permissions::from_mode(0o0)).unwrap();
+    if std::fs::read(&manifest).is_ok() {
+        return;
+    }
+    let output = check_package(&root);
+    assert_root_warning(&output, &manifest);
+    assert_eq!(output.stdout, without_metadata.stdout);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("failed to read workspace metadata"));
+}
+
+#[test]
+fn malformed_ancestor_manifest_warns_and_lints_valid_package() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path().canonicalize().unwrap();
+    let package = root.join("app");
+    diagnostic_package(&package);
+    std::fs::write(package.join("pubspec.yaml"), "name: app\n").unwrap();
+    let without_metadata = check_package(&package);
+    let manifest = root.join("pubspec.yaml");
+    std::fs::write(&manifest, "workspace: [\n").unwrap();
+    let output = check_package(&package);
+    assert_root_warning(&output, &manifest);
+    assert_eq!(output.stdout, without_metadata.stdout);
+}
+
+#[test]
+fn broken_literal_and_glob_workspace_members_warn_and_lint() {
+    for declaration in ["app", "'*'"] {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        let package = root.join("app");
+        diagnostic_package(&package);
+        std::fs::write(
+            root.join("falcon.json"),
+            std::fs::read(package.join("falcon.json")).unwrap(),
+        )
+        .unwrap();
+        std::fs::remove_file(package.join("falcon.json")).unwrap();
+        std::fs::write(
+            root.join("pubspec.yaml"),
+            format!("workspace: [{declaration}]\n"),
+        )
+        .unwrap();
+        let manifest = package.join("pubspec.yaml");
+        std::fs::write(&manifest, "name: [\n").unwrap();
+        let output = check_package(&package);
+        assert_root_warning(&output, &manifest);
+    }
+}
+
 #[test]
 fn malformed_package_config_is_reported_on_stderr() {
     let project = tempfile::tempdir().unwrap();
@@ -207,7 +328,7 @@ fn member_run_wide_settings_warn_once_on_stderr_only_when_present() {
         ("", &[][..]),
     ] {
         let project = tempfile::tempdir().unwrap();
-        let root = project.path();
+        let root = project.path().canonicalize().unwrap();
         std::fs::write(
             root.join("pubspec.yaml"),
             "name: workspace_root\nworkspace:\n  - packages/a\n  - packages/b\n",
