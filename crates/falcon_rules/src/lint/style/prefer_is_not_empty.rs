@@ -1,24 +1,13 @@
-//! Flags `.length` comparisons equivalent to a `.isNotEmpty` check.
+//! Flags negated `isEmpty` checks in favor of `isNotEmpty`.
 //!
-//! Collections and strings expose an `isNotEmpty` getter that reads as plain
-//! intent and, for lazy iterables, can avoid computing the full `length`.
-//! Comparing `length` against a constant makes the reader infer the meaning, so
-//! `list.isNotEmpty` should replace forms such as `length != 0`, `length > 0`,
-//! and `length >= 1`, along with their operand-swapped mirrors (`0 != length`,
-//! `0 < length`, `1 <= length`). Adopted from package:lints
-//! `prefer_is_not_empty`.
+//! `!items.isEmpty` and `!(items.isEmpty)` are more directly expressed as
+//! `items.isNotEmpty`. Null-aware accesses are left alone. Length comparisons
+//! belong to `prefer-is-empty`, irrespective of the direction of comparison.
+//! Adopted from package:lints `prefer_is_not_empty`.
 //!
-//! Only a plain `.length` property access matches against the relevant integer
-//! literal. A null-aware `receiver?.length` is deliberately left alone: that
-//! comparison also has to account for a `null` receiver, so `isNotEmpty` is not
-//! a drop-in replacement.
-//!
-//! Semantic analysis requires declaration identities. Once available, an
-//! unknown receiver still triggers the lint. A `TypeIndex` can suppress it only
-//! when the receiver is proven to have no `isNotEmpty` member and not to be an
-//! `Iterable`, `String`, or `Map`; source-resolved members and subtypes take
-//! precedence. Without a type index, those negative proofs are unavailable,
-//! but source-derived receiver types are still inferred.
+//! Unknown receivers still trigger the lint. A type index suppresses a report
+//! when the receiver is proven not to provide `isNotEmpty` and is not an
+//! `Iterable`, `String`, or `Map`.
 
 use crate::lint::support::collection_checks::{Emptiness, analyze_emptiness};
 use falcon_analyze::{AnalyzeContext, Rule, RulePreparation};
@@ -32,7 +21,7 @@ impl Rule for PreferIsNotEmpty {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(analyze_emptiness(ctx, Emptiness::NotEmpty))
+        RulePreparation::Semantic(analyze_emptiness(ctx, Emptiness::NegatedIsEmpty))
     }
 }
 
@@ -51,15 +40,15 @@ mod tests {
 
     #[test]
     fn unknown_receiver_fires_with_and_without_types() {
-        let src = "void f() { if (list.length != 0) return; }";
+        let src = "void f() { if (!list.isEmpty) return; }";
         assert_eq!(count_no_types(src), 1);
         assert_eq!(count_with_types(src), 1);
     }
 
     #[test]
     fn proven_non_collection_suppresses_only_with_types() {
-        let src = "class Ruler { int get length => 3; } \
-                   void f(Ruler r) { if (r.length != 0) return; }";
+        let src = "class Ruler { bool get isEmpty => true; } \
+                   void f(Ruler r) { if (!r.isEmpty) return; }";
         assert_eq!(count_no_types(src), 1, "no type index → fire (baseline)");
         assert_eq!(count_with_types(src), 0, "proven no isNotEmpty → suppress");
     }
@@ -67,32 +56,29 @@ mod tests {
     #[test]
     fn class_implementing_iterable_still_fires() {
         let src = "class Bag implements Iterable<int> { int get length => 0; } \
-                   void f(Bag b) { if (b.length != 0) return; }";
+                   void f(Bag b) { if (!b.isEmpty) return; }";
         assert_eq!(count_with_types(src), 1);
     }
 
     #[test]
     fn supertype_leaving_project_still_fires() {
-        let src = "class Offsite extends Frobnicator { int get length => 0; } \
-                   void f(Offsite o) { if (o.length != 0) return; }";
+        let src = "class Offsite extends Frobnicator { bool get isEmpty => true; } \
+                   void f(Offsite o) { if (!o.isEmpty) return; }";
         assert_eq!(count_with_types(src), 1);
     }
 
     #[test]
     fn string_receiver_still_fires() {
-        let src = "void f(String s) { if (s.length != 0) return; }";
+        let src = "void f(String s) { if (!s.isEmpty) return; }";
         assert_eq!(count_with_types(src), 1);
     }
 
     #[test]
-    fn all_mirrored_forms_detected() {
+    fn parenthesized_checks_detected() {
         let src = "void f() { \
-            if (a.length != 0) return; \
-            if (0 != b.length) return; \
-            if (c.length > 0) return; \
-            if (0 < d.length) return; \
-            if (e.length >= 1) return; \
-            if (1 <= g.length) return; }";
-        assert_eq!(count_no_types(src), 6);
+            if (!a.isEmpty) return; \
+            if (!(b.isEmpty)) return; \
+            if (!((c.isEmpty))) return; }";
+        assert_eq!(count_no_types(src), 3);
     }
 }

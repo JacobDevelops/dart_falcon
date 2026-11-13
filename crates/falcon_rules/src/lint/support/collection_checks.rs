@@ -45,71 +45,73 @@ pub(crate) fn lacks_collection_member(
 
 #[derive(Clone, Copy)]
 pub(crate) enum Emptiness {
-    Empty,
-    NotEmpty,
+    LengthComparison,
+    NegatedIsEmpty,
 }
 
-impl Emptiness {
-    fn details(self) -> (&'static str, &'static str) {
+enum EmptinessCheck {
+    Empty,
+    NotEmpty,
+    AlwaysTrue,
+    AlwaysFalse,
+    NegatedIsEmpty,
+}
+
+impl EmptinessCheck {
+    fn details(&self) -> (&'static str, &'static str) {
         match self {
-            Self::Empty => (
-                "isEmpty",
-                "Use `isEmpty` instead of comparing `length` to 0.",
-            ),
+            Self::Empty => ("isEmpty", "Use `isEmpty` instead of comparing `length`."),
             Self::NotEmpty => (
                 "isNotEmpty",
-                "Use `isNotEmpty` instead of comparing `length` to 0.",
+                "Use `isNotEmpty` instead of comparing `length`.",
+            ),
+            Self::AlwaysTrue => (
+                "isEmpty",
+                "The comparison is always `true` because `length` is nonnegative.",
+            ),
+            Self::AlwaysFalse => (
+                "isEmpty",
+                "The comparison is always `false` because `length` is nonnegative.",
+            ),
+            Self::NegatedIsEmpty => (
+                "isNotEmpty",
+                "Use `isNotEmpty` rather than negating `isEmpty`.",
             ),
         }
     }
+}
 
-    fn comparison_receiver<'a>(
-        self,
-        op: BinaryOp,
-        left: Expr<'a>,
-        right: Expr<'a>,
-    ) -> Option<Expr<'a>> {
-        let forms = match self {
-            Self::Empty => &[
-                (BinaryOp::EqEq, 0, false),
-                (BinaryOp::EqEq, 0, true),
-                (BinaryOp::Lt, 1, false),
-                (BinaryOp::Gt, 1, true),
-                (BinaryOp::LtEq, 0, false),
-                (BinaryOp::GtEq, 0, true),
-            ],
-            Self::NotEmpty => &[
-                (BinaryOp::NotEq, 0, false),
-                (BinaryOp::NotEq, 0, true),
-                (BinaryOp::Gt, 0, false),
-                (BinaryOp::Lt, 0, true),
-                (BinaryOp::GtEq, 1, false),
-                (BinaryOp::LtEq, 1, true),
-            ],
+fn length_comparison(binary: BinaryExpr<'_>) -> Option<(Expr<'_>, EmptinessCheck)> {
+    let (length, literal, op) = if matches!(binary.left().unparenthesized(), Expr::IntLit(_)) {
+        let op = match binary.op() {
+            BinaryOp::Lt => BinaryOp::Gt,
+            BinaryOp::LtEq => BinaryOp::GtEq,
+            BinaryOp::Gt => BinaryOp::Lt,
+            BinaryOp::GtEq => BinaryOp::LtEq,
+            op => op,
         };
-        forms.iter().find_map(|&(comparison, value, swapped)| {
-            if op != comparison {
-                return None;
-            }
-            let (length, literal) = if swapped {
-                (right, left)
-            } else {
-                (left, right)
-            };
-            let Expr::Field(field) = length.unparenthesized() else {
-                return None;
-            };
-            if !field.is_null_safe()
-                && field.field().name() == "length"
-                && matches!(literal.unparenthesized(), Expr::IntLit(text)
-                    if text.value().replace('_', "").parse::<i64>().ok() == Some(value))
-            {
-                Some(field.object())
-            } else {
-                None
-            }
-        })
+        (binary.right(), binary.left(), op)
+    } else {
+        (binary.left(), binary.right(), binary.op())
+    };
+    let Expr::Field(field) = length.unparenthesized() else {
+        return None;
+    };
+    let Expr::IntLit(literal) = literal.unparenthesized() else {
+        return None;
+    };
+    if field.is_null_safe() || field.field().name() != "length" {
+        return None;
     }
+    let value = falcon_analyze::parse_int(literal.value())?;
+    let check = match (op, value) {
+        (BinaryOp::EqEq | BinaryOp::LtEq, 0) | (BinaryOp::Lt, 1) => EmptinessCheck::Empty,
+        (BinaryOp::NotEq | BinaryOp::Gt, 0) | (BinaryOp::GtEq, 1) => EmptinessCheck::NotEmpty,
+        (BinaryOp::GtEq, 0) => EmptinessCheck::AlwaysTrue,
+        (BinaryOp::Lt, 0) => EmptinessCheck::AlwaysFalse,
+        _ => return None,
+    };
+    Some((field.object(), check))
 }
 
 pub(crate) fn analyze_emptiness<'a>(
@@ -127,22 +129,33 @@ pub(crate) fn analyze_emptiness<'a>(
         }
 
         fn visit_expr(&mut self, node: Expr<'a>, state: &SemanticState<'a>) {
-            let Expr::Binary(binary) = node else {
-                return;
+            let (receiver, check) = match (self.emptiness, node) {
+                (Emptiness::LengthComparison, Expr::Binary(binary)) => {
+                    let Some((receiver, check)) = length_comparison(binary) else {
+                        return;
+                    };
+                    (receiver, check)
+                }
+                (Emptiness::NegatedIsEmpty, Expr::Unary(unary)) if unary.op() == UnaryOp::Bang => {
+                    let Expr::Field(field) = unary.operand().unparenthesized() else {
+                        return;
+                    };
+                    if field.is_null_safe() || field.field().name() != "isEmpty" {
+                        return;
+                    }
+                    (field.object(), EmptinessCheck::NegatedIsEmpty)
+                }
+                _ => return,
             };
-            let (member, message) = self.emptiness.details();
-            if let Some(receiver) =
-                self.emptiness
-                    .comparison_receiver(binary.op(), binary.left(), binary.right())
-                && !lacks_collection_member(
-                    self.ctx,
-                    receiver,
-                    state,
-                    member,
-                    &["Iterable", "String", "Map"],
-                )
-            {
-                self.diags.push(self.ctx.diagnostic(message, binary.span()));
+            let (member, message) = check.details();
+            if !lacks_collection_member(
+                self.ctx,
+                receiver,
+                state,
+                member,
+                &["Iterable", "String", "Map"],
+            ) {
+                self.diags.push(self.ctx.diagnostic(message, node.span()));
             }
         }
     }

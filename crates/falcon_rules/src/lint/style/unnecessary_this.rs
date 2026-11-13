@@ -361,6 +361,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         if let Expr::Field(field) = node
             && matches!(field.object().unparenthesized(), Expr::This(_))
+            && !field.is_null_safe()
             && !self.scopes.bound(field.field().name())
             && (self.names.contains(field.field().name())
                 || !library_contains_name(self.program, self.model.as_ref(), field.field().name()))

@@ -50,19 +50,10 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         {
             return StructuralTraversal::SkipChildren;
         }
-        if let Some(keyword) = ctx
-            .tree()
-            .keywords_in(ctx.source(), alias.span(), TokenKind::Typedef)
-            .next()
-        {
-            self.diags.push(ctx.diagnostic(
-                "Use the generic function type syntax in typedefs.",
-                falcon_syntax::cst::Span {
-                    start: keyword.offset(),
-                    end: keyword.offset() + keyword.len(),
-                },
-            ));
-        }
+        self.diags.push(ctx.diagnostic(
+            "Use the generic function type syntax in typedefs.",
+            alias.name().span(),
+        ));
         StructuralTraversal::SkipChildren
     }
 
@@ -76,6 +67,23 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
 mod tests {
     use super::*;
     use falcon_analyze::RuleAnalysis;
+
+    #[test]
+    fn reports_the_alias_name() {
+        let source = "typedef int Compare(int left, int right);";
+        let diagnostics = crate::lint::test_support::diagnostics(
+            "prefer-generic-function-type-aliases",
+            &PreferGenericFunctionTypeAliases,
+            std::path::Path::new("test.dart"),
+            source,
+            false,
+        );
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            &source[diagnostics[0].span.start..diagnostics[0].span.end],
+            "Compare"
+        );
+    }
 
     #[test]
     fn incomplete_alias_without_parameter_list_is_not_a_legacy_function_alias() {

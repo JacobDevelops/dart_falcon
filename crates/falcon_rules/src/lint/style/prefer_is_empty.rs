@@ -1,12 +1,11 @@
-//! Flags `.length` comparisons equivalent to a `.isEmpty` check.
+//! Flags `length` comparisons that can use `isEmpty` or `isNotEmpty`.
 //!
-//! Collections and strings expose an `isEmpty` getter that states intent
-//! directly and, for lazy iterables, can be cheaper than computing the full
-//! `length`. Comparing `length` against a constant forces the reader to decode
-//! the boundary, so `list.isEmpty` should replace forms such as `length == 0`,
-//! `length < 1`, and `length <= 0`, together with their operand-swapped mirrors
-//! (`0 == length`, `1 > length`, `0 >= length`). Adopted from package:lints
-//! `prefer_is_empty`.
+//! Collections and strings expose getters that state intent directly and can
+//! avoid computing a lazy iterable's full length. This rule covers both empty
+//! checks (`length == 0`, `length < 1`, `length <= 0`) and nonempty checks
+//! (`length != 0`, `length > 0`, `length >= 1`), including operand-swapped forms.
+//! Comparisons `length >= 0` and `length < 0` are reported as always true or
+//! false. Adopted from package:lints `prefer_is_empty`.
 //!
 //! Only a plain `.length` property access matches against the relevant integer
 //! literal. A null-aware `receiver?.length` is deliberately left alone: that
@@ -33,7 +32,7 @@ impl Rule for PreferIsEmpty {
         _program: Program<'a>,
         ctx: &'a AnalyzeContext<'a>,
     ) -> RulePreparation<'a> {
-        RulePreparation::Semantic(analyze_emptiness(ctx, Emptiness::Empty))
+        RulePreparation::Semantic(analyze_emptiness(ctx, Emptiness::LengthComparison))
     }
 }
 

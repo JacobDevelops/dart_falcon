@@ -1,11 +1,8 @@
-//! Flags an `addAll` cascade on a collection literal that a spread would express.
+//! Flags an `addAll` cascade on a list literal that a spread would express.
 //!
-//! The spread operator (`[a, b, ...x]`) folds another collection's elements into
-//! a literal in one expression, so `[a, b]..addAll(x)` is unnecessarily verbose
-//! and reads as a construction followed by mutation rather than a single
-//! collection. The rule matches each `..addAll(...)` section cascaded onto a
-//! list, set, or map literal that takes exactly one positional argument and no
-//! named arguments; other shapes and non-literal receivers are ignored.
+//! `[a, b]..addAll(items)` is more directly written `[a, b, ...items]`.
+//! Calls require one positional argument and no named arguments. List-literal
+//! arguments belong to `prefer-inlined-adds`; other receivers are left alone.
 
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
@@ -35,19 +32,19 @@ falcon_analyze::structural_visitor! {
 impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
     fn visit_expr(&mut self, node: Expr<'a>) -> StructuralTraversal {
         if let Expr::Cascade(cascade) = node.unparenthesized()
-            && is_collection_literal(cascade.object())
+            && matches!(cascade.object().unparenthesized(), Expr::List(_))
         {
             for section in cascade.sections() {
-                // Stop after one match because operations in a section share its span.
                 for op in section.ops() {
                     if let CascadeOp::Call(call) = op
                         && call.name().name() == "addAll"
                         && call.args().positional().len() == 1
                         && call.args().named().is_empty()
+                        && !matches!(call.args().positional().next().unwrap().unparenthesized(), Expr::List(_))
                     {
                         self.diags.push(self.ctx.diagnostic(
                             "Use the spread operator `...` instead of `addAll`.",
-                            section.span(),
+                            call.name().span(),
                         ));
                         break;
                     }
@@ -61,11 +58,4 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         self.diags
     }
 }
-}
-
-fn is_collection_literal(expr: Expr<'_>) -> bool {
-    matches!(
-        expr.unparenthesized(),
-        Expr::List(_) | Expr::Set(_) | Expr::Map(_)
-    )
 }

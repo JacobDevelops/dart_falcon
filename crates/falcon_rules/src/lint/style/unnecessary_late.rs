@@ -38,7 +38,7 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
         let diags = &mut self.diags;
         match decl {
             TopLevelDecl::Variable(var) if var.is_late() => {
-                flag_initialized(var.declarators(), ctx, diags);
+                flag_initialized(var.declarators(), var.span(), ctx, diags);
             }
             _ => {
                 if let Some(members) = crate::lint::declarations::members_of(decl) {
@@ -65,19 +65,52 @@ fn static_late_fields<'a>(
             && field.is_static()
             && field.is_late()
         {
-            flag_initialized(field.declarators(), ctx, diags);
+            flag_initialized(field.declarators(), field.span(), ctx, diags);
         }
     }
 }
 
 fn flag_initialized<'a>(
     declarators: AstChildren<'a, VarDeclarator<'a>>,
+    declaration: Span,
     ctx: &AnalyzeContext,
     diags: &mut Vec<Diagnostic>,
 ) {
-    for decl in declarators {
-        if decl.initializer().is_some() {
-            diags.push(ctx.diagnostic("Remove `late` from this already-lazy static or top-level variable.".to_string(), decl.name().span()));
-        }
+    if declarators
+        .into_iter()
+        .any(|decl| decl.initializer().is_some())
+        && let Some(keyword) = ctx
+            .tree()
+            .keywords_in(
+                ctx.source(),
+                declaration,
+                falcon_syntax::token::TokenKind::Late,
+            )
+            .next()
+    {
+        diags.push(ctx.diagnostic(
+            "Remove `late` from this already-lazy static or top-level variable.",
+            keyword.span(),
+        ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn reports_the_late_keyword() {
+        let source = "class C { static late int field = 1; }";
+        let diagnostics = crate::lint::test_support::diagnostics(
+            "unnecessary-late",
+            &super::UnnecessaryLate,
+            std::path::Path::new("test.dart"),
+            source,
+            false,
+        );
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            &source[diagnostics[0].span.start..diagnostics[0].span.end],
+            "late"
+        );
     }
 }

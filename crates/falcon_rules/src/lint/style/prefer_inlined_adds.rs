@@ -1,11 +1,9 @@
-//! Flags an `add` cascade on a list literal whose element could be written inline.
+//! Flags list-literal cascades whose added elements could be written inline.
 //!
-//! Building a list by literal-then-cascade (`[a]..add(b)`) is more verbose than
-//! placing the element directly in the literal (`[a, b]`), and the inline form
-//! reads as a single collection rather than a construction followed by mutation.
-//! The rule matches each `..add(...)` section cascaded onto a list literal that
-//! takes exactly one positional argument and no named arguments; multi-argument
-//! or named calls, and cascades on non-list receivers, are ignored.
+//! Both `[a]..add(b)` and `[a]..addAll([b, c])` can put the added elements
+//! directly in the original literal. Calls require one positional argument
+//! and no named arguments. Nonliteral receivers and `addAll` arguments are
+//! left alone; `prefer-spread-collections` handles nonliteral arguments.
 
 use falcon_analyze::{
     AnalyzeContext, Rule, RulePreparation, StructuralRuleVisitor, StructuralTraversal,
@@ -42,14 +40,18 @@ impl<'a> StructuralRuleVisitor<'a> for Collector<'a> {
             && matches!(cascade.object().unparenthesized(), Expr::List(_))
         {
             for section in cascade.sections() {
-                // Stop after one match because operations in a section share its span.
                 for op in section.ops() {
                     if let CascadeOp::Call(call) = op
-                        && call.name().name() == "add"
                         && call.args().positional().len() == 1
                         && call.args().named().is_empty()
+                        && (call.name().name() == "add"
+                            || (call.name().name() == "addAll"
+                                && matches!(call.args().positional().next().unwrap().unparenthesized(), Expr::List(_))))
                     {
-                        self.diags.push(self.ctx.diagnostic("Inline the added element into the collection literal instead of using `add`.", section.span()));
+                        self.diags.push(self.ctx.diagnostic(
+                            "Inline the added elements into the list literal.",
+                            call.name().span(),
+                        ));
                         break;
                     }
                 }
