@@ -882,6 +882,17 @@ impl<'a> IdentityBuild<'a> {
             }
         }
 
+        // Canonical collisions retain their original last-writer precedence.
+        // Cache aliases only after that winner is known, so every spelling agrees.
+        for (&(path, _, _), canonical) in all.iter().zip(&paths) {
+            if let Some(canonical) = canonical
+                && path != canonical
+                && let Some(file) = by_path.get(canonical).copied()
+            {
+                by_path.insert(path.to_path_buf(), file);
+            }
+        }
+
         self.by_path = by_path;
         self.paths = paths;
     }
@@ -4477,13 +4488,64 @@ mod tests {
         let path = directory.path().join("main.dart");
         std::fs::write(&path, "class Main {}").unwrap();
         let canonical = path.canonicalize().unwrap();
-        let index = index(&[(canonical.to_str().unwrap(), "class Main {}")], &[]);
-        let expected = index.file(&canonical);
-        assert!(expected.is_some());
-        std::fs::remove_file(&path).unwrap();
         let relative = path.strip_prefix(&cwd).unwrap();
-        assert_eq!(index.file(relative), expected);
-        assert_eq!(index.file(&Path::new(".").join(relative)), expected);
+        let indexes = [canonical.as_path(), relative]
+            .map(|spelling| index(&[(spelling.to_str().unwrap(), "class Main {}")], &[]));
+        std::fs::remove_file(&path).unwrap();
+        for index in indexes {
+            let expected = index.file(&canonical);
+            assert!(expected.is_some());
+            assert_eq!(index.file(relative), expected);
+            assert_eq!(index.file(&Path::new(".").join(relative)), expected);
+            assert_eq!(index.file(&path), expected);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn registered_aliases_share_the_final_canonical_file_and_library_ids() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("main.dart");
+        let alias = directory.path().join("alias.dart");
+        let other = directory.path().join("other.dart");
+        std::fs::write(&path, "class Main {}").unwrap();
+        std::fs::write(&other, "class Other {}").unwrap();
+        std::os::unix::fs::symlink(&path, &alias).unwrap();
+        let canonical = path.canonicalize().unwrap();
+        let canonical_other = other.canonicalize().unwrap();
+        let baseline = index(
+            &[
+                (canonical.to_str().unwrap(), "class Main {}"),
+                (canonical_other.to_str().unwrap(), "class Other {}"),
+                (canonical.to_str().unwrap(), "class Main {}"),
+            ],
+            &[],
+        );
+        let aliased = index(
+            &[
+                (alias.to_str().unwrap(), "class Main {}"),
+                (other.to_str().unwrap(), "class Other {}"),
+                (canonical.to_str().unwrap(), "class Main {}"),
+            ],
+            &[],
+        );
+        std::fs::remove_file(&alias).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_file(&other).unwrap();
+        let expected = baseline.file(&canonical).unwrap();
+        assert_eq!(expected, FileId(2));
+        for spelling in [&alias, &canonical] {
+            let file = aliased.file(spelling).unwrap();
+            assert_eq!(file, expected);
+            assert_eq!(aliased.library(file), baseline.library(expected));
+        }
+        let expected_other = baseline.file(&canonical_other).unwrap();
+        assert_eq!(expected_other, FileId(1));
+        assert_eq!(aliased.file(&other), Some(expected_other));
+        assert_eq!(
+            aliased.library(expected_other),
+            baseline.library(expected_other),
+        );
     }
 
     #[cfg(unix)]

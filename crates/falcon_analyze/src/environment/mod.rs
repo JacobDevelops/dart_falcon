@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use packages::{FilePackage, PackageMetadata};
+use rustc_hash::FxHashMap;
 
 pub use dependency_inputs::{DependencyExport, DependencyInput, DependencySource};
 pub use external::{ExternalLibraries, ExternalOrigin, ExternalTarget};
@@ -265,6 +266,12 @@ impl<'a> PackageConfigInput<'a> {
 }
 type RootPackageConfig = Arc<std::sync::OnceLock<DependencyInput<Arc<PackageConfig>>>>;
 
+#[derive(Debug, Clone)]
+struct FileLocation {
+    normalized: PathBuf,
+    directory: PathBuf,
+}
+
 /// Package configurations, SDKs and language versions for a set of files.
 ///
 /// Built once per run (or per LSP workspace state) from the analyzed paths;
@@ -287,6 +294,8 @@ pub struct AnalysisEnvironment {
     root_candidates: std::collections::BTreeSet<PathBuf>,
     mutable_roots: std::collections::BTreeSet<PathBuf>,
     directory_packages: HashMap<PathBuf, Option<Arc<PackageMetadata>>>,
+    /// Original file spellings mapped to the locations captured during discovery.
+    file_locations: FxHashMap<PathBuf, FileLocation>,
     package_discovery: Arc<Mutex<PackageDiscovery>>,
     config_fingerprints: Arc<Mutex<FingerprintCache>>,
     #[cfg(test)]
@@ -348,6 +357,7 @@ impl AnalysisEnvironment {
             root_candidates: std::collections::BTreeSet::new(),
             mutable_roots: std::collections::BTreeSet::new(),
             directory_packages: HashMap::new(),
+            file_locations: FxHashMap::default(),
             package_discovery: Arc::default(),
             config_fingerprints: Arc::default(),
             #[cfg(test)]
@@ -481,6 +491,13 @@ impl AnalysisEnvironment {
                     .insert(package_directory.to_path_buf(), package.clone());
             }
             let directory = package_config::absolute(path.parent().unwrap_or(Path::new("")));
+            self.file_locations.insert(
+                path.to_path_buf(),
+                FileLocation {
+                    normalized: normalized.clone(),
+                    directory: directory.clone(),
+                },
+            );
             if self.directories.contains_key(&directory) {
                 continue;
             }
@@ -880,6 +897,12 @@ impl AnalysisEnvironment {
     /// External directories are discovered lazily and shared across file contexts.
     #[must_use]
     pub fn file_package(&self, path: &Path) -> FilePackage {
+        if let Some(location) = self.file_locations.get(path) {
+            return FilePackage::new(
+                &location.normalized,
+                self.package_metadata(&location.normalized),
+            );
+        }
         let path = crate::canonical_or_lexical(&package_config::absolute(path));
         FilePackage::new(&path, self.package_metadata(&path))
     }
@@ -1047,6 +1070,9 @@ impl AnalysisEnvironment {
     /// The context of an analyzed file's directory; files in directories not
     /// seen by [`Self::discover`] have none.
     fn context_index(&self, path: &Path) -> Option<usize> {
+        if let Some(location) = self.file_locations.get(path) {
+            return self.directories.get(&location.directory).copied().flatten();
+        }
         let directory = package_config::absolute(path.parent().unwrap_or(Path::new("")));
         self.directories.get(&directory).copied().flatten()
     }
@@ -1077,11 +1103,7 @@ impl AnalysisEnvironment {
     #[must_use]
     pub fn language_version(&self, path: &Path, source: &str) -> LanguageVersion {
         LanguageVersion::file_override(source)
-            .or_else(|| {
-                self.package_config(path)
-                    .available()?
-                    .language_version(path)
-            })
+            .or_else(|| self.package_language_version(path))
             .unwrap_or(LanguageVersion::CURRENT)
     }
 
@@ -1096,9 +1118,12 @@ impl AnalysisEnvironment {
     /// package configuration covers it (see [`crate::AnalyzeContext`]).
     #[must_use]
     pub fn package_language_version(&self, path: &Path) -> Option<LanguageVersion> {
-        self.package_config(path)
-            .available()?
-            .language_version(path)
+        let config = self.package_config(path).available()?;
+        if let Some(location) = self.file_locations.get(path) {
+            config.language_version_canonical(&location.normalized)
+        } else {
+            config.language_version(path)
+        }
     }
 }
 

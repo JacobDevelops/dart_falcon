@@ -383,6 +383,58 @@ mod tests {
         assert!(environment.package(&source).is_none());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn registered_directory_aliases_share_package_and_language_version() {
+        let root = tempfile::tempdir().unwrap();
+        let package = root.path().join("package");
+        let alias = root.path().join("alias");
+        std::fs::create_dir_all(package.join("lib")).unwrap();
+        std::fs::create_dir(package.join(".dart_tool")).unwrap();
+        std::fs::write(package.join("pubspec.yaml"), "name: package\n").unwrap();
+        std::fs::write(
+            package.join(".dart_tool/package_config.json"),
+            r#"{"configVersion":2,"packages":[{"name":"package","rootUri":"../","packageUri":"lib/","languageVersion":"3.5"}]}"#,
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&package, &alias).unwrap();
+        let source = alias.join("lib/source.dart");
+        std::fs::write(&source, "").unwrap();
+        let canonical = std::fs::canonicalize(&source).unwrap();
+        let mut environment =
+            AnalysisEnvironment::discover_with_sdk_locator([source.as_path()], |_| None);
+        let expected = environment.file_package(&canonical);
+        environment.extend([canonical.as_path()]);
+        let version = crate::LanguageVersion::new(3, 5);
+        assert_eq!(expected.identity().unwrap().name, "package");
+        for deleted in [false, true] {
+            if deleted {
+                std::fs::remove_file(&canonical).unwrap();
+                std::fs::remove_file(&alias).unwrap();
+                environment.io_observer = Some(|_, path| {
+                    panic!("Registered package lookup accessed the filesystem: {path:?}");
+                });
+            }
+            for path in [&source, &canonical] {
+                let actual = environment.file_package(path);
+                assert_eq!(
+                    actual.identity().unwrap().name,
+                    expected.identity().unwrap().name
+                );
+                assert_eq!(
+                    actual.identity().unwrap().lib_root,
+                    expected.identity().unwrap().lib_root
+                );
+                assert_eq!(
+                    actual.lib_identity().unwrap().lib_root,
+                    expected.lib_identity().unwrap().lib_root
+                );
+                assert_eq!(environment.language_version(path, ""), version);
+                assert_eq!(environment.package_language_version(path), Some(version));
+            }
+        }
+    }
+
     #[test]
     fn external_package_discovery_is_shared_across_contexts_and_directories() {
         let root = tempfile::tempdir().unwrap();
