@@ -51,7 +51,9 @@ impl From<&'static str> for InternedString {
 
 impl PartialEq for InternedString {
     fn eq(&self, other: &Self) -> bool {
-        self.as_str() == other.as_str()
+        let left = self.as_str();
+        let right = other.as_str();
+        std::ptr::eq(left, right) || left == right
     }
 }
 impl Eq for InternedString {}
@@ -136,6 +138,13 @@ mod tests {
         let mut set = HashSet::new();
         set.insert(builtin);
         assert!(set.contains(&shared));
+        let mut independent = StringInterner::default();
+        let rebuilt = independent.intern("Widget");
+        assert_eq!(shared, shared.clone());
+        assert_eq!(shared, rebuilt);
+        assert_eq!(shared.cmp(&rebuilt), std::cmp::Ordering::Equal);
+        assert_ne!(shared, independent.intern("WidgetBuilder"));
+        assert!(set.contains(&rebuilt));
         assert!(set.contains("Widget"));
     }
 }
