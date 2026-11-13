@@ -27,8 +27,8 @@ use falcon_analyze::{
     SemanticIndexes,
 };
 use falcon_config::{
-    ConfigError, ConfigPathSegment, FalconConfig, LoadedConfig, ResolvedSeverity, Rules,
-    format_config_path,
+    ConfigError, ConfigPathSegment, FalconConfig, LoadedConfig, ResolvedFileConfig,
+    ResolvedSeverity, Rules, format_config_path,
 };
 use falcon_diagnostics::{Diagnostic, Severity};
 
@@ -476,34 +476,45 @@ pub fn run_cross_file(
 
 /// Resolve per-path severities and discard diagnostics disabled by configuration.
 pub fn apply_severities(diags: &mut Vec<Diagnostic>, config: &FalconConfig) {
+    let mut files = HashMap::new();
     diags.retain_mut(|diag| {
-        let Some(meta) = meta_for(diag.rule) else {
+        if meta_for(diag.rule).is_none() {
             return true;
-        };
-        let resolved = if meta.is_cross_file() {
-            config.resolve_cross_file_rule_for(
-                &diag.file_path,
-                meta.group.as_str(),
-                meta.name,
-                meta.recommended,
-            )
-        } else {
-            config.resolve_rule_for(
-                &diag.file_path,
-                meta.group.as_str(),
-                meta.name,
-                meta.recommended,
-                meta.domain_names(),
-            )
-        };
-        match resolved {
-            Some(sev) => {
-                diag.severity = to_severity(sev);
-                true
-            }
-            None => false,
         }
+        if !files.contains_key(diag.file_path.as_str()) {
+            files.insert(diag.file_path.clone(), config.resolve_file(&diag.file_path));
+        }
+        let file = &files[diag.file_path.as_str()];
+        apply_severity(diag, file)
     });
+}
+
+/// Apply severities using the same resolved view as a file's analysis context.
+pub fn apply_file_severities(diags: &mut Vec<Diagnostic>, file: &ResolvedFileConfig<'_>) {
+    diags.retain_mut(|diag| apply_severity(diag, file));
+}
+
+fn apply_severity(diag: &mut Diagnostic, file: &ResolvedFileConfig<'_>) -> bool {
+    let Some(meta) = meta_for(diag.rule) else {
+        return true;
+    };
+    let resolved = if meta.is_cross_file() {
+        file.resolve_cross_file_rule(meta.group.as_str(), meta.name, meta.recommended)
+    } else {
+        file.resolve_rule(
+            meta.group.as_str(),
+            meta.name,
+            meta.recommended,
+            meta.domain_names(),
+        )
+    };
+    match resolved {
+        Some(sev) => {
+            diag.severity = to_severity(sev);
+            true
+        }
+        None => false,
+    }
 }
 
 fn to_severity(sev: ResolvedSeverity) -> Severity {
@@ -623,6 +634,54 @@ fn enabled_cross_file_rules(
 mod tests {
     use super::config_warnings;
     use falcon_config::FalconConfig;
+    #[test]
+    fn per_file_severities_preserve_order_for_interleaved_cross_file_results() {
+        use falcon_diagnostics::{Diagnostic, Severity, Span};
+        let config: FalconConfig = serde_json::from_value(serde_json::json!({
+            "error-on-warnings": true,
+            "linter": {"rules": {"recommended": false, "suspicious": {"avoid-dynamic": "warn"}}},
+            "cross-file": {"rules": {"recommended": false, "correctness": {"unused-files": "warn"}}},
+            "overrides": [
+                {"includes": ["lib/**"], "linter": {"rules": {"suspicious": {"avoid-dynamic": "error"}}},
+                 "cross-file": {"rules": {"correctness": {"unused-files": "error"}}}},
+                {"includes": ["lib/low.dart"], "linter": {"rules": {"suspicious": {"avoid-dynamic": "info"}}},
+                 "cross-file": {"rules": {"correctness": {"unused-files": "info"}}}},
+                {"includes": ["lib/off.dart"], "linter": {"rules": {"suspicious": {"avoid-dynamic": "off"}}},
+                 "cross-file": {"rules": {"correctness": {"unused-files": "off"}}}}
+            ]
+        })).unwrap();
+        let mut diagnostics = [
+            ("lib/high.dart", "avoid-dynamic"),
+            ("lib/low.dart", "unused-files"),
+            ("lib/off.dart", "avoid-dynamic"),
+            ("other.dart", "avoid-dynamic"),
+            ("lib/high.dart", "unused-files"),
+            ("lib/off.dart", "unused-files"),
+            ("lib/low.dart", "avoid-dynamic"),
+            ("other.dart", "syntax-error"),
+        ]
+        .into_iter()
+        .map(|(path, rule)| {
+            Diagnostic::new(rule, Severity::Error, rule, path, Span { start: 0, end: 0 })
+        })
+        .collect();
+        super::apply_severities(&mut diagnostics, &config);
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|d| (d.file_path.as_str(), d.rule, d.severity))
+                .collect::<Vec<_>>(),
+            [
+                ("lib/high.dart", "avoid-dynamic", Severity::Error),
+                ("lib/low.dart", "unused-files", Severity::Info),
+                ("other.dart", "avoid-dynamic", Severity::Warning),
+                ("lib/high.dart", "unused-files", Severity::Error),
+                ("lib/low.dart", "avoid-dynamic", Severity::Info),
+                ("other.dart", "syntax-error", Severity::Error),
+            ]
+        );
+    }
+
     #[test]
     fn package_identity_keeps_name_when_other_yaml_is_invalid() {
         let root = tempfile::tempdir().unwrap();
@@ -793,7 +852,8 @@ mod tests {
                 assert_eq!(
                     loaded
                         .config
-                        .resolve_rule_for(&path, "suspicious", "avoid-dynamic", false, &[])
+                        .resolve_file(&path)
+                        .resolve_rule("suspicious", "avoid-dynamic", false, &[])
                         .is_some(),
                     enabled,
                     "{relative}"

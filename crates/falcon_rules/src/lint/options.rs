@@ -44,9 +44,10 @@ pub(crate) fn cross_file<'a, T: TypedOptions>(
     name: &str,
 ) -> Result<&'a T, ConfigError> {
     let meta = crate::meta::meta_for(name).expect("registered option-reading rule");
-    let options = config.cross_file_options_data_for(path, meta.group.as_str(), meta.name);
+    let file = config.resolve_file(path);
+    let options = file.cross_file_options_data(meta.group.as_str(), meta.name);
     read(options).map_err(|error| {
-        let path = config.cross_file_options_location_for(path, meta.group.as_str(), meta.name);
+        let path = file.cross_file_options_location(meta.group.as_str(), meta.name);
         option_error(&path, error)
     })
 }

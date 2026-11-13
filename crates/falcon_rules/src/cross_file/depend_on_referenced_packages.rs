@@ -49,12 +49,8 @@ impl CrossFileRule for DependOnReferencedPackages {
                 is_public_or_executable(environment, file.path(), pubspec);
             let replacement_enabled = replacement.is_some_and(|meta| {
                 config
-                    .resolve_cross_file_rule_for(
-                        &file.path().to_string_lossy(),
-                        meta.group.as_str(),
-                        meta.name,
-                        meta.recommended,
-                    )
+                    .resolve_file(&file.path().to_string_lossy())
+                    .resolve_cross_file_rule(meta.group.as_str(), meta.name, meta.recommended)
                     .is_some()
             });
 

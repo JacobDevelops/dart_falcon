@@ -2253,13 +2253,9 @@ fn upgrade_legacy_severity_accepts_case_and_historical_aliases() {
         );
         let config = assert_migrated_config_loads(&result.json);
         assert_eq!(
-            config.resolve_rule_for(
-                &migrated_path(&config, "lib/a.dart"),
-                "complexity",
-                "max-lines-for-file",
-                false,
-                &[]
-            ),
+            config
+                .resolve_file(&migrated_path(&config, "lib/a.dart"))
+                .resolve_rule("complexity", "max-lines-for-file", false, &[]),
             Some(severity)
         );
         assert!(
@@ -2318,13 +2314,9 @@ fn upgrade_discards_only_override_domains_and_retains_scoped_rules() {
         ("lib/a.dart", Some(falcon_config::ResolvedSeverity::Warn)),
     ] {
         assert_eq!(
-            config.resolve_rule_for(
-                &migrated_path(&config, path),
-                "style",
-                "avoid-late-keyword",
-                false,
-                &[]
-            ),
+            config
+                .resolve_file(&migrated_path(&config, path))
+                .resolve_rule("style", "avoid-late-keyword", false, &[]),
             expected,
             "{path}"
         );

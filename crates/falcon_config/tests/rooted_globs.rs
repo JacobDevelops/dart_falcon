@@ -135,7 +135,9 @@ fn document_alias_to_root_subdirectory_matches_includes_and_overrides() {
         assert!(config.files.includes.admits(&path), "{path}");
         assert!(config.overrides[0].matches(&path), "{path}");
         assert_eq!(
-            config.resolve_rule_for(&path, "style", "test-rule", true, &[]),
+            config
+                .resolve_file(&path)
+                .resolve_rule("style", "test-rule", true, &[]),
             None
         );
     }
@@ -188,7 +190,9 @@ fn internal_aliases_share_file_filters_and_overrides_through_a_project_symlink()
                     assert!(config.files.includes.admits(&path), "{path}");
                     assert!(config.overrides[0].matches(&path), "{path}");
                     assert_eq!(
-                        config.resolve_rule_for(&path, "style", "test-rule", true, &[]),
+                        config
+                            .resolve_file(&path)
+                            .resolve_rule("style", "test-rule", true, &[]),
                         None,
                         "{path}"
                     );

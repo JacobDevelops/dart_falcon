@@ -355,33 +355,24 @@ fn deprecated_option_keys_warn_with_paths_and_canonical_keys_win() {
     assert_eq!(
         loaded
             .config
-            .rule_options_data_for(
-                &directory.join("lib/a.dart").to_string_lossy(),
-                "complexity",
-                "max-parameters-for-function",
-            )
+            .resolve_file(&directory.join("lib/a.dart").to_string_lossy())
+            .rule_options_data("complexity", "max-parameters-for-function",)
             .map(falcon_config::RuleOptions::value),
         Some(&json!({ "max-parameters": 2 }))
     );
     assert_eq!(
         loaded
             .config
-            .rule_options_data_for(
-                &directory.join("lib/a.dart").to_string_lossy(),
-                "style",
-                "prefer-correct-handler-name",
-            )
+            .resolve_file(&directory.join("lib/a.dart").to_string_lossy())
+            .rule_options_data("style", "prefer-correct-handler-name",)
             .map(falcon_config::RuleOptions::value),
         Some(&json!({ "name-pattern": "^handle" }))
     );
     assert_eq!(
         loaded
             .config
-            .rule_options_data_for(
-                &directory.join("test/a.dart").to_string_lossy(),
-                "complexity",
-                "max-parameters-for-function"
-            )
+            .resolve_file(&directory.join("test/a.dart").to_string_lossy())
+            .rule_options_data("complexity", "max-parameters-for-function")
             .map(falcon_config::RuleOptions::value),
         Some(&json!({ "max-parameters": 3 }))
     );
@@ -491,11 +482,8 @@ fn typed_options_follow_matching_overrides_and_preserve_level_only_changes() {
         assert_eq!(
             loaded
                 .config
-                .rule_options_data_for(
-                    &file_path.to_string_lossy(),
-                    "complexity",
-                    "max-parameters-for-function"
-                )
+                .resolve_file(&file_path.to_string_lossy())
+                .rule_options_data("complexity", "max-parameters-for-function")
                 .map(falcon_config::RuleOptions::value),
             Some(&json!({ "max-parameters": maximum }))
         );
@@ -510,11 +498,8 @@ fn typed_options_follow_matching_overrides_and_preserve_level_only_changes() {
     assert_eq!(
         loaded
             .config
-            .rule_options_data_for(
-                &directory.join("test/a.dart").to_string_lossy(),
-                "style",
-                "prefer-correct-handler-name"
-            )
+            .resolve_file(&directory.join("test/a.dart").to_string_lossy())
+            .rule_options_data("style", "prefer-correct-handler-name")
             .map(falcon_config::RuleOptions::value),
         Some(&json!({ "name-pattern": "^on" })),
         "override options replace the entire object, not just supplied fields"
@@ -552,22 +537,16 @@ fn null_options_remain_absent_and_do_not_clear_previous_options() {
     assert_eq!(
         loaded
             .config
-            .rule_options_data_for(
-                &directory.join("test/a.dart").to_string_lossy(),
-                "complexity",
-                "max-parameters-for-function"
-            )
+            .resolve_file(&directory.join("test/a.dart").to_string_lossy())
+            .rule_options_data("complexity", "max-parameters-for-function")
             .map(falcon_config::RuleOptions::value),
         Some(&json!({ "max-parameters": 2 }))
     );
     assert!(
         loaded
             .config
-            .cross_file_options_data_for(
-                &directory.join("lib/a.dart").to_string_lossy(),
-                "correctness",
-                "banned-imports"
-            )
+            .resolve_file(&directory.join("lib/a.dart").to_string_lossy())
+            .cross_file_options_data("correctness", "banned-imports")
             .is_none()
     );
     fs::remove_dir_all(directory).unwrap();
@@ -621,11 +600,8 @@ fn cross_file_typed_options_replace_boundaries_in_override_order() {
         assert_eq!(
             loaded
                 .config
-                .cross_file_options_data_for(
-                    &directory.join(file).to_string_lossy(),
-                    "correctness",
-                    "banned-imports"
-                )
+                .resolve_file(&directory.join(file).to_string_lossy())
+                .cross_file_options_data("correctness", "banned-imports")
                 .map(falcon_config::RuleOptions::value),
             Some(expected),
             "{file}"
@@ -672,11 +648,8 @@ fn nested_option_aliases_normalize_inside_arrays_with_canonical_precedence() {
     assert_eq!(
         loaded
             .config
-            .rule_options_data_for(
-                &directory.join("lib/a.dart").to_string_lossy(),
-                "style",
-                "use-design-system-item",
-            )
+            .resolve_file(&directory.join("lib/a.dart").to_string_lossy())
+            .rule_options_data("style", "use-design-system-item",)
             .map(falcon_config::RuleOptions::value),
         Some(&json!({ "items": [{
             "class-name": "Container", "use-instead": "AppContainer"

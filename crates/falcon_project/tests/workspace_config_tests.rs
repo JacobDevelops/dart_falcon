@@ -67,24 +67,15 @@ fn member_configuration_replaces_disabled_parent_and_controls_shared_analysis() 
     );
     assert!(config.is_rule_enabled_anywhere("complexity", "max-lines-for-file", false, &[]));
     assert_eq!(
-        config.resolve_rule_for(
-            &admitted.to_string_lossy(),
-            "complexity",
-            "max-lines-for-file",
-            false,
-            &[]
-        ),
+        config
+            .resolve_file(&admitted.to_string_lossy())
+            .resolve_rule("complexity", "max-lines-for-file", false, &[]),
         Some(ResolvedSeverity::Error)
     );
     assert!(
         config
-            .resolve_rule_for(
-                &root.join("packages/b/lib/main.dart").to_string_lossy(),
-                "complexity",
-                "max-lines-for-file",
-                false,
-                &[]
-            )
+            .resolve_file(&root.join("packages/b/lib/main.dart").to_string_lossy())
+            .resolve_rule("complexity", "max-lines-for-file", false, &[])
             .is_none()
     );
     let output = walk_project(&[root.to_path_buf()], &config.files.includes, true).unwrap();
@@ -143,28 +134,22 @@ fn nearest_configuration_overrides_options_and_cross_file_settings() {
     ] {
         let path = root.join(path);
         let options = config
-            .rule_options_data_for(&path.to_string_lossy(), "complexity", "max-lines-for-file")
+            .resolve_file(&path.to_string_lossy())
+            .rule_options_data("complexity", "max-lines-for-file")
             .unwrap();
         assert_eq!(options.value()["max-lines"], expected);
     }
     assert!(config.is_cross_file_rule_enabled_anywhere("correctness", "unused-files", false));
     assert_eq!(
-        config.resolve_cross_file_rule_for(
-            &root.join("packages/a/lib/main.dart").to_string_lossy(),
-            "correctness",
-            "unused-files",
-            false
-        ),
+        config
+            .resolve_file(&root.join("packages/a/lib/main.dart").to_string_lossy())
+            .resolve_cross_file_rule("correctness", "unused-files", false),
         Some(ResolvedSeverity::Error)
     );
     assert!(
         config
-            .resolve_cross_file_rule_for(
-                &root.join("main.dart").to_string_lossy(),
-                "correctness",
-                "unused-files",
-                false
-            )
+            .resolve_file(&root.join("main.dart").to_string_lossy())
+            .resolve_cross_file_rule("correctness", "unused-files", false)
             .is_none()
     );
 }
@@ -211,8 +196,7 @@ fn explicit_base_still_loads_members_and_cli_exclusions_remain_global() {
         .unwrap()
         .config;
     assert_eq!(
-        config.resolve_rule_for(
-            &file.to_string_lossy(),
+        config.resolve_file(&file.to_string_lossy()).resolve_rule(
             "complexity",
             "max-lines-for-file",
             false,
@@ -284,15 +268,14 @@ fn tolerant_loading_retains_root_and_valid_members_with_qualified_errors() {
     assert_ne!(errors[0].1, [] as [falcon_config::ConfigPathSegment; 0]);
     for (member, expected) in [("a", None), ("b", Some(ResolvedSeverity::Error))] {
         assert_eq!(
-            loaded.config.resolve_rule_for(
-                &root
-                    .join(format!("packages/{member}/main.dart"))
-                    .to_string_lossy(),
-                "suspicious",
-                "avoid-dynamic",
-                false,
-                &[],
-            ),
+            loaded
+                .config
+                .resolve_file(
+                    &root
+                        .join(format!("packages/{member}/main.dart"))
+                        .to_string_lossy()
+                )
+                .resolve_rule("suspicious", "avoid-dynamic", false, &[],),
             expected,
         );
     }
@@ -423,8 +406,7 @@ fn member_defaults_and_domains_replace_parent_settings() {
     let child = root.join("packages/a/lib/main.dart");
     let fallback = root.join("packages/b/lib/main.dart");
     assert_eq!(
-        config.resolve_rule_for(
-            &child.to_string_lossy(),
+        config.resolve_file(&child.to_string_lossy()).resolve_rule(
             "suspicious",
             "avoid-print",
             true,
@@ -434,22 +416,14 @@ fn member_defaults_and_domains_replace_parent_settings() {
     );
     assert!(
         config
-            .resolve_rule_for(
-                &fallback.to_string_lossy(),
-                "suspicious",
-                "avoid-print",
-                true,
-                &["flutter"],
-            )
+            .resolve_file(&fallback.to_string_lossy())
+            .resolve_rule("suspicious", "avoid-print", true, &["flutter"],)
             .is_none()
     );
     assert_eq!(
-        config.resolve_cross_file_rule_for(
-            &child.to_string_lossy(),
-            "correctness",
-            "unused-files",
-            true,
-        ),
+        config
+            .resolve_file(&child.to_string_lossy())
+            .resolve_cross_file_rule("correctness", "unused-files", true,),
         Some(ResolvedSeverity::Warn)
     );
 }
@@ -560,13 +534,10 @@ fn explicit_member_base_applies_run_wide_settings_without_ignored_setting_warnin
         }
         let file = root.join("packages/a/lib/main.dart");
         assert_eq!(
-            loaded.config.resolve_rule_for(
-                &file.to_string_lossy(),
-                "suspicious",
-                "avoid-dynamic",
-                false,
-                &[],
-            ),
+            loaded
+                .config
+                .resolve_file(&file.to_string_lossy())
+                .resolve_rule("suspicious", "avoid-dynamic", false, &[],),
             Some(ResolvedSeverity::Error)
         );
         assert!(
@@ -630,8 +601,7 @@ fn local_nonmember_configuration_is_preserved_inside_a_workspace() {
         .unwrap()
         .config;
     assert_eq!(
-        config.resolve_rule_for(
-            &file.to_string_lossy(),
+        config.resolve_file(&file.to_string_lossy()).resolve_rule(
             "complexity",
             "max-lines-for-file",
             false,
@@ -668,8 +638,7 @@ fn ignored_melos_package_retains_its_local_configuration() {
         .unwrap()
         .config;
     assert_eq!(
-        config.resolve_rule_for(
-            &file.to_string_lossy(),
+        config.resolve_file(&file.to_string_lossy()).resolve_rule(
             "complexity",
             "max-lines-for-file",
             false,

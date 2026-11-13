@@ -436,6 +436,11 @@ impl<'a> AnalyzeContext<'a> {
         self
     }
 
+    /// The package settings and overrides already matched for this file.
+    pub fn file_config(&self) -> &ResolvedFileConfig<'a> {
+        &self.file_config
+    }
+
     /// Read rule options from the file's resolved path-override snapshot.
     pub fn rule_options_data(
         &self,

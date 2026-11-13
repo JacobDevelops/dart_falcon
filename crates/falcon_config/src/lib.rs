@@ -131,7 +131,7 @@ pub struct Override {
     /// Partial linter (file-rule) configuration applied to matching files. Rule
     /// levels, per-rule `options`, and an optional `enabled` master switch are
     /// honored. Options replace the base rule's options for matching files (see
-    /// [`FalconConfig::rule_options_data_for`]).
+    /// [`ResolvedFileConfig::rule_options_data`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub linter: Option<OverrideRules>,
     /// Partial cross-file rule configuration applied to matching files. Same
@@ -1197,20 +1197,24 @@ pub struct ResolvedFileConfig<'a> {
     overrides: Vec<(usize, &'a Override)>,
 }
 
-impl ResolvedFileConfig<'_> {
+impl<'a> ResolvedFileConfig<'a> {
     /// Return effective options without repeating filesystem or glob matching.
     #[must_use]
-    pub fn rule_options_data(&self, group: &str, name: &str) -> Option<&RuleOptions> {
-        self.options_data(group, name).0
+    pub fn rule_options_data(&self, group: &str, name: &str) -> Option<&'a RuleOptions> {
+        self.options_data(group, name, Section::Linter).0
     }
 
-    fn options_data(&self, group: &str, name: &str) -> (Option<&RuleOptions>, Option<usize>) {
+    fn options_data(
+        &self,
+        group: &str,
+        name: &str,
+        section: Section,
+    ) -> (Option<&'a RuleOptions>, Option<usize>) {
         // Last non-null options replace the whole value; level-only overrides
         // and disabled rules still inherit earlier options.
         for &(index, ov) in self.overrides.iter().rev() {
-            if let Some(options) = ov
-                .linter
-                .as_ref()
+            if let Some(options) = section
+                .override_rules(ov)
                 .and_then(|block| block.rules.groups.get(group))
                 .and_then(|rules| rules.get(name))
                 .and_then(RuleConfiguration::options_data)
@@ -1219,9 +1223,8 @@ impl ResolvedFileConfig<'_> {
             }
         }
         (
-            self.config
-                .linter
-                .rules
+            section
+                .rules(self.config)
                 .groups
                 .get(group)
                 .and_then(|rules| rules.get(name))
@@ -1233,7 +1236,29 @@ impl ResolvedFileConfig<'_> {
     /// Locate the same effective options used by [`Self::rule_options_data`].
     #[must_use]
     pub fn rule_options_location(&self, group: &str, name: &str) -> Vec<ConfigPathSegment> {
-        options_location(self.options_data(group, name).1, "linter", group, name)
+        options_location(
+            self.options_data(group, name, Section::Linter).1,
+            "linter",
+            group,
+            name,
+        )
+    }
+
+    /// Return effective cross-file options from this file's override snapshot.
+    #[must_use]
+    pub fn cross_file_options_data(&self, group: &str, name: &str) -> Option<&'a RuleOptions> {
+        self.options_data(group, name, Section::CrossFile).0
+    }
+
+    /// Locate effective cross-file options for configuration diagnostics.
+    #[must_use]
+    pub fn cross_file_options_location(&self, group: &str, name: &str) -> Vec<ConfigPathSegment> {
+        options_location(
+            self.options_data(group, name, Section::CrossFile).1,
+            "cross-file",
+            group,
+            name,
+        )
     }
 
     /// Resolve severity using the same ordered override snapshot as options.
@@ -1252,6 +1277,24 @@ impl ResolvedFileConfig<'_> {
             self.config
                 .linter
                 .resolve_rule(group, name, recommended, domains),
+        )
+    }
+
+    /// Resolve cross-file severity using this file's ordered override snapshot.
+    #[must_use]
+    pub fn resolve_cross_file_rule(
+        &self,
+        group: &str,
+        name: &str,
+        recommended: bool,
+    ) -> Option<ResolvedSeverity> {
+        self.config.resolve_overrides(
+            self.overrides.iter().map(|&(_, ov)| ov),
+            (group, name),
+            Section::CrossFile,
+            self.config
+                .cross_file
+                .resolve_rule(group, name, recommended),
         )
     }
 }
@@ -1308,38 +1351,6 @@ impl FalconConfig {
         self.linter.resolve_rule(group, name, recommended, domains)
     }
 
-    /// Return effective file-rule options and their parsed cache for `path`.
-    ///
-    /// Lookup is scoped to the rule's own group, like level resolution.
-    /// Matching overrides replace the whole options value in order, not individual
-    /// fields. An override with absent or null options leaves earlier options intact,
-    /// independently of its level.
-    #[must_use]
-    pub fn rule_options_data_for(
-        &self,
-        path: &str,
-        group: &str,
-        rule_name: &str,
-    ) -> Option<&RuleOptions> {
-        self.options_data_for(path, group, rule_name, Section::Linter)
-            .0
-    }
-
-    /// Return effective cross-file-rule options and their parsed cache.
-    ///
-    /// Matching overrides replace the whole value in order; absent or null
-    /// options leave the previous value intact, independently of rule levels.
-    #[must_use]
-    pub fn cross_file_options_data_for(
-        &self,
-        path: &str,
-        group: &str,
-        rule_name: &str,
-    ) -> Option<&RuleOptions> {
-        self.options_data_for(path, group, rule_name, Section::CrossFile)
-            .0
-    }
-
     /// Return the effective file-rule autofix policy for `path`.
     ///
     /// Matching overrides apply in order. An absent fix policy inherits the
@@ -1393,123 +1404,6 @@ impl FalconConfig {
         result
     }
 
-    /// Return the full configuration path of effective file-rule options.
-    #[must_use]
-    pub fn rule_options_location_for(
-        &self,
-        path: &str,
-        group: &str,
-        rule_name: &str,
-    ) -> Vec<ConfigPathSegment> {
-        self.options_location_for(path, group, rule_name, Section::Linter, "linter")
-    }
-
-    /// Return the full configuration path of effective cross-file-rule options.
-    #[must_use]
-    pub fn cross_file_options_location_for(
-        &self,
-        path: &str,
-        group: &str,
-        rule_name: &str,
-    ) -> Vec<ConfigPathSegment> {
-        self.options_location_for(path, group, rule_name, Section::CrossFile, "cross-file")
-    }
-
-    fn options_location_for(
-        &self,
-        path: &str,
-        group: &str,
-        rule_name: &str,
-        section: Section,
-        key: &str,
-    ) -> Vec<ConfigPathSegment> {
-        let (_, index) = self.options_data_for(path, group, rule_name, section);
-        options_location(index, key, group, rule_name)
-    }
-
-    fn options_data_for(
-        &self,
-        path: &str,
-        group: &str,
-        rule_name: &str,
-        section: Section,
-    ) -> (Option<&RuleOptions>, Option<usize>) {
-        let path = self.files.includes.match_path(path);
-        let config = self.config_for_identity(&path);
-        let rules = match section {
-            Section::Linter => &config.linter.rules,
-            Section::CrossFile => &config.cross_file.rules,
-        };
-        let mut result = rules
-            .groups
-            .get(group)
-            .and_then(|g| g.get(rule_name))
-            .and_then(RuleConfiguration::options_data);
-        let mut index = None;
-        for (override_index, ov) in config
-            .overrides
-            .iter()
-            .enumerate()
-            .filter(|(_, ov)| ov.includes.admits_identity(&path))
-        {
-            if let Some(options) = section
-                .override_rules(ov)
-                .and_then(|block| block.rules.groups.get(group))
-                .and_then(|g| g.get(rule_name))
-                .and_then(RuleConfiguration::options_data)
-            {
-                result = Some(options);
-                index = Some(override_index);
-            }
-        }
-        (result, index)
-    }
-
-    /// Resolve file-rule severity, applying matching overrides in order (later wins).
-    #[must_use]
-    pub fn resolve_rule_for(
-        &self,
-        path: &str,
-        group: &str,
-        name: &str,
-        recommended: bool,
-        domains: &[&str],
-    ) -> Option<ResolvedSeverity> {
-        let path = self.files.includes.match_path(path);
-        let config = self.config_for_identity(&path);
-        config.resolve_for(
-            &path,
-            (group, name),
-            Section::Linter,
-            config
-                .linter
-                .resolve_rule(group, name, recommended, domains),
-        )
-    }
-
-    /// Resolve a **cross-file** rule's effective severity for a specific `path`:
-    /// the base cross-file resolution ([`CrossFileConfig::resolve_rule`]) patched
-    /// by every override whose `includes` match, applied in order (later wins).
-    /// Mirrors [`Self::resolve_rule_for`] but reads the override's `cross_file`
-    /// block and has no domain dimension. `None` means the rule is disabled here.
-    #[must_use]
-    pub fn resolve_cross_file_rule_for(
-        &self,
-        path: &str,
-        group: &str,
-        name: &str,
-        recommended: bool,
-    ) -> Option<ResolvedSeverity> {
-        let path = self.files.includes.match_path(path);
-        let config = self.config_for_identity(&path);
-        config.resolve_for(
-            &path,
-            (group, name),
-            Section::CrossFile,
-            config.cross_file.resolve_rule(group, name, recommended),
-        )
-    }
-
     /// Whether a **cross-file** rule is enabled for any path — the base cross-file
     /// config or any override turns it on. Drives cross-file-rule registration,
     /// mirroring [`Self::is_rule_enabled_anywhere`].
@@ -1556,23 +1450,6 @@ impl FalconConfig {
             Section::Linter => self.linter.enabled,
             Section::CrossFile => self.cross_file.enabled,
         }
-    }
-
-    fn resolve_for(
-        &self,
-        path: &MatchPath<'_>,
-        (group, name): (&str, &str),
-        section: Section,
-        result: Option<ResolvedSeverity>,
-    ) -> Option<ResolvedSeverity> {
-        self.resolve_overrides(
-            self.overrides
-                .iter()
-                .filter(|ov| ov.includes.admits_identity(path)),
-            (group, name),
-            section,
-            result,
-        )
     }
 
     fn resolve_overrides<'a>(
@@ -1628,6 +1505,13 @@ enum Section {
 }
 
 impl Section {
+    fn rules(self, config: &FalconConfig) -> &Rules {
+        match self {
+            Self::Linter => &config.linter.rules,
+            Self::CrossFile => &config.cross_file.rules,
+        }
+    }
+
     fn override_rules(self, ov: &Override) -> Option<&OverrideRules> {
         match self {
             Self::Linter => ov.linter.as_ref(),
@@ -2189,7 +2073,13 @@ mod path_resolution_tests {
                 })
                 .sum::<usize>()
         };
-        let _ = workspace.resolve_rule_for(&path, "style", "test", true, &[]);
+        let file = workspace.resolve_file(&path);
+        for _ in 0..10 {
+            let _ = file.resolve_rule("style", "test", true, &[]);
+            let _ = file.resolve_cross_file_rule("style", "test", true);
+            let _ = file.rule_options_data("style", "test");
+            let _ = file.cross_file_options_data("style", "test");
+        }
         assert_eq!(probes(), 1);
         assert!(std::ptr::eq(
             workspace.config_for_path(&path),
@@ -2200,13 +2090,19 @@ mod path_resolution_tests {
         assert_eq!(probes(), 3);
         assert!(!workspace.files.includes.excludes(&path));
         assert_eq!(probes(), 4);
-        let _ = workspace.rule_options_data_for(&path, "style", "test");
+        let _ = workspace
+            .resolve_file(&path)
+            .rule_options_data("style", "test");
         assert_eq!(probes(), 5);
         let _ = workspace.rule_fix_for(&path, "style", "test");
         assert_eq!(probes(), 6);
-        let _ = workspace.resolve_cross_file_rule_for(&path, "style", "test", true);
+        let _ = workspace
+            .resolve_file(&path)
+            .resolve_cross_file_rule("style", "test", true);
         assert_eq!(probes(), 7);
-        let _ = workspace.cross_file_options_data_for(&path, "style", "test");
+        let _ = workspace
+            .resolve_file(&path)
+            .cross_file_options_data("style", "test");
         assert_eq!(probes(), 8);
         let _ = workspace.cross_file_fix_for(&path, "style", "test");
         assert_eq!(probes(), 9);
@@ -2933,8 +2829,12 @@ mod option_tests {
                 ("test/main.dart", json!({ "limit": 2 })),
                 ("test/special/main.dart", json!({})),
             ] {
-                let file = config.rule_options_data_for(path, "style", "example");
-                let cross_file = config.cross_file_options_data_for(path, "style", "example");
+                let file = config
+                    .resolve_file(path)
+                    .rule_options_data("style", "example");
+                let cross_file = config
+                    .resolve_file(path)
+                    .cross_file_options_data("style", "example");
                 let (selected, other) = if section == "linter" {
                     (file, cross_file)
                 } else {
@@ -2945,12 +2845,14 @@ mod option_tests {
             }
             assert!(
                 config
-                    .rule_options_data_for("test/main.dart", "wrong-group", "example")
+                    .resolve_file("test/main.dart")
+                    .rule_options_data("wrong-group", "example")
                     .is_none()
             );
             assert!(
                 config
-                    .cross_file_options_data_for("test/main.dart", "wrong-group", "example")
+                    .resolve_file("test/main.dart")
+                    .cross_file_options_data("wrong-group", "example")
                     .is_none()
             );
         }

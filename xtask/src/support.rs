@@ -585,11 +585,8 @@ mod tests {
                 assert_eq!(config.overrides.len(), 2);
                 assert_eq!(
                     config
-                        .rule_options_data_for(
-                            &bad.to_string_lossy(),
-                            "performance",
-                            "move-variable-closer-to-its-usage",
-                        )
+                        .resolve_file(&bad.to_string_lossy())
+                        .rule_options_data("performance", "move-variable-closer-to-its-usage",)
                         .map(falcon_config::RuleOptions::value),
                     Some(&json!({ "ignore-after-if": false })),
                 );
@@ -597,11 +594,8 @@ mod tests {
                     sdk_fixture::staged_file(staged.path(), &original, &original.join("good.dart"));
                 assert_eq!(
                     config
-                        .rule_options_data_for(
-                            &good.to_string_lossy(),
-                            "performance",
-                            "move-variable-closer-to-its-usage",
-                        )
+                        .resolve_file(&good.to_string_lossy())
+                        .rule_options_data("performance", "move-variable-closer-to-its-usage",)
                         .map(falcon_config::RuleOptions::value),
                     target
                         .is_dir()

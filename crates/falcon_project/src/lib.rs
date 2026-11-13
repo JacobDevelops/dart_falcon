@@ -417,7 +417,7 @@ pub fn analyze_document<'a>(
     mut syntax_diagnostics: Vec<Diagnostic>,
 ) -> Vec<Diagnostic> {
     syntax_diagnostics.extend(registry.run_all(ctx.parsed().program(), ctx));
-    falcon_rules::apply_severities(&mut syntax_diagnostics, config);
+    falcon_rules::apply_file_severities(&mut syntax_diagnostics, ctx.file_config());
     apply_fix_policies(config, &mut syntax_diagnostics);
     syntax_diagnostics
 }

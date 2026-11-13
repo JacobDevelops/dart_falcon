@@ -389,7 +389,8 @@ fn test_rule_options_scoped_to_group() {
         } } }
     }));
     let opts = cfg
-        .rule_options_data_for("lib/main.dart", "style", "use-design-system-item")
+        .resolve_file("lib/main.dart")
+        .rule_options_data("style", "use-design-system-item")
         .expect("options present")
         .value();
     assert_eq!(
@@ -398,7 +399,8 @@ fn test_rule_options_scoped_to_group() {
     );
     // Plain form or absent rule → no options.
     assert!(
-        cfg.rule_options_data_for("lib/main.dart", "suspicious", "avoid-dynamic")
+        cfg.resolve_file("lib/main.dart")
+            .rule_options_data("suspicious", "avoid-dynamic")
             .is_none()
     );
 }
@@ -416,7 +418,8 @@ fn test_rule_options_ignores_wrong_group_entry() {
     }));
     // Options are ignored when queried under the rule's real group.
     assert!(
-        cfg.rule_options_data_for("lib/main.dart", "style", "use-design-system-item")
+        cfg.resolve_file("lib/main.dart")
+            .rule_options_data("style", "use-design-system-item")
             .is_none()
     );
     // And the misplaced `"off"` does not disable it: still on at default (Warn).
@@ -625,12 +628,22 @@ fn test_legacy_underscore_cross_file_alias_resolves_identically() {
         "cross-file": { "rules": { "correctness": { "unused-files": "error" } } }
     }));
     assert_eq!(
-        legacy.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        legacy.resolve_file("lib/a.dart").resolve_cross_file_rule(
+            "correctness",
+            "unused-files",
+            true
+        ),
         Some(ResolvedSeverity::Error)
     );
     assert_eq!(
-        legacy.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true),
-        canonical.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true)
+        legacy.resolve_file("lib/a.dart").resolve_cross_file_rule(
+            "correctness",
+            "unused-files",
+            true
+        ),
+        canonical
+            .resolve_file("lib/a.dart")
+            .resolve_cross_file_rule("correctness", "unused-files", true)
     );
 
     // The alias also flows through an override's underscore `cross_file` block.
@@ -638,12 +651,9 @@ fn test_legacy_underscore_cross_file_alias_resolves_identically() {
         "overrides": [ { "includes": ["gen/**"], "cross_file": { "enabled": false } } ]
     }));
     assert_eq!(
-        legacy_override.resolve_cross_file_rule_for(
-            "gen/a.dart",
-            "correctness",
-            "unused-files",
-            true
-        ),
+        legacy_override
+            .resolve_file("gen/a.dart")
+            .resolve_cross_file_rule("correctness", "unused-files", true),
         None
     );
 }
@@ -718,7 +728,7 @@ fn test_override_invalid_patterns_and_clone_preserve_matching() {
     assert!(!negated.matches("test/a.dart"));
 }
 #[test]
-fn test_resolve_rule_for_base_on_override_off() {
+fn test_resolved_rule_base_on_override_off() {
     let cfg = from_json(serde_json::json!({
         "linter": { "rules": { "recommended": true } },
         "overrides": [ {
@@ -733,17 +743,19 @@ fn test_resolve_rule_for_base_on_override_off() {
     );
     // The override turns it off only for matching paths.
     assert_eq!(
-        cfg.resolve_rule_for("test/a.dart", "suspicious", "avoid-dynamic", true, &[]),
+        cfg.resolve_file("test/a.dart")
+            .resolve_rule("suspicious", "avoid-dynamic", true, &[]),
         None
     );
     assert_eq!(
-        cfg.resolve_rule_for("lib/a.dart", "suspicious", "avoid-dynamic", true, &[]),
+        cfg.resolve_file("lib/a.dart")
+            .resolve_rule("suspicious", "avoid-dynamic", true, &[]),
         Some(ResolvedSeverity::Warn)
     );
 }
 
 #[test]
-fn test_resolve_rule_for_base_off_override_on_with_severity() {
+fn test_resolved_rule_base_off_override_on_with_severity() {
     let cfg = from_json(serde_json::json!({
         "linter": { "rules": { "suspicious": { "avoid-dynamic": "off" } } },
         "overrides": [ {
@@ -752,11 +764,13 @@ fn test_resolve_rule_for_base_off_override_on_with_severity() {
         } ]
     }));
     assert_eq!(
-        cfg.resolve_rule_for("test/a.dart", "suspicious", "avoid-dynamic", true, &[]),
+        cfg.resolve_file("test/a.dart")
+            .resolve_rule("suspicious", "avoid-dynamic", true, &[]),
         Some(ResolvedSeverity::Error)
     );
     assert_eq!(
-        cfg.resolve_rule_for("lib/a.dart", "suspicious", "avoid-dynamic", true, &[]),
+        cfg.resolve_file("lib/a.dart")
+            .resolve_rule("suspicious", "avoid-dynamic", true, &[]),
         None
     );
     // Registration must include a rule an override re-enables.
@@ -764,7 +778,7 @@ fn test_resolve_rule_for_base_off_override_on_with_severity() {
 }
 
 #[test]
-fn test_resolve_rule_for_later_override_wins() {
+fn test_resolved_rule_later_override_wins() {
     let cfg = from_json(serde_json::json!({
         "linter": { "rules": { "recommended": true } },
         "overrides": [
@@ -775,7 +789,8 @@ fn test_resolve_rule_for_later_override_wins() {
         ]
     }));
     assert_eq!(
-        cfg.resolve_rule_for("test/a.dart", "suspicious", "avoid-dynamic", true, &[]),
+        cfg.resolve_file("test/a.dart")
+            .resolve_rule("suspicious", "avoid-dynamic", true, &[]),
         None,
         "later override wins"
     );
@@ -788,11 +803,13 @@ fn test_override_enabled_false_disables_all_rules_for_path() {
         "overrides": [ { "includes": ["gen/**"], "linter": { "enabled": false } } ]
     }));
     assert_eq!(
-        cfg.resolve_rule_for("gen/a.dart", "suspicious", "avoid-dynamic", true, &[]),
+        cfg.resolve_file("gen/a.dart")
+            .resolve_rule("suspicious", "avoid-dynamic", true, &[]),
         None
     );
     assert_eq!(
-        cfg.resolve_rule_for("lib/a.dart", "suspicious", "avoid-dynamic", true, &[]),
+        cfg.resolve_file("lib/a.dart")
+            .resolve_rule("suspicious", "avoid-dynamic", true, &[]),
         Some(ResolvedSeverity::Warn)
     );
 }
@@ -810,7 +827,8 @@ fn test_globally_disabled_linter_not_resurrected_by_override() {
         } ]
     }));
     assert_eq!(
-        cfg.resolve_rule_for("test/a.dart", "suspicious", "avoid-dynamic", true, &[]),
+        cfg.resolve_file("test/a.dart")
+            .resolve_rule("suspicious", "avoid-dynamic", true, &[]),
         None
     );
     assert!(!cfg.is_rule_enabled_anywhere("suspicious", "avoid-dynamic", true, &[]));
@@ -845,12 +863,17 @@ fn test_cross_file_explicit_levels_and_disabled_switch() {
         } } }
     }));
     assert_eq!(
-        cfg.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        cfg.resolve_file("lib/a.dart")
+            .resolve_cross_file_rule("correctness", "unused-files", true),
         Some(ResolvedSeverity::Error)
     );
     // Explicit entry beats the recommended=false gate.
     assert_eq!(
-        cfg.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unnecessary-nullable", false),
+        cfg.resolve_file("lib/a.dart").resolve_cross_file_rule(
+            "correctness",
+            "unnecessary-nullable",
+            false
+        ),
         Some(ResolvedSeverity::Warn)
     );
 
@@ -859,7 +882,8 @@ fn test_cross_file_explicit_levels_and_disabled_switch() {
         "cross-file": { "enabled": false, "rules": { "correctness": { "unused-files": "error" } } }
     }));
     assert_eq!(
-        off.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        off.resolve_file("lib/a.dart")
+            .resolve_cross_file_rule("correctness", "unused-files", true),
         None
     );
     assert!(!off.is_cross_file_rule_enabled_anywhere("correctness", "unused-files", true));
@@ -876,12 +900,22 @@ fn test_legacy_project_alias_resolves_identically() {
         "cross-file": { "rules": { "correctness": { "unused-files": "error" } } }
     }));
     assert_eq!(
-        legacy.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        legacy.resolve_file("lib/a.dart").resolve_cross_file_rule(
+            "correctness",
+            "unused-files",
+            true
+        ),
         Some(ResolvedSeverity::Error)
     );
     assert_eq!(
-        legacy.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true),
-        canonical.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true)
+        legacy.resolve_file("lib/a.dart").resolve_cross_file_rule(
+            "correctness",
+            "unused-files",
+            true
+        ),
+        canonical
+            .resolve_file("lib/a.dart")
+            .resolve_cross_file_rule("correctness", "unused-files", true)
     );
     // The alias also flows through an override's `project` block.
     let legacy_override = from_json(serde_json::json!({
@@ -891,12 +925,9 @@ fn test_legacy_project_alias_resolves_identically() {
         } ]
     }));
     assert_eq!(
-        legacy_override.resolve_cross_file_rule_for(
-            "gen/a.dart",
-            "correctness",
-            "unused-files",
-            true
-        ),
+        legacy_override
+            .resolve_file("gen/a.dart")
+            .resolve_cross_file_rule("correctness", "unused-files", true),
         None
     );
 }
@@ -911,12 +942,17 @@ fn test_cross_file_overrides_patch_per_path() {
     }));
     // Base (recommended) resolution is on...
     assert_eq!(
-        cfg.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        cfg.resolve_file("lib/a.dart")
+            .resolve_cross_file_rule("correctness", "unused-files", true),
         Some(ResolvedSeverity::Warn)
     );
     // ...but the override turns it off for matching paths.
     assert_eq!(
-        cfg.resolve_cross_file_rule_for("test/a.dart", "correctness", "unused-files", true),
+        cfg.resolve_file("test/a.dart").resolve_cross_file_rule(
+            "correctness",
+            "unused-files",
+            true
+        ),
         None
     );
 
@@ -929,7 +965,9 @@ fn test_cross_file_overrides_patch_per_path() {
         } ]
     }));
     assert_eq!(
-        reenable.resolve_cross_file_rule_for("test/a.dart", "correctness", "unused-files", true),
+        reenable
+            .resolve_file("test/a.dart")
+            .resolve_cross_file_rule("correctness", "unused-files", true),
         Some(ResolvedSeverity::Error)
     );
     assert!(reenable.is_cross_file_rule_enabled_anywhere("correctness", "unused-files", true));
@@ -939,11 +977,19 @@ fn test_cross_file_overrides_patch_per_path() {
         "overrides": [ { "includes": ["gen/**"], "cross-file": { "enabled": false } } ]
     }));
     assert_eq!(
-        disabled.resolve_cross_file_rule_for("gen/a.dart", "correctness", "unused-files", true),
+        disabled.resolve_file("gen/a.dart").resolve_cross_file_rule(
+            "correctness",
+            "unused-files",
+            true
+        ),
         None
     );
     assert_eq!(
-        disabled.resolve_cross_file_rule_for("lib/a.dart", "correctness", "unused-files", true),
+        disabled.resolve_file("lib/a.dart").resolve_cross_file_rule(
+            "correctness",
+            "unused-files",
+            true
+        ),
         Some(ResolvedSeverity::Warn)
     );
 }
@@ -988,14 +1034,16 @@ fn test_override_options_replace_base_per_path() {
 
     // Non-matching path: base options.
     assert_eq!(
-        cfg.rule_options_data_for("lib/main.dart", "complexity", "max_lines_for_file")
+        cfg.resolve_file("lib/main.dart")
+            .rule_options_data("complexity", "max_lines_for_file")
             .and_then(|options| options.value().get("max_lines"))
             .and_then(serde_json::Value::as_u64),
         Some(400)
     );
     // Matching path: override options replace the base wholesale.
     assert_eq!(
-        cfg.rule_options_data_for("test/widget_test.dart", "complexity", "max_lines_for_file")
+        cfg.resolve_file("test/widget_test.dart")
+            .rule_options_data("complexity", "max_lines_for_file")
             .and_then(|options| options.value().get("max_lines"))
             .and_then(serde_json::Value::as_u64),
         Some(10)
@@ -1015,7 +1063,8 @@ fn test_override_without_options_keeps_base_options() {
         } ]
     }));
     assert_eq!(
-        cfg.rule_options_data_for("test/widget_test.dart", "complexity", "max_lines_for_file")
+        cfg.resolve_file("test/widget_test.dart")
+            .rule_options_data("complexity", "max_lines_for_file")
             .and_then(|options| options.value().get("max_lines"))
             .and_then(serde_json::Value::as_u64),
         Some(400)
@@ -1226,30 +1275,40 @@ fn assert_resolved_overrides(config: &FalconConfig, root: &std::path::Path) {
         let path = root.join(relative);
         let path = path.to_string_lossy();
         let resolved = config.resolve_file(&path);
-        let before = config
-            .rule_options_data_for(&path, "complexity", "test-rule")
-            .unwrap();
         let after = resolved
             .rule_options_data("complexity", "test-rule")
             .unwrap();
-        assert!(std::ptr::eq(before, after), "{path}");
         assert_eq!(after.value()["limit"], limit, "{path}");
         assert_eq!(
             resolved.rule_options_location("complexity", "test-rule"),
-            config.rule_options_location_for(&path, "complexity", "test-rule"),
+            {
+                let mut location = Vec::with_capacity(7);
+                let index = match limit {
+                    100 => None,
+                    20 => Some(0),
+                    10 => Some(1),
+                    5 => Some(3),
+                    _ => unreachable!(),
+                };
+                if let Some(index) = index {
+                    location.push(falcon_config::ConfigPathSegment::Key("overrides".into()));
+                    location.push(falcon_config::ConfigPathSegment::Index(index));
+                }
+                location.extend(
+                    ["linter", "rules", "complexity", "test-rule", "options"]
+                        .map(|key| falcon_config::ConfigPathSegment::Key(key.into())),
+                );
+                location
+            },
             "{path}"
         );
         for recommended in [false, true] {
             assert_eq!(
                 resolved.resolve_rule("complexity", "test-rule", recommended, &[]),
-                config.resolve_rule_for(&path, "complexity", "test-rule", recommended, &[]),
+                severity,
                 "{path}"
             );
         }
-        assert_eq!(
-            resolved.resolve_rule("complexity", "test-rule", false, &[]),
-            severity
-        );
         assert!(
             resolved
                 .rule_options_data("other-group", "test-rule")
@@ -1292,7 +1351,8 @@ fn resolved_options_preserve_symlinked_roots_and_package_replacements() {
     std::os::unix::fs::symlink(&real, &alias).unwrap();
     let mut package = resolved_override_config();
     package.resolve_paths(&alias);
-    let mut workspace = FalconConfig::default();
+    let mut workspace = resolved_override_config();
+    workspace.linter.enabled = false;
     workspace.resolve_paths(directory.path());
     workspace.set_package_configs(vec![package]);
     assert_resolved_overrides(&workspace, &alias);

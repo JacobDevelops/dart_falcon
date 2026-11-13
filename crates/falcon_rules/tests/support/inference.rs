@@ -200,21 +200,15 @@ mod config_tests {
         assert_eq!(projected.overrides.len(), 2);
         assert_eq!(
             projected
-                .rule_options_data_for(
-                    &staged_path.to_string_lossy(),
-                    "performance",
-                    "move-variable-closer-to-its-usage",
-                )
+                .resolve_file(&staged_path.to_string_lossy())
+                .rule_options_data("performance", "move-variable-closer-to-its-usage",)
                 .map(falcon_config::RuleOptions::value),
             Some(&json!({ "ignore_after_if": false })),
         );
         assert!(
             original
-                .rule_options_data_for(
-                    &staged_path.to_string_lossy(),
-                    "performance",
-                    "move-variable-closer-to-its-usage",
-                )
+                .resolve_file(&staged_path.to_string_lossy())
+                .rule_options_data("performance", "move-variable-closer-to-its-usage",)
                 .is_none()
         );
         assert_eq!(original.overrides.len(), 3);
