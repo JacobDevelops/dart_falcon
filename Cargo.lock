@@ -463,6 +463,7 @@ dependencies = [
  "falcon_rules",
  "falcon_syntax",
  "glob",
+ "rayon",
  "serde_json",
  "serde_yaml",
  "tempfile",

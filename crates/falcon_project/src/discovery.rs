@@ -2,6 +2,7 @@
 
 use falcon_analyze::{SourceAcquisition, acquire_source};
 use falcon_config::PathFilter;
+use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -150,10 +151,11 @@ impl std::error::Error for DiscoveryFailure {
 /// manifests, including manifests discovered in input paths' ancestors.
 /// Required source read failures abort collection; ordinary optional manifest reads warn and skip.
 /// Discovery failures abort collection rather than hiding required sources.
+/// Reads run on the shared analysis pool; results and errors retain sorted path order.
 ///
 /// # Errors
 ///
-/// Returns an error if discovery fails or a required source cannot be read.
+/// Returns an error if discovery fails, a required source cannot be read, or the analysis pool fails.
 pub fn walk_project(
     paths: &[PathBuf],
     filter: &PathFilter,
@@ -168,8 +170,20 @@ pub fn walk_project(
         filtered_paths: discovery.filtered_paths,
         ..WalkOutput::default()
     };
-    for path in discovery.files {
-        match acquire_source(&path) {
+    let reads = falcon_dart_parser::with_stack(|| {
+        discovery
+            .files
+            .into_par_iter()
+            .map(|path| {
+                let source = acquire_source(&path);
+                (path, source)
+            })
+            .collect::<Vec<_>>()
+    })
+    .map_err(|error| format!("failed to read project sources: {error}"))?;
+    // Report failures in sorted path order, independently of worker completion.
+    for (path, source) in reads {
+        match source {
             SourceAcquisition::Acquired(source) => output.files.push((path, source)),
             SourceAcquisition::Oversized(error) | SourceAcquisition::Failed(error) => {
                 return Err(format!(
@@ -689,6 +703,184 @@ mod tests {
             SourceAcquisition::Failed(error) if error.kind() != std::io::ErrorKind::NotFound
                 && !falcon_analyze::is_source_too_large(&error)
         ));
+    }
+
+    #[test]
+    fn vanished_walk_entry_is_not_an_incomplete_scan() {
+        let directory = tempfile::tempdir().unwrap();
+        let removed = directory.path().join("removed");
+        let mut output = ProjectDiscovery::default();
+        discover_directory(
+            &removed,
+            &PathFilter::default(),
+            false,
+            &mut HashSet::new(),
+            &mut output,
+            &mut None,
+            &mut Vec::new(),
+        );
+        assert!(output.failures.is_empty(), "{:?}", output.failures);
+    }
+
+    #[test]
+    fn replaced_walk_directory_retains_required_traversal_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let replaced = directory.path().join("replaced");
+        std::fs::write(&replaced, "").unwrap();
+        let mut output = ProjectDiscovery::default();
+        discover_directory(
+            &replaced.join("child"),
+            &PathFilter::default(),
+            false,
+            &mut HashSet::new(),
+            &mut output,
+            &mut None,
+            &mut Vec::new(),
+        );
+        assert!(matches!(
+            output.failures.as_slice(),
+            [DiscoveryFailure::Traversal { source, .. }]
+                if source.io_error().is_some_and(|error| error.kind() == std::io::ErrorKind::NotADirectory)
+        ));
+    }
+
+    #[test]
+    fn incomplete_scan_error_explains_exclusion_remedy() {
+        let failure = DiscoveryFailure::Metadata {
+            path: PathBuf::from("project/private"),
+            source: std::io::ErrorKind::PermissionDenied.into(),
+        };
+        let message = failure.to_string();
+        assert!(message.contains("project/private"));
+        assert!(message.contains("files.includes"), "{message}");
+    }
+
+    #[test]
+    fn explicit_input_does_not_read_manifests_above_its_package() {
+        let directory = tempfile::tempdir().unwrap();
+        let package = directory.path().join("package");
+        std::fs::create_dir(&package).unwrap();
+        std::fs::write(directory.path().join("pubspec.yaml"), [0xff]).unwrap();
+        std::fs::write(package.join("pubspec.yaml"), "name: package").unwrap();
+        let source = package.join("main.dart");
+        std::fs::write(&source, "void main() {}").unwrap();
+        let output = walk_project(&[source], &PathFilter::default(), true).unwrap();
+        assert_eq!(output.manifests.len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn excluded_explicit_input_is_not_accessed() {
+        use std::os::unix::fs::PermissionsExt;
+        struct Restore(std::path::PathBuf, std::fs::Permissions);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                std::fs::set_permissions(&self.0, self.1.clone()).unwrap();
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let blocked = directory.path().join("private");
+        std::fs::create_dir(&blocked).unwrap();
+        let source = blocked.join("main.dart");
+        std::fs::write(&source, "void main() {}").unwrap();
+        let _restore = Restore(blocked.clone(), blocked.metadata().unwrap().permissions());
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o0)).unwrap();
+        if std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .unwrap()
+            .stdout
+            == b"0\n"
+            || std::fs::read_dir(&blocked).is_ok()
+        {
+            return;
+        }
+        let mut filter = PathFilter::from_includes(&["**".into(), "!private".into()]);
+        filter.set_base_dir(directory.path());
+        let output = walk_project(&[source], &filter, false).unwrap();
+        assert_eq!(output.files, [] as [(PathBuf, String); 0]);
+    }
+
+    #[test]
+    fn replaced_source_parent_retains_required_source_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let parent = directory.path().join("replaced");
+        std::fs::write(&parent, "no longer a directory").unwrap();
+        let source_directory = directory.path().join("replaced.dart");
+        std::fs::create_dir(&source_directory).unwrap();
+        for path in [parent.join("main.dart"), source_directory] {
+            assert!(matches!(acquire_source(&path), SourceAcquisition::Failed(_)));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_walk_entries_are_incomplete_scans() {
+        use std::os::unix::fs::PermissionsExt;
+        struct Restore(std::path::PathBuf, std::fs::Permissions);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                std::fs::set_permissions(&self.0, self.1.clone()).unwrap();
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let blocked = directory.path().join("private");
+        std::fs::create_dir(&blocked).unwrap();
+        std::fs::write(blocked.join("main.dart"), "void main() {}").unwrap();
+        let _restore = Restore(blocked.clone(), blocked.metadata().unwrap().permissions());
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o0)).unwrap();
+        if std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .unwrap()
+            .stdout
+            == b"0\n"
+            || std::fs::read_dir(&blocked).is_ok()
+        {
+            return;
+        }
+        let paths = [directory.path().to_path_buf()];
+        let output = discover_project(&paths, &PathFilter::default(), false);
+        assert!(output.failures.iter().any(|failure| {
+            matches!(failure, DiscoveryFailure::Traversal { source, .. }
+                if source.io_error().is_some_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied))
+        }));
+        assert!(walk_project(&paths, &PathFilter::default(), false).is_err());
+        let alias = directory.path().join("alias.dart");
+        std::os::unix::fs::symlink(blocked.join("main.dart"), &alias).unwrap();
+        let mut filter = PathFilter::from_includes(&["**".into(), "!private".into()]);
+        filter.set_base_dir(directory.path());
+        let output = discover_project(&paths, &filter, false);
+        assert!(output.failures.iter().any(|failure| {
+            matches!(failure, DiscoveryFailure::Metadata { path, source }
+                if *path == alias && source.kind() == std::io::ErrorKind::PermissionDenied)
+        }));
+        assert!(walk_project(&paths, &filter, false).is_err());
+    }
+    #[test]
+    fn source_reads_retain_sorted_order_and_first_size_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("a.dart");
+        let second = directory.path().join("b.dart");
+        std::fs::write(&second, "second").unwrap();
+        std::fs::write(&first, "first").unwrap();
+        let paths = [second.clone(), first.clone()];
+        let output = walk_project(&paths, &PathFilter::default(), false).unwrap();
+        assert_eq!(
+            output.files,
+            vec![
+                (first.clone(), "first".into()),
+                (second.clone(), "second".into())
+            ]
+        );
+        for path in [&second, &first] {
+            std::fs::File::create(path)
+                .unwrap()
+                .set_len(u64::from(u32::MAX) + 1)
+                .unwrap();
+        }
+        let error = walk_project(&paths, &PathFilter::default(), false).unwrap_err();
+        assert!(error.starts_with(&format!("failed to analyze file {}:", first.display())));
     }
 
     #[test]

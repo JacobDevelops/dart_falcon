@@ -25,6 +25,7 @@ struct PackageAttribution<'a> {
     cwd: PathBuf,
     paths: HashMap<PathBuf, Option<usize>>,
     directories: HashMap<PathBuf, Option<usize>>,
+    canonical_directories: HashMap<PathBuf, PathBuf>,
 }
 
 impl<'a> PackageAttribution<'a> {
@@ -34,6 +35,7 @@ impl<'a> PackageAttribution<'a> {
             cwd: std::env::current_dir().expect("report paths require a working directory"),
             paths: HashMap::with_capacity(capacity),
             directories: HashMap::with_capacity(capacity),
+            canonical_directories: HashMap::new(),
         }
     }
 
@@ -41,12 +43,26 @@ impl<'a> PackageAttribution<'a> {
         if let Some(index) = self.paths.get(path) {
             return *index;
         }
-        let absolute = if path.is_absolute() {
-            falcon_analyze::canonical_or_lexical(path)
+        let absolute_path = if path.is_absolute() {
+            path.to_path_buf()
         } else {
-            falcon_analyze::canonical_or_lexical(&self.cwd.join(path))
+            self.cwd.join(path)
         };
-        let directory = if absolute.is_dir() {
+        let regular_file = std::fs::symlink_metadata(&absolute_path)
+            .is_ok_and(|metadata| metadata.file_type().is_file());
+        let absolute = if regular_file {
+            // Resolve shared directory components once, but follow file symlinks
+            // individually so links into another package retain their attribution.
+            let parent = absolute_path.parent()?;
+            let directory = self
+                .canonical_directories
+                .entry(parent.to_path_buf())
+                .or_insert_with(|| falcon_analyze::canonical_or_lexical(parent));
+            directory.join(absolute_path.file_name()?)
+        } else {
+            falcon_analyze::canonical_or_lexical(&absolute_path)
+        };
+        let directory = if !regular_file && absolute.is_dir() {
             absolute.as_path()
         } else {
             absolute.parent()?
@@ -559,6 +575,34 @@ mod tests {
     use crate::analyze_pipeline::OutputFormat as ReportFormat;
     use falcon_diagnostics::Span;
     use serde_json::Value;
+
+    #[cfg(unix)]
+    #[test]
+    fn package_attribution_resolves_directory_and_file_symlinks() {
+        let directory = tempfile::tempdir().unwrap();
+        let member = directory.path().join("member");
+        let outside = directory.path().join("outside");
+        for root in [&member, &outside] {
+            std::fs::create_dir_all(root.join("lib")).unwrap();
+            std::fs::write(root.join("pubspec.yaml"), "name: test\n").unwrap();
+            std::fs::write(root.join("lib/main.dart"), "void main() {}").unwrap();
+        }
+        let alias = directory.path().join("alias");
+        std::os::unix::fs::symlink(&member, &alias).unwrap();
+        let linked_file = member.join("lib/linked.dart");
+        std::os::unix::fs::symlink(outside.join("lib/main.dart"), &linked_file).unwrap();
+        let packages = [falcon_project::WorkspacePackage {
+            name: "member".into(),
+            root: member.clone(),
+        }];
+        let files = [
+            alias.join("lib/main.dart"),
+            member.join("lib/main.dart"),
+            linked_file,
+        ];
+        let summaries = summarize_packages(&packages, files.iter().map(PathBuf::as_path), &[]);
+        assert_eq!(summaries[0].total_files, 2);
+    }
 
     #[test]
     fn package_counts_use_deepest_member_and_retain_empty_members() {
