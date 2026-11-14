@@ -1,2 +1,9 @@
 [profile.default]
 slow-timeout = { period = "30s", terminate-after = 4 }
+
+# This burst replays 4,096 analyses on Rayon: it needs the whole test-thread budget,
+# and takes 45-60 s alone, so the default 120 s kill leaves too little margin on slow hosts.
+[[profile.default.overrides]]
+filter           = 'package(falcon_lsp) & test(=server::queue_tests::save_bursts_keep_latest_text_last_received_version_and_one_refresh)'
+threads-required = "num-test-threads"
+slow-timeout     = { period = "60s", terminate-after = 5 }
