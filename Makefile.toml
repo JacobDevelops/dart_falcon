@@ -85,7 +85,7 @@ run_task = { name = [ "test_targets", "test_doctests" ], parallel = false }
 [tasks.test_targets]
 private = true
 command = "${CARGO_CMD}"
-args    = [ "nextest", "run", "--locked", "--workspace", "--all-targets", "${@}" ]
+args    = [ "nextest", "run", "--locked", "--workspace", "--all-targets", "--no-fail-fast", "${@}" ]
 
 [tasks.test_doctests]
 private = true
