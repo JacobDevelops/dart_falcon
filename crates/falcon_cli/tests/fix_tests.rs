@@ -8,6 +8,8 @@ const AFTER: &str = "class Example {}\nvoid main() { final value = Example(); }\
 
 fn fixture(rule: &serde_json::Value) -> (TempDir, CheckOptions) {
     let dir = tempdir().unwrap();
+    // Pins the project root so diff paths don't depend on VCS markers above TMPDIR.
+    fs::create_dir(dir.path().join(".git")).unwrap();
     let config_path = dir.path().join("falcon.json");
     fs::write(
         &config_path,
