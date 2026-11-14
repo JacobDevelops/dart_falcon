@@ -231,10 +231,10 @@ pub(crate) fn canonical_comparison_path(path: &Path) -> PathBuf {
     let path = super::package_config::absolute(path);
     for ancestor in path.ancestors() {
         if let Ok(canonical) = std::fs::canonicalize(ancestor) {
-            return canonical.join(path.strip_prefix(ancestor).unwrap());
+            return canonical.join(path.strip_prefix(ancestor).expect("path ancestor"));
         }
     }
-    path
+    crate::lexical_normalize(&path)
 }
 
 /// # Panics

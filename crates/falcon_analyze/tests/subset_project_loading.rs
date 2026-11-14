@@ -354,7 +354,8 @@ fn unreadable_project_companions_abort_both_resolving_engines() {
     for directive in ["part", "import"] {
         for failure in ["invalid", "oversized"] {
             let directory = tempfile::tempdir().unwrap();
-            let root = directory.path();
+            let canonical_root = directory.path().canonicalize().unwrap();
+            let root = canonical_root.as_path();
             fs::write(root.join("pubspec.yaml"), "name: app\n").unwrap();
             let companion = root.join("companion.dart");
             fs::write(&companion, [0xff]).unwrap();

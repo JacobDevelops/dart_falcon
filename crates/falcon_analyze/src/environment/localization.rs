@@ -160,12 +160,15 @@ impl LocalizationSnapshot {
     }
 
     pub(super) fn affected_by(&self, path: &Path) -> bool {
-        self.settings.starts_with(path)
+        let path = super::canonical_event_path(path);
+        let path = path.as_path();
+        super::canonical_event_path(&self.settings).starts_with(path)
             || self
                 .template_path
                 .as_ref()
-                .is_some_and(|template| template.starts_with(path))
+                .is_some_and(|template| super::canonical_event_path(template).starts_with(path))
             || self.arb_dir.as_ref().is_some_and(|directory| {
+                let directory = super::packages::canonical_comparison_path(directory);
                 directory.starts_with(path)
                     || (path.parent() == Some(directory.as_path())
                         && path.extension().is_some_and(|extension| extension == "arb"))

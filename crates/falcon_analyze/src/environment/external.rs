@@ -200,8 +200,8 @@ impl ExternalLibraries {
             }
         }
         for &(path, program, source) in project {
+            let context = environment.context_index(path);
             let path = canonical_or_lexical(path);
-            let context = environment.context_index(&path);
             sources.insert(path, vec![(context, program, source)]);
         }
         let mut reachable = FxHashSet::default();

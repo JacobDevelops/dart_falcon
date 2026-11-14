@@ -537,3 +537,8 @@ pub fn sort_diagnostics(diagnostics: &mut [Diagnostic]) {
 
 #[cfg(test)]
 mod analysis_plan_tests;
+
+#[cfg(test)]
+fn tempdir() -> tempfile::TempDir {
+    tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+}

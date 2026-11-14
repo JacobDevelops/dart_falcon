@@ -650,7 +650,9 @@ fn asset_directory_failures_reach_config_messages_once_per_episode() {
     let assets = directory.path().join("assets/icons");
     std::fs::create_dir_all(&assets).unwrap();
     let invalid_name = assets.join(OsString::from_vec(b"invalid-\xff.png".to_vec()));
-    std::fs::write(&invalid_name, "asset").unwrap();
+    if std::fs::write(&invalid_name, "asset").is_err() {
+        return; // Some filesystems cannot represent non-UTF-8 names.
+    }
     std::fs::write(assets.join("unused.png"), "asset").unwrap();
     state.reload_config();
     state.open(&uri, "void main() {}".into(), Some(1));

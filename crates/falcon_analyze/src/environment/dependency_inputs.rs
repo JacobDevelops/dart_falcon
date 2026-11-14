@@ -104,8 +104,15 @@ fn source_stamp(path: &Path) -> Option<SourceStamp> {
     })
 }
 
+fn within(path: &Path, root: &Path) -> bool {
+    path.starts_with(root)
+        || super::packages::canonical_comparison_path(path)
+            .starts_with(super::packages::canonical_comparison_path(root))
+}
+
 fn event_matches(input: &Path, kind: Kind, value: &DependencyInput<Value>, path: &Path) -> bool {
     let canonical = crate::canonical_package_path(input);
+    let event = super::canonical_event_path(path);
     let stored = match value {
         DependencyInput::Present(Value::Canonical(path)) => Some(path.as_path()),
         _ => None,
@@ -115,8 +122,9 @@ fn event_matches(input: &Path, kind: Kind, value: &DependencyInput<Value>, path:
         .flatten()
         .any(|input| {
             input.starts_with(path)
+                || input.starts_with(&event)
                 || (matches!(kind, Kind::Directory(_) | Kind::Files)
-                    && path.parent() == Some(input))
+                    && (path.parent() == Some(input) || event.parent() == Some(input)))
         })
 }
 
@@ -526,18 +534,18 @@ impl AnalysisEnvironment {
     }
 
     fn mutable_dependency_input(&self, path: &Path) -> bool {
-        self.mutable_roots.iter().any(|root| path.starts_with(root))
+        self.mutable_roots.iter().any(|root| within(path, root))
             || self
                 .probe_mutable_roots
                 .lock()
                 .unwrap()
                 .iter()
-                .any(|root| path.starts_with(root))
+                .any(|root| within(path, root))
             || self
                 .directory_packages
                 .values()
                 .flatten()
-                .any(|package| path.starts_with(&package.root))
+                .any(|package| within(path, &package.root))
     }
 
     /// Set explicit workspace boundaries for rule disk facts, including pubspec-less files.
@@ -562,13 +570,13 @@ impl AnalysisEnvironment {
         ) {
             self.filesystem_fact_roots()
                 .iter()
-                .any(|root| path.starts_with(root))
+                .any(|root| within(path, root))
                 || (self.filesystem_fact_roots().is_empty()
                     && self
                         .directory_packages
                         .values()
                         .flatten()
-                        .any(|package| path.starts_with(&package.root)))
+                        .any(|package| within(path, &package.root)))
         } else {
             self.mutable_dependency_input(path)
         }
@@ -581,7 +589,7 @@ impl AnalysisEnvironment {
     #[must_use]
     pub fn dependency_input_watch_roots(&self) -> Vec<PathBuf> {
         let inputs = self.dependency_inputs.lock().unwrap();
-        inputs
+        let mut roots: Vec<_> = inputs
             .values
             .keys()
             .filter(|(path, kind)| {
@@ -597,9 +605,16 @@ impl AnalysisEnvironment {
                     .flatten()
                     .cloned(),
             )
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
+            .fold(std::collections::BTreeMap::new(), |mut roots, path| {
+                roots
+                    .entry(super::packages::canonical_comparison_path(&path))
+                    .or_insert(path);
+                roots
+            })
+            .into_values()
+            .collect();
+        roots.sort_unstable();
+        roots
     }
     /// Exact mutable dependency input files, without watching ancestor directories.
     ///
@@ -651,12 +666,12 @@ impl AnalysisEnvironment {
             && (inputs
                 .evicted_parents
                 .iter()
-                .any(|parent| path.starts_with(parent) || parent.starts_with(path))
+                .any(|parent| within(path, parent) || within(parent, path))
                 || (inputs.existence_overflow
                     && self
                         .filesystem_fact_roots()
                         .iter()
-                        .any(|root| path.starts_with(root)))))
+                        .any(|root| within(path, root)))))
             || inputs.values.iter().any(|((input, kind), value)| {
                 (!content_only
                     || !matches!(
@@ -670,11 +685,13 @@ impl AnalysisEnvironment {
             || inputs
                 .probes
                 .iter()
-                .any(|input| self.mutable_dependency_input(input) && input.starts_with(path))
-            || inputs
-                .ancestor_files
-                .keys()
-                .any(|(root, name)| root.ancestors().any(|ancestor| ancestor.join(name) == path))
+                .any(|input| self.mutable_dependency_input(input) && within(input, path))
+            || inputs.ancestor_files.keys().any(|(root, name)| {
+                root.ancestors().any(|ancestor| {
+                    super::canonical_event_path(&ancestor.join(name))
+                        == super::canonical_event_path(path)
+                })
+            })
     }
 
     /// Whether a disk event changes a captured per-file rule existence query.
@@ -687,12 +704,12 @@ impl AnalysisEnvironment {
         (inputs
             .evicted_parents
             .iter()
-            .any(|parent| path.starts_with(parent) || parent.starts_with(path))
+            .any(|parent| within(path, parent) || within(parent, path))
             || (inputs.existence_overflow
                 && self
                     .filesystem_fact_roots()
                     .iter()
-                    .any(|root| path.starts_with(root))))
+                    .any(|root| within(path, root))))
             || inputs.values.iter().any(|((input, kind), value)| {
                 *kind == Kind::IsFile
                     && self.watchable_input(input, *kind)
@@ -751,7 +768,7 @@ impl AnalysisEnvironment {
             .unwrap()
             .manifests
             .keys()
-            .filter(|input| paths.iter().any(|path| input.starts_with(path)))
+            .filter(|input| paths.iter().any(|path| within(input, path)))
             .cloned()
             .collect();
         for input in manifests {
@@ -824,6 +841,49 @@ impl AnalysisEnvironment {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_workspace_facts_match_both_event_spellings() {
+        let directory = tempfile::tempdir().unwrap();
+        let real = directory.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let alias = directory.path().join("alias");
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+        let real = real.canonicalize().unwrap();
+        let source = alias.join("source.dart");
+        std::fs::write(&source, "class Before {}").unwrap();
+        let mut environment = AnalysisEnvironment::default();
+        assert!(
+            environment
+                .project_source_required(&real.join("source.dart"), std::slice::from_ref(&alias),)
+        );
+        environment.set_project_roots([alias.clone()]);
+        assert!(matches!(
+            environment.dependency_source(&source, 1024),
+            DependencyInput::Present(_)
+        ));
+        assert!(environment.dependency_input_watch_files().contains(&source));
+        assert!(environment.dependency_input_event(&real.join("source.dart")));
+        assert!(environment.dependency_input_event(&source));
+        assert_eq!(
+            environment.file_exists(&alias.join("created.dart")),
+            Some(false)
+        );
+        std::fs::write(real.join("created.dart"), "class Created {}").unwrap();
+        assert!(environment.file_existence_event(&alias.join("created.dart")));
+        environment.refresh_dependency_inputs(&[alias.join("created.dart")]);
+        assert_eq!(
+            environment.file_exists(&real.join("created.dart")),
+            Some(true)
+        );
+        std::fs::remove_file(&source).unwrap();
+        environment.refresh_dependency_inputs(&[real.join("source.dart")]);
+        assert!(matches!(
+            environment.dependency_source(&source, 1024),
+            DependencyInput::Missing
+        ));
+    }
 
     #[test]
     fn dependency_probe_raw_facts_survive_deletion_and_share_manifest_identity() {
@@ -1067,7 +1127,10 @@ mod tests {
             .into_iter()
             .collect();
         assert_eq!(files, BTreeSet::from([project.path().join("value.dart")]));
-        assert_eq!(environment.dependency_input_watch_roots(), [project.path()]);
+        assert_eq!(
+            environment.dependency_input_watch_roots(),
+            [project.path().to_path_buf()]
+        );
         assert!(environment.file_existence_event(&project.path().join("value.dart")));
         assert!(!environment.file_existence_event(&outside.path().join("value.dart")));
     }
@@ -1201,12 +1264,21 @@ mod tests {
         symlink(&first, &alias).unwrap();
         let environment =
             AnalysisEnvironment::discover_with_sdk_locator([alias.as_path()], |_| None);
-        assert_eq!(environment.canonical_path(&alias), first);
+        assert_eq!(
+            environment.canonical_path(&alias),
+            first.canonicalize().unwrap()
+        );
         std::fs::remove_file(&alias).unwrap();
         symlink(&second, &alias).unwrap();
         environment.refresh_dependency_inputs(std::slice::from_ref(&second));
-        assert_eq!(environment.canonical_path(&alias), second);
-        assert_eq!(environment.canonical_or_lexical_path(&alias), first);
+        assert_eq!(
+            environment.canonical_path(&alias),
+            second.canonicalize().unwrap()
+        );
+        assert_eq!(
+            environment.canonical_or_lexical_path(&alias),
+            first.canonicalize().unwrap()
+        );
     }
 
     #[test]
@@ -1241,7 +1313,10 @@ mod tests {
             );
         }
         assert!(environment.dependency_inputs.lock().unwrap().values.len() <= 258);
-        assert_eq!(environment.dependency_input_watch_roots(), [root.path()]);
+        assert_eq!(
+            environment.dependency_input_watch_roots(),
+            [root.path().canonicalize().unwrap()]
+        );
         assert!(environment.dependency_input_watch_files().len() <= 1);
         for _ in 0..2 {
             assert_eq!(

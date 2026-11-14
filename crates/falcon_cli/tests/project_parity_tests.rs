@@ -1405,8 +1405,9 @@ fn malformed_optional_settings_recover_current_frontend_findings() {
 #[test]
 fn invalid_falcon_configuration_aborts_cli_but_editor_retains_and_recovers_rules() {
     let temp = tempdir().unwrap();
-    let config = temp.path().join("falcon.json");
-    let path = temp.path().join("main.dart");
+    let root = temp.path().canonicalize().unwrap();
+    let config = root.join("falcon.json");
+    let path = root.join("main.dart");
     let source = "dynamic value = 1;\n";
     fs::write(&config, parity_config("error")).unwrap();
     fs::write(&path, source).unwrap();

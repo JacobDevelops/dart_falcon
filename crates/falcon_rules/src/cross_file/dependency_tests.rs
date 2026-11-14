@@ -238,7 +238,7 @@ fn malformed_manifest_fallback_name_preserves_own_package_path_boundaries() {
 }
 
 fn dependency_probe_fixture() -> (tempfile::TempDir, Vec<ProjectFile>) {
-    let root = tempfile::tempdir().unwrap();
+    let root = crate::tempdir();
     let app = root.path().join("app");
     std::fs::create_dir_all(app.join(".dart_tool")).unwrap();
     std::fs::write(app.join("pubspec.yaml"),

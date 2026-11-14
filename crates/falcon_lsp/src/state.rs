@@ -1711,6 +1711,8 @@ impl LspState {
                 parsed: next_parsed,
                 declaration_signature: next_signature,
                 version,
+                received_version: version,
+                diagnostics_version: version,
                 language_version,
                 syntax_diagnostics,
                 rule_worker_error: None,
@@ -1777,6 +1779,7 @@ impl LspState {
         doc.parsed = next_parsed;
         doc.declaration_signature = next_signature;
         doc.version = version;
+        doc.diagnostics_version = version;
         doc.language_version = self.environment.language_version(&doc.path, doc.text());
         doc.parse_count += 1;
         self.update_document_snapshot(uri, unchanged_api);
@@ -1838,6 +1841,9 @@ impl LspState {
                 let version = self.documents.get(uri).and_then(|d| d.version);
                 self.refresh_text(uri, text, version);
             }
+        }
+        if let Some(document) = self.documents.get_mut(uri) {
+            document.diagnostics_version = document.received_version;
         }
         self.analyze(uri)
     }

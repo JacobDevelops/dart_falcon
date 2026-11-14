@@ -336,7 +336,9 @@ impl AnalysisEnvironment {
         let path = crate::canonical_or_lexical(
             &std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()),
         );
-        roots.iter().any(|root| path.starts_with(root))
+        roots
+            .iter()
+            .any(|root| path.starts_with(packages::canonical_comparison_path(root)))
     }
 
     /// Use an explicit SDK discovery policy, including SDK-free test fixtures.
@@ -817,6 +819,8 @@ impl AnalysisEnvironment {
     /// Capture localization inputs only for files whose frontend enables the consumer.
     pub fn capture_localization<'a>(&mut self, paths: impl IntoIterator<Item = &'a Path>) {
         for path in paths {
+            // Keep generated-source comparisons stable even after metadata disappears.
+            let _ = self.canonical_path(path);
             if let Some(package) = self.package(path)
                 && !self.localization.contains_key(&package.manifest)
             {
@@ -865,9 +869,9 @@ impl AnalysisEnvironment {
     /// # Panics
     /// Panics if the environment warning mutex is poisoned.
     pub fn refresh_localization(&mut self, paths: &[PathBuf]) {
-        for (manifest, snapshot) in &mut self.localization {
+        for snapshot in self.localization.values_mut() {
             if paths.iter().any(|path| snapshot.affected_by(path))
-                && let Some(root) = manifest.parent()
+                && let Some(root) = snapshot.settings().parent()
             {
                 let fresh = localization::LocalizationSnapshot::load(root);
                 let recovered: Vec<_> = snapshot

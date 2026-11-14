@@ -818,7 +818,8 @@ fn resolving_an_action_keeps_its_versioned_edit_snapshot() {
 #[test]
 fn interleaved_close_refreshes_disk_state_and_publishes_clear_before_reopen() {
     let directory = tempfile::tempdir().unwrap();
-    let root = directory.path();
+    let canonical_root = directory.path().canonicalize().unwrap();
+    let root = canonical_root.as_path();
     std::fs::create_dir(root.join("lib")).unwrap();
     let path = root.join("lib/main.dart");
     std::fs::write(&path, "class OnDisk {}").unwrap();

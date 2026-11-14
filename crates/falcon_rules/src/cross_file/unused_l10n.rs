@@ -55,12 +55,10 @@ impl CrossFileRule for UnusedL10n {
             {
                 continue;
             }
-            let path = environment
-                .normalized_path(file.path())
-                .unwrap_or(file.path());
+            let path = environment.canonical_path(file.path());
             if templates
                 .iter()
-                .any(|template| is_generated(path, &template.output_file, &template.locales))
+                .any(|template| is_generated(&path, &template.output_file, &template.locales))
             {
                 continue;
             }
@@ -221,7 +219,7 @@ mod tests {
     fn malformed_and_inaccessible_localization_inputs_warn_once_and_skip() {
         for relative in ["l10n.yaml", "messages/app_en.arb", "messages/app_fr.arb"] {
             for bytes in [b"[".as_slice(), &[0xff]] {
-                let root = tempfile::tempdir().unwrap();
+                let root = crate::tempdir();
                 fixture(root.path());
                 let path = root.path().join(relative);
                 std::fs::write(&path, bytes).unwrap();
@@ -245,7 +243,7 @@ mod tests {
     #[test]
     fn unreadable_localization_inputs_warn_with_the_failed_path() {
         for relative in ["l10n.yaml", "messages/app_en.arb", "messages/app_fr.arb"] {
-            let root = tempfile::tempdir().unwrap();
+            let root = crate::tempdir();
             fixture(root.path());
             let path = root.path().join(relative);
             std::fs::remove_file(&path).unwrap();

@@ -338,8 +338,9 @@ fn structural_write_does_not_load_fix_externals() {
 #[test]
 fn shared_fix_externals_retain_unopened_selected_part_companions() {
     let dir = tempfile::tempdir().unwrap();
-    let owner = dir.path().join("owner.dart");
-    let part = dir.path().join("part.dart");
+    let root = dir.path().canonicalize().unwrap();
+    let owner = root.join("owner.dart");
+    let part = root.join("part.dart");
     fs::write(&owner, "part 'part.dart'; class Base {}\n").unwrap();
     let source = "part of 'owner.dart'; class Child extends Base {}\n";
     fs::write(&part, source).unwrap();

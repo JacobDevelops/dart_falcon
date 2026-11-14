@@ -15,7 +15,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use falcon_analyze::{
-    AnalysisEnvironment, CrossFileRule, PackageConfigInput, PackageIdentity, ProjectFile, SemanticIndexes,
+    AnalysisEnvironment, CrossFileRule, PackageConfigInput, PackageIdentity, ProjectFile,
+    SemanticIndexes,
 };
 use falcon_config::FalconConfig;
 use falcon_diagnostics::{Diagnostic, Severity};
@@ -281,15 +282,25 @@ mod tests {
         ];
         for (contents, expected) in [
             ("{", 0),
-            (r#"{"configVersion":2,"packages":[{"name":"dep","rootUri":"../dep/","packageUri":"lib/"},{"name":"broken"}]}"#, 1),
-            (r#"{"configVersion":2,"packages":[{"name":"dep","rootUri":"../dep/","packageUri":"lib/"}]}"#, 1),
+            (
+                r#"{"configVersion":2,"packages":[{"name":"dep","rootUri":"../dep/","packageUri":"lib/"},{"name":"broken"}]}"#,
+                1,
+            ),
+            (
+                r#"{"configVersion":2,"packages":[{"name":"dep","rootUri":"../dep/","packageUri":"lib/"}]}"#,
+                1,
+            ),
         ] {
             std::fs::write(&configuration, contents).unwrap();
             let environment = AnalysisEnvironment::discover_with_sdk_locator(
-                files.iter().map(ProjectFile::path), |_| None,
+                files.iter().map(ProjectFile::path),
+                |_| None,
             );
             let diagnostics = NoDeepPackageImports.prepare_project(
-                &environment, &files, &FalconConfig::default(), None,
+                &environment,
+                &files,
+                &FalconConfig::default(),
+                None,
             );
             assert_eq!(diagnostics.len(), expected, "{contents}: {diagnostics:?}");
             if expected == 1 {
@@ -369,31 +380,29 @@ mod tests {
     #[test]
     fn unreadable_dependency_source_is_unknown_and_warning_rearms_after_recovery() {
         let root = tempfile::tempdir().unwrap();
-        let barrel = root.path().join("barrel.dart");
-        let target = root.path().join("value.dart");
+        let root = root.path().canonicalize().unwrap();
+        let barrel = root.join("barrel.dart");
+        let target = root.join("value.dart");
         std::fs::write(&barrel, "export 'value.dart';").unwrap();
         std::fs::write(&target, [0xff]).unwrap();
         let environment = AnalysisEnvironment::default();
         for expected in [1, 0] {
             environment.refresh_dependency_inputs(std::slice::from_ref(&target));
             assert!(
-                export_closure(&environment, "other", root.path(), &barrel, &HashMap::new())
-                    .is_none()
+                export_closure(&environment, "other", &root, &barrel, &HashMap::new()).is_none()
             );
             assert_eq!(environment.take_warnings().len(), expected);
         }
         std::fs::write(&target, "class Value {}").unwrap();
         environment.refresh_dependency_inputs(std::slice::from_ref(&target));
         assert!(
-            export_closure(&environment, "other", root.path(), &barrel, &HashMap::new())
+            export_closure(&environment, "other", &root, &barrel, &HashMap::new())
                 .unwrap()
                 .contains(&environment.canonical_path(&target))
         );
         std::fs::write(&target, [0xff]).unwrap();
         environment.refresh_dependency_inputs(std::slice::from_ref(&target));
-        assert!(
-            export_closure(&environment, "other", root.path(), &barrel, &HashMap::new()).is_none()
-        );
+        assert!(export_closure(&environment, "other", &root, &barrel, &HashMap::new()).is_none());
         assert_eq!(environment.take_warnings().len(), 1);
     }
 

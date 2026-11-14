@@ -6,7 +6,7 @@ use falcon_diagnostics::{
 
 #[test]
 fn incomplete_source_diagnostics_choose_precise_anchors_and_deduplicate_paths() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let first = directory.path().join("first.dart");
     let second = directory.path().join("second.dart");
     let companion = directory.path().join("broken.dart");
@@ -66,7 +66,7 @@ fn incomplete_source_diagnostics_choose_precise_anchors_and_deduplicate_paths() 
 
 #[test]
 fn rejected_open_document_warns_at_its_start_and_close_clears_the_episode() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let lib = directory.path().join("lib");
     std::fs::create_dir(&lib).unwrap();
     let rejected = lib.join("rejected.dart");
@@ -2582,7 +2582,7 @@ mod source_size_tests {
     #[test]
     fn required_companion_reads_preserve_per_file_semantics_and_recover_cross_file_results() {
         for failure in ["invalid", "oversized"] {
-            let directory = tempfile::tempdir().unwrap();
+            let directory = tempdir();
             let config = directory.path().join("falcon.json");
             std::fs::write(&config, r#"{"linter":{"rules":{"recommended":false,"correctness":{"use-key-in-widget-constructors":"warn"},"suspicious":{"avoid-ignoring-return-values":"warn"}}},"cross-file":{"rules":{"recommended":false,"correctness":{"unused-files":"warn"}}}}"#).unwrap();
             let lib = directory.path().join("lib/src");
@@ -2684,7 +2684,7 @@ mod source_size_tests {
     #[cfg(unix)]
     #[test]
     fn walked_metadata_failure_anchors_only_on_referencing_directive() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = tempdir();
         let failed = directory.path().join("loop.dart");
         std::os::unix::fs::symlink(&failed, &failed).unwrap();
         let main = directory.path().join("main.dart");
@@ -2736,7 +2736,7 @@ mod source_size_tests {
     #[test]
     fn failed_discovery_is_incomplete_until_roots_recover_or_disappear() {
         for (walked, dynamic) in [(false, false), (true, false), (false, true), (true, true)] {
-            let directory = tempfile::tempdir().unwrap();
+            let directory = tempdir();
             let valid = directory.path().join("valid");
             std::fs::create_dir(&valid).unwrap();
             let failed = if walked {
@@ -2832,8 +2832,8 @@ mod source_size_tests {
     #[cfg(unix)]
     #[test]
     fn dynamic_discovery_recovers_external_link_without_a_watcher_event() {
-        let directory = tempfile::tempdir().unwrap();
-        let external = tempfile::tempdir().unwrap();
+        let directory = tempdir();
+        let external = tempdir();
         let target = external.path().join("target.dart");
         std::os::unix::fs::symlink(&target, &target).unwrap();
         let link = directory.path().join("source.dart");
@@ -2889,7 +2889,7 @@ mod source_size_tests {
 
     #[test]
     fn missing_roots_keep_project_collection_complete() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = tempdir();
         let mut state = LspState::new(None);
         state.initialize_workspace_roots(vec![directory.path().join("missing")]);
         state.environment = AnalysisEnvironment::with_sdk_locator(|_| None);
@@ -6108,7 +6108,7 @@ fn assert_external_parser_failure(diagnostics: &[Diagnostic]) {
 fn external_parser_worker_recovery(remove_import: bool) {
     for semantic in [false, true] {
         let project = tempfile::tempdir().unwrap();
-        let dependency = tempfile::tempdir().unwrap();
+        let dependency = tempdir();
         let root = canonical_or_lexical(project.path());
         let source = "import 'package:dep/dep.dart' as dep;\n/// [dep.Missing]\nclass App {}\nvoid main() {}\n";
         let main = root.join("main.dart");
@@ -6277,7 +6277,7 @@ fn future_package_version_warning_is_once_and_does_not_mark_analysis_incomplete(
 
 #[test]
 fn broken_package_config_exempts_dependency_until_current_metadata_recovers() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir();
     let configuration = directory.path().join(".dart_tool/package_config.json");
     std::fs::create_dir(configuration.parent().unwrap()).unwrap();
     std::fs::write(&configuration, "{").unwrap();
@@ -6326,7 +6326,7 @@ fn broken_package_config_exempts_dependency_until_current_metadata_recovers() {
 fn optional_external_part_publications_stay_qualified_by_unknown_facts_and_recover() {
     for failure in ["missing", "invalid-utf8", "oversized", "unreadable"] {
         let project = tempfile::tempdir().unwrap();
-        let dependency = tempfile::tempdir().unwrap();
+        let dependency = tempdir();
         let source = "import 'package:dep/dep.dart' as dep;\n/// [dep.Missing]\nclass App {}\nvoid main() {}\n";
         let main = project.path().join("main.dart");
         let orphan = project.path().join("lib/src/orphan.dart");

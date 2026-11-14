@@ -1,6 +1,9 @@
 use std::fs;
 use std::process::Command;
-use tempfile::tempdir;
+
+fn tempdir() -> std::io::Result<tempfile::TempDir> {
+    tempfile::tempdir_in(std::env::temp_dir().canonicalize()?)
+}
 
 #[cfg(unix)]
 #[test]
@@ -19,7 +22,9 @@ fn asset_directory_failures_warn_once_and_exempt_the_directory() {
     fs::create_dir_all(&assets).unwrap();
     fs::write(assets.join("unused.png"), "asset").unwrap();
     let invalid_name = assets.join(OsString::from_vec(b"invalid-\xff.png".to_vec()));
-    fs::write(&invalid_name, "asset").unwrap();
+    if fs::write(&invalid_name, "asset").is_err() {
+        return; // Some filesystems cannot represent non-UTF-8 names.
+    }
     let output = Command::new(env!("CARGO_BIN_EXE_falcon"))
         .args(["check", ".", "--format", "json"])
         .current_dir(project.path())

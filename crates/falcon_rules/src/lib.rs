@@ -631,6 +631,11 @@ fn enabled_cross_file_rules(
 }
 
 #[cfg(test)]
+fn tempdir() -> tempfile::TempDir {
+    tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+}
+
+#[cfg(test)]
 mod tests {
     use super::config_warnings;
     use falcon_config::FalconConfig;

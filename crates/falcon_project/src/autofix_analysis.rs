@@ -624,7 +624,7 @@ mod tests {
 
     #[test]
     fn companion_parser_worker_failure_prevents_autofix_indexes_until_recovery() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = crate::tempdir();
         let path = directory.path().join("main.dart");
         let companion = directory.path().join("part.dart");
         let source = "part 'part.dart'; class Main {}";
@@ -666,7 +666,7 @@ mod tests {
 
     #[test]
     fn reparsed_companion_worker_failure_prevents_indexes_and_recovers_current_source() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = crate::tempdir();
         let path = directory.path().join("main.dart");
         let companion = directory.path().join("part.dart");
         let source = "part 'part.dart'; class Main {}";
