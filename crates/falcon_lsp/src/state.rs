@@ -3840,7 +3840,7 @@ impl LspState {
 /// semantic retention. A subsequent valid full-sync change recovers normally.
 fn reject_oversized_buffer(path: &Path, length: u64, text: &mut String) -> Option<Diagnostic> {
     let diagnostic = falcon_analyze::source_size_diagnostic(path, length)?;
-    *text = String::new();
+    drop(std::mem::take(text));
     Some(diagnostic)
 }
 
