@@ -2782,52 +2782,35 @@ impl LspState {
                 })
             })
         });
-        if let Some(cache) = cache {
-            let previous = previous.filter(|previous| {
-                previous
-                    .external_identity
-                    .as_ref()
-                    .is_some_and(|identity| Arc::ptr_eq(identity, &cache.identities))
-            });
-            let (indexes, _, _, rebuilt) = self.semantic_indexes(
-                &files,
-                &self.external_libraries,
-                Some(cache),
-                previous.map(|previous| previous.indexes),
-            );
-            return (indexes, rebuilt, Some(Arc::clone(&cache.identities)));
-        }
-        let graph_roots = Self::cross_file_graph_roots(&files);
-        if self
-            .cross_file_external_cache
-            .as_ref()
-            .is_none_or(|cache| cache.roots != graph_roots)
-        {
-            self.rebuild_cross_file_external(&files, &paths, graph_roots);
-        }
-        let cache = self.cross_file_external_cache.as_ref().unwrap();
+        let (libraries, external_indexes) = if let Some(cache) = cache {
+            (&self.external_libraries, Some(cache))
+        } else {
+            let graph_roots = Self::cross_file_graph_roots(&files);
+            if self
+                .cross_file_external_cache
+                .as_ref()
+                .is_none_or(|cache| cache.roots != graph_roots)
+            {
+                self.rebuild_cross_file_external(&files, &paths, graph_roots);
+            }
+            let cache = self.cross_file_external_cache.as_ref().unwrap();
+            (&cache.libraries, cache.indexes.as_ref())
+        };
+        let external_identity = external_indexes.map(|external| &external.identities);
         let previous = previous.filter(|previous| {
-            cache.indexes.as_ref().is_some_and(|external| {
-                previous
-                    .external_identity
-                    .as_ref()
-                    .is_some_and(|identity| Arc::ptr_eq(identity, &external.identities))
-            })
+            previous
+                .external_identity
+                .as_ref()
+                .zip(external_identity)
+                .is_some_and(|(previous, current)| Arc::ptr_eq(previous, current))
         });
         let (indexes, _, _, rebuilt) = self.semantic_indexes(
             &files,
-            &cache.libraries,
-            cache.indexes.as_ref(),
+            libraries,
+            external_indexes,
             previous.map(|previous| previous.indexes),
         );
-        (
-            indexes,
-            rebuilt,
-            cache
-                .indexes
-                .as_ref()
-                .map(|external| Arc::clone(&external.identities)),
-        )
+        (indexes, rebuilt, external_identity.cloned())
     }
 
     fn cross_file_graph_roots(files: &[&ProjectFile]) -> Vec<(PathBuf, Vec<String>)> {
