@@ -43,6 +43,8 @@ jobs:
           tools: cargo-make mr-boxington knope
           snapshot: lint
       - run: makers ci_rustup_show
+      # xtask refreshes lockfiles offline; the Zed extension isn't a workspace member, so building xtask never fetches its crates.
+      - run: cargo fetch --locked --manifest-path extensions/falcon-zed/Cargo.toml
       - run: knope prepare-release
       - name: Bundle release branch
         run: git bundle create release.bundle main..release
