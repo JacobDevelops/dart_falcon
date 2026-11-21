@@ -1,5 +1,5 @@
 name: falcon
-version: 0.4.6
+version: 0.4.7
 description: A launcher for the falcon native Dart linter that downloads and verifies the matching GitHub release binary on first run.
 homepage: https://dart-falcon.jacobdevelops.com
 repository: https://github.com/JacobDevelops/dart_falcon
