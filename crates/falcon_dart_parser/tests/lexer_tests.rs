@@ -832,7 +832,7 @@ fn adjacent_ident_then_braced_is_one_string_token() {
     assert_no_error_tokens(src);
     let texts = significant_texts(src);
     assert!(
-        texts.contains(&"'$m${ 'y' }'".to_string()),
+        texts.iter().any(|text| text == "'$m${ 'y' }'"),
         "expected a single StringLit token, got {texts:?}"
     );
 }
@@ -888,7 +888,9 @@ fn nested_triple_quote_in_interpolation_is_one_token() {
     assert_no_error_tokens(src);
     let texts = significant_texts(src);
     assert!(
-        texts.contains(&"'''${wrap('''inner''')}'''".to_string()),
+        texts
+            .iter()
+            .any(|text| text == "'''${wrap('''inner''')}'''"),
         "expected a single StringLit token, got {texts:?}"
     );
 }

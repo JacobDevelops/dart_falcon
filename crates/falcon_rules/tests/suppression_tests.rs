@@ -108,20 +108,20 @@ fn dart_ignore_no_longer_suppresses() {
 fn missing_reason_reports_and_does_not_suppress() {
     // No reason → the rule still fires AND a malformed-suppression is emitted.
     let out = run("dynamic x = 1; // falcon-ignore lint/suspicious/avoid-dynamic\n");
-    assert!(out.contains(&"avoid-dynamic".to_string()));
-    assert!(out.contains(&"malformed-suppression".to_string()));
+    assert!(out.iter().any(|rule| rule == "avoid-dynamic"));
+    assert!(out.iter().any(|rule| rule == "malformed-suppression"));
 }
 
 #[test]
 fn wrong_group_reports_and_does_not_suppress() {
     let out = run("dynamic x = 1; // falcon-ignore lint/style/avoid-dynamic: y\n");
-    assert!(out.contains(&"avoid-dynamic".to_string()));
-    assert!(out.contains(&"malformed-suppression".to_string()));
+    assert!(out.iter().any(|rule| rule == "avoid-dynamic"));
+    assert!(out.iter().any(|rule| rule == "malformed-suppression"));
 }
 
 #[test]
 fn unknown_rule_reports() {
     let out = run("dynamic x = 1; // falcon-ignore lint/suspicious/not-a-rule: y\n");
-    assert!(out.contains(&"avoid-dynamic".to_string()));
-    assert!(out.contains(&"malformed-suppression".to_string()));
+    assert!(out.iter().any(|rule| rule == "avoid-dynamic"));
+    assert!(out.iter().any(|rule| rule == "malformed-suppression"));
 }
