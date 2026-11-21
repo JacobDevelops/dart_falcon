@@ -48,6 +48,9 @@ this skill covers the checks and generated surfaces it does not sequence.
    `config-reference.json`. Rule prose comes from implementation documentation;
    examples come from corpus files and real CLI diagnostics. Review generated
    examples as behavior, not just a JSON diff.
-3. Apply CONTRIBUTING's **Commits & pull requests** changeset policy. Finish when
-   source, fixtures, showcase, applicable generated outputs, and changeset agree,
-   and the gates in `AGENTS.md` have passed or their exact blockers are reported.
+3. Apply CONTRIBUTING's **Commits & pull requests** changeset policy: a new rule
+   gets one single-line changeset naming the rule id, and later fixes to a rule
+   that hasn't been released yet edit that line instead of adding changesets.
+   Finish when source, fixtures, showcase, applicable generated outputs, and
+   changeset agree, and the gates in `AGENTS.md` have passed or their exact
+   blockers are reported.
