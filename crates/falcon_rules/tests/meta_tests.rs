@@ -702,18 +702,15 @@ fn changeset_format_error(body: &str) -> Option<&'static str> {
     if body.is_empty() {
         return Some("is empty");
     }
-    if body.contains("\n\n") {
-        return Some("has several paragraphs; split it into one changeset per change");
+    // Knope renders a body with more than one line as a heading section, not a bullet.
+    if body.contains('\n') {
+        return Some("spans several lines; split it into one single-line changeset per change");
     }
-    body.lines()
-        .map(str::trim_start)
-        .any(|line| {
-            line.starts_with('#')
-                || line.starts_with("- ")
-                || line.starts_with("* ")
-                || line.starts_with("```")
-        })
-        .then_some("contains headings, lists or code blocks")
+    (body.starts_with('#')
+        || body.starts_with("- ")
+        || body.starts_with("* ")
+        || body.starts_with("```"))
+    .then_some("is a heading, list or code block")
 }
 
 #[test]
@@ -731,6 +728,8 @@ fn changeset_format_rejects_multi_item_bodies() {
     assert!(changeset_format_error("Add a flag.\n\nFix a crash.").is_some());
     assert!(changeset_format_error("- Add a flag.\n- Fix a crash.").is_some());
     assert!(changeset_format_error("# Flag\nAdd a flag.").is_some());
+    assert!(changeset_format_error("Add a flag.\nFix a crash.").is_some());
+    assert!(changeset_format_error("- Add a flag.").is_some());
 }
 
 #[test]
