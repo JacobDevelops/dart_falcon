@@ -106,9 +106,9 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.13.0
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
-        with:
-          tool: cargo-zigbuild
+      # Nightly passes -mfix-cortex-a53-843419 to the aarch64 linker and zig rejects it; the filter is unreleased after 0.24.1.
+      - name: Install cargo-zigbuild
+        run: cargo install --locked --git https://github.com/rust-cross/cargo-zigbuild --rev 875d3aa050975e468e4771686f1cdbf35adaeccb cargo-zigbuild
       - name: Build
         run: |
           set -euo pipefail
